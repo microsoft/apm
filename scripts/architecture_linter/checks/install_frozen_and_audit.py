@@ -346,6 +346,8 @@ _FROZEN_PARAMETER_SITES = frozenset(
         ("src/apm_cli/deps/apm_resolver.py", "__init__"),
         ("src/apm_cli/deps/immutable_requirements.py", "__init__"),
         ("src/apm_cli/install/dry_run_plan.py", "with_resolved_dependencies"),
+        ("src/apm_cli/install/fast_entry.py", "_run"),
+        ("src/apm_cli/install/fast_entry.py", "run"),
         ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
         ("src/apm_cli/install/pipeline.py", "run_install_pipeline"),
     }
@@ -683,6 +685,32 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "src/apm_cli/install/phases/lockfile.py",
             "_preserve_existing_mcp_state",
             "DeploymentLedgerCodec.mcp_native_hashes",
+        ),
+        # A config file APM emptied is deleted only by the provenance owner (#4867).
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "_write_cleaned_json_config",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_ownership.py",
+            "remove_emptied_hook_file",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_source_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_entries_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/install/mcp/retired_destinations.py",
+            "heal_retired_project_mcp_destinations",
+            "delete_emptied_config",
         ),
     ):
         facts, failures = _facts_for(provider, path, rule_id)

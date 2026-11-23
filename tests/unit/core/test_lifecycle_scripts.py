@@ -35,6 +35,20 @@ def _write_yaml(path: Path, data: dict) -> Path:
     return path
 
 
+def _fire(runner, event_name: str = "post-install") -> None:
+    """Fire *event_name* without running any script command."""
+    event = LifecycleEvent(
+        event=event_name,
+        packages=[PackageInfo(name="org/repo")],
+        scope="project",
+        timestamp="2026-01-01T00:00:00Z",
+        cli_version="0.0.0",
+        working_directory="/tmp/test",
+    )
+    with patch("apm_cli.core.script_executors.execute_script"):
+        runner.fire(event_name, event)
+
+
 class TestLifecycleEvent:
     def test_to_json_round_trips(self) -> None:
         event = LifecycleEvent(
@@ -249,28 +263,32 @@ class TestDiscoverScripts:
         entries = discover_scripts(project_root=str(tmp_path))
         assert any(entry.bash == "echo project" for entry in entries)
 
-    def test_discovers_from_user_apm_yml(self, tmp_path: Path) -> None:
-        user_apm = _write_yaml(
-            tmp_path / "user" / "apm.yml",
+    def test_discovers_from_user_apm_yml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        apm_home = tmp_path / "apm-home"
+        _write_yaml(
+            apm_home / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
         )
-        with patch("apm_cli.core.lifecycle_scripts._get_user_apm_yml", return_value=user_apm):
-            entries = discover_scripts()
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        entries = discover_scripts()
         assert any(entry.bash == "echo user" for entry in entries)
 
-    def test_additive_across_sources(self, tmp_path: Path) -> None:
-        user_apm = _write_yaml(
-            tmp_path / "user" / "apm.yml",
+    def test_additive_across_sources(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        apm_home = tmp_path / "apm-home"
+        _write_yaml(
+            apm_home / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
         )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         _write_yaml(
             project_dir / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo project"}]}},
         )
-        with patch("apm_cli.core.lifecycle_scripts._get_user_apm_yml", return_value=user_apm):
-            entries = discover_scripts(project_root=str(project_dir))
+        entries = discover_scripts(project_root=str(project_dir))
         assert len(entries) == 2
 
     def test_user_scope_manifest_is_loaded_once(
@@ -387,14 +405,13 @@ class TestBuildRunnerFromContext:
         mock_fetch.policy = mock_policy
         mock_fetch.outcome = "found"
         mock_fetch.source = "org"
-        user_apm = _write_yaml(
-            tmp_path / "user" / "apm.yml",
+        apm_home = tmp_path / "user"
+        _write_yaml(
+            apm_home / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
         )
-        with (
-            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch),
-            patch("apm_cli.core.lifecycle_scripts._get_user_apm_yml", return_value=user_apm),
-        ):
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch):
             runner = build_runner_from_context(project_root=str(tmp_path))
         assert any(script.bash == "echo user" for script in runner._scripts)
 
@@ -405,21 +422,217 @@ class TestBuildRunnerFromContext:
         from apm_cli.policy.discovery import PolicyFetchResult
 
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
-        user_apm = _write_yaml(
-            tmp_path / "user" / "apm.yml",
+        apm_home = tmp_path / "user"
+        _write_yaml(
+            apm_home / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
         )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
         _write_yaml(
             tmp_path / "apm.yml",
             {"name": "p", "policy": {"fetch_failure_default": failure_default}},
         )
         failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
-        with (
-            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed),
-            patch("apm_cli.core.lifecycle_scripts._get_user_apm_yml", return_value=user_apm),
-        ):
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed):
             runner = build_runner_from_context(project_root=str(tmp_path))
         assert (runner._scripts == []) is suppressed
+
+    def test_unresolved_org_policy_warn_emits_notice_scripts_run(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Under fetch_failure_default=warn an unavailable policy prints a [!] notice
+        once, yet the lifecycle scripts still run (#4913)."""
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        apm_home = tmp_path / "user"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"name": "p", "policy": {"fetch_failure_default": "warn"}},
+        )
+        failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.lines: list[str] = []
+
+            def warning(self, message: str) -> None:
+                self.lines.append(message)
+
+        logger = _Logger()
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed):
+            runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+            second = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+        # Scripts still run: the warn posture is unchanged.
+        assert any(script.bash == "echo user" for script in runner._scripts)
+        assert any(script.bash == "echo user" for script in second._scripts)
+        _fire(runner)
+        _fire(second)
+        # The notice is printed exactly once per command logger.
+        notices = [
+            line
+            for line in logger.lines
+            if "org policy" in line.lower() and "lifecycle scripts" in line.lower()
+        ]
+        assert len(notices) == 1, logger.lines
+
+    def test_unresolved_org_policy_warn_no_logger_emits_rich_notice(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """With no command logger (as ``apm lifecycle`` builds the runner) an
+        unavailable policy under fetch_failure_default=warn still prints a real
+        ``[!]`` notice once, and the scripts still run (#4913).
+
+        This is the exact scenario the issue reports: the runner is built with
+        ``logger=None`` and previously printed nothing at all.
+        """
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        apm_home = tmp_path / "user"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"name": "p", "policy": {"fetch_failure_default": "warn"}},
+        )
+        failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed):
+            # No logger: the runner is built exactly as ``apm lifecycle`` does.
+            runner = build_runner_from_context(project_root=str(tmp_path))
+            # A second command (a separate invocation) builds its own runner.
+            second = build_runner_from_context(project_root=str(tmp_path))
+        # Scripts still run: the warn posture is unchanged.
+        assert any(script.bash == "echo user" for script in runner._scripts)
+        # An unfiltered runner (install, update, uninstall) says nothing for an
+        # event with no scripts (#4917 review).
+        _fire(runner, "pre-compile")
+        assert "org policy not applied" not in capsys.readouterr().out
+        _fire(runner)
+        _fire(runner)
+        # The real ``[!]`` warning symbol is rendered on the console, once.
+        out = " ".join(capsys.readouterr().out.split())
+        assert "[!]" in out, out
+        assert "org policy not applied to lifecycle scripts" in out, out
+        assert out.count("[!]") == 1, out
+        # No process-wide state outlives a command: the next invocation warns
+        # again (#4917 review).
+        _fire(second)
+        again = " ".join(capsys.readouterr().out.split())
+        assert again.count("org policy not applied to lifecycle scripts") == 1, again
+
+    def test_unresolved_org_policy_warn_untrusted_only_emits_no_notice(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Under fetch_failure_default=warn, when the only lifecycle scripts are
+        untrusted project entries that the trust filter removes, NO unresolved-
+        policy notice is emitted -- no scripts will run, so an unapplied-policy
+        warning would be misleading (review #4917)."""
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        # Only a project-tier script, which the trust filter will drop.
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {
+                "name": "p",
+                "policy": {"fetch_failure_default": "warn"},
+                "lifecycle": {"post-install": [{"type": "command", "bash": "echo from-project"}]},
+            },
+        )
+        failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.lines: list[str] = []
+
+            def warning(self, message: str) -> None:
+                self.lines.append(message)
+
+        logger = _Logger()
+        with (
+            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed),
+            patch("apm_cli.core.script_trust.is_fingerprint_trusted", return_value=False),
+        ):
+            runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+        # No scripts survive the trust filter.
+        assert runner._scripts == []
+        assert runner._skipped_project_scripts == 1
+        _fire(runner)
+        # ...so no unapplied-policy notice should be printed.
+        notices = [
+            line
+            for line in logger.lines
+            if "org policy" in line.lower() and "lifecycle scripts" in line.lower()
+        ]
+        assert notices == [], logger.lines
+
+    def test_fetched_policy_warn_emits_no_notice(self, tmp_path: Path, monkeypatch) -> None:
+        """A resolved policy under warn prints no new lifecycle notice (#4913)."""
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        apm_home = tmp_path / "user"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        mock_policy = MagicMock()
+        mock_policy.executables.deny_all = False
+        mock_fetch = MagicMock()
+        mock_fetch.policy = mock_policy
+        mock_fetch.outcome = "found"
+        mock_fetch.source = "org"
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.lines: list[str] = []
+
+            def warning(self, message: str) -> None:
+                self.lines.append(message)
+
+        logger = _Logger()
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch):
+            runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+        assert any(script.bash == "echo user" for script in runner._scripts)
+        _fire(runner)
+        assert not any("org policy" in line.lower() for line in logger.lines), logger.lines
+
+    def test_no_policy_outcome_absent_warn_emits_no_notice(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A clean 'absent' outcome (no policy asserted) prints no new notice (#4913)."""
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        apm_home = tmp_path / "user"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        absent = PolicyFetchResult(outcome="absent", source="org")
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.lines: list[str] = []
+
+            def warning(self, message: str) -> None:
+                self.lines.append(message)
+
+        logger = _Logger()
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=absent):
+            runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+        assert any(script.bash == "echo user" for script in runner._scripts)
+        _fire(runner)
+        assert not any("org policy" in line.lower() for line in logger.lines), logger.lines
 
     def test_untrusted_project_scripts_are_skipped(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
@@ -475,14 +688,13 @@ class TestBuildRunnerFromContext:
 
     def test_user_scripts_bypass_trust_gate(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
-        user_apm = _write_yaml(
-            tmp_path / "user" / "apm.yml",
+        apm_home = tmp_path / "user"
+        _write_yaml(
+            apm_home / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user-notify"}]}},
         )
-        with (
-            patch("apm_cli.core.lifecycle_scripts._get_user_apm_yml", return_value=user_apm),
-            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=None),
-        ):
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=None):
             runner = build_runner_from_context(project_root=str(tmp_path))
         assert any(script.bash == "echo user-notify" for script in runner._scripts)
 

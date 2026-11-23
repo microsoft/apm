@@ -209,6 +209,10 @@ def heal_retired_project_mcp_destinations(
     detection signal; ``run_mcp_integration`` sets it for a ``--frozen``
     replay from ``InstallService.frozen_disposition``.
     """
+    from apm_cli.integration.config_file_provenance import (
+        delete_emptied_config,
+        recorded_config_write,
+    )
     from apm_cli.utils.json_config import write_json_config
 
     heal = RetiredMcpHeal(removed={}, kept={}, deleted_files=[])
@@ -241,20 +245,21 @@ def heal_retired_project_mcp_destinations(
         scaffolding_only = all(
             value in ([], {}) for key, value in data.items() if key != destination.servers_key
         )
-        if (
+        emptied = (
             destination.deletable
             and not servers
             and removed_here == total
             and scaffolding_only
             and not (destination.detection_signal and keep_signal_files)
             and (not destination.detection_signal or _selected_without(destination, project_root))
-        ):
-            path.unlink()
+        )
+        if delete_emptied_config(path, root=project_root, empty=emptied):
             heal.deleted_files.append(destination.relative_path)
             continue
         if not removed_here:
             continue
-        write_json_config(path, data, default_trailing_newline=raw.endswith("\n"))
+        with recorded_config_write(path):
+            write_json_config(path, data, default_trailing_newline=raw.endswith("\n"))
     return heal
 
 
