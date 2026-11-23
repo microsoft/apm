@@ -25,6 +25,77 @@ from stat import S_ISLNK
 
 from .file_ops import robust_rmtree
 
+# PERF FALSIFICATION HACK (faithful safe design): directories THIS process
+# created are resolved once; a path directly inside one is resolved
+# lexically plus one lstat of its leaf. Every other path resolves live,
+# exactly as today. NEVER SHIP as-is.
+import os as _hos  # noqa: E402
+import stat as _hstat  # noqa: E402
+
+_h_real = _hos.path.realpath
+_h_mkdir = _hos.mkdir
+_h_created: dict[str, str] = {}
+
+
+_h_suppress = [0]
+
+
+def _h_record_mkdir(path, mode=0o777, *, dir_fd=None):
+    _h_mkdir(path, mode, dir_fd=dir_fd) if dir_fd is not None else _h_mkdir(path, mode)
+    if dir_fd is None and not _h_suppress[0]:
+        key = _hos.path.abspath(_hos.fspath(path))
+        info = _hos.lstat(key)
+        if _hstat.S_ISDIR(info.st_mode) and not getattr(info, "st_file_attributes", 0) & 0x400:
+            _h_created[key] = _h_real(key)
+
+
+import shutil as _hshutil  # noqa: E402
+
+_h_copytree = _hshutil.copytree
+
+
+def _h_copytree_untrusted(*args, **kwargs):
+    """Package content (copytree) never enters the created set (QL C2)."""
+    _h_suppress[0] += 1
+    try:
+        return _h_copytree(*args, **kwargs)
+    finally:
+        _h_suppress[0] -= 1
+
+
+_hshutil.copytree = _h_copytree_untrusted
+
+
+def _h_realpath(path, *, strict=False):
+    raw = _hos.fspath(path)
+    if not isinstance(raw, str) or not _hos.path.isabs(raw):
+        return _h_real(path, strict=strict)
+    key = _hos.path.normpath(raw)
+    if key != raw.rstrip(_hos.sep) and raw != key:
+        return _h_real(path, strict=strict)
+    hit = _h_created.get(key)
+    if hit is not None:
+        return hit
+    parent, leaf = _hos.path.split(key)
+    real_parent = _h_created.get(parent)
+    if real_parent is None or leaf in ("", ".", ".."):
+        return _h_real(path, strict=strict)
+    try:
+        info = _hos.lstat(key)
+    except FileNotFoundError:
+        if strict:
+            raise
+        return _hos.path.join(real_parent, leaf)
+    except OSError:
+        return _h_real(path, strict=strict)
+    if _hstat.S_ISLNK(info.st_mode):
+        return _h_real(path, strict=strict)
+    return _hos.path.join(real_parent, leaf)
+
+
+_hos.mkdir = _h_record_mkdir
+_hos.path.realpath = _h_realpath
+
 
 class PathTraversalError(ValueError):
     """Raised when a computed path escapes its expected base directory."""
