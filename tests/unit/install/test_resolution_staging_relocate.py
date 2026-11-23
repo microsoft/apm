@@ -342,3 +342,22 @@ def test_nested_copies_stage_in_either_order_and_roll_back(
     assert staging.rollback() == []
     assert (parent / "apm.yml").read_text(encoding="utf-8") == "name: repo\n"
     assert (child / "apm.yml").read_text(encoding="utf-8") == "name: tool\n"
+
+
+def test_a_no_clobber_publish_never_replaces_an_existing_destination(tmp_path: Path) -> None:
+    """``clobber=False`` fails on anything at the destination and leaves it as it was."""
+    modules = tmp_path / "apm_modules"
+    destination = modules / "o" / "p"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("user\n", encoding="utf-8")
+    session = ResolutionStagingSession(modules)
+    replacement = session.prepare_replacement(destination)
+    replacement.mkdir(parents=True)
+    (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        session.publish_replacement(replacement, clobber=False)
+
+    assert destination.read_text(encoding="utf-8") == "user\n"
+    assert session.rollback() == []
+    assert destination.read_text(encoding="utf-8") == "user\n"

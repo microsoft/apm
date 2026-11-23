@@ -97,8 +97,12 @@ class ResolutionStagingSession:
             self._destination_by_replacement[replacement] = resolved
         return replacement
 
-    def publish_replacement(self, replacement: Path) -> Path:
-        """Activate a prepared replacement and return its live path."""
+    def publish_replacement(self, replacement: Path, *, clobber: bool = True) -> Path:
+        """Activate a prepared replacement and return its live path.
+
+        With ``clobber=False`` an existing destination is never backed up and
+        replaced: the publish fails with :class:`FileExistsError` instead.
+        """
         staged = ensure_path_within(replacement, self._staging_root)
         with self._lock:
             resolved = self._destination_by_replacement.get(staged)
@@ -108,6 +112,8 @@ class ResolutionStagingSession:
                 raise RuntimeError(f"Path is already staged for replacement: {resolved}")
             if not staged.exists():
                 raise FileNotFoundError(f"Replacement path was not materialized: {staged}")
+            if not clobber and os.path.lexists(resolved):
+                raise FileExistsError(f"Refusing to replace {resolved}")
 
             backup: Path | None = None
             if resolved.exists():

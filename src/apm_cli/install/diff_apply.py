@@ -232,6 +232,11 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
         if getattr(ref, "is_virtual", False) or getattr(ref, "virtual_path", None):
             raise Decline("virtual package")
         install_path = ref.get_install_path(modules)
+        if os.path.lexists(install_path) and (
+            install_path.is_symlink() or not install_path.is_dir()
+        ):
+            # Not a package copy: APPLY never replaces it, the full run decides.
+            raise Decline("non-directory at a package path")
         if install_path.is_dir():
             # A present copy must already prove its locked content: decline before any write.
             if locked_copy_is_stale(dep, install_path) or locked_content_mismatch(
@@ -270,8 +275,12 @@ def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str, stag
 
 
 def _publish(staging: Any, replacement: Path) -> None:
-    """Activate one complete package copy: a rename inside ``apm_modules``."""
-    staging.publish_replacement(replacement)
+    """Activate one complete package copy: a rename inside ``apm_modules``.
+
+    No clobber: anything that appeared at the destination since planning
+    fails the publish (and the whole apply rolls back) instead of being replaced.
+    """
+    staging.publish_replacement(replacement, clobber=False)
 
 
 def _discard_staging(staging: Path) -> None:
@@ -461,7 +470,7 @@ def _commit(
     session: Any,
     recheck: bool,
     render: Any,
-) -> None:
+) -> Any:
     """Create the decided state and print it inside one journal.
 
     The journal records every path this apply creates and, at the write seam,
@@ -522,7 +531,7 @@ def _commit(
             raise  # an interrupt is restored, then propagates
         raise Decline(f"write failed ({type(exc).__name__})") from exc
     staging.commit()
-    held.release()
+    return held
 
 
 def try_apply(
@@ -611,12 +620,7 @@ def try_apply(
                 _render(project_root, lock, outcomes, packages, files, started, frozen_disposition)
 
             # The decision is final: nothing above wrote to the project or HOME.
-            _commit(project_root, fetch, staged, files, targets, session, recheck, render)
-            _trace(
-                f"applied a verified diff ({len(files)} files)"
-                if files or packages
-                else "no-op (desired state already deployed)"
-            )
+            held = _commit(project_root, fetch, staged, files, targets, session, recheck, render)
         finally:
             _discard_staging(stage_root)
     except Decline as exc:
@@ -627,6 +631,14 @@ def try_apply(
     except Exception as exc:
         _trace(f"full run (error: {type(exc).__name__})")
         return False
+    # Committed: the run is this apply. Printing its held output is outside the
+    # fallback, so a failure here propagates and never starts the full pipeline.
+    held.release()
+    _trace(
+        f"applied a verified diff ({len(files)} files)"
+        if files or packages
+        else "no-op (desired state already deployed)"
+    )
     return True
 
 

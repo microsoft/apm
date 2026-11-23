@@ -139,6 +139,25 @@ def test_a_dependency_without_a_locked_content_hash_declines(tmp_path: Path) -> 
     assert not any(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize("kind", ["file", "symlink"])
+def test_a_non_directory_at_a_package_path_declines(tmp_path: Path, kind: str) -> None:
+    """APPLY never replaces what sits at a package path: only a package copy is kept."""
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    lock = _lock(**{"o/p": {_REL: _digest(b"x")}})
+    lock.dependencies["o/p"].to_dependency_ref = lambda: DependencyReference.parse("o/p")
+    occupant = tmp_path / "apm_modules" / "o" / "p"
+    occupant.parent.mkdir(parents=True)
+    if kind == "file":
+        occupant.write_text("user\n", encoding="utf-8")
+    else:
+        (occupant.parent / "real").mkdir()
+        occupant.symlink_to(occupant.parent / "real")
+    with pytest.raises(Decline, match="non-directory at a package path"):
+        diff_apply._plan_packages(tmp_path, lock)
+    assert occupant.is_symlink() or occupant.read_text(encoding="utf-8") == "user\n"
+
+
 def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     rel = ".github/prompts/a.prompt.md"
     lock = _lock(**{"o/p": {rel: _digest(b"locked\n")}})
