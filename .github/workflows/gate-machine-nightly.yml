@@ -58,7 +58,7 @@ jobs:
         run: |
           export APM_BINARY_PATH="$PWD/dist/apm-linux-x86_64/apm"
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-            -n 2 --durations=10 -k sequences tests/lifecycle/machines/test_m_gate.py
+            -n 2 --durations=10 -k "org_deny or mandatory_spine" tests/lifecycle/machines/test_m_gate.py
 
       # M-SPINE (#4098): same binary, 25 fresh examples per variant.
       - name: Explore SPINE sequences
