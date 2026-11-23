@@ -191,6 +191,9 @@ def _run_cleanup(
                     for path in _orphan_dep.deployed_files
                 }
                 continue
+            if not _retire_orphan_hooks(ctx, _orphan_dep):
+                # A hook config it could not rewrite keeps the row for a retry.
+                orphan_cleanup_retained.setdefault(_orphan_key, {})
             orphan_only_files = list(decision.removed_files[_orphan_key])
             if not orphan_only_files:
                 continue
@@ -437,6 +440,51 @@ def _orphan_decision(
         reachability=None,
         deployment_claims=DeploymentClaims(live_files=surviving_files, retained=retained),
     )
+
+
+def _retire_orphan_hooks(ctx: InstallContext, dependency) -> bool:
+    """Retire the merged hook entries APM recorded for an undeclared dependency (#5057).
+
+    The hook owner removes only entries carrying the dependency's ownership
+    marker, as ``apm uninstall`` does; an entry APM did not write, or one the
+    user edited, stays. Returns False when a hook config could not be rewritten.
+    """
+    from types import SimpleNamespace
+
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    apm_modules_dir = ctx.apm_modules_dir
+    targets = [target for target in ctx.targets or () if target.supports("hooks")]
+    if not targets or not isinstance(apm_modules_dir, Path):
+        return True
+    try:
+        ref = dependency.to_dependency_ref()
+        package = SimpleNamespace(
+            install_path=ref.get_install_path(apm_modules_dir), dependency_ref=ref
+        )
+    except (ValueError, TypeError) as exc:
+        ctx.diagnostics.warn(
+            kept_note(
+                f"hook entries of {dependency.get_unique_key()}",
+                f"its install path could not be computed ({exc})",
+                "Repair its lockfile entry; the next install retries the removal.",
+            ),
+            package=dependency.get_unique_key(),
+        )
+        return False
+    stats = HookIntegrator().reconcile_package_target_restriction(
+        package, ctx.project_root, targets
+    )
+    for path in stats["failed_paths"]:
+        ctx.diagnostics.warn(
+            kept_note(
+                f"hook entries of {dependency.get_unique_key()} in {path}",
+                "the file could not be rewritten",
+                "Repair the file; the next install retries the removal.",
+            ),
+            package=dependency.get_unique_key(),
+        )
+    return not stats["failed_paths"]
 
 
 def _remove_dropped_package_dirs(ctx: InstallContext, decision) -> None:
