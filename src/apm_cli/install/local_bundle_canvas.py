@@ -178,8 +178,13 @@ def record_bundle_canvas(
     slug: str,
     approval_key: str | None,
     deployed: Collection[str],
+    *,
+    user_scope: bool = False,
 ) -> None:
-    """Record the canvas files this install of bundle *slug* deployed, with its key."""
+    """Record the canvas files this install of bundle *slug* deployed, with its key.
+
+    An install write: the hook record file's write is classified at this scope.
+    """
     from ..integration.hook_ownership import BUNDLE_RECORD_CANVAS, write_per_file_bundle_record
 
     root = Path(project_root)
@@ -188,7 +193,13 @@ def record_bundle_canvas(
         sidecar = _sidecar(root, target)
         if files or sidecar.is_file():
             write_per_file_bundle_record(
-                sidecar, slug, approval_key, files, kind=BUNDLE_RECORD_CANVAS
+                sidecar,
+                slug,
+                approval_key,
+                files,
+                kind=BUNDLE_RECORD_CANVAS,
+                project_root=root,
+                user_scope=user_scope,
             )
 
 

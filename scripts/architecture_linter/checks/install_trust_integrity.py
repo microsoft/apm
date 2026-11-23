@@ -392,7 +392,8 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "path = contained_bundle_path(root, value, prefixes)",
     ),
     "src/apm_cli/install/services.py": (
-        "record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)",
+        # Recording the canvas is an install write at the install's scope (#5042).
+        "project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
