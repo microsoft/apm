@@ -9,7 +9,8 @@ tests/lifecycle/scenarios/_engine_parity.py.
 
 from __future__ import annotations
 
-import sys
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,6 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.promise("P-INV-I1", "P-INV-I2", "P-INV-I4"),
-    pytest.mark.skipif(sys.platform == "win32", reason="fast engines are POSIX-only"),
 ]
 
 
@@ -173,8 +173,29 @@ def test_cleanup_on_a_doubt_prunes_like_the_full_pipeline(twin: Twin) -> None:
     _assert_decision(decision, FULL)
 
 
+def _can_symlink() -> bool:
+    """Windows creates directory symlinks only with the privilege or developer mode."""
+    with tempfile.TemporaryDirectory() as scratch:
+        try:
+            os.symlink(scratch, Path(scratch) / "probe", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            return False
+    return True
+
+
+_NO_SYMLINKS = pytest.mark.skipif(
+    not _can_symlink(), reason="this host cannot create directory symlinks"
+)
+
+
 @pytest.mark.parametrize(
-    "change", [pytest.param(c, marks=NEEDS_ANY.marks) for c in sorted(CHANGES)]
+    "change",
+    [
+        pytest.param(
+            c, marks=(*NEEDS_ANY.marks, *((_NO_SYMLINKS,) if c == "symlinked-destination" else ()))
+        )
+        for c in sorted(CHANGES)
+    ],
 )
 def test_install_after_a_change_matches_the_full_pipeline(twin: Twin, change: str) -> None:
     """Same history in both worlds, so nothing is exempt: an edited or symlinked path is compared."""

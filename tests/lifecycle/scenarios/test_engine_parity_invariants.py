@@ -52,12 +52,16 @@ from tests.lifecycle.scenarios._engine_parity import (
 )
 from tests.lifecycle.world import World
 
+_POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX-only: injects faults through a sitecustomize hook and SIGKILL (#5002)",
+)
+
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.promise("P-INV-I1", "P-INV-I7"),
-    pytest.mark.skipif(sys.platform == "win32", reason="fast engines are POSIX-only"),
 ]
 
 
@@ -127,6 +131,7 @@ def test_decide_mode_hit_leaves_caches_untouched(twin: Twin, hit: str) -> None:
     _assert_caches_untouched(stats, after, hit)
 
 
+@_POSIX_ONLY
 @NEEDS_DIFF
 def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) -> None:
     """A fault on the commit's 2nd write: the engine declines and the full run's tree wins.
@@ -152,6 +157,7 @@ def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) 
     assert "write failed" in decision, decision
 
 
+@_POSIX_ONLY
 @pytest.mark.parametrize(
     "point", [pytest.param(p, marks=NEEDS_DIFF.marks) for p in sorted(KILL_POINTS)]
 )
@@ -184,13 +190,17 @@ def test_kill_mid_commit_then_install_equals_the_full_world(twin: Twin, point: s
     staging = twin.fast.project / "apm_modules" / ".apm-resolution-staging"
     assert not staging.exists(), f"staging left behind: {sorted(staging.rglob('*'))}"
     problems = diff(
-        comparable(twin.fast), comparable(twin.full), twin.worlds, ("recovered", "full")
+        comparable(twin.fast, receipt_history=True),
+        comparable(twin.full, receipt_history=True),
+        twin.worlds,
+        ("recovered", "full"),
     )
     assert not problems, f"{point}: recovery differs from a full install\n" + "\n".join(problems)
     modes = [_modes(world) for world in twin.worlds]
     assert modes[0] == modes[1], f"{point}: file modes differ after recovery"
 
 
+@_POSIX_ONLY
 @NEEDS_DIFF
 def test_output_failure_after_commit_never_runs_the_full_pipeline(twin: Twin) -> None:
     """Printing a committed apply fails (a broken pipe): the command exits non-zero, the
@@ -212,7 +222,12 @@ def test_output_failure_after_commit_never_runs_the_full_pipeline(twin: Twin) ->
     assert not decisions or _kind(decisions[0]) == DIFF, decisions
     reference = twin.invoke(twin.full, ("install",))
     assert reference.returncode == 0, reference.stdout + reference.stderr
-    problems = diff(comparable(twin.fast), comparable(twin.full), twin.worlds, ("fast", "full"))
+    problems = diff(
+        comparable(twin.fast, receipt_history=True),
+        comparable(twin.full, receipt_history=True),
+        twin.worlds,
+        ("fast", "full"),
+    )
     assert not problems, "the committed tree differs from a full install\n" + "\n".join(problems)
     modes = [_modes(world) for world in twin.worlds]
     assert modes[0] == modes[1], "file modes differ from a full install"

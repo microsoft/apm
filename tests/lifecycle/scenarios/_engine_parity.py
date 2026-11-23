@@ -51,6 +51,7 @@ from tests.lifecycle.scenarios._deploy_diff import (
     comparable,
     diff,
     revoke_user_approval,
+    rooted,
 )
 from tests.lifecycle.world import World
 from tests.lifecycle.world.clone import clone
@@ -184,7 +185,7 @@ def _normalized(world: World, text: str) -> list[str]:
     Dependencies resolve in parallel, so each run of consecutive progress lines
     ("[>] Resolving ...") is compared as a sorted block; all other order counts.
     """
-    text = _POLICY_AGE.sub("", _DECISION.sub("", text)).replace(str(world.root), "<ROOT>")
+    text = rooted(_POLICY_AGE.sub("", _DECISION.sub("", text)), str(world.root))
     text = _ELAPSED.sub("<T>", text)
     lines: list[str] = []
     block: list[str] = []

@@ -9,7 +9,6 @@ full pipeline decides. Oracle and cell contract in _engine_parity.py.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -44,7 +43,6 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.promise("P-INV-I1", "P-INV-I4"),
-    pytest.mark.skipif(sys.platform == "win32", reason="fast engines are POSIX-only"),
 ]
 
 
