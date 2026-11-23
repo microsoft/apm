@@ -128,6 +128,7 @@ class DeploymentEvidence:
         self._receipts_readable = receipts_readable
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
+        self._spellings: dict[str, list[str]] | None = None
         self._consent_refused: dict[str, None] = {}
         self._reported: set[str] = set()
 
@@ -363,6 +364,28 @@ class DeploymentEvidence:
             self._renders[owner] = self._render(owner) if self._render is not None else None
         return self._renders[owner]
 
+    def _equivalent_keys(self, key: str) -> tuple[str, ...]:
+        """*key* and every recorded key naming the same file on this filesystem (#4295).
+
+        Case- or normalization-insensitive filesystems make ``A.md`` and
+        ``a.md`` one file; case-sensitive ones never alias.
+        """
+        from apm_cli.utils.paths import _same_entry, _spelling_key
+
+        if self._spellings is None:
+            self._spellings = {}
+            for known in {*self._recorded_hashes, *self._owners}:
+                if "://" not in known:
+                    self._spellings.setdefault(_spelling_key(known), []).append(known)
+        if "://" in key:
+            return (key,)
+        aliases = (
+            known
+            for known in self._spellings.get(_spelling_key(key), ())
+            if known != key and _same_entry(self._deploy_root / key, self._deploy_root / known)
+        )
+        return (key, *aliases)
+
     def _owners_of(self, claim: str) -> tuple[str, ...]:
         """Return the locked owners of *claim* and of every claimed enclosing directory.
 
@@ -372,7 +395,8 @@ class DeploymentEvidence:
         owners: dict[str, None] = {}
         path = _claim_key(claim)
         while path:
-            owners.update(dict.fromkeys(self._owners.get(path, ())))
+            for key in self._equivalent_keys(path):
+                owners.update(dict.fromkeys(self._owners.get(key, ())))
             path = path.rpartition("/")[0]
         return tuple(owners)
 
@@ -465,7 +489,8 @@ class DeploymentEvidence:
 
         recorded = {
             _hash_envelope(value)
-            for value in self._recorded_hashes.get(_claim_key(claim), frozenset())
+            for key in self._equivalent_keys(_claim_key(claim))
+            for value in self._recorded_hashes.get(key, frozenset())
         }
         if not self._receipts_readable or len(recorded) != 1:
             return False
@@ -518,7 +543,7 @@ class DeploymentEvidence:
             and self._lockfile_consent
             and self.lockfile_consentable(claim, physical)
         ):
-            self._consented[claim] = None
+            self._consented[_claim_key(claim)] = None
             return AUTHORIZED
         return rendered
 
