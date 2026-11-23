@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.utils.content_hash import canonical_digest
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.fixtures.perf import TREE_RECIPES, build_tree, serve_offline
 
 pytestmark = [
@@ -142,3 +142,51 @@ def test_cache_clean_after_an_install_empties_the_store(
 
         assert cleaned.returncode == 0, cleaned.stdout + cleaned.stderr
         assert not [path for path in store.rglob("*") if path.is_file()]
+
+
+def _cache(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_a_policy_refused_install_stores_nothing(apm_binary_path: Path, tmp_path: Path) -> None:
+    """QL binding property: a refused install never reaches the deploy store."""
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    denied = sorted(tree.packages)[0]
+    policy = {
+        "name": "deny-one",
+        "version": "1.0.0",
+        "enforcement": "block",
+        "dependencies": {"deny": [f"{tree.recipe.owner}/{denied}"]},
+    }
+    with serve_offline(tree, tmp_path / "world") as world:
+        project = tmp_path / "project"
+        shutil.copytree(tree.project, project)
+        dump_yaml(policy, project / "org-policy.yml")
+        store = world.cache_dir / _BUCKET
+
+        def refused() -> None:
+            result = subprocess.run(
+                [str(apm_binary_path), "install", "--policy", "./org-policy.yml"],
+                cwd=project,
+                env=world.env,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert denied in result.stdout + result.stderr
+
+        refused()
+        assert not [path for path in store.rglob("*") if path.is_file()], "cold refusal stored"
+
+        warm = tmp_path / "warm"
+        shutil.copytree(tree.project, warm)
+        _install(apm_binary_path, warm, world.env)
+        before = _cache(world.cache_dir)
+        refused()
+
+        assert _cache(world.cache_dir) == before, "a refused install changed the cache"
