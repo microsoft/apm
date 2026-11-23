@@ -705,7 +705,7 @@ class TestKeptEntryReviewThree:
 
         assert (tmp_path / "opencode.json").read_bytes() == before
         assert record.held_claims == {"opencode": {"pyright"}}
-        assert "pyright" in record.kept_edits
+        assert record.kept_edits == {"pyright": "blocked"}
 
     def test_an_upgrade_that_is_not_blocked_reaches_no_held_target(self, tmp_path):
         record, _before = self._upgrade_to_socket(tmp_path, edit_copilot=False)

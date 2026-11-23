@@ -1018,7 +1018,8 @@ class LSPIntegrator:
 
         for _runtime, spec, prepared in prepared_targets:
             for name, kind in sorted(prepared.kept.items()):
-                if kept_edits is not None:
+                if kept_edits is not None and (kind != "drift" or name not in kept_edits):
+                    # A held target's drift never hides another target's block (#4871).
                     kept_edits[name] = kind
                 message = kept_entry_message(
                     f"LSP server '{name}' in {spec.label(user_scope=user_scope)}",
