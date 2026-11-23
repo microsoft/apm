@@ -806,7 +806,6 @@ def _spy(ctx: Context, journey: Journey, launch: list[str], prof: Path) -> None:
             started = time.perf_counter()
             result = subprocess.run(
                 ["py-spy", "record", "--nonblocking", "--rate", str(rate), "--format", "raw",
-                 *(["--subprocesses"] if os.name == "nt" else []),
                  "--output", str(raw), "--", *launch, *argv],
                 cwd=cwd, env=ctx.world.env, capture_output=True, text=True,
                 timeout=_COMMAND_TIMEOUT_S, check=False,
@@ -828,8 +827,17 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
     """RESEARCH: py-spy sampling only (cProfile inflates per-call costs)."""
     apm = Path(ctx.apm[-1])
     if apm.suffix.lower() == ".exe":
-        entry = "import sys; from apm_cli.entrypoint import main; sys.argv[0] = 'apm'; main()"
-        launch = [str(apm.parent / "python.exe"), "-c", entry]
+        # uv's venv python.exe is a trampoline py-spy cannot see through: run the
+        # base interpreter from pyvenv.cfg with the venv's site-packages added.
+        venv = apm.parent.parent
+        cfg = (venv / "pyvenv.cfg").read_text(encoding="utf-8").splitlines()
+        home = next(line.split("=", 1)[1].strip() for line in cfg if line.startswith("home"))
+        site_dir = str(venv / "Lib" / "site-packages")
+        entry = (
+            f"import site, sys; site.addsitedir({site_dir!r}); "
+            "from apm_cli.entrypoint import main; sys.argv[0] = 'apm'; main()"
+        )
+        launch = [str(Path(home) / "python.exe"), "-c", entry]
     else:
         first = apm.read_bytes()[:200].split(b"\n", 1)[0]
         if not first.startswith(b"#!") or b"python" not in first:
