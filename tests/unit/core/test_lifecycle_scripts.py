@@ -249,7 +249,9 @@ class TestDiscoverScripts:
         entries = discover_scripts(project_root=str(tmp_path))
         assert any(entry.bash == "echo project" for entry in entries)
 
-    def test_discovers_from_user_apm_yml(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_discovers_from_user_apm_yml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         apm_home = tmp_path / "apm-home"
         _write_yaml(
             apm_home / "apm.yml",
