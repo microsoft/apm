@@ -40,10 +40,11 @@ def test_refused_wildcard_legacy_cleanup_records_concrete_runtime_claims(tmp_pat
         native_hashes=({}, {}),
     )
 
-    claims = LockFile.read(lock_path).mcp_target_servers
+    recorded = LockFile.from_yaml(lock_path.read_text(encoding="utf-8"))
+    claims = recorded.mcp_target_servers
     runtimes = set(ClientFactory.supported_clients()) - {"cursor"}
     assert set(claims) == runtimes
     assert claims["claude"] == ["new", "notes"]
     assert claims["codex"] == ["new", "notes"]
     assert all(claims[runtime] == ["notes"] for runtime in runtimes - {"claude", "codex"})
-    assert LockFile.read(lock_path).mcp_configs["notes"] == notes
+    assert recorded.mcp_configs["notes"] == notes
