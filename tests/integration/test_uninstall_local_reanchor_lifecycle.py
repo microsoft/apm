@@ -27,7 +27,6 @@ from tests.integration._install_audit_replay_kit import (
     ReplayWorld,
     lock_bytes,
     tree_digest,
-    write,
 )
 
 pytestmark = [
@@ -36,6 +35,12 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-INV-I3", "P-INV-I1", "P-INV-I2"),
 ]
+
+
+def write(path: Path, text: str) -> None:
+    """UTF-8, so a re-anchored path may be non-ASCII."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _skill_package(root: Path, name: str, deps: tuple[str, ...] = (), body: str = "") -> None:
@@ -138,11 +143,18 @@ def test_later_uninstall_and_prune_of_the_reanchored_package_keep_deletion_evide
     edited = world.project / ".claude/skills/e-skill/SKILL.md"
     edited.write_text(edited.read_text(encoding="utf-8") + "\nmine\n", encoding="utf-8")
 
-    result = world.apm("uninstall", "./vendor/d")
+    before = tree_digest(world.project)
 
-    output = " ".join((result.stdout + result.stderr).split())
-    assert edited.is_file() and edited.read_text(encoding="utf-8").endswith("mine\n")
-    assert "e-skill" in output, output
+    # The edit is evidence that APM did not write those bytes: the removal
+    # refuses, names the file and changes nothing (#3701).
+    refused = world.apm("uninstall", "./vendor/d", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert ".claude/skills/e-skill/SKILL.md: edited since APM deployed it" in output, output
+    assert tree_digest(world.project) == before
+    # Once the edit is moved aside, the proven files go with the package.
+    edited.unlink()
+    world.apm("uninstall", "./vendor/d")
     assert "_local/e" not in _rows(world)
     assert not (world.project / ".claude/skills/d-skill").exists()
 
