@@ -21,6 +21,7 @@
     "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_member_replaced_by_a_link_after_the_scan",
     "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reports_one_deletion_for_absolute_and_relative_spellings",
     "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_rejects_a_member_link_under_a_symlinked_skills_root",
-    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_unlinks_a_member_moved_under_a_symlinked_skills_root"
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_unlinks_a_member_moved_under_a_symlinked_skills_root",
+    "tests/unit/integration/test_cleanup_spelling_windows_compat.py::test_consent_reads_case_variant_cowork_spellings_as_one_file"
   ]
 }

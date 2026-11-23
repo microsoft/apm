@@ -145,6 +145,8 @@ class DeploymentEvidence:
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
         self._spellings: SpellingAliasIndex | None = None
+        # Cowork claims by their path under the resolved Cowork root (#4815).
+        self._cowork_spellings: tuple[SpellingAliasIndex, dict[str, str], Path] | None = None
         self._receipt_spellings: SpellingAliasIndex | None = None
         self._consent_refused: dict[str, None] = {}
         self._reported: set[str] = set()
@@ -416,9 +418,34 @@ class DeploymentEvidence:
         Case- or normalization-insensitive filesystems make ``A.md`` and
         ``a.md`` one file; case-sensitive ones never alias.
         """
+        from .copilot_cowork_paths import COWORK_URI_SCHEME
+
+        if key.startswith(COWORK_URI_SCHEME):
+            return (key, *self._cowork_aliases(key))
         if self._spellings is None:
             self._spellings = SpellingAliasIndex({*self._recorded_hashes, *self._owners})
         return (key, *self._spellings.aliases(key, self._deploy_root))
+
+    def _cowork_aliases(self, key: str) -> tuple[str, ...]:
+        """Recorded ``cowork://`` keys naming the same file as *key* under the Cowork root."""
+        from .copilot_cowork_paths import COWORK_URI_SCHEME, resolve_copilot_cowork_skills_dir
+
+        if self._cowork_spellings is None:
+            try:
+                root = resolve_copilot_cowork_skills_dir()
+            except Exception:
+                root = None
+            if root is None:
+                return ()
+            claims = {
+                claim[len(COWORK_URI_SCHEME) :].removeprefix("skills/"): claim
+                for claim in {*self._recorded_hashes, *self._owners}
+                if claim.startswith(COWORK_URI_SCHEME)
+            }
+            self._cowork_spellings = (SpellingAliasIndex(claims), claims, root)
+        index, claims, root = self._cowork_spellings
+        relative = key[len(COWORK_URI_SCHEME) :].removeprefix("skills/")
+        return tuple(claims[alias] for alias in index.aliases(relative, root))
 
     def _owners_of(self, claim: str) -> tuple[str, ...]:
         """Return the locked owners of *claim* and of every claimed enclosing directory.
