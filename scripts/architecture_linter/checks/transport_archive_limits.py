@@ -3,10 +3,12 @@
 ``utils/archive.py`` alone reads archive members. ``safe_extract_tar`` and
 ``safe_extract_zip`` apply the same limits to every format: an entry-count
 cap, an uncompressed-size cap, and refusal of links, special files, absolute
-or traversing paths and duplicate or conflicting entries. ``read_zip_member``
-is the single in-memory member reader under the same cap. ``open_tar_gz``
-reads every tar through a decompressed stream bounded by the cap plus a
-header allowance, so pax and GNU long-name headers cannot pass it.
+or traversing paths, duplicate or conflicting entries, and names a filesystem
+would rewrite (``portable_name_problem``, also applied by the bundle unpack
+copy step). ``read_zip_member`` is the single in-memory member reader under
+the same cap. ``open_tar_gz`` reads every tar through a decompressed stream
+bounded by the cap plus a header allowance, so pax and GNU long-name headers
+cannot pass it.
 
 Closed world, keyed on call shape rather than variable names:
 
@@ -32,12 +34,13 @@ from scripts.architecture_linter.models import Rule, Violation
 _RULE_ID = "transport-platform-archive-extraction-limits"
 _OWNER = "src/apm_cli/utils/archive.py"
 _REGISTRY_EXTRACTOR = "src/apm_cli/deps/registry/extractor.py"
+_UNPACKER = "src/apm_cli/bundle/unpacker.py"
 
 # Modules that open an archive for reading and hand it to the owner.
 _READERS = frozenset(
     {
         "src/apm_cli/bundle/local_bundle.py",
-        "src/apm_cli/bundle/unpacker.py",
+        _UNPACKER,
         "src/apm_cli/deps/download_strategies.py",
         _REGISTRY_EXTRACTOR,
     }
@@ -73,8 +76,23 @@ def _check_archive_extraction_limits(provider: FactsProvider) -> tuple[Violation
                 ("sub", "file_type not in _ZIP_ALLOWED_FILE_TYPES", 1, "eq"),
                 ("sub", "total_uncompressed = _stream_member(", 1, "eq"),
                 ("sub", "_write_planned(plan, ", 2, "eq"),
+                ("re", r"^def portable_name_problem\(", 1, "eq"),
+                ("sub", "problem = portable_name_problem(member_name)", 1, "eq"),
             ),
             "tar and zip extraction must validate every entry, then write through one size-capped writer",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inventory,
+            _RULE_ID,
+            _UNPACKER,
+            (
+                ("sub", "portable_name_problem(rel_path) is not None", 1, "eq"),
+                ("sub", "portable_name_problem(name) is not None", 1, "eq"),
+            ),
+            "bundle unpack must refuse lockfile paths the archive owner finds non-portable",
         )
     )
     findings.extend(

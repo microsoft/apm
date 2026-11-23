@@ -332,10 +332,14 @@ def inert_git_args() -> list[str]:
     return [*git_no_hooks_args(), "-c", "core.fsmonitor=false"]
 
 
-def cached_repo_env(env: dict[str, str], repo: Path | None = None) -> dict[str, str]:
+def cached_repo_env(
+    env: dict[str, str], repo: Path | None = None, *, offline: bool = False
+) -> dict[str, str]:
     """Return *env* fenced for a persisted repository: no prompts, fixed askpass, safe transports.
 
     With *repo*, Git never searches above it for a repository either.
+    *offline* allows no transport at all and no lazy object fetch, for runs
+    that must read only what is already on disk.
     """
     fenced = dict(env)
     if repo is not None:
@@ -343,5 +347,7 @@ def cached_repo_env(env: dict[str, str], repo: Path | None = None) -> dict[str, 
     fenced["GIT_TERMINAL_PROMPT"] = "0"
     if fenced.get("GIT_ASKPASS") not in {"", "echo"}:
         fenced["GIT_ASKPASS"] = "echo"
-    fenced["GIT_ALLOW_PROTOCOL"] = _ALLOWED_PROTOCOLS
+    fenced["GIT_ALLOW_PROTOCOL"] = "none" if offline else _ALLOWED_PROTOCOLS
+    if offline:
+        fenced["GIT_NO_LAZY_FETCH"] = "1"
     return fenced

@@ -738,3 +738,43 @@ def test_refusals_name_a_symlinked_member_of_a_claimed_directory(project_root):
 
     assert refused == [(".agents/skills/kit/SKILL.md", SYMLINKED)]
     assert (skill / "SKILL.md").is_symlink() and final.is_symlink()
+
+
+@pytest.mark.parametrize(
+    ("recorded", "receipts_readable", "consentable"),
+    [
+        ("match", True, True),
+        ("conflict", True, False),
+        ("none", True, False),
+        ("match", False, False),
+    ],
+)
+def test_trust_lockfile_consent_needs_one_matching_recorded_hash(
+    tmp_path: Path, recorded: str, receipts_readable: bool, consentable: bool
+) -> None:
+    """#4295: consent fills missing evidence only from a single matching lock hash."""
+    from apm_cli.integration.cleanup import AUTHORIZED, UNPROVEN, DeploymentEvidence
+
+    rel = ".github/instructions/a.instructions.md"
+    target = _make_managed_file(tmp_path, rel)
+    hashes = {
+        "match": frozenset({compute_file_hash(target)}),
+        "conflict": frozenset({compute_file_hash(target), "sha256:" + "0" * 64}),
+        "none": frozenset(),
+    }[recorded]
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=lambda _owner: None,
+        owners={rel: ("pkg",)},
+        kept=(),
+        recorded_hashes={rel: hashes},
+        receipts_readable=receipts_readable,
+    )
+
+    assert evidence.verdict(rel, target) == UNPROVEN
+    evidence.consent_to_lockfile_hashes()
+
+    assert (evidence.verdict(rel, target) == AUTHORIZED) is consentable
+    target.write_text("edited after the decision\n", encoding="utf-8")
+    assert evidence.verdict(rel, target) == UNPROVEN

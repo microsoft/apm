@@ -17,11 +17,11 @@ from apm_cli.policy.discovery import (
     _write_cache,
     discover_policy_with_chain,
 )
+from apm_cli.policy.parser import load_policy
 from apm_cli.policy.project_config import (
     ProjectPolicyConfigError,
     read_project_policy_hash_pin,
 )
-from apm_cli.policy.schema import ApmPolicy
 
 pytestmark = [
     pytest.mark.component,
@@ -50,8 +50,10 @@ def test_existing_sha2_cache_digest_remains_compatible(tmp_path: Path, algorithm
     }
     digest = constructors[algorithm](_VALID_POLICY_YAML.encode("utf-8")).hexdigest()
     pin = f"{algorithm}:{digest}"
-    policy = ApmPolicy(name="cached-policy", enforcement="block")
-    _write_cache("org/.github", policy, tmp_path, raw_bytes_hash=pin)
+    policy, _warnings = load_policy(_VALID_POLICY_YAML)
+    _write_cache(
+        "org/.github", policy, tmp_path, raw_bytes_hash=pin, raw_content=_VALID_POLICY_YAML
+    )
     with patch("hashlib.new", side_effect=AssertionError("dynamic digest selection")):
         assert _compute_hash_normalized(_VALID_POLICY_YAML, pin.upper()) == pin
         cached = _fetch_from_repo(

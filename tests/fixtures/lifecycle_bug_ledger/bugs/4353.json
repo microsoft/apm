@@ -9,7 +9,7 @@
     "transaction.failed_command_preserves_state"
   ],
   "regression_tests": [
-    "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_audit_ci_and_frozen_refuse_alike_when_every_copy_differs",
+    "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_audit_ci_and_frozen_refuse_alike_when_the_commit_cannot_be_fetched",
     "tests/lifecycle/security/test_integrity.py::test_integrity_row"
   ]
 }

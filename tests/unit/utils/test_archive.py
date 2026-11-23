@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import os
+import sys
 import tarfile
+import threading
 import zipfile
 from pathlib import Path
 
@@ -433,3 +436,128 @@ def test_extract_tar_gz_writes_safe_members(tmp_path: Path) -> None:
 
     assert extracted == ["plugin/SKILL.md"]
     assert (out / "plugin" / "SKILL.md").read_text() == "content"
+
+
+# -- Entry names a filesystem would rewrite or reinterpret ----------------------
+# Refused on every OS: Windows drops a trailing dot or space, treats ':' as an
+# alternate data stream and maps reserved device names, so such a name would
+# not land where it says.
+
+_UNPORTABLE_NAMES = [
+    ".. /x.md",
+    "a/.. /x.md",
+    ".../x.md",
+    "a/.../x.md",
+    "a./x.md",
+    "a /x.md",
+    "x.md.",
+    "x.md ",
+    "a.md:x",
+    "a.md::$DATA",
+    "CON",
+    "con.md",
+    "aux.md",
+    "NUL",
+    "nul.txt",
+    "COM1.txt",
+    "Com1.md",
+    "LPT9",
+    "a/PRN.md",
+    "COM0.md",
+    "lpt0",
+    "COM\u00b9.md",
+    "LPT\u00b3",
+    "CONIN$",
+    "conout$.txt",
+    "a\x01b.md",
+    "a/\x1f.md",
+]
+_PORTABLE_NAMES = ["a.b.md", "v1.2/notes.md", "console.md", "COM10.md", "con_notes/x.md"]
+_FORMATS = ["tar.gz", "zip"]
+
+
+def _archive_entries(fmt: str, entries: list[tuple[str, bytes]]) -> bytes:
+    buf = io.BytesIO()
+    if fmt == "zip":
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, data in entries:
+                zf.writestr(zipfile.ZipInfo(name), data)
+    else:
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            for name, data in entries:
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def _extract_watched(fmt: str, entries: list[tuple[str, bytes]], dest: Path) -> dict:
+    """Extract in a daemon thread; ``"error"`` is missing if it did not finish in 20 s."""
+    data = _archive_entries(fmt, entries)
+    extract = _extract_zip if fmt == "zip" else _extract_tar_gz
+    outcome: dict = {}
+
+    def run() -> None:
+        try:
+            extract(data, str(dest))
+            outcome["error"] = None
+        except BaseException as exc:
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    return outcome
+
+
+@pytest.mark.parametrize("name", _UNPORTABLE_NAMES)
+@pytest.mark.parametrize("fmt", _FORMATS)
+def test_extract_refuses_an_unportable_entry_name(tmp_path: Path, fmt: str, name: str) -> None:
+    dest = tmp_path / "dest"
+
+    outcome = _extract_watched(fmt, [("ok.md", b"ok"), (name, b"x")], dest)
+
+    assert "error" in outcome, "extraction did not finish"
+    assert isinstance(outcome["error"], ArchiveError), outcome["error"]
+    assert not dest.exists() or not any(dest.rglob("*"))
+    assert set(dest.parent.iterdir()) <= {dest}
+
+
+@pytest.mark.parametrize("name", _PORTABLE_NAMES)
+@pytest.mark.parametrize("fmt", _FORMATS)
+def test_extract_keeps_an_ordinary_dotted_name(tmp_path: Path, fmt: str, name: str) -> None:
+    dest = tmp_path / "dest"
+
+    outcome = _extract_watched(fmt, [(name, b"x")], dest)
+
+    assert outcome == {"error": None}
+    assert (dest / name).read_bytes() == b"x"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows name trimming")
+@pytest.mark.parametrize("name", [".. /x.md", "a/.. /.. /x.md", "a/.../x.md", "a. /x.md"])
+@pytest.mark.parametrize("fmt", _FORMATS)
+def test_trimmed_names_never_land_outside_dest_on_windows(
+    tmp_path: Path, fmt: str, name: str
+) -> None:
+    dest = tmp_path / "outer" / "dest"
+
+    outcome = _extract_watched(fmt, [("ok.md", b"ok"), (name, b"x")], dest)
+
+    outside = [p for p in tmp_path.rglob("x.md") if dest not in p.parents]
+    assert outside == []
+    assert "error" in outcome, "extraction did not finish"
+    assert isinstance(outcome["error"], ArchiveError), outcome["error"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows devices and streams")
+@pytest.mark.parametrize("name", ["aux.md", "a.md:x"])
+def test_device_and_stream_names_are_refused_on_windows(tmp_path: Path, name: str) -> None:
+    dest = tmp_path / "dest"
+
+    outcome = _extract_watched("zip", [("ok.md", b"ok"), (name, b"x")], dest)
+
+    assert "error" in outcome, "extraction did not finish"
+    assert isinstance(outcome["error"], ArchiveError), outcome["error"]
+    assert not (dest / "a.md").exists()
+    assert not os.path.exists(f"{dest / 'a.md'}:x")
