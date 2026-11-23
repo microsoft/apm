@@ -29,7 +29,7 @@ _SARIF_EMPTY = '{"version": "2.1.0", "runs": [{"results": []}]}'
 
 def _capture_run(monkeypatch, *, stdout=_SARIF_EMPTY, stderr="", returncode=0):
     """Patch ``shutil.which`` + ``subprocess.run`` and capture the argv/env."""
-    monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+    monkeypatch.setattr(mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector")
     captured: dict[str, object] = {}
 
     def _fake_run(cmd, **kwargs):
@@ -89,13 +89,17 @@ class TestArgvConstruction:
 
 class TestLlmAvailability:
     def test_available_offline_without_key(self, monkeypatch) -> None:
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
         for var in mod._LLM_KEY_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
         assert mod.SkillSpectorAdapter().is_available(options=ScannerOptions()) == (True, None)
 
     def test_llm_requires_key_fails_closed(self, monkeypatch) -> None:
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
         for var in mod._LLM_KEY_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
         ok, reason = mod.SkillSpectorAdapter().is_available(options=ScannerOptions(llm=True))
@@ -103,7 +107,9 @@ class TestLlmAvailability:
         assert "API key" in reason
 
     def test_llm_available_with_key(self, monkeypatch) -> None:
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
         monkeypatch.setenv("NVIDIA_INFERENCE_KEY", "key-123")
         assert mod.SkillSpectorAdapter().is_available(options=ScannerOptions(llm=True)) == (
             True,
@@ -131,7 +137,9 @@ class TestCredentialHygiene:
         assert "sk-abcdef123456" not in str(exc.value)
 
     def test_timeout_raises_external_scan_error(self, monkeypatch) -> None:
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
 
         def _raise(cmd, **kwargs):
             raise subprocess.TimeoutExpired(cmd, mod._TIMEOUT_SECONDS)

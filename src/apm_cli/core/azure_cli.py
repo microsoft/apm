@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import threading
 import time
@@ -86,21 +85,23 @@ class AzureCliBearerProvider:
         # Azure CLI ships as az.cmd (a batch wrapper), and Python's
         # subprocess.run -> CreateProcessW does NOT honor PATHEXT for
         # non-.exe executables, so a bare "az" token fails with
-        # FileNotFoundError even though `shutil.which("az")` resolves it.
-        # See microsoft/apm#1430. Resolving via shutil.which here (which
-        # DOES honor PATHEXT) and storing the absolute path keeps every
-        # downstream subprocess.run call portable across platforms.
+        # FileNotFoundError even though a PATHEXT-aware lookup resolves it.
+        # See microsoft/apm#1430. Resolving via trusted_executable here
+        # (PATHEXT-aware, PATH outside the project only) and storing the
+        # absolute path keeps every downstream subprocess.run call portable.
         #
         # Edge case: callers (notably tests) may pass an explicit absolute
         # path. We trust absolute paths verbatim and skip re-resolution.
-        # Relative tokens always flow through shutil.which so a
+        # Relative tokens always flow through trusted_executable so a
         # CWD-relative form like "subdir/az" cannot bypass resolution.
         #
         # PATH changes mid-process won't be detected; restart the CLI.
         if os.path.isabs(az_command):
             self._az_command: str | None = az_command
         else:
-            self._az_command = shutil.which(az_command)
+            from apm_cli.utils.git_env import trusted_executable
+
+            self._az_command = trusted_executable(az_command)
         # Cache stores (token, expires_at_epoch_seconds). expires_at is None
         # if the response did not include an expiresOn field (very old az
         # versions); in that case the token is treated as never-expiring

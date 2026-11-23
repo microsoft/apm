@@ -232,3 +232,68 @@ def test_retiring_apm_entries_keeps_a_config_file_with_user_content(
     for key, value in user_content.items():
         if key != container or value:
             assert after.get(key) == value, f"{relative} lost the user's {key!r}: {after}"
+
+
+# (change, config file, the empty skeleton the user created before the first install,
+# the APM entry the change retires). APM did not create the file, so it stays (#4867).
+_USER_SKELETONS = {
+    "mcp-user-skeleton": (
+        "approval-revoked",
+        ".mcp.json",
+        {"mcpServers": {}},
+        ("mcpServers", "p-exec-mcp"),
+    ),
+    "claude-settings-user-skeleton": (
+        "target-removed",
+        ".claude/settings.json",
+        {},
+        ("hooks", None),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_USER_SKELETONS))
+def test_retiring_apm_entries_keeps_an_empty_config_file_the_user_created(
+    lifecycle_template: World, tmp_path: Path, case: str
+) -> None:
+    change, relative, skeleton, (container, entry) = _USER_SKELETONS[case]
+    spec = CHANGES[change]
+    world = clone(lifecycle_template, tmp_path / "world")
+    world.services.reset()
+    config = world.project / relative
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(json.dumps(skeleton, indent=2) + "\n", encoding="utf-8")
+
+    converge(world, spec.start)
+    deployed = json.loads(config.read_text(encoding="utf-8"))
+    managed = deployed.get(container) or {}
+    assert (entry in managed) if entry else managed, f"{relative}: APM's entry not deployed"
+    spec.apply(world)
+    result = _install(world)
+    output = f"{result.stdout}{result.stderr}"
+    assert result.returncode == 0, output
+
+    assert config.is_file(), f"{relative} the user created was deleted\n{output}"
+    after = json.loads(config.read_text(encoding="utf-8"))
+    assert not after.get(container), f"APM's {container} stayed in {relative}: {after}"
+
+
+def test_a_pre_provenance_install_still_removes_the_config_file_apm_emptied(
+    lifecycle_template: World, tmp_path: Path
+) -> None:
+    """An installation from before file-creation records keeps the #4852 content proof."""
+    spec = CHANGES["approval-revoked"]
+    world = clone(lifecycle_template, tmp_path / "world")
+    world.services.reset()
+    config = world.project / ".mcp.json"
+    converge(world, spec.start)
+    assert "p-exec-mcp" in json.loads(config.read_text(encoding="utf-8"))["mcpServers"]
+    # What an older APM left on this machine: no record of the files it created.
+    (world.apm_home / "deployment-receipts" / "config-files" / "records.json").unlink(
+        missing_ok=True
+    )
+
+    spec.apply(world)
+    result = _install(world)
+    assert result.returncode == 0, f"{result.stdout}{result.stderr}"
+    assert not config.exists(), f".mcp.json APM emptied stayed\n{result.stdout}{result.stderr}"
