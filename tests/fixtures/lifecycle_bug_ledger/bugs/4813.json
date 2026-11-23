@@ -11,6 +11,7 @@
     "outcome.status_matches_state"
   ],
   "regression_tests": [
-    "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_first_upgrade_switching_to_a_target_sharing_the_skills_dir_updates_it"
+    "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_first_upgrade_switching_to_a_target_sharing_the_skills_dir_updates_it",
+    "tests/unit/integration/test_skills_root_and_target_compat.py::test_unresolvable_unselected_receipt_target_skips_skill_dir_adoption"
   ]
 }

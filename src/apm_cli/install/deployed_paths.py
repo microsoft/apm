@@ -125,13 +125,14 @@ def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) 
     The receipt's own target is resolved at user scope even when this run did
     not select it (#4813); its directory is adopted only for a selected target
     that deploys skills to that same destination (Copilot and Codex share
-    ``~/.agents/skills``), and is attributed to that selected target.
+    ``~/.agents/skills``), and is attributed to that selected target. An
+    unselected target whose user root cannot resolve adopts nothing.
     """
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
     origin = next((t for t in targets if t.name == target_name), None)
     if origin is None and (static := KNOWN_TARGETS.get(target_name)) is not None:
-        origin = static.for_scope(user_scope=True)
+        origin = scoped_profile_or_none(static, user_scope=True)
     if origin is None or not origin.supports("skills"):
         return ()
     skills_root = origin.skills_deploy_path(root).resolve()
