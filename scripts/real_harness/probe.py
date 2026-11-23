@@ -48,12 +48,16 @@ ENVS = ("normal", "worktree", "headless")
 # Claude-only diagnostics at project scope: a second session in the same HOME, the
 # marketplace path made absolute, no folder trust, and the native oracle (Claude's
 # own `plugin marketplace add` + `plugin install --scope project`, then the user
-# plugin state wiped to simulate a fresh clone).
+# plugin state wiped to simulate a fresh clone). Worktree diagnostics: apm installs
+# only on the worktree's branch (main checkout has no .agents/plugins), or a
+# session runs in the main checkout before the first session in a worktree.
 DIAG_ENVS = (
     "headless-rerun",
     "headless-abspath",
     "headless-untrusted",
     "headless-native",
+    "headless-wt-branch",
+    "headless-wt-after-main",
 )
 _AUTH_BLOCKERS = ("could not be validated", "rate limit exceeded", "No authentication")
 TOOL_PROMPT = (
@@ -148,6 +152,7 @@ class Cell:
         # A Claude-format plugin loads in Copilot only at project scope; an
         # Agent Plugin is the Copilot user-scope format (native_plugins/scopes.py).
         self.agent_plugin = harness == "copilot" and scope == "user"
+        self.install_root = self.project
 
     # -- process plumbing ---------------------------------------------------
 
@@ -312,7 +317,7 @@ class Cell:
         flags = ["-g"] if self.scope == "user" else []
         if self.scope == "project":
             _write(
-                self.project / "apm.yml",
+                self.install_root / "apm.yml",
                 f"name: consumer\nversion: 1.0.0\ntargets: [{self.harness}]\n"
                 f"dependencies:\n  apm:\n    - {plugin}\n",
             )
@@ -326,16 +331,16 @@ class Cell:
             argv = [apm, "install", "-g", "--no-policy", "--target", self.harness]
         else:
             argv = [apm, "install", "-g", "--no-policy", "--target", self.harness, str(plugin)]
-        proc = self.run("apm-install", argv, self.project)
+        proc = self.run("apm-install", argv, self.install_root)
         output = proc.stdout + proc.stderr
         if "Parked" in output:
             match = re.search(r"Approve: (apm approve [^\n]+)", output)
             if not match:
                 self.evidence["apm_error"] = "parked without an approve hint"
                 return False
-            self.run("apm-approve", [apm, *match.group(1).split()[1:]], self.project)
+            self.run("apm-approve", [apm, *match.group(1).split()[1:]], self.install_root)
             again = [apm, "install", *flags, "--no-policy", "--target", self.harness]
-            proc = self.run("apm-install-approved", again, self.project)
+            proc = self.run("apm-install-approved", again, self.install_root)
             output = proc.stdout + proc.stderr
             if "Parked" in output:
                 self.evidence["apm_error"] = "still parked after approve"
@@ -349,10 +354,14 @@ class Cell:
     # -- probes -------------------------------------------------------------
 
     def run_dir(self) -> Path:
-        return self.worktree if self.env == "worktree" else self.project
+        if self.env == "worktree" or self.env.startswith("headless-wt"):
+            return self.worktree
+        return self.project
 
     def marketplace(self) -> str:
-        lock = _read(self.project / "apm.lock.yaml") + _read(self.home / ".apm" / "apm.lock.yaml")
+        lock = _read(self.install_root / "apm.lock.yaml") + _read(
+            self.home / ".apm" / "apm.lock.yaml"
+        )
         match = re.search(r"name: (apm-[pu]-[0-9a-f]+)", lock)
         return match.group(1) if match else ""
 
@@ -462,6 +471,13 @@ class Cell:
                 self.absolutize_project_marketplace()
             if self.env == "headless-native" and self.scope == "project":
                 self.native_oracle(cwd)
+            if self.env == "headless-wt-after-main":
+                main = self.run("headless-main", argv, self.project, timeout=SESSION_SECONDS + 30)
+                self.evidence["main_session_plugin_paths"] = re.findall(
+                    r'"path":\s*"([^"]*rh-probe[^"]*)"', main.stdout
+                )
+                self.hook_marker.unlink(missing_ok=True)
+                self.mcp_marker.unlink(missing_ok=True)
             proc = self.run("headless", argv, cwd, timeout=SESSION_SECONDS + 30)
             if self.env == "headless-rerun":
                 self.evidence["first_session_hook"] = _read(self.hook_marker)
@@ -481,6 +497,9 @@ class Cell:
             self.evidence["headless_tail"] = _tail(proc.stdout + proc.stderr, 2000)
             if init is not None:
                 _json(self.logs / "init-event.json", init)
+                self.evidence["init_plugin_paths"] = [
+                    entry.get("path") for entry in init.get("plugins") or [] if PLUGIN in str(entry)
+                ]
                 keys = ("plugins", "mcp_servers", "skills", "slash_commands", "claude_code_version")
                 self.evidence["init"] = {key: init.get(key) for key in keys}
             return
@@ -516,6 +535,10 @@ class Cell:
             skills = json.dumps(init.get("skills")) + json.dumps(init.get("slash_commands"))
             sig["init_skill"] = SKILL in skills
             sig["init_mcp"] = MCP in json.dumps(init.get("mcp_servers"))
+            paths = self.evidence.get("init_plugin_paths") or []
+            sig["init_path_in_cwd"] = any(
+                str(path).startswith(str(self.run_dir())) for path in paths
+            )
         return sig
 
     def verdict(self, sig: dict) -> tuple[str, str]:
@@ -557,10 +580,13 @@ class Cell:
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "init")
         self.seed_harness()
+        if self.env == "headless-wt-branch":
+            self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
+            self.install_root = self.worktree
         if self.apm_install(plugin):
-            self.git("add", "-A")
-            self.git("commit", "-q", "-m", "apm install")
-            if self.env == "worktree":
+            self.run("git-add", ["git", "add", "-A"], self.install_root)
+            self.run("git-commit", ["git", "commit", "-q", "-m", "apm install"], self.install_root)
+            if self.env in ("worktree", "headless-wt-after-main"):
                 self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             cwd = self.run_dir()
             self.list_probes(cwd)

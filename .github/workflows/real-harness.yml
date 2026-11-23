@@ -81,7 +81,8 @@ jobs:
           if [ "$HARNESS" = claude ]; then
             python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
               --env headless-rerun --env headless-abspath --env headless-untrusted \
-              --env headless-native --scope project
+              --env headless-native --env headless-wt-branch \
+              --env headless-wt-after-main --scope project
           fi
 
       - name: Summary
