@@ -496,3 +496,25 @@ def test_rekeyed_move_passes_against_base_ref(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "[+] test duplicate ratchet clean" in result.stdout
+
+
+def test_still_present_source_is_not_a_move_against_base_ref(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    for name in ("test_a.py", "test_b.py"):
+        _write(root, name, BODY)
+    _track_tests(root)
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, _payload(bodies=PAIR))
+    _commit_base(root, baseline)
+    _write(root, "test_a.py", BODY.replace("1 == 1", "2 == 2"))
+    _write(root, "test_c.py", BODY)
+    subprocess.run(["git", "-C", str(root), "add", "tests"], check=True)
+    swapped = {"tests/test_b.py": ["test_value"], "tests/test_c.py": ["test_value"]}
+    _write_baseline(baseline, _payload(bodies=swapped))
+
+    result = _run(root, baseline, "--base-ref", "HEAD")
+
+    assert result.returncode == 1
+    assert (
+        "[x] tests/test_c.py::test_value: added to duplicate_bodies in the test-duplicate baseline."
+    ) in result.stderr

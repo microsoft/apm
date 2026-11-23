@@ -230,19 +230,23 @@ def _validate(payload: dict[str, object]) -> tuple[set[str], set[str]]:
     )
 
 
-def baseline_growth(current: dict[str, object], base: dict[str, object]) -> list[str]:
+def baseline_growth(
+    current: dict[str, object], base: dict[str, object], present: set[str]
+) -> list[str]:
     """Return one failure per baseline entry absent from the base revision's copy.
 
     The checker trusts its baseline, so a hand-added entry would grandfather a
     new duplicate. An added entry passes only as a move: the base lists the
-    same test name under another file and the current baseline no longer does.
+    same test name under another file, the current baseline no longer does,
+    and that source test is absent from the scanned corpus (``present``), as
+    in :func:`compare`. Dropping a still-present test's entry is not a move.
     """
     failures: list[str] = []
     for key, qualified in (("duplicate_bodies", False), ("duplicate_names", True)):
         now = _load_layout(current[key], key, qualified=qualified)
         before = _load_layout(base.get(key, {}), key, qualified=qualified)
         gone: dict[str, list[str]] = defaultdict(list)
-        for nodeid in sorted(before - now):
+        for nodeid in sorted(before - now - present):
             gone[nodeid.split("::", 1)[1]].append(nodeid)
         for nodeid in sorted(now - before):
             sources = gone.get(nodeid.split("::", 1)[1])
@@ -257,11 +261,13 @@ def baseline_growth(current: dict[str, object], base: dict[str, object]) -> list
     return failures
 
 
-def check_base_growth(root: Path, baseline: Path, payload: dict[str, object], ref: str) -> int:
+def check_base_growth(
+    root: Path, baseline: Path, payload: dict[str, object], ref: str, present: set[str]
+) -> int:
     """Return 0 when *payload* adds no entry over *ref*'s copy, else an exit status."""
     try:
         base = load_baseline_at_ref(root, baseline, ref, label="test-duplicate")
-        grown = baseline_growth(payload, base) if base is not None else []
+        grown = baseline_growth(payload, base, present) if base is not None else []
     except BaselineError as error:
         print(f"[x] {error}", file=sys.stderr)
         return 2
@@ -340,16 +346,15 @@ def main(argv: list[str] | None = None) -> int:
     except _Invalid as error:
         print(f"[x] invalid test-duplicate baseline: {error}", file=sys.stderr)
         return 2
-    if args.base_ref:
-        status = check_base_growth(root, baseline, payload, args.base_ref)
-        if status:
-            return status
-
     try:
         module_count, digests, qualnames = scan(root, SCOPE)
     except (OSError, UnicodeError, ValueError, SyntaxError) as error:
         print(f"[x] test-duplicate scan failed: {error}", file=sys.stderr)
         return 2
+    if args.base_ref:
+        status = check_base_growth(root, baseline, payload, args.base_ref, set(digests))
+        if status:
+            return status
     bodies = duplicate_bodies(digests)
     names = duplicate_names(qualnames)
     result = compare(bodies, names, allowed_bodies, allowed_names, set(digests))
