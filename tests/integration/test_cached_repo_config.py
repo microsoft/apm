@@ -457,6 +457,27 @@ def test_an_alternate_is_checked_exactly_as_git_reads_it(tmp_path: Path) -> None
 
 
 @_POSIX_ONLY
+@pytest.mark.parametrize("name", ["objects", "refs"])
+def test_git_state_linked_out_of_the_repository_is_refused(tmp_path: Path, name: str) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError, require_trusted_cached_repo
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    elsewhere = tmp_path / f"external-{name}"
+    (checkout / ".git" / name).rename(elsewhere)
+    (checkout / ".git" / name).symlink_to(elsewhere, target_is_directory=True)
+
+    with pytest.raises(UntrustedCachedRepoError, match="not a plain directory"):
+        require_trusted_cached_repo(
+            checkout,
+            bare=False,
+            origin_ok=lambda _url: True,
+            alternates_root=tmp_path / "cache" / "git" / "db_v1",
+        )
+    assert (checkout / ".git" / name).is_symlink()
+
+
+@_POSIX_ONLY
 def test_a_snapshot_without_a_valid_head_never_reaches_the_enclosing_project(
     tmp_path: Path,
 ) -> None:

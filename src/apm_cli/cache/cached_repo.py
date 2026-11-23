@@ -230,6 +230,9 @@ def require_trusted_cached_repo(
         info = os.lstat(git_dir)
         if not stat.S_ISDIR(info.st_mode) or (not bare and os.path.islink(repo)):
             raise UntrustedCachedRepoError("git directory is not a plain directory")
+        for name in ("objects", "refs"):
+            if not stat.S_ISDIR(os.lstat(git_dir / name).st_mode):
+                raise UntrustedCachedRepoError(f"{name} is not a plain directory")
         for name in ("commondir", "info/attributes"):
             if (git_dir / name).exists():
                 raise UntrustedCachedRepoError(f"{name} present")
