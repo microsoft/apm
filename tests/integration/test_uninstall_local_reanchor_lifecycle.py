@@ -813,3 +813,51 @@ def test_without_apm_modules_a_plugin_format_survivor_refuses(
     )
 
     _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_without_apm_modules_an_unresolvable_removal_target_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a removal target that cannot be resolved is unverified, never dropped."""
+    world = _local_world(tmp_path, apm_binary_path)
+    _without_modules(world)
+    target = world.project / "vendor" / "e"
+    shutil.rmtree(target)
+    os.symlink(target, target, target_is_directory=True)
+
+    before = tree_digest(world.project)
+    # A later dry-run step reports the loop itself; the preview still keeps e.
+    preview = world.apm("uninstall", "./vendor/e", "--dry-run", expect=None)
+    text = preview.stdout + preview.stderr
+    assert "Would keep ./vendor/e" in text and "Traceback" not in text, text
+    assert tree_digest(world.project) == before
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+def test_without_apm_modules_a_replaced_survivor_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: replace rules can make a remote survivor local; offline they cannot be proven."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "$schema": _REPLACEMENTS_SCHEMA,
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e", "test/r"]},
+            "replace": [
+                {"for": {"git": "https://github.com/test/r"}, "with": {"path": "./vendor/d"}}
+            ],
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _without_modules(world)
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")

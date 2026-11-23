@@ -49,6 +49,9 @@
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_dry_run_previews_the_offline_refusal_as_kept",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_symlinked_survivor_directory_refuses",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_survivor_outside_the_project_refuses",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_plugin_format_survivor_refuses"
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_plugin_format_survivor_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_an_unresolvable_removal_target_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_replaced_survivor_refuses",
+    "tests/unit/test_uninstall_local_reanchor_rollback.py::test_a_failed_postcommit_binding_rolls_the_reanchor_back"
   ]
 }

@@ -454,6 +454,17 @@ def _hold_native_registration(native_before, logger: CommandLogger) -> None:
         )
 
 
+def _persist_in_reanchor_transaction(
+    lockfile, lockfile_path, logger, integration_cleanup, repair
+) -> _LockPersistence:
+    """Persist survivors; post-commit binding is part of a re-anchor's transaction (#4889)."""
+    try:
+        return _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    except Exception:
+        _abort_unsaved_reanchor(repair, logger)
+        raise
+
+
 def _persist_lock_then_resync_native(
     *,
     lock_changed: bool,
@@ -477,7 +488,9 @@ def _persist_lock_then_resync_native(
     """
     saved = None
     if lock_changed and persist_allowed:
-        saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+        saved = _persist_in_reanchor_transaction(
+            lockfile, lockfile_path, logger, integration_cleanup, still_needed_repairs
+        )
     if lock_changed and (saved is None or not saved.saved):
         _hold_native_registration(native_before, logger)
         _abort_unsaved_reanchor(still_needed_repairs, logger)
