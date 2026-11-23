@@ -995,10 +995,8 @@ def test_approve_clears_a_deny_stored_under_another_spelling() -> None:
     ]
 
 
-def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``apm approve --all`` writes no allow for a package another layer denies (#3957)."""
+def _hook_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_text: str) -> Path:
+    """A project with installed ``org-denied`` and ``fine`` hook packages; returns apm.yml."""
     project = tmp_path / "project"
     apm_home = tmp_path / "home" / ".apm"
     apm_home.mkdir(parents=True)
@@ -1013,11 +1011,27 @@ def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
             f"name: {name}\nversion: '1.0'\n", encoding="utf-8"
         )
     manifest = project / "apm.yml"
-    manifest.write_text("name: consumer\nversion: '1.0'\n", encoding="utf-8")
+    manifest.write_text(manifest_text, encoding="utf-8")
     monkeypatch.chdir(project)
-    policy = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
+    return manifest
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+
+_ORG_DENY = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
+
+
+def _org_denies():
+    """Serve the org deny at the policy discovery boundary."""
+    found = PolicyFetchResult(policy=_ORG_DENY, source="org:contoso/.github", outcome="found")
+    return patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=found)
+
+
+def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm approve --all`` writes no allow for a package another layer denies (#3957)."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+
+    with _org_denies():
         result = CliRunner().invoke(approve_cmd, ["--all"])
 
     allow = (yaml.safe_load(manifest.read_text(encoding="utf-8")).get("executables") or {}).get(
@@ -1026,3 +1040,54 @@ def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
     assert not any("org-denied" in key for key in allow), result.output
     assert any("fine" in key for key in allow), result.output
     assert "Skipped org-denied" in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize(
+    ("manifest_text", "args"),
+    [
+        pytest.param("name: consumer\nversion: '1.0'\n", ["org-denied"], id="org-deny"),
+        pytest.param(
+            "name: consumer\nversion: '1.0'\n", ["fine", "org-denied"], id="with-an-allowed-one"
+        ),
+        pytest.param(
+            "name: consumer\nversion: '1.0'\n"
+            "executables:\n  deny:\n    org-denied:\n      hooks: true\n",
+            ["org-denied"],
+            id="project-deny-kept",
+        ),
+    ],
+)
+def test_approve_refuses_an_org_denied_package_before_any_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_text: str, args: list[str]
+) -> None:
+    """A failed approve changes nothing: the org deny is decided before the write (#4923)."""
+    manifest = _hook_packages(tmp_path, monkeypatch, manifest_text)
+    config = tmp_path / "home" / ".apm" / "config.json"
+    before = manifest.read_bytes()
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, args)
+
+    assert result.exit_code == 1, result.output
+    assert manifest.read_bytes() == before, result.output
+    assert not config.exists()
+    text = " ".join(result.output.split())
+    assert "org-denied is still denied (org-deny)" in text
+    assert "ask its owner to change apm-policy.yml" in text
+    assert "Nothing written." in text
+    assert "Approved" not in text
+
+
+def test_approve_records_a_package_no_layer_denies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control for #4923: an org deny on another package leaves this approve unchanged."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, ["fine"])
+
+    assert result.exit_code == 0, result.output
+    allow = yaml.safe_load(manifest.read_text(encoding="utf-8"))["executables"]["allow"]
+    assert any("fine" in key for key in allow), result.output
+    assert not any("org-denied" in key for key in allow), result.output

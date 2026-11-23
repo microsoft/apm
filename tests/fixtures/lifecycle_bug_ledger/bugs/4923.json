@@ -1,0 +1,15 @@
+{
+  "issue": 4923,
+  "fixed_in": "Unreleased",
+  "summary": "apm approve of a package an org or other-store deny still blocked recorded the grant (and cleared the same-store deny) before exiting 1; the deny is now decided before any write, so the failed approve leaves apm.yml and the user store unchanged.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/unit/commands/test_approve_deny.py::test_approve_refuses_an_org_denied_package_before_any_write",
+    "tests/integration/test_deny_remediation_lifecycle.py::test_approve_exits_1_when_another_layer_still_denies"
+  ]
+}
