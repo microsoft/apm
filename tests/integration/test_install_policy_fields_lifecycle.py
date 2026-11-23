@@ -28,9 +28,11 @@ from tests.lifecycle.world.fixtures import (  # noqa: F401
     lifecycle_template,
     lifecycle_world,
 )
+from tests.lifecycle.world.packages import _skill_package
 from tests.lifecycle.world.scopes import use_policy
 from tests.lifecycle.world.services import policy_org
 from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
     pytest.mark.integration,
@@ -270,6 +272,26 @@ def test_max_depth_reuses_a_dependency_already_resolved_directly(
     rows = lock["dependencies"]
     assert sorted(row.get("depth", 1) for row in rows) == [1, 1], rows
     _assert_ok(world, "audit", "--ci")
+
+
+def test_max_depth_terminates_on_a_cycle_without_a_false_refusal(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """c-a -> c-b -> c-a under max_depth 2: the back edge reuses c-a at depth 1."""
+    world = lifecycle_world
+    factory = LocalPackageFactory(world.root / "cycle")
+    first, second = _skill_package(factory, "c-a"), _skill_package(factory, "c-b")
+    factory.add_relative_dependency(first, second)
+    factory.add_relative_dependency(second, first)
+    use_policy(world, "max-depth-2")
+
+    _assert_ok(world, "install", str(first.root))
+
+    lock = yaml.safe_load((world.project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    depths = {
+        row["repo_url"].rsplit("/", 1)[-1]: row.get("depth", 1) for row in lock["dependencies"]
+    }
+    assert depths == {"c-a": 1, "c-b": 2}, lock["dependencies"]
 
 
 def test_max_depth_judges_the_resolved_graph_not_the_old_lockfile(
