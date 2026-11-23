@@ -1,6 +1,7 @@
 """Deterministic SHA-256 content hashing for package integrity verification."""
 
 import hashlib
+import os
 import stat
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -304,6 +305,37 @@ def compute_file_hash(file_path: Path) -> str:
     if not file_path.is_file() or file_path.is_symlink():
         return _EMPTY_HASH
     return f"sha256:{canonical_digest(file_path.read_bytes())}"
+
+
+def exact_hash_of_bytes(raw: bytes) -> str:
+    """Hash *raw* as is, without line-ending normalization (#4863).
+
+    For evidence that must notice a line-ending-only change, such as what the
+    deploy journal saw at a path; :func:`compute_file_hash` would not.
+    """
+    return f"sha256:{hashlib.sha256(raw).hexdigest()}"
+
+
+def compute_exact_file_hash(file_path: Path) -> str:
+    """:func:`exact_hash_of_bytes` of the regular file at *file_path*."""
+    return exact_hash_of_bytes(file_path.read_bytes())
+
+
+def text_write_hash(
+    data: str, *, encoding: str = "utf-8", newline: str | None = "", lf: bool = False
+) -> str:
+    """The exact bytes hash a text write of *data* leaves, line endings included (#4863).
+
+    *newline* is ``open``'s: ``None`` writes ``\\n`` as ``os.linesep``, ``""``
+    and ``"\\n"`` write *data* as is. *lf* first turns CRLF into LF, as
+    ``write_text_lf`` and a normalizing ``atomic_write_text`` do.
+    """
+    if lf:
+        data = normalize_crlf_to_lf(data)
+    newline = os.linesep if newline is None else newline
+    if newline not in ("", "\n"):
+        data = data.replace("\n", newline)
+    return exact_hash_of_bytes(data.encode(encoding))
 
 
 def canonical_digest(raw: bytes) -> str:

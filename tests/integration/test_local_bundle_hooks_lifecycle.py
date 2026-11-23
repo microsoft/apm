@@ -1426,3 +1426,29 @@ def test_uninstall_retry_by_bundle_path_refuses_two_aliased_copies(
     assert "matches 2 installed local bundles (team-a, team-b)" in refused, refused
     assert tree_bytes(consumer) == before
     world.apm(consumer, "uninstall", "team-a")
+
+
+def test_uninstall_bundle_ignores_a_matcher_naming_its_script(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4679 review: only a hook's command fields run a script; a matcher naming it does not."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "matcher-text-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    settings = consumer / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    mine = {
+        "matcher": "hooks/hookpkg/hooks/scripts/x.sh",
+        "hooks": [{"type": "command", "command": "true"}],
+    }
+    data["hooks"].setdefault("Stop", []).append(mine)
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / script).exists()
+    assert script not in _claims(world, consumer)
+    assert _hook_entries(consumer) == {"Stop": ["hooks/hookpkg/hooks/scripts/x.sh"]}

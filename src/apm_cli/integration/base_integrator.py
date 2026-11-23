@@ -812,9 +812,13 @@ class BaseIntegrator:
         """
         if cls.is_content_identical_to_text(path, text, lf_normalized_deploy=True):
             return False
+        from apm_cli.utils.content_hash import text_write_hash
+
         write_seam.mkdir(path.parent, parents=True, exist_ok=True)
-        write_seam.record_before_write(path)
+        expected = text_write_hash(text, lf=True)
+        write_seam.record_before_write(path, expected=expected)
         writer(path, text)
+        write_seam.record_after_write(path)
         return True
 
     def _check_adopt_or_skip(

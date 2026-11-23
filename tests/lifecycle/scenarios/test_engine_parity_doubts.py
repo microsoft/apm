@@ -9,7 +9,6 @@ full pipeline decides. Oracle and cell contract in _engine_parity.py.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -44,13 +43,13 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.promise("P-INV-I1", "P-INV-I4"),
-    pytest.mark.skipif(sys.platform == "win32", reason="fast engines are POSIX-only"),
 ]
 
 
 @pytest.fixture
-def twin(lifecycle_template: World, tmp_path: Path) -> Twin:
-    return make_twin(lifecycle_template, tmp_path)
+def twin(lifecycle_template: World, _world_dir: Path) -> Twin:
+    # The short world root (Windows: git's '$GIT_DIR too big' workaround), both clones.
+    return make_twin(lifecycle_template, _world_dir.parent)
 
 
 @pytest.mark.parametrize(

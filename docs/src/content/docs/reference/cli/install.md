@@ -240,8 +240,19 @@ still cleans up its managed files, subject to the usual user-edit protections.
   configuration write or a refused `--frozen` install restores them the same
   way. An MCP connection collision found before any write changes nothing;
   one found at the MCP write keeps the deployed files the lockfile records. A killed process (SIGKILL, power loss)
-  cannot restore: `apm audit --ci` reports the files the lockfile does not
-  record, and the next `apm install` converges and deletes the leftover copies.
+  cannot restore itself: the next `apm install` in that project (including
+  `--mcp` and local-bundle installs) restores every file first and prints `Restored N deployed path(s) left by an interrupted
+  install.` It restores only bytes that `apm.lock.yaml` records for the path,
+  and never removes or replaces a file that changed after the interrupted
+  install (for example one you wrote there): it keeps that file and names it
+  in a warning.
+  If the kept copies do not match the lockfile, it restores nothing; if a file
+  cannot be restored, it restores the others. Either way it names each path,
+  keeps the copies under `~/.apm/install-snapshots/retained-*` and exits 1.
+  Restore or remove the listed paths by hand, then run the command again.
+  Shared settings the lockfile does not record (hook settings, MCP
+  configuration) are not restored this way: the copies are kept and reported
+  for you to restore by hand.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed
