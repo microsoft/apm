@@ -335,34 +335,53 @@ def _refuse_denied_scripts_before_fetch(ctx: InstallContext) -> None:
 
 
 def refuse_denied_install_entry(scope: Any, *, no_policy: bool, dry_run: bool, logger: Any) -> None:
-    """Refuse an install a blocking policy forbids before any install entry writes (#4826).
+    """Refuse a scope manifest ``scripts:`` block before any install entry writes (#4826).
 
     Every ``apm install`` entry -- a local bundle, ``--mcp`` and the
-    dependency pipeline -- passes here first: the scope manifest's
-    ``scripts:`` block meets ``manifest.scripts: deny`` and the governed
-    files no row of the current lockfile claims meet
-    ``unmanaged_files.action: deny``. The deeper gates still judge the
-    claims each entry would leave; ``warn`` and ``--dry-run`` report there.
-    Policy is discovered only when there is something to judge: a
-    ``scripts:`` block, or a governed file in the default directories no
-    row claims.
+    dependency pipeline -- passes here first. ``unmanaged_files.action:
+    deny`` is judged on the claims each entry leaves: the pipeline and a
+    local bundle at their final-claims gates, ``--mcp`` (which records no
+    file claims) by :func:`judge_mcp_install_files`.
     """
-    if dry_run:
-        return
+    from apm_cli.core.scope import get_manifest_path
+
+    refuse_denied_manifest_scripts(
+        get_manifest_path(scope), no_policy=no_policy, dry_run=dry_run, logger=logger
+    )
+
+
+def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run: bool) -> None:
+    """Judge the files a direct ``--mcp`` install leaves, after its policy preflight (#4826).
+
+    ``--mcp`` records no file claims, so the governed directories the
+    policy names are judged against the scope's current lockfile. A real
+    install refused a denied ``scripts:`` block at entry; ``--dry-run``
+    previews both verdicts.
+    """
     from apm_cli.core.scope import get_apm_dir, get_deploy_root, get_manifest_path
     from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
     from apm_cli.policy.install_preflight import prefetch_identity_policy
-    from apm_cli.policy.policy_checks import _check_unmanaged_files
-    from apm_cli.policy.schema import UnmanagedFilesPolicy
+    from apm_cli.policy.policy_checks import _check_unmanaged_files, _load_raw_apm_yml
 
     manifest_path = get_manifest_path(scope)
-    refuse_denied_manifest_scripts(manifest_path, no_policy=no_policy, dry_run=False, logger=logger)
-    root = get_deploy_root(scope)
-    lockfile = LockFile.read(resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True))
-    if _check_unmanaged_files(root, lockfile, UnmanagedFilesPolicy(action="deny")).passed:
-        return
     policy = prefetch_identity_policy(manifest_path.parent, no_policy=no_policy)
-    refuse_unmanaged_files(logger, policy, root, lockfile, dry_run=False)
+    if policy is None:
+        return
+    checks = []
+    if dry_run and policy.manifest.scripts == "deny" and manifest_path.is_file():
+        scripts = (_load_raw_apm_yml(manifest_path.parent) or {}).get("scripts")
+        checks.append(_scripts_policy_check(scripts, policy))
+    if policy.unmanaged_files.effective_action == "deny":
+        path = resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True)
+        root, lockfile = get_deploy_root(scope), LockFile.read(path)
+        checks.append(_check_unmanaged_files(root, lockfile, policy.unmanaged_files))
+    _report_install_policy_checks(logger, policy, checks, dry_run=dry_run, source=None)
+
+
+def _scripts_policy_check(scripts: Any, policy: Any) -> Any:
+    from apm_cli.policy.policy_checks import _check_scripts_policy
+
+    return _check_scripts_policy({"scripts": scripts}, policy.manifest)
 
 
 def refuse_denied_manifest_scripts(
@@ -400,13 +419,13 @@ def refuse_denied_scripts(
     if dry_run or not scripts:
         return
     from apm_cli.policy.install_preflight import prefetch_identity_policy
-    from apm_cli.policy.policy_checks import _check_scripts_policy
 
     policy = prefetch_identity_policy(policy_root, no_policy=no_policy)
     if policy is None or policy.manifest.scripts != "deny":
         return
-    check = _check_scripts_policy({"scripts": scripts}, policy.manifest)
-    _report_install_policy_checks(logger, policy, [check], dry_run=False, source=None)
+    _report_install_policy_checks(
+        logger, policy, [_scripts_policy_check(scripts, policy)], dry_run=False, source=None
+    )
 
 
 def policy_depth_limit(ctx: InstallContext) -> tuple[Any, int]:

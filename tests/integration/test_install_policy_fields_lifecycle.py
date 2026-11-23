@@ -23,6 +23,7 @@ import yaml
 
 from tests.lifecycle import driver
 from tests.lifecycle.world import World
+from tests.lifecycle.world.builder import _pack_bundle
 from tests.lifecycle.world.fixtures import (  # noqa: F401
     _world_dir,
     lifecycle_template,
@@ -126,6 +127,17 @@ def _add_scripts(manifest: Path) -> None:
     data = data or {"name": "user", "version": "1.0.0"}
     data["scripts"] = {"hello": "echo hi"}
     manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _rules_bundle(world: World) -> Path:
+    """Pack a bundle whose instruction deploys into a governed directory."""
+    source = world.root / "rules-src"
+    rules = source / ".apm" / "instructions" / "rules.instructions.md"
+    rules.parent.mkdir(parents=True)
+    rules.write_text("---\napplyTo: '**'\n---\n# Rules\n", encoding="utf-8")
+    manifest = "name: p-rules\nversion: 1.0.0\nlicense: MIT\ndependencies:\n  apm: []\n"
+    (source / "apm.yml").write_text(manifest, encoding="utf-8")
+    return _pack_bundle(source, world.root / "rules-bundle", world.env)
 
 
 def _govern(world: World, directory: Path, variant: str) -> None:
@@ -264,6 +276,96 @@ def test_unmanaged_files_deny_refuses_an_mcp_install(
         world, _UNMANAGED, "--mcp", "srv", "--url", "https://mcp.example.com/mcp"
     )
     assert _HAND_WRITTEN in text, text
+
+
+def test_unmanaged_files_deny_judges_custom_directories_for_an_mcp_install(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny-dirs")
+    _seed(world)
+    path = world.project / "governed" / "hand-written.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# hand written\n", encoding="utf-8")
+
+    text = _assert_refused(
+        world, _UNMANAGED, "--mcp", "srv", "--url", "https://mcp.example.com/mcp"
+    )
+    assert "governed/hand-written.md" in text, text
+
+
+@pytest.mark.parametrize("source", ["bundle", "local-content"])
+def test_unmanaged_files_deny_lets_a_reinstall_adopt_files_after_lockfile_loss(
+    lifecycle_world: World,  # noqa: F811
+    source: str,
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    if source == "bundle":
+        args: tuple[str, ...] = (str(_rules_bundle(world)),)
+    else:
+        local = world.project / ".apm" / "instructions" / "house.instructions.md"
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text("---\napplyTo: '**'\n---\n# House rules\n", encoding="utf-8")
+        args = ()
+    _assert_ok(world, "install", *args)
+    (world.project / "apm.lock.yaml").unlink()
+
+    _assert_ok(world, "install", *args)
+
+    name = "rules" if source == "bundle" else "house"
+    lock = (world.project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert f".github/instructions/{name}.instructions.md" in lock, lock
+
+
+@pytest.mark.parametrize("force", [False, True], ids=["skipped", "forced"])
+def test_unmanaged_files_deny_judges_a_bundle_file_the_install_skips(
+    lifecycle_world: World,  # noqa: F811
+    force: bool,
+) -> None:
+    world = lifecycle_world
+    bundle = str(_rules_bundle(world))
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    path = world.project / ".github" / "instructions" / "rules.instructions.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# hand written\n", encoding="utf-8")
+
+    if force:
+        _assert_ok(world, "install", "--force", bundle)
+        _assert_ok(world, "audit", "--ci")
+    else:
+        text = _assert_refused(world, _UNMANAGED, bundle)
+        assert ".github/instructions/rules.instructions.md" in text, text
+
+
+@pytest.mark.parametrize("variant", ["scripts-deny", "unmanaged-deny"])
+def test_mcp_dry_run_previews_the_refusal(
+    lifecycle_world: World,  # noqa: F811
+    variant: str,
+) -> None:
+    world = lifecycle_world
+    use_policy(world, variant)
+    _seed(world)
+    if variant == "scripts-deny":
+        _add_scripts(world.project / "apm.yml")
+        expected = _SCRIPTS[0]
+    else:
+        path = world.project / _HAND_WRITTEN
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# hand written\n", encoding="utf-8")
+        expected = _UNMANAGED[0]
+    before = _state(world, None, keep_git_cache=False)
+
+    result = _assert_ok(
+        world, "install", "--dry-run", "--mcp", "srv", "--url", "https://mcp.example.com/mcp"
+    )
+
+    text = _text(result)
+    assert "Would be blocked by policy" in text, text
+    assert expected in text, text
+    assert _state(world, None, keep_git_cache=False) == before
 
 
 def test_unmanaged_files_deny_keeps_files_root_local_content_deploys(
