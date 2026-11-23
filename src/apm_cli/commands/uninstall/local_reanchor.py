@@ -290,28 +290,46 @@ def move_materializations(
             ensure_path_within(path, root)
         except PathTraversalError as exc:
             raise ValueError(f"{path} is outside apm_modules") from exc
-    done: list[tuple[Path, Path, tuple[Path, ...]]] = []
-    for current, target in moves:
-        created = tuple(
-            parent
-            for parent in reversed(target.parents)
-            if parent != root and root in parent.parents and not parent.exists()
+    # Every destination's missing parents are found before the first rename, so
+    # an error inspecting them cannot strand a directory already moved.
+    planned = [
+        (
+            current,
+            target,
+            tuple(
+                parent
+                for parent in reversed(target.parents)
+                if parent != root and root in parent.parents and not parent.exists()
+            ),
         )
+        for current, target in moves
+    ]
+    done: list[tuple[Path, Path, tuple[Path, ...]]] = []
+    for current, target, created in planned:
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             current.rename(target)
         except BaseException:
-            # A failed or interrupted (Ctrl-C) move leaves apm_modules as it was;
-            # a rename that completed before the interrupt is moved back too.
-            if target.is_dir() and not current.exists():
-                done.append((current, target, created))
-            else:
-                _remove_created(created)
-            if unrestored := restore_materializations(tuple(done), root):
-                raise OSError(f"could not move back {', '.join(unrestored)}") from None
+            _undo_failed_move(current, target, created, done, root)
             raise
         done.append((current, target, created))
     return tuple(done)
+
+
+def _undo_failed_move(current, target, created, done: list, root: Path) -> None:
+    """Undo a failed or interrupted (Ctrl-C) move and every earlier one.
+
+    A rename that completed before the interrupt is moved back too; earlier
+    moves go back even when cleaning this move's parents fails.
+    """
+    try:
+        if target.is_dir() and not current.exists():
+            done.append((current, target, created))
+        else:
+            _remove_created(created)
+    finally:
+        if unrestored := restore_materializations(tuple(done), root):
+            raise OSError(f"could not move back {', '.join(unrestored)}")
 
 
 def _remove_created(created: tuple[Path, ...]) -> None:

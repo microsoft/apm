@@ -463,3 +463,50 @@ def test_an_unsaved_lock_whose_directory_cannot_move_back_still_restores_the_man
     assert (manifest.read_bytes(), lock.read_bytes()) == before
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert "apm_modules/_local/h1/e" in message, message
+
+
+class _UnreadableParent(type(Path())):
+    """A destination whose parent ``boom`` cannot be inspected (for example EACCES)."""
+
+    def exists(self, *args, **kwargs):
+        if self.name == "boom":
+            raise OSError(13, "Permission denied")
+        return super().exists(*args, **kwargs)
+
+
+def test_destination_discovery_fails_before_any_directory_moves(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    first, second = _package(modules, "a"), _package(modules, "b")
+    before = _tree(modules)
+    moves = (
+        (first, modules / "_local" / "h1" / "a"),
+        (second, _UnreadableParent(modules / "_local" / "boom" / "b")),
+    )
+
+    with pytest.raises(OSError):
+        move_materializations(moves, modules)
+
+    assert _tree(modules) == before
+    assert not (modules / "_local" / "h1").exists()
+
+
+class _StubbornParent(type(Path())):
+    """A parent the failed move created that cannot be removed again."""
+
+    def rmdir(self):
+        raise OSError(16, "Device or resource busy")
+
+
+def test_a_failed_cleanup_still_moves_earlier_directories_back(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    first = _package(modules, "a")
+    moves = (
+        (first, modules / "_local" / "h1" / "a"),
+        (modules / "_local" / "missing", _StubbornParent(modules / "_local" / "h2" / "x")),
+    )
+
+    with pytest.raises(OSError):
+        move_materializations(moves, modules)
+
+    assert (modules / "_local" / "a" / "apm.yml").is_file()
+    assert not (modules / "_local" / "h1").exists()
