@@ -21,7 +21,7 @@ from apm_cli.install.phases.claude_plugins import _note_native_route
 from apm_cli.native_plugins.scopes import COPILOT
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-claude-native-plugin-registration")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-claude-native-plugin-registration")]
 
 _HINT = ' To deploy its skills loose instead, set skills: ["*"] on this dependency in apm.yml.'
 
