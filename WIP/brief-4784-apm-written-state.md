@@ -1,7 +1,7 @@
 # Design brief: persisted APM-written MCP/hook state (#4784, #4864, #4867; context #4899)
 
 Owner: P3 lead (9a22ec4b) with QL. Rule 22: hourly steps, each a pushed SHA.
-Status: STEP 3 RISKS+COMPAT (Mon 09:50). Steps: S1 outline (09:40) -> S2 options A/B/C/P
+Status: STEP 4 FINAL for Regent (Mon 10:15), QL-reviewed. Steps: S1 outline (09:40) -> S2 options A/B/C/P
 with mechanism and call sites (10:40) -> S3 risks + OpenAPM/compat cells per option (11:40)
 -> S4 QL review folded + recommendation + decision memo for A/B (12:40).
 Any option that changes MCP retirement behavior goes to the Regent as a decision memo.
@@ -107,9 +107,41 @@ R7 test surface.
   per the #4867 record: user-created empty file kept, APM-created file removed,
   pre-provenance install unchanged. Spec: optional note under req-lk-024; no new MUST.
 
-## 7. Recommendation (draft, pending QL)
-- 0.38.x: C for #4784 (report, no removal); #4867 P (additive provenance, delete-guard
-  only, which tightens deletion: safety-positive); #4899 narrow per its record.
-- 0.39: A+B decided together with #4864 (one schema change for the per-runtime record).
-- Decision memo to the Regent: required for A/B (they change retirement behavior),
-  not for C or P (they only report, or only add a deletion guard).
+## 7. Recommendation (STEP 4; QL AGREES, inbox 148, conditions Q1-Q7 folded)
+### 0.38.x (no Regent memo needed: report-only or tighter deletion)
+- #4784 = C. Q1: kept-and-reported PERSISTS: `mark_kept` writes the record, so every
+  later install and `audit --ci` (kept-mcp-entries) report it until resolved, not a one-time
+  warning. Acceptance: the QL strict cell passes on its "kept AND reported" arm and its
+  Known entry flips in the same PR (H4).
+- #4867 = P, as the SINGLE owner of "may APM delete a config file it emptied".
+  Q2: today #4862 (main, 09:2x) proves "APM created it" by CONTENT SHAPE only:
+  `hook_file_emptied` (integration/hook_ownership.py:665, file holds only the target's
+  injected defaults, no symlink below the root) and `_write_cleaned_json_config(...,
+  delete_emptied)` (mcp_integrator.py, file holds only the servers key, emptied by this
+  cleanup). P replaces both with one owner; no second authority stays beside it.
+  Q3: a provenance record alone never authorizes a delete. Delete only when ALL hold:
+  (a) the receipt says APM created the file; (b) its bytes equal the bytes APM last wrote
+  or APM's empty skeleton (fingerprint); (c) the receipt store is local state outside any
+  VCS-tracked path, so a clone never ships a "created by APM" record. Else keep and report.
+  Q4: provenance keyed by the resolved file, one red-first cell per class: path with
+  whitespace/encoding (COPILOT_HOME with spaces); missing file falling back to a parent;
+  config file as a symlink to outside (never touch the target) and as a FIFO; case and
+  Unicode (case-insensitive FS, NFC/NFD profile dir); traversal in config/profile paths.
+- #4899 stays narrow on existing fields (Q7).
+### 0.39 (Regent memo required: both remove entries)
+- #4784 retirement = A + B decided together with #4864 (one schema change).
+  Q5 (A): closed skip-reason enum; retire only after a successful deploy pass on a
+  full-project install (not `install <pkg>`, --only, --dry-run); keep `_selected` and
+  `_declared_keys`; an unknown reason keeps.
+  Q6 (B): the baseline never authorizes removal alone; each retirement still needs the
+  per-entry write proof (fingerprint, R6), so an edited committed baseline can only make
+  APM keep, never remove a user-held entry. Field omitted when unchanged (req-lk-005).
+- Oracle: a twin of the QL cell for the "retired" arm, Known-red until A/B land.
+
+## 8. Decision memo to the Regent (A/B only)
+Ask: approve A+B (with #4864) for 0.39 under Q5/Q6, or keep C as the permanent rule.
+Recommended default: approve A+B for 0.39; C ships in 0.38.x either way.
+Why: C closes the silent-audit gap with no removal; A+B are the only way to actually
+retire entries for dropped runtimes, and Q5/Q6 bound them to proven, APM-written
+entries on full installs. Cost: 1 additive lockfile field, a spec fold (Section 4.5),
+about 9 lifecycle cells. Risk if declined: kept entries accumulate and stay reported.
