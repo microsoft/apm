@@ -407,8 +407,17 @@ def test_a_git_config_include_is_followed_and_keyed(project: Path, capsys) -> No
         '[include]\n\tpath = "C:\\\\Users\\\\me\\\\extra.gitconfig"\n',
         "[include] path = extra.gitconfig\n",
         "[include]\n\tpath = %(prefix)/etc/extra.gitconfig\n",
+        '[include]\n\tpath = "extra"".gitconfig"\n',
+        '[includeIf "gitdir:a]b/"]\n\tpath = extra.gitconfig\n',
     ],
-    ids=["inline-comment", "quoted-backslash", "key-on-header", "prefix-form"],
+    ids=[
+        "inline-comment",
+        "quoted-backslash",
+        "key-on-header",
+        "prefix-form",
+        "inner-quote",
+        "ambiguous-header",
+    ],
 )
 def test_include_syntax_the_reader_does_not_parse_is_never_recorded(
     project: Path, config: str

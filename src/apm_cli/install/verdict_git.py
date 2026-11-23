@@ -142,8 +142,10 @@ def _git_includes(config: Path, data: bytes) -> list[Path]:
         header = _SECTION_RE.match(line)
         if header is not None:
             section = header.group(1).lower()
-            if section.startswith(b"include") and line[line.rindex(b"]") + 1 :].strip():
-                raise ValueError("git include: a key on the section line")
+            if section.startswith(b"include") and (
+                line.count(b"]") != 1 or line[line.index(b"]") + 1 :].strip()
+            ):
+                raise ValueError("git include: an ambiguous section line")
             continue
         if not section.startswith(b"include"):
             continue
@@ -151,7 +153,12 @@ def _git_includes(config: Path, data: bytes) -> list[Path]:
         if match is None:
             continue
         raw = match.group(1)
-        if _INCLUDE_UNPARSED.search(raw) or (os.name == "nt" and raw.lstrip(b'"').startswith(b"~")):
+        inner = raw[1:-1] if len(raw) > 1 and raw[:1] == raw[-1:] == b'"' else raw
+        if (
+            b'"' in inner
+            or _INCLUDE_UNPARSED.search(raw)
+            or (os.name == "nt" and raw.lstrip(b'"').startswith(b"~"))
+        ):
             # Comments, escapes, continuations, %(prefix)/ and Windows ~ are git syntax
             # this reader does not parse: fail closed rather than under-key (W3d R3).
             raise ValueError("git include: unparsed value syntax")
