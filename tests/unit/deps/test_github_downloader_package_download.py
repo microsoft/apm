@@ -1213,11 +1213,15 @@ def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
         downloader._refs.resolve_commit_sha_for_ref.assert_not_called()
         downloader._refs.resolve.assert_not_called()
     if case == "locked-sibling":
-        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(
+            dependency, "heads/main"
+        )
         assert resolver.resolve(seeded).resolved_commit == old_sha
         assert resolver.remotely_resolved(seeded, old_sha) is False
     if stale_provider:
-        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(
+            dependency, "heads/main"
+        )
         downloader._refs.resolve.assert_not_called()
     if case == "mismatched-repository":
         dependency = _make_dep(repo_url="other/repository")

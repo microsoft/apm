@@ -144,7 +144,10 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
 
     assert result.resolved_commit == SHA_B
     stale_l2.assert_not_called()
-    fake_refs.resolve_commit_sha_for_ref.assert_called_once()
+    assert [c.args[1] for c in fake_refs.resolve_commit_sha_for_ref.call_args_list] == [
+        "heads/main",
+        "tags/main",
+    ]
     fake_refs.resolve.assert_called_once()
     assert resolver.stats["legacy_clone"] == 1
     assert "bare_rev_parse" not in resolver.stats
@@ -172,7 +175,10 @@ def test_compatibility_policy_uses_l2_when_api_unavailable_without_clone(monkeyp
 
     assert result.resolved_commit == SHA_A
     cached_l2.assert_called_once_with(_dep().to_github_url(), "main")
-    fake_refs.resolve_commit_sha_for_ref.assert_called_once()
+    assert [c.args[1] for c in fake_refs.resolve_commit_sha_for_ref.call_args_list] == [
+        "heads/main",
+        "tags/main",
+    ]
     fake_refs.resolve.assert_not_called()
     assert resolver.stats["bare_rev_parse"] == 1
     assert resolver.stats["legacy_clone"] == 0

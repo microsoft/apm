@@ -645,3 +645,47 @@ def test_factory_preserves_l2_for_explicit_compatibility_policy(monkeypatch):
     tier_names = [t.name for t in resolver._tiers]
     assert "bare_rev_parse" in tier_names
     assert tier_names == ["per_run_cache", "commits_api", "bare_rev_parse", "legacy_clone"]
+
+
+class _RevParseCommitsApi:
+    """A commits API that resolves names like ``git rev-parse`` (as GitHub does)."""
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+        self._REFS = {
+            "refs/heads/main": "a" * 40,
+            "refs/tags/v1": "b" * 40,
+            "refs/pull/1/head": "f" * 40,
+        }
+
+    def resolve_commit_sha_for_ref(self, _dep_ref, ref: str) -> str | None:
+        self.queries.append(ref)
+        for prefix in ("", "refs/", "refs/tags/", "refs/heads/"):
+            if f"{prefix}{ref}" in self._REFS:
+                return self._REFS[f"{prefix}{ref}"]
+        return None
+
+
+@pytest.mark.parametrize("ref", ["pull/1/head", "refs/pull/1/head"])
+def test_the_commits_api_tier_never_answers_with_a_pull_request_commit(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+    assert all(query.startswith(("heads/", "tags/")) for query in api.queries)
+
+
+@pytest.mark.parametrize(
+    ("ref", "want"),
+    [
+        ("main", "a" * 40),
+        ("refs/heads/main", "a" * 40),
+        ("v1", "b" * 40),
+        ("refs/tags/v1", "b" * 40),
+    ],
+)
+def test_the_commits_api_tier_resolves_exact_branches_and_tags(ref: str, want: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) == want

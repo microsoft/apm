@@ -210,6 +210,21 @@ class L0PerRunCache:
 # ---------------------------------------------------------------------------
 
 
+_ABBREVIATED_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,39}$")
+
+
+def _exact_ref_queries(ref: str) -> tuple[str, ...]:
+    """Commits-API names that match only an origin branch or tag named *ref*."""
+    for namespace in ("heads", "tags"):
+        if ref.startswith(f"refs/{namespace}/"):
+            return (ref.removeprefix("refs/"),)
+    if ref.startswith("refs/"):
+        return ()
+    if _ABBREVIATED_COMMIT_RE.match(ref):
+        return (ref,)
+    return (f"heads/{ref}", f"tags/{ref}")
+
+
 class L1CommitsAPI:
     """Resolve via the GitHub-family commits API.
 
@@ -250,9 +265,13 @@ class L1CommitsAPI:
             resolver = getattr(self._host, "_refs", None)
             if resolver is None:
                 return None
-            sha = resolver.resolve_commit_sha_for_ref(dep_ref, ref)
-            if sha and _SHA_RE.match(sha):
-                return sha.lower()
+            # The commits API resolves a name like rev-parse, so ``pull/1/head``
+            # would reach a pull request's commit. Ask for the origin's own
+            # branch, then tag, by namespace; any other ``refs/`` name gets no answer.
+            for query in _exact_ref_queries(ref):
+                sha = resolver.resolve_commit_sha_for_ref(dep_ref, query)
+                if sha and _SHA_RE.match(sha):
+                    return sha.lower()
             return None
         except Exception as exc:
             _log.debug(
