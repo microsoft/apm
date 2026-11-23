@@ -746,14 +746,14 @@ def dropped_target_files(
         *lockfile.local_deployed_files,
     ]
     dropped = {path: name for path in recorded if (name := classify(path)) is not None}
-    dropped.update(governance.retired_native_paths(lockfile, (), declared))
+    dropped.update(dict(governance.retired_native_plugins(lockfile, (), declared).values()))
     # A target apm.yml declared when the lock was written and no longer does is dropped; one
     # only an explicit --target deployed is precedence (#4517); an older lock counts every one.
     if lockfile.manifest_targets:
         dropped = {
             path: name for path, name in dropped.items() if name in lockfile.manifest_targets
         }
-    return dropped
+    return {**dropped, **governance.retired_native_declarations(lockfile, (), declared)}
 
 
 def reconcile_target_deployed_files(

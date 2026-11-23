@@ -148,16 +148,16 @@ def retired_native_plugins(
     return retired
 
 
-def retired_native_paths(
+def retired_native_declarations(
     lockfile: Any, active_targets: Iterable[TargetProfile], declared_targets: Any
 ) -> dict[str, str]:
-    """``{path: harness}`` of native-plugin state target contraction retires.
+    """``{settings file: harness}`` of APM enable entries target contraction retires (#4874).
 
-    The root of a plugin every harness of which is retired (#4744); for a
-    project-scope plugin another declared harness still loads, the settings
-    file of each retired harness that held APM's ``true`` (``native_declared``;
-    an older row, its allowed harnesses), as ``registrar._owned_in`` retires
-    it (#4874).
+    For a project-scope plugin another declared harness still loads: each
+    retired harness that held APM's ``true`` (``native_declared``; an older
+    row, its allowed harnesses), as ``registrar._owned_in`` retires it. The
+    lock records what APM wrote, so no manifest-history filter applies. A
+    plugin every harness of which is retired is :func:`retired_native_plugins`'.
     """
     from apm_cli.native_plugins.scopes import PROJECT_SETTINGS_RELATIVE, is_project_path
 
@@ -165,13 +165,16 @@ def retired_native_paths(
         return {}
     active = tuple(active_targets)
     whole = retired_native_plugins(lockfile, active, declared_targets)
-    found = dict(whole.values())
+    found = {}
     for key, locked in lockfile.dependencies.items():
         record = locked.native_plugin
         if record is None or key in whole or not is_project_path(record.marketplace_path):
             continue
         wrote = locked.native_declared
         for harness in _allowed_harnesses(locked) if wrote is None else wrote:
-            if target_retired(harness, active_targets=active, declared_targets=declared_targets):
+            # native_declared is advisory: ignore a name that is no native harness.
+            if harness in PROJECT_SETTINGS_RELATIVE and target_retired(
+                harness, active_targets=active, declared_targets=declared_targets
+            ):
                 found[PROJECT_SETTINGS_RELATIVE[harness]] = harness
     return found

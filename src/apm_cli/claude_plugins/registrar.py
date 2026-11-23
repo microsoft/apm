@@ -584,6 +584,7 @@ def _settings_declarations(
             next(iter(prior_bindings)) if prior_bindings else None,
             suppressed if harness == COPILOT else frozenset(),
             managed if harness == COPILOT else frozenset(),
+            catalog=frozenset(harnesses),
         )
         for harness in HARNESSES
     }
