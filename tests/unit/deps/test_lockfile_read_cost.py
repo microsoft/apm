@@ -480,11 +480,12 @@ def test_every_bmp_code_point_round_trips_except_the_refused_class():
     mismatched = {ord(a) for a, b in zip(plain, loaded, strict=True) if a != b}
     surrogates = {cp for cp in range(0xD800, 0xE000) if not _round_trips(chr(cp))}
 
+    # libyaml refuses a dumped lone surrogate; the pure-Python loader keeps it.
     assert mismatched == {0x85}
-    assert surrogates == set(range(0xD800, 0xE000))
+    assert surrogates <= set(range(0xD800, 0xE000))
     refused = {cp for cp in range(0x10000) if _UNSAFE_STR.search(chr(cp))}
     assert mismatched | surrogates <= refused
-    assert refused - (mismatched | surrogates) == {0x2028, 0x2029}
+    assert refused == {0x85, 0x2028, 0x2029} | set(range(0xD800, 0xE000))
 
 
 @pytest.mark.parametrize("where", ["value", "key"])
@@ -510,7 +511,10 @@ def test_a_lone_surrogate_is_never_seeded_and_reads_like_a_fresh_read(where):
     remember_lockfile_text(text, document)
 
     assert parse_key(text) not in _parsed_texts
-    with pytest.raises(yaml.YAMLError) as fresh:
-        yaml_io.load_machine_yaml_str(text)
-    with pytest.raises(type(fresh.value)):
-        parse_lockfile_text(text)
+    try:
+        fresh = yaml_io.load_machine_yaml_str(text)
+    except yaml.YAMLError as refused:
+        with pytest.raises(type(refused)):
+            parse_lockfile_text(text)
+    else:
+        assert parse_lockfile_text(text) == fresh
