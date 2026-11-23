@@ -791,6 +791,11 @@ def run_mcp_integration(  # noqa: PLR0913
             deselected_mcp_claims,
             names_owned_by_active_peers,
         )
+        from apm_cli.install.mcp.retirement import (
+            record_refused_retirement,
+            retire_mcp_claims,
+            stale_claim_remover,
+        )
         from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
         # Targets the manifest itself stopped selecting leave every entry's reach;
@@ -843,22 +848,9 @@ def run_mcp_integration(  # noqa: PLR0913
             retired_names -= names_owned_by_active_peers(
                 removed_target, retired_names, managed_target_servers, user_scope=user_scope
             )
-            if not retired_names:
-                continue
-            MCPIntegrator.remove_stale(
-                retired_names,
-                runtime=removed_target,
-                project_root=project_root,
-                user_scope=user_scope,
-                scope=scope,
-                fail_on_write_error=True,
-                stored_configs=old_mcp_configs,
-                native_hashes=old_native_hashes,
-            )
-            logger.record_mcp_removed(retired_names)
-
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers
+        cleanup_owners: builtins.dict = {}
         if stale_servers:
             cleanup_owners = {
                 target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
@@ -873,24 +865,33 @@ def run_mcp_integration(  # noqa: PLR0913
                     runtime=runtime, target_decision=target_decision
                 ):
                     cleanup_owners.setdefault(legacy_runtime, builtins.set()).update(stale_servers)
-            for cleanup_runtime, owned_servers in sorted(
-                cleanup_owners.items(), key=lambda item: item[0] or ""
-            ):
-                scoped_stale = stale_servers.intersection(owned_servers)
-                if not scoped_stale:
-                    continue
-                MCPIntegrator.remove_stale(
-                    scoped_stale,
-                    cleanup_runtime,
-                    exclude,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                    scope=scope,
-                    fail_on_write_error=True,
-                    stored_configs=old_mcp_configs,
-                    native_hashes=old_native_hashes,
-                )
-                logger.record_mcp_removed(scoped_stale)
+
+        _remove = stale_claim_remover(
+            logger, (project_root, user_scope, scope), (old_mcp_configs, old_native_hashes)
+        )
+
+        def _record_refusal(removed, planned) -> None:
+            # A preserved (edited) entry stopped retirement after this run's
+            # writes: record what reached disk, keep every claim not removed (#4792).
+            _keep_unhealed(healed)
+            record_refused_retirement(
+                lock_path,
+                logger,
+                managed_target_servers=managed_target_servers,
+                # cleanup_owners adds the runtimes a legacy lock's cleanup reached.
+                old_target_servers=cleanup_owners or old_mcp_target_servers,
+                removed=removed,
+                planned=planned,
+                servers=(new_mcp_servers, old_mcp_servers),
+                configs=(new_mcp_configs, old_mcp_configs),
+                provenance=(new_mcp_provenance, old_mcp_provenance),
+                native_hashes=(native_hashes, old_native_hashes),
+                stamp_version=translated,
+            )
+
+        retire_mcp_claims(
+            retired_by_target, (stale_servers, cleanup_owners, exclude), _remove, _record_refusal
+        )
 
         _keep_unhealed(healed)
         # Persist the new MCP server set, configs, and transitive provenance.
@@ -975,6 +976,10 @@ def run_mcp_integration(  # noqa: PLR0913
             exclude=exclude,
             logger=logger,
             retire=pre_install_lock is None and not frozen,
+            manifest=apm_package,
+            dependencies=mcp_deps,
+            runtime=runtime,
+            target_decision=target_decision,
         )
 
     if prepared.omission_view is not None and lockfile_exists(lock_path):

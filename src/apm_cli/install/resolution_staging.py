@@ -153,8 +153,10 @@ class ResolutionStagingSession:
                 raise FileNotFoundError(f"Replacement path was not materialized: {staged}")
             if not clobber:
                 resolved.parent.mkdir(parents=True, exist_ok=True)
+                # The rename keeps the directory's identity: take it from the staged
+                # copy, so a destination substituted after the rename is never ours.
+                info = os.lstat(staged)
                 _publish_no_clobber(staged, resolved)
-                info = os.lstat(resolved)
                 self._published[resolved] = (info.st_dev, info.st_ino)
                 self._backups[resolved] = None  # rollback removes what this created
                 self._replacement_by_destination.pop(resolved)

@@ -648,6 +648,7 @@ install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-spelling-aliases
 install-deployment-cleanup-target-roots
 install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
@@ -688,6 +689,7 @@ install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
 install-deployment-skill-adoption-trusted-receipt
 install-deployment-selection-merge
+install-deployment-server-name-rule
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle
@@ -786,6 +788,7 @@ mutation_writes.hook_command_vocabulary
 mutation_writes.hook_containment_root
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
+mutation_writes.mcp_config_link_policy
 mutation_writes.mcp_declaration_scope
 mutation_writes.mcp_json_config_write
 mutation_writes.mcp_json_config_writer

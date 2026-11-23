@@ -364,28 +364,73 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
     """Judge the files a direct ``--mcp`` install leaves, after its policy preflight (#4826).
 
     ``--mcp`` records no file claims, so the governed directories the
-    policy names are judged against the scope's current lockfile. A real
-    install refused a denied ``scripts:`` block at entry; ``--dry-run``
-    previews both verdicts.
+    policy names are judged against the scope's current lockfile. A
+    blocking real install refused a denied ``scripts:`` block at entry;
+    ``warn`` warns on both verdicts and ``--dry-run`` previews them (#4957).
     """
-    from apm_cli.core.scope import get_apm_dir, get_deploy_root, get_manifest_path
+    from apm_cli.core.scope import (
+        get_apm_dir,
+        get_deploy_root,
+        get_manifest_path,
+        is_user_scope,
+        manifest_root,
+    )
     from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
-    from apm_cli.policy.install_preflight import prefetch_identity_policy
-    from apm_cli.policy.policy_checks import _check_unmanaged_files, _load_raw_apm_yml
+    from apm_cli.policy.install_preflight import enforced_entry_policy
+    from apm_cli.policy.policy_checks import _check_unmanaged_files
 
+    # scripts: is judged with the source manifest's policy; unmanaged files with
+    # the policy of the root the install writes to, as the MCP preflight reads it.
     manifest_path = get_manifest_path(scope)
-    policy = prefetch_identity_policy(manifest_path.parent, no_policy=no_policy)
-    if policy is None:
-        return
-    checks = []
-    if dry_run and policy.manifest.scripts == "deny" and manifest_path.is_file():
-        scripts = (_load_raw_apm_yml(manifest_path.parent) or {}).get("scripts")
-        checks.append(_scripts_policy_check(scripts, policy))
-    if policy.unmanaged_files.effective_action == "deny":
+    files_root = manifest_root(get_deploy_root(scope), user_scope=is_user_scope(scope))
+    roots = {"scripts": manifest_path.parent, "files": files_root}
+    policies = {
+        root: enforced_entry_policy(root, no_policy=no_policy) for root in set(roots.values())
+    }
+    checks: dict[Path, list[Any]] = {root: [] for root in policies}
+    scripts_policy = policies[roots["scripts"]]
+    if scripts_policy is not None:
+        checks[roots["scripts"]].extend(
+            _entry_scripts_checks(scripts_policy, manifest_path, dry_run=dry_run)
+        )
+    files_policy = policies[roots["files"]]
+    if files_policy is not None and files_policy.unmanaged_files.effective_action == "deny":
         path = resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True)
         root, lockfile = get_deploy_root(scope), LockFile.read(path)
-        checks.append(_check_unmanaged_files(root, lockfile, policy.unmanaged_files))
+        checks[roots["files"]].append(
+            _check_unmanaged_files(root, lockfile, files_policy.unmanaged_files)
+        )
+    for policy_root, found in checks.items():
+        if found:
+            _report_install_policy_checks(
+                logger, policies[policy_root], found, dry_run=dry_run, source=None
+            )
+
+
+def judge_bundle_manifest_scripts(
+    policy: Any, manifest_path: Path, *, dry_run: bool, logger: Any
+) -> None:
+    """Warn on, or preview, the scope manifest's ``scripts:`` block for a local bundle (#4957).
+
+    *policy* is the one the bundle's admission enforced. A blocking real
+    install refused the block at entry.
+    """
+    if policy is None or policy.enforcement not in ("block", "warn"):
+        return
+    checks = _entry_scripts_checks(policy, Path(manifest_path), dry_run=dry_run)
     _report_install_policy_checks(logger, policy, checks, dry_run=dry_run, source=None)
+
+
+def _entry_scripts_checks(policy: Any, manifest_path: Path, *, dry_run: bool) -> list[Any]:
+    """The ``manifest.scripts`` check an entry still reports: none once refused at entry."""
+    if policy.manifest.scripts != "deny" or not manifest_path.is_file():
+        return []
+    if policy.enforcement == "block" and not dry_run:
+        return []
+    from apm_cli.policy.policy_checks import _load_raw_apm_yml
+
+    scripts = (_load_raw_apm_yml(manifest_path.parent) or {}).get("scripts")
+    return [_scripts_policy_check(scripts, policy)]
 
 
 def _scripts_policy_check(scripts: Any, policy: Any) -> Any:
