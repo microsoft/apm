@@ -49,6 +49,9 @@ ALLOW = [
     ("record", "the record, its key and the lifecycle lock: the record machinery itself"),
     ("tmp", "the run's own temp files"),
     ("path resolution", "ancestors of the project, HOME, APM_HOME, the cache and the program"),
+    ("git refs and objects", "the project's packed-refs, refs/heads/<branch> and objects/info/alternates:"
+     " commit SHAs and the object store; the no-op consumes only the branch name (HEAD, keyed)"
+     " and the remote (config, keyed), and no no-op code reads the commit SHA"),
     ("deploy cache", "deploy_v1/records: a missing record only declines the fast path to the"
      " full pipeline, whose output equals it (engine-parity scenarios)"),
 ]
@@ -134,6 +137,8 @@ def covered_from_record(record: dict, root: Path, env: dict) -> tuple[set[str], 
             trees.append(str(root / rest))  # existence keyed; contents keyed by listing
         elif kind in ("parent", "git-head") and rest.startswith("/"):
             files.add(os.path.normpath(rest if kind == "parent" else os.path.join(rest, "HEAD")))
+        elif kind == "git-dir" and rest.startswith("/"):
+            files.add(os.path.join(os.path.dirname(rest), ".git", os.path.basename(rest)))
         elif kind == "modules":
             trees_listed.add(str(root / rest))
             LISTED.add(str(root / rest))
@@ -186,6 +191,11 @@ def classify(path, calls, *, files, trees, writes, env, venv, prefixes, git_dirs
         return "path resolution"
     if path in env["_FILE_ANCESTORS"]:
         return "keyed"
+    g = path.split("/.git/", 1)
+    if len(g) == 2 and g[0] == env["_ROOT"] and (
+        g[1] in ("packed-refs", "objects/info/alternates") or g[1].startswith("refs/heads/")
+    ):
+        return "git refs and objects"
     if "/deploy_v1" in path and under(path, env.get("APM_CACHE_DIR", "/nonexistent")):
         return "deploy cache"
     if under(path, apm_home) and not under(path, apm_home + "/cache"):
