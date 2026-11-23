@@ -354,7 +354,7 @@ def _refuse_unverifiable_local_survivors(
     chain refuses.
     """
     from ...core.remediation import RESYNC_DEPLOYED
-    from .engine import _read_survivor_direct_refs
+    from .local_survivors import read_survivor_direct_refs
 
     project_root = Path(apm_yml_path).parent
     local = {}
@@ -374,7 +374,7 @@ def _refuse_unverifiable_local_survivors(
             local.setdefault(directory, []).append(package)
     if not local and not unresolved:
         return []
-    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
+    direct_refs, dev_refs = read_survivor_direct_refs(apm_yml_path, packages)
     from ...deps.reachability import local_sources_reach
 
     # Replacement rules can turn a remote survivor into a local source; the
