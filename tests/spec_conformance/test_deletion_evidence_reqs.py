@@ -908,6 +908,26 @@ def test_consent_reports_one_deletion_per_file_across_spellings(tmp_path: Path) 
     assert evidence.take_consented_deletions() == [_PATH]
 
 
+@pytest.mark.req("req-lk-024")
+def test_consent_reports_one_deletion_for_absolute_and_relative_spellings(tmp_path: Path) -> None:
+    """A user-scope lock listing a file both ways reports one deletion, not two (#4815)."""
+    root = tmp_path / "home"
+    path = _deployed(root)
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+    for claim in (_PATH, (root / _PATH).as_posix()):
+        evidence.verdict(claim, path)
+    path.unlink()
+
+    assert evidence.take_consented_deletions() == [_PATH]
+
+
 _HOOK = ".github/hooks/pkg-apm.json"
 
 
