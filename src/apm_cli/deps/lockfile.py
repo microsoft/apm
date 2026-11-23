@@ -40,9 +40,14 @@ from ..models.dependency.replacement import (
     parse_replace_block,
     project_effective_reference,
 )
-from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
-from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
+from ..models.dependency.subsets import (
+    SkillTargetSelection,
+    canonical_target_subset,
+    copy_subset_pairings,
+)
+from ..native_plugins import record as native_rec
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
+from .lockfile_container import parse_lockfile_text, records_mcp_target_servers
 from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
 from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
 from .lockfile_version_remedy import with_version_remedy
@@ -82,24 +87,6 @@ def _copy_extension_map(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or not value:
         return {}
     return {str(key): item for key, item in value.items()}
-
-
-def _copy_subset_pairings(value: object) -> Any:
-    """Copy raw ``subset_pairings`` records without validating them.
-
-    Malformed values survive the round trip so audit and frozen install can
-    reject them through ``LockedDependency.selection()`` (req-rs-018).
-    """
-    if value is None or value == []:
-        return None
-    if isinstance(value, list):
-        return [
-            {key: list(item) if isinstance(item, list) else item for key, item in record.items()}
-            if isinstance(record, dict)
-            else record
-            for record in value
-        ]
-    return value
 
 
 def _replay_pairing(
@@ -206,16 +193,6 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
         for runtime, names in existing.mcp_target_servers.items()
     }
     return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
-
-
-def _same_document(current: str | None, serialized: str) -> bool:
-    """Whether *current* holds the data *serialized* would write; only formatting may differ."""
-    from ..utils.yaml_io import load_yaml_str
-
-    try:
-        return current is not None and load_yaml_str(current) == load_yaml_str(serialized)
-    except (UnicodeError, yaml.YAMLError, ValueError):
-        return False
 
 
 def recorded_generator(data: Mapping[str, Any]) -> object:
@@ -447,6 +424,13 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _recorded_package_targets(raw: object) -> list[str]:
+    """Decode ``package_targets``: only a list of strings is a recorded restriction (#4850)."""
+    if not isinstance(raw, list) or not all(isinstance(t, str) for t in raw):
+        return []
+    return sorted(raw)
+
+
 @dataclass
 class LockedDependency:
     """A resolved dependency with exact commit/version information."""
@@ -487,6 +471,9 @@ class LockedDependency:
     # Exact per-edge skills x targets pairing (req-rs-018), recorded only when
     # skill_subset x target_subset would over-select. Decode via ``selection()``.
     subset_pairings: list[dict[str, list[str]]] | None = None
+    # The package's own ``targets:`` restriction, recorded at install so pack can
+    # tell a self-excluded dependency from a missing cache (#4850).
+    package_targets: list[str] = field(default_factory=list)
 
     # Registry resolver fields (design §6.1).
     # Populated when source == "registry"; absent otherwise. resolved_hash is
@@ -541,7 +528,9 @@ class LockedDependency:
     extensions: dict[str, Any] = field(default_factory=dict)
     # Intact native plugin APM deployed and declared for this dependency; the
     # only ownership evidence for native settings keys and deployed roots.
-    native_plugin: NativePluginRecord | None = None
+    native_plugin: native_rec.NativePluginRecord | None = None
+    # Harnesses whose settings held APM's true when written (tells hand edits apart).
+    native_declared: list[str] | None = None
     replacement: ReplacementBinding | None = field(default=None, repr=False)
     # Stream ``content_hash`` was recorded in; set from the owning lockfile's
     # version, never serialized per row (see ``FRAMED_CONTENT_HASH_VERSION``).
@@ -689,7 +678,9 @@ class LockedDependency:
         if self.target_subset:
             result["target_subset"] = sorted(self.target_subset)
         if self.subset_pairings:
-            result["subset_pairings"] = _copy_subset_pairings(self.subset_pairings)
+            result["subset_pairings"] = copy_subset_pairings(self.subset_pairings)
+        if self.package_targets:
+            result["package_targets"] = sorted(self.package_targets)
         if self.resolved_url:
             result["resolved_url"] = self.resolved_url
         if self.resolved_hash:
@@ -708,8 +699,7 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
-        if self.native_plugin is not None:
-            result["native_plugin"] = self.native_plugin.to_lock_data()
+        result.update(native_rec.native_lock_fields(self.native_plugin, self.native_declared))
         if self.exec_allowed_types:
             result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
@@ -788,6 +778,7 @@ class LockedDependency:
             "skill_subset",
             "target_subset",
             "subset_pairings",
+            "package_targets",
             "resolved_url",
             "resolved_hash",
             "constraint",
@@ -800,6 +791,7 @@ class LockedDependency:
             "exec_allowed_types",
             "name",
             "native_plugin",
+            "native_declared",
             "replacement",
             # legacy migration key handled above
             "deployed_skills",
@@ -843,7 +835,8 @@ class LockedDependency:
             skill_subset=list(data.get("skill_subset") or []),
             # Locks written before canonical recording may hold ``vscode``.
             target_subset=canonical_target_subset(data.get("target_subset")),
-            subset_pairings=_copy_subset_pairings(data.get("subset_pairings")),
+            subset_pairings=copy_subset_pairings(data.get("subset_pairings")),
+            package_targets=_recorded_package_targets(data.get("package_targets")),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
             constraint=data.get("constraint"),
@@ -857,11 +850,11 @@ class LockedDependency:
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
         )
-        if "native_plugin" in data:
-            try:
-                locked.native_plugin = NativePluginRecord.from_lock_data(data["native_plugin"])
-            except NativePluginRecordError as exc:
-                raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
+        try:
+            native = native_rec.native_fields_from_lock_data(data)
+            locked.native_plugin, locked.native_declared = native
+        except native_rec.NativePluginRecordError as exc:
+            raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
         if "replacement" in data:
             try:
                 locked.replacement = ReplacementBinding.from_dict(
@@ -1231,7 +1224,7 @@ class LockFile:
         for dep in self.dependencies.values():
             dep.content_hash_framed = framed
 
-    def add_dependency(self, dep: LockedDependency) -> None:
+    def add_dependency(self, dep: LockedDependency, *, project_ledger: bool = True) -> None:
         """Add a dependency to the lock file.
 
         Adding a registry-sourced dep or a git-source dep with semver
@@ -1242,7 +1235,7 @@ class LockFile:
         dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
         dep.content_hash_framed = self.framed_content_hashes
         self.dependencies[dep.get_unique_key()] = dep
-        if dep.deployed_files or dep.deployed_file_hashes:
+        if project_ledger and (dep.deployed_files or dep.deployed_file_hashes):
             from ..core.deployment_ledger import DeploymentLedgerCodec
 
             DeploymentLedgerCodec.invalidate_legacy_projection(self)
@@ -1557,7 +1550,7 @@ class LockFile:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
             if self.mcp_omissions:
                 data["mcp_omissions"] = dict(sorted(self.mcp_omissions.items()))
-            if self.mcp_target_servers or self._mcp_target_servers_present:
+            if records_mcp_target_servers(self):
                 data["mcp_target_servers"] = {
                     target: sorted(servers)
                     for target, servers in sorted(self.mcp_target_servers.items())
@@ -1602,14 +1595,12 @@ class LockFile:
     @classmethod
     def from_yaml(cls, yaml_str: str) -> LockFile:
         """Deserialize from YAML string."""
-        from ..utils.yaml_io import load_yaml_str
-
         # Bounded loader: an untrusted bundle apm.lock.yaml cannot wedge the
         # parser with a merge-key bomb (the surrounding LockFile.read guard
         # cannot catch a non-terminating safe_load loop -- it can catch the
         # YAMLError this raises instead).
         try:
-            loaded = load_yaml_str(yaml_str)
+            loaded = parse_lockfile_text(yaml_str)
         except (yaml.YAMLError, ValueError) as exc:
             raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
         data = _validate_lockfile_container(loaded)
@@ -1669,8 +1660,12 @@ class LockFile:
             [str(name) for name in recorded_targets] if isinstance(recorded_targets, list) else None
         )
         lock._extensions = vendor_extensions(data)
-        for dep_data in data.get("dependencies", []):
-            lock.add_dependency(LockedDependency.from_dict(dep_data))
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        dependencies = [LockedDependency.from_dict(row) for row in data.get("dependencies", [])]
+        project_per_row = DeploymentLedgerCodec.load_observes_per_row_projection(dependencies)
+        for dep in dependencies:
+            lock.add_dependency(dep, project_ledger=project_per_row)
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.mcp_omissions = dict(data.get("mcp_omissions") or {})
@@ -1712,8 +1707,6 @@ class LockFile:
         # and the local package, without changing the on-disk YAML shape.
         if lock.local_deployed_files:
             lock.dependencies[_SELF_KEY] = lock.project_self_entry()
-        from ..core.deployment_ledger import DeploymentLedgerCodec
-
         if "deployments" in data:
             deployment_rows = data["deployments"]
             lock.deployment_ledger = DeploymentLedgerCodec.from_rows(deployment_rows)
@@ -1760,9 +1753,11 @@ class LockFile:
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
+        from .lockfile_document import document_snapshot, same_document
         from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
 
         existing: LockFile | None
+        existing_document: dict[str, Any] | None = None
         legacy_timestamp_present = False
         existing_text = staged_lockfile_text(path)
         if isinstance(existing_lockfile, _ExistingLockfileUnset) and existing_text is not None:
@@ -1773,6 +1768,8 @@ class LockFile:
             existing = None
             if isinstance(existing_data, dict):
                 legacy_timestamp_present = existing_data.get("generated_at") is not None
+                # Construction shares nested objects; snapshot for the no-op check.
+                existing_document = document_snapshot(existing_data)
                 try:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
@@ -1821,7 +1818,7 @@ class LockFile:
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml(user_scope=user_scope)
         assert_no_staging_paths(serialized, path.name)
-        if unchanged and _same_document(existing_text, serialized):
+        if unchanged and same_document(existing_text, serialized, existing_document):
             # A proven no-op keeps the file's own bytes (comments, key style).
             return True
         if not stage_lockfile(path, serialized):
@@ -1987,8 +1984,7 @@ class LockFile:
             return False
         if (
             self.mcp_target_servers != other.mcp_target_servers
-            or (bool(self.mcp_target_servers) or self._mcp_target_servers_present)
-            != (bool(other.mcp_target_servers) or other._mcp_target_servers_present)
+            or records_mcp_target_servers(self) != records_mcp_target_servers(other)
             or dict(self.deployment_ledger.records) != dict(other.deployment_ledger.records)
         ):
             return False

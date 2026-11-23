@@ -21,6 +21,8 @@ from click.testing import CliRunner
 import apm_cli.config as _conf
 from apm_cli.commands.audit import audit
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def runner():

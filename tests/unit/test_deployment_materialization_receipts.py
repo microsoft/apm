@@ -632,6 +632,42 @@ def test_native_resync_never_runs_ahead_of_the_survivor_lock(
 
 
 @pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("target_name", "skill", "skill_dir"),
+    [
+        ("copilot", "skills", ".agents/skills/skills"),
+        ("grok-bot", "research", "agent-data/workflows/research"),
+    ],
+    ids=["skill-named-skills", "workflows-skills-root"],
+)
+def test_adopted_user_root_skill_receipt_records_its_skill_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str, skill: str, skill_dir: str
+) -> None:
+    """A migrated pre-0.38 skill member also gets the directory entry a normal install records."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    target = KNOWN_TARGETS[target_name].for_scope(user_scope=True)
+    assert target is not None
+    path = target.skills_deploy_path(home) / skill / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("rendered\n", encoding="utf-8")
+    session = DeploymentMaterializationSession(home, InstallScope.USER, None)
+    session.record({path: compute_file_hash(path)}, [target], ".")
+    session.flush()
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    data["bindings"] = {key: [".", "[]"] for key in data["bindings"]}
+    session.state_path.write_text(json.dumps(data), encoding="utf-8")
+
+    migrating = DeploymentMaterializationSession(home, InstallScope.USER, None)
+    adopted = migrating.adopt_root_receipts([], [target])
+    migrating.flush()
+
+    assert adopted == [skill_dir, f"{skill_dir}/SKILL.md"]
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert [".", "[]"] not in persisted["bindings"].values(), persisted
+
+
 def test_scope_isolation_and_atomic_lf_serialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1094,6 +1130,86 @@ def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monk
     assert corrupt.exists()
 
 
+def _rewrite(session: DeploymentMaterializationSession, path: Path, text: str) -> str:
+    path.write_text(text, encoding="utf-8")
+    content_hash = compute_file_hash(path)
+    session.record({path: content_hash}, [TARGET], "pkg")
+    session.flush()
+    return content_hash
+
+
+def test_an_earlier_write_on_this_checkout_is_a_baseline_but_not_deletion_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#4428: bytes this installation wrote earlier stay provable after a rewrite."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_bytes = path.read_bytes()
+    session = _session(root, lock)
+    old_hash = _rewrite(session, path, "rendered old\n")
+    _rewrite(session, path, "rendered on another branch\n")
+    path.write_bytes(old_bytes)  # git checkout restores the earlier render
+
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert [old_hash in hashes for hashes in persisted["history"].values()] == [True]
+    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    assert _receipt_evidence(root).receipt_hashes.get(path.resolve().as_posix()) != old_hash
+    path.write_text("user edit\n", encoding="utf-8")
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
+def test_the_write_history_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from apm_cli.core.receipt_history import HISTORY_LIMIT
+
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    first = _rewrite(session, path, "write 0\n")
+    for index in range(1, HISTORY_LIMIT + 2):
+        _rewrite(session, path, f"write {index}\n")
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    (history,) = data["history"].values()
+    assert len(history) == HISTORY_LIMIT
+    assert first not in history
+
+
+def test_an_invalid_write_history_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    _rewrite(session, path, "write 0\n")
+    _rewrite(session, path, "write 1\n")
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    data["history"] = {key: ["not-a-hash"] for key in data["history"]}
+    session.state_path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="rendered-write history"):
+        _session(root, lock)
+
+
+@pytest.mark.parametrize("handoff", ["owner", "claims"])
+def test_earlier_writes_never_acquire_a_new_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, handoff: str
+) -> None:
+    """A new owner or claim binding starts a fresh history (#4428)."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_bytes = path.read_bytes()
+    session = _session(root, lock)
+    _rewrite(session, path, "rendered old\n")
+    if handoff == "owner":
+        path.write_text("another owner's render\n", encoding="utf-8")
+        session.record({path: compute_file_hash(path)}, [TARGET], "other")
+        session.flush()
+    else:
+        _rewrite(session, path, "rendered new\n")
+        assert json.loads(session.state_path.read_text(encoding="utf-8"))["history"]
+        session.bind_committed_claims(LockFile())
+    path.write_bytes(old_bytes)
+
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert "history" not in persisted
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
 @pytest.mark.parametrize("target_name", ["claude", "copilot-cowork"])
 def test_owner_receipts_stand_in_with_the_claim_spelling_current_claims_use(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str
@@ -1141,3 +1257,53 @@ def _receipt_evidence_for(root: Path):
         diagnostics=DiagnosticCollector(),
         kept=(),
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_locator_refuses_a_link_planted_after_a_first_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A link planted under the skills root after a first check still cannot pass."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    skills_root = TARGET.skills_deploy_path(root)
+    assert session._locator(path, [TARGET]) is not None
+    outside = tmp_path / "outside"
+    (outside / "SKILL.md").parent.mkdir(parents=True)
+    (outside / "SKILL.md").write_text("planted\n", encoding="utf-8")
+    (skills_root / "planted").symlink_to(outside, target_is_directory=True)
+
+    planted = skills_root / "planted" / "SKILL.md"
+    assert session._locator(planted, [TARGET]) is None
+    with pytest.raises(RuntimeError, match="outside"):
+        DeploymentLedgerCodec.locator_for_path(
+            planted, project_root=root, target=TARGET, scope=InstallScope.PROJECT
+        )
+    assert planted.read_text(encoding="utf-8") == "planted\n"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_locator_resolves_a_retargeted_skills_root_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retargeting the skills root and linking back into its old target is refused."""
+    (tmp_path / "home").mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    root = tmp_path / "consumer"
+    old, new = root / "old", root / "new"
+    (old / "demo").mkdir(parents=True)
+    (old / "demo" / "SKILL.md").write_text("old\n", encoding="utf-8")
+    new.mkdir()
+    skills_root = TARGET.skills_deploy_path(root)
+    skills_root.parent.mkdir(parents=True)
+    skills_root.symlink_to(old, target_is_directory=True)
+    session = _session(root, LockFile())
+    path = skills_root / "demo" / "SKILL.md"
+    assert session._locator(path, [TARGET]) is not None
+
+    skills_root.unlink()
+    skills_root.symlink_to(new, target_is_directory=True)
+    (new / "demo").symlink_to(old / "demo", target_is_directory=True)
+
+    assert session._locator(path, [TARGET]) is None
+    assert path.read_text(encoding="utf-8") == "old\n"

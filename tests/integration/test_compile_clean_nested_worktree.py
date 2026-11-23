@@ -99,10 +99,13 @@ def test_compile_excludes_linked_worktree_primitives(
         env=environment,
     )
     assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
-    for output_name in ("AGENTS.md", "CLAUDE.md"):
-        output = (parent / output_name).read_text(encoding="utf-8")
-        assert "OWN-SENTINEL" in output
-        assert "FOREIGN-SENTINEL" not in output
+    output = (parent / "AGENTS.md").read_text(encoding="utf-8")
+    assert "OWN-SENTINEL" in output
+    assert "FOREIGN-SENTINEL" not in output
+    # CLAUDE.md reaches the same instructions through its AGENTS.md import (#3939).
+    claude = (parent / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "@AGENTS.md" in claude.splitlines()
+    assert "FOREIGN-SENTINEL" not in claude
     assert "foreign.instructions.md" not in result.stdout
     assert "foreign.instructions.md" not in result.stderr
 

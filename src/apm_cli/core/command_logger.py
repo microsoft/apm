@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import (
     DRY_RUN_INCOMPLETE,
+    LEGACY_RENDER_MIGRATE,
     LOCKED_REFS_SATISFIED,
     ORPHANED_PACKAGES,
 )
@@ -202,6 +203,12 @@ class CommandLogger:
         return self._removed_paths(
             cleanup.announced_paths,
             lambda noun: f"stale deployed {noun} for {_dependency_label(dep_key)}",
+        )
+
+    def hook_config_cleanup(self, dep_key: str, paths: Sequence[str]) -> int:
+        """Name each hook config file deleted once its last APM hook left (#4852)."""
+        return self._removed_paths(
+            paths, lambda noun: f"emptied hook config {noun} for {_dependency_label(dep_key)}"
         )
 
     @staticmethod
@@ -796,6 +803,15 @@ class InstallLogger(CommandLogger):
         _rich_info(
             "Kept packages no longer in apm.yml because --frozen does not change "
             f"apm.lock.yaml: {', '.join(dep_keys)}. {ORPHANED_PACKAGES.sentence()}",
+            symbol="info",
+        )
+
+    def frozen_stale_kept(self, paths: list[str]) -> None:
+        """Name locked files a frozen install left because this version no longer renders them."""
+        _rich_info(
+            f"Left {len(paths)} file(s) recorded in apm.lock.yaml that this APM version "
+            f"no longer deploys, because --frozen does not change apm.lock.yaml: "
+            f"{', '.join(paths)}. {LEGACY_RENDER_MIGRATE.sentence()}",
             symbol="info",
         )
 

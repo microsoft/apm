@@ -42,6 +42,8 @@ first failure to skip expensive I/O.
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `native-mcp-ownership` | block | `ci_checks.py` | yes |
+| `native-mcp-drift` | block | `ci_checks.py` | only when a recorded self-defined native MCP entry was edited |
+| `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it could not confirm |
 | `content-integrity` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
@@ -172,6 +174,18 @@ the [policy schema](../policy-schema/).
 - **Fails when.** Such an entry exists. The detail names the server and the target. An entry equal to the declaration, including one switched off with `enabled = false`, passes and stays the user's.
 - **Remediation.** Make the entry match the declaration or remove it, then run `apm install`. Audit does not change the native configuration.
 
+### `native-mcp-drift`
+
+- **What it verifies.** That every native MCP entry the lockfile records APM writing for a self-defined server, with its recorded fingerprint, still matches that write (for example in `.mcp.json` or `~/.claude.json`). It appears only when such an entry changed. Entries the lockfile does not record are covered by `native-mcp-ownership`; registry servers are not compared.
+- **Fails when.** A recorded entry was edited by hand. The detail names the server, the config file and the runtime. `apm install` preserves the same entry and refuses to overwrite it.
+- **Remediation.** Undo your edit to the entry or remove it, then run `apm install` (`apm install -g` for a user-scope entry). Audit does not change the native configuration.
+
+### `kept-mcp-entries`
+
+- **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable). It appears only when such an entry exists.
+- **Fails when.** A kept entry is still in the selected config and the lockfile does not manage its server, or this machine's MCP write record cannot be used (without a lockfile, or once an install without a lockfile met it, also after the lockfile is rewritten). The detail names the server, the config file and the runtime, or the unusable record file.
+- **Remediation.** Remove each entry you no longer use, or declare the server again, and remove an unusable record file, then run `apm install`. Audit does not change the native configuration.
+
 ### `content-integrity`
 
 - **What it verifies.** Two independent signals, including local `.apm/` deployments recorded through the synthesized self-entry:
@@ -183,8 +197,8 @@ the [policy schema](../policy-schema/).
 ### `hook-approval-pins`
 
 - **What it verifies.** That every hook file the lockfile records as deployed is still admitted by its pinned approval in `apm.yml` (see [pinned approvals](../cli/approve/#pinned-approvals)). It runs after `content-integrity` and uses the same check as `apm install --frozen`, so both reach one verdict.
-- **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead.
-- **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`.
+- **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead. It also fails when a file the lockfile does not record sits at one of a package's own hook destinations (such as `.github/hooks/<package>-<name>.json`) while the executables gate withholds that package's hooks (denied or not approved); the detail names the path. For targets that merge hooks into one config file (such as `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`), it fails on an entry that matches such a package's own hook and that no ownership record attributes to another source; the detail names the file and the event. `apm install` keeps such a file or entry and warns naming it, because no lock record proves APM wrote it.
+- **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`. For an unrecorded file at a withheld package's hook path, delete it if you did not write it yourself, then run `apm audit --ci`; for a named merged-config entry, remove the entry if you did not add it yourself.
 
 ### `includes-consent`
 
@@ -203,7 +217,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `lockfile-targets-current`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `lockfile-targets-current`, `skill-subset-consistency`, `config-consistency`, `native-mcp-ownership`, `native-mcp-drift` (only when reported), `kept-mcp-entries` (only when reported), `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 

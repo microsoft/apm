@@ -1,0 +1,18 @@
+{
+  "issue": 4737,
+  "fixed_in": "Unreleased",
+  "summary": "apm install without apm.lock.yaml kept every MCP entry APM had written for a server it no longer deployed, and apm audit --ci passed; install now records per-entry write evidence on this machine, retires an entry that evidence proves unchanged, and keeps and reports any other entry, including an identical one the user wrote.",
+  "failure_modes": [
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_no_longer_deployed_is_retired_without_the_lockfile",
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_identical_user_entry_is_kept_without_the_lockfile",
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_unproven_entry_is_kept_and_reported_without_the_lockfile",
+    "tests/unit/install/test_mcp_write_receipts.py::test_a_proven_entry_no_longer_declared_is_retired"
+  ]
+}

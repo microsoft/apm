@@ -27,7 +27,14 @@ _BLOCK = re.compile(
 )
 
 # Executed installed-CLI proofs: test_area_remediation_clears_the_reported_state.
-EXECUTED = frozenset({"orphaned-agents-md", "root-context-hand-authored"})
+EXECUTED = frozenset(
+    {
+        "claude-agents-md-blocked",
+        "claude-directory-instruction-single-file",
+        "orphaned-agents-md",
+        "root-context-hand-authored",
+    }
+)
 
 _LOCK_CONFLICT = (
     "needs two manifests pinning one package to different commits of a live remote; "

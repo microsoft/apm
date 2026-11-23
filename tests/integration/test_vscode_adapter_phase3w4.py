@@ -10,8 +10,12 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -247,6 +247,7 @@ def _run_cleanup(
     # packages that left the manifest entirely.
     # ------------------------------------------------------------------
     if package_deployed_files:
+        frozen_retained: list[str] = []
         for dep_key, new_deployed in package_deployed_files.items():
             # Skip packages whose integration reported errors this run --
             # a file that failed to re-deploy would look stale and get
@@ -268,6 +269,11 @@ def _run_cleanup(
                     **package_cleanup_retained.get(dep_key, {}),
                     **{path: prev_dep.deployed_file_hashes.get(path) for path in kept},
                 }
+            if stale and frozen_disposition.retain_stale_files:
+                frozen_retained.extend(
+                    _retain_frozen_stale(stale, new_deployed, prev_dep, dep_key, ctx)
+                )
+                continue
             if not stale:
                 continue
 
@@ -330,6 +336,25 @@ def _run_cleanup(
                         f"Renamed {_aliased} to the new letter case from {dep_key}"
                     )
                 logger.stale_cleanup(dep_key, cleanup_result)
+        if frozen_retained and logger:
+            logger.frozen_stale_kept(sorted(frozen_retained))
+
+
+def _retain_frozen_stale(
+    stale: set[str], new_deployed: list[str], prev_dep, dep_key: str, ctx: InstallContext
+) -> list[str]:
+    """Keep locked files this version no longer renders: --frozen never rewrites the lock.
+
+    Deleting them would leave apm.lock.yaml recording files missing from disk
+    (an APM upgrade that drops a rendered file, e.g. #3939). They keep their
+    lock claim until a normal install re-renders the package.
+    """
+    retained = sorted(stale)
+    new_deployed.extend(path for path in retained if path not in new_deployed)
+    ctx.package_cleanup_retained[dep_key] = ctx.package_cleanup_retained.get(dep_key, {}) | {
+        path: prev_dep.deployed_file_hashes.get(path) for path in retained
+    }
+    return retained
 
 
 def _run_local_basis(ctx: InstallContext) -> Any:

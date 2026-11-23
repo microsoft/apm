@@ -40,7 +40,8 @@ steps:
     key_lines:
       - "[x] Script execution error: Script or prompt 'missing' not found."
       - "Available scripts in apm.yml: start, review"
-    remediate:
-      - {advice: apm list}
-    rerun: [apm run review --param target=src/auth.py]
+    diagnose:
+      advice: apm list
+      # "to see each script and its command": the step names only the scripts.
+      promises: [cat review.prompt.md]
 known_cells:

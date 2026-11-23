@@ -25,6 +25,16 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.registry.resolver import RegistryResolution
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
+from tests.lifecycle.known import KnownFailure
+
+# @registry shorthand: a deferred design, its tracker stays open (#4543).
+_REGISTRY_SHORTHAND = KnownFailure(
+    "#4543",
+    "@registry shorthand deferred to v2",
+    r"Shorthand '@alias' is not supported",
+    kind="deferred-design",
+    raises=(ValueError, AssertionError),
+)
 
 pytestmark = pytest.mark.component
 
@@ -297,7 +307,7 @@ class TestEnvVarPrefixCollision:
 class TestIdentityPreservation:
     """``DependencyReference.get_identity()`` must be stable across modes."""
 
-    @pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
+    @_REGISTRY_SHORTHAND.mark()
     def test_identity_unchanged_by_registry_scope(self):
         d_git = DependencyReference.parse("acme/foo#1.0.0")
         d_reg = DependencyReference.parse("acme/foo@corp-main#1.0.0")
@@ -319,7 +329,7 @@ class TestIdentityPreservation:
         assert d_git.get_identity() == "acme/foo"
         assert d_reg_obj.get_identity().startswith("acme/foo/")
 
-    @pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
+    @_REGISTRY_SHORTHAND.mark()
     def test_unique_key_includes_repo_url_for_both(self):
         d_git = DependencyReference.parse("acme/foo#1.0.0")
         d_reg = DependencyReference.parse("acme/foo@corp-main#1.0.0")

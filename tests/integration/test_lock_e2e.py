@@ -27,7 +27,7 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 
-pytestmark = pytest.mark.requires_apm_binary
+pytestmark = [pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +73,7 @@ def _make_local_package(
     name: str,
     *,
     instruction_name: str = "test-skill.instructions.md",
+    apply_to: str = "**",
 ) -> None:
     pkg_dir.mkdir(parents=True, exist_ok=True)
     (pkg_dir / "apm.yml").write_text(
@@ -88,7 +89,7 @@ def _make_local_package(
     instructions = pkg_dir / ".apm" / "instructions"
     instructions.mkdir(parents=True, exist_ok=True)
     (instructions / instruction_name).write_text(
-        "---\napplyTo: '**'\n---\n# Test\n", encoding="utf-8"
+        f"---\napplyTo: '{apply_to}'\n---\n# Test\n", encoding="utf-8"
     )
 
 
@@ -224,6 +225,8 @@ class TestLockTargetContraction:
             pkg_dir,
             "local-rules",
             instruction_name="local-rules.instructions.md",
+            # Path-scoped: Claude keeps it in .claude/rules/, not AGENTS.md (#3939).
+            apply_to="**/*.md",
         )
         _write_apm_yml(project, deps=[str(pkg_dir)], targets=["claude", "copilot"])
 

@@ -50,6 +50,12 @@ _DEFAULT_INSTRUCTION = (
 )
 
 
+# Claude loads ``**`` instructions from compiled AGENTS.md (#3939); scenarios
+# that observe a Claude ``.claude/rules/`` deployment use a path-scoped rule.
+_SCOPED_INSTRUCTION = _DEFAULT_INSTRUCTION.replace(b'applyTo: "**"', b'applyTo: "**/*.md"')
+_SCOPED_FILES = {"instructions/rules.instructions.md": _SCOPED_INSTRUCTION}
+
+
 def _make_apm_project(
     tmp_path: Path,
     *,
@@ -473,7 +479,7 @@ class TestSectionBRegressions:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """User hooks survive CI audit while tampered APM hooks still fail it."""
-        project = _make_apm_project(tmp_path, target="claude")
+        project = _make_apm_project(tmp_path, target="claude", files=_SCOPED_FILES)
         source_hook = project / ".apm" / "hooks" / "pre.json"
         source_hook.parent.mkdir(parents=True)
         source_hook.write_bytes(
@@ -667,7 +673,7 @@ class TestSectionDMultiTarget:
     def test_d1_multi_target_install_creates_all_target_outputs(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        project = _make_apm_project(tmp_path, target="copilot,claude")
+        project = _make_apm_project(tmp_path, target="copilot,claude", files=_SCOPED_FILES)
         _install(project, monkeypatch)
         # Sanity: both targets received the integrated file.
         assert (project / ".github" / "instructions" / "rules.instructions.md").exists()
@@ -683,7 +689,7 @@ class TestSectionDMultiTarget:
         deployed file MUST appear in the drift findings if it is
         tampered with -- it must never be silently ignored.
         """
-        project = _make_apm_project(tmp_path, target="copilot,claude")
+        project = _make_apm_project(tmp_path, target="copilot,claude", files=_SCOPED_FILES)
         _install(project, monkeypatch)
         (project / ".claude" / "rules" / "rules.md").write_bytes(b"# tampered\n")
 
@@ -697,6 +703,34 @@ class TestSectionDMultiTarget:
         # (replay reproduced it and content differs). Both prove the
         # secondary target is not invisible.
         assert kinds[".claude/rules/rules.md"] in {"modified", "orphaned"}
+
+    @pytest.mark.parametrize("hand_authored_claude_md", [False, True])
+    def test_d4_claude_agents_md_routing_replays_clean(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hand_authored_claude_md: bool
+    ) -> None:
+        """Replay routes Claude instructions exactly as install did (#3939).
+
+        Without a hand-authored CLAUDE.md the ``**`` rule loads from AGENTS.md;
+        with one, install keeps it in .claude/rules/. The scratch replay must
+        read that decision from the live project, so neither layout drifts.
+        """
+        project = _make_apm_project(
+            tmp_path,
+            target="claude",
+            files={
+                "instructions/rules.instructions.md": _DEFAULT_INSTRUCTION,
+                "instructions/docs.instructions.md": _SCOPED_INSTRUCTION,
+            },
+        )
+        if hand_authored_claude_md:
+            (project / "CLAUDE.md").write_bytes(b"# Team notes\n")
+        _install(project, monkeypatch)
+        assert (project / ".claude" / "rules" / "docs.md").is_file()
+        assert (project / ".claude" / "rules" / "rules.md").is_file() is hand_authored_claude_md
+
+        result = _audit(project, monkeypatch, "--ci", "-f", "json")
+        assert result.exit_code == 0, result.output
+        assert _drift_paths(result.stdout) == []
 
     def test_d3_multi_target_primary_target_drift_detected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

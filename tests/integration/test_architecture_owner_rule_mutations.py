@@ -326,6 +326,43 @@ def test_dependency_unique_key_cannot_drop_the_port(
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "DeploymentLedgerCodec.load_observes_per_row_projection(dependencies)",
+            'any("://" in path for dep in dependencies for path in dep.deployed_files)',
+            id="loader-rederives-verdict",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "lock.add_dependency(dep, project_ledger=project_per_row)",
+            "lock.add_dependency(dep, project_ledger=False)",
+            id="loader-hardcodes-skip",
+        ),
+        pytest.param(
+            "src/apm_cli/core/legacy_lock_evidence.py",
+            "cls._legacy_locator(path).kind is LocatorKind.URI",
+            '"://" in path',
+            id="codec-rederives-uri-locator",
+        ),
+    ],
+)
+def test_lockfile_load_row_projection_routes_through_ledger_codec(
+    path: str, original: str, replacement: str
+) -> None:
+    """Skipping per-row legacy projection on load is the ledger codec's decision (#4733)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-provenance-state"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",
@@ -1702,10 +1739,35 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "if trusted is not None:",
             id="receipt-binding-without-bytes",
         ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "        kept = self.keeps_unproven_file(",
+            "        kept = self.keeps_nothing(",
+            id="adopt-adapter-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "            if not self.keeps_edited_output(",
+            "            if not self.keeps_nothing(",
+            id="hook-file-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "        # An edited copied script is kept like any managed file (#4626).\n"
+            "        if integrator.keeps_edited_output(",
+            "        if integrator.keeps_nothing(",
+            id="hook-script-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "        if self._keeps_edited_bundle(planned",
+            "        if self._keeps_nothing(planned",
+            id="canvas-bundle-not-left-whole",
+        ),
     ],
 )
 def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:
-    """No write path replaces a managed file without receipt or render evidence (#4360)."""
+    """No write path replaces a managed file without receipt or render evidence (#4360, #4626)."""
     rule_id = "install-deployment-overwrite-evidence"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
@@ -1900,6 +1962,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="reused = self.session.lookup_facts(key)",
         new="reused = None",
         intent="The facts provider skips the session and re-parses content it already built.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-local-identity",
+        rule_id="contracts-tooling-local-identity",
+        path="src/apm_cli/deps/reachability.py",
+        old="                ref = transitive_local_identity(",
+        new="                ref = replace(",
+        intent="The reachability walk re-keys a local edge itself instead of calling the owner.",
     ),
     MutationCase(
         guard_id="contracts-tooling-local-path-anchor",
@@ -2097,6 +2167,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="PLUGIN_ROOT_NAMES = (",
         new="PLUGIN_ROOT_NAMES_EXTRA = (",
         intent="Plugin-root hook command vocabulary loses its canonical constant.",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-hook-containment-root",
+        rule_id="mutation_writes.hook_containment_root",
+        path="src/apm_cli/integration/hook_bundle.py",
+        old="    containment = hook_containment_root(target, project_root)",
+        new="    containment = project_root",
+        intent="Hook bundle copies re-decide their containment root instead of asking the owner.",
     ),
     MutationCase(
         guard_id="hooks-integrations-jetbrains-mcp-path",
@@ -2305,6 +2383,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)\n",
         new="    return Path.home() if user_scope else Path.cwd()\n",
         intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="            if routes_to_agents_md(",
+        new="            if True or routes_to_agents_md(",
+        intent="Install widens Claude routing beyond the owner's verdict.",
     ),
     MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",
@@ -3021,7 +3107,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-claude-ownership",
         rule_id="marketplace-integrations-claude-ownership",
         path="src/apm_cli/native_plugins/settings.py",
-        old="if enabled.get(key) is True:",
+        old="if enabled.get(key) is True or (plugin in managed and enabled.get(key) is False):",
         new="if key in enabled:",
         intent="Retiring a native plugin deletes the user's explicit enabledPlugins false.",
     ),
@@ -3045,9 +3131,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-copilot-ownership",
         rule_id="marketplace-integrations-copilot-ownership",
         path="src/apm_cli/copilot_plugins/registrar.py",
-        old="def synchronize_copilot_plugins(",
-        new="def synchronize_copilot_plugins_X(",
-        intent="Copilot marketplace ownership loses its single synchronization owner.",
+        old="def plan_legacy_copilot_retirement(",
+        new="def plan_legacy_copilot_retirement_X(",
+        intent="The legacy Copilot registration loses its single migration owner.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-dependency-confusion",
@@ -3998,6 +4084,14 @@ CASE_IDS: tuple[str, ...] = tuple(case.guard_id for case in MUTATIONS)
 # registry guards. Execute these through the same source-override mutation seam.
 USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="blocker = claude_agents_md_blocker(live_root, cache=self._routing_cache)",
+        new="blocker = None",
+        intent="Install routes Claude instructions to AGENTS.md past a hand-authored CLAUDE.md.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",
         path="src/apm_cli/compilation/user_root_context.py",
@@ -4593,7 +4687,7 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
     [
         (
             "src/apm_cli/install/deployment_plan.py",
-            "if codex_native is not None\n        else plan_native_claude_plugin(",
+            "if codex_native is not None or is_first_party\n        else plan_native_claude_plugin(",
             "if False\n        else plan_native_claude_plugin(",
         ),
         (
@@ -4628,8 +4722,8 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/native_plugins/settings.py",
-            "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
-            "for plugin in sorted(frozenset(enabled) - declaration.plugins):",
+            "for plugin in sorted((owned or frozenset()) - wanted):",
+            "for plugin in sorted(frozenset(enabled) - wanted):",
         ),
         (
             "src/apm_cli/install/phases/claude_plugins.py",
@@ -4658,7 +4752,17 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/claude_plugins/registrar.py",
-            "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+            "if fingerprint_of(source) != own.record.fingerprint:",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "changes[harness] = write_declaration(target, declarations[harness])",
+            "changes[harness] = SettingsChange()",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            'if result.get("native_plugin") and lock_dep.native_plugin is not None:',
             "if False:",
         ),
         (
@@ -4887,6 +4991,16 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
             "native_hashes=DeploymentLedgerCodec.mcp_native_hashes(",
             "native_hashes=DeploymentLedgerCodec.unverified_mcp_native_hashes(",
         ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "        _refuse_native_mcp_collision(\n            dep,",
+            "        _skip_native_mcp_collision(\n            dep,",
+        ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "        refuse_projected_mcp_collisions(\n            [dep],",
+            "        unchecked_mcp_collisions(\n            [dep],",
+        ),
     ],
     ids=[
         "legacy-resolver",
@@ -4903,6 +5017,8 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         "bundle-deferred-claims",
         "registry-install-routing",
         "rebuild-receipt-routing",
+        "direct-entry-preflight-routing",
+        "direct-entry-preflight-delegation",
     ],
 )
 def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) -> None:
@@ -6509,11 +6625,8 @@ def test_bundle_lock_stamp_guard_rejects_other_writers(path: str, old: str, new:
         ),
         pytest.param(
             "src/apm_cli/security/trust.py",
-            "                grants_manifest, policy=None, logger=None, include_user=include_user",
-            '                Path(project_root) / "apm.yml",\n'
-            "                policy=None,\n"
-            "                logger=None,\n"
-            "                include_user=include_user,",
+            "                grants_manifest,\n                policy=None,\n",
+            '                Path(project_root) / "apm.yml",\n                policy=None,\n',
             id="registered-caller-derives-apm-yml-from-root",
         ),
     ],

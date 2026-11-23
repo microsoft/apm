@@ -51,6 +51,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "kept-file next step",
     "bundle-hooks-approved": _BUNDLE,
     "bundle-hooks-unadmitted": _BUNDLE,
+    "compile-dependency-denied": "covered by test_compile_dependency_policy_lifecycle, "
+    "which asserts the refusal names the denied package and apm.yml",
     "content-hash-unverified": "needs a legacy (version 1-3) lockfile whose carried bytes "
     "cannot be verified",
     "content-hashes-missing": _POLICY,
@@ -73,9 +75,22 @@ COMPONENT_ONLY: dict[str, str] = {
     "managed-paths-unresolved": _FAULT,
     "native-mcp-ownership-unrecorded": "covered by the audit --ci native-mcp-ownership "
     "check tests in tests/unit/policy/test_ci_checks.py",
+    "native-mcp-entry-edited": "executed by test_ownership_siblings::"
+    "test_audit_reports_a_hand_edited_recorded_mcp_entry",
+    "kept-mcp-entries": "needs a deleted lockfile and an edited MCP entry; covered by "
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py and the audit --ci kept-mcp-entries "
+    "check test in tests/unit/install/test_mcp_write_receipts.py",
+    "withheld-hook-entry-unrecorded": "the reported state is a merged hook config entry; "
+    "tests/unit/install/test_withheld_merged_hooks.py pins the rows and their removal",
+    "withheld-hook-paths-unchecked": "the reported state is an unreadable or misplaced hook "
+    "directory; tests/unit/install/test_withheld_hooks.py pins the unchecked rows",
+    "withheld-hook-file-unrecorded": "executed by test_ownership_siblings::"
+    "test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected",
     "policy-fetch-failure-blocked": "executed by test_remediation_advice_lifecycle::"
     "test_policy_fetch_failure_remediation_clears_the_block",
     "rendering-changed": "needs a locked file rendered by an older APM version",
+    "run-dependency-denied": "covered by tests/unit/test_script_runner_dependency_policy.py, "
+    "which asserts the refusal names the denied package",
     "required-package-unlocked": "executed end to end by "
     "tests/integration/test_policy_refusal_stderr_lifecycle.py (RA-015)",
     "unmanaged-file-track": _POLICY,

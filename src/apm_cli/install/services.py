@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
-from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
+from apm_cli.core.remediation import claude_native_switch_loose_hooks
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
@@ -33,6 +33,7 @@ from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_err
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .project_package import build_project_local_package_info
+from .target_filter import announced_reconcile
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
 from .target_warnings import warn_unsupported_primitives
@@ -121,6 +122,7 @@ def _check_native_claude_transition(
     project_root: Path,
     targets: list[Any],
     package: str,
+    flag: str = "",
 ) -> None:
     """Refuse native activation over retained or unreadable loose hook state."""
     from apm_cli.claude_plugins.admission import ClaudeNativePluginError
@@ -137,9 +139,10 @@ def _check_native_claude_transition(
         failed = ", ".join(reconcile_stats.get("failed_paths", []))
         recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
         if not reconcile_stats.get("errors"):
-            recovery = CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS.bind(package=package).sentence()
+            switch = claude_native_switch_loose_hooks(user_scope=bool(flag))
+            recovery = switch.bind(package=package).sentence()
         raise ClaudeNativePluginError(
-            f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
+            f"Cannot switch {package} to a native plugin. Hook settings were preserved. {recovery}"
         )
 
 
@@ -245,6 +248,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         logger=logger,
         scope=scope,
         skill_subset=skill_subset,
+        skill_pairing=skill_pairing,
         ctx=ctx,
         policy=policy,
         is_first_party=is_first_party,
@@ -259,11 +263,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)
     dep_targets_active = target_selection.consumer_restriction_active
 
-    reconcile_package_targets = getattr(
-        integrators.hook,
-        "reconcile_package_target_restriction",
-        None,
-    )
+    reconcile_package_targets = announced_reconcile(integrators.hook, logger, package_name, scope)
 
     def _reconcile_excluded_targets() -> None:
         if target_selection.excluded_targets and callable(reconcile_package_targets):
@@ -293,7 +293,7 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     codex_native = deployment_plan.codex_native
     native_claude_plugin = deployment_plan.claude_native
-    native_target_names = {native_claude_plugin.target_name} if native_claude_plugin else set()
+    native_target_names = native_claude_plugin.harnesses if native_claude_plugin else set()
     # Compatibility-only Codex data is opaque to every loose target adapter.
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan
@@ -308,12 +308,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     ):
         return result
 
-    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
-    # unit live from apm_modules, so decomposing its skills or MCP servers here
-    # would double-load them. The registrar owns this package instead. The
-    # short-circuit fires only AFTER target narrowing (so a dependency that
-    # excludes copilot is not registered) and AFTER the executable trust gate
-    # (so an Agent Plugin's MCP servers / bin cannot bypass a default-deny).
+    # A native Agent Plugin stays opaque (Copilot loads it whole from .agents/plugins); this
+    # fires only AFTER target narrowing and AFTER the executable trust gate.
     from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.install.native_plugin_admission import finalize_native_plugin
 
@@ -381,7 +377,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             package_info,
             project_root,
             source_plan,
-            user_scope=scope is InstallScope.USER,
+            user_scope=scope is InstallScope.USER or native_claude_user_scope,
             retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
         )
 
@@ -408,6 +404,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             project_root,
             [target for target in targets if target.name in native_target_names],
             package_name,
+            " --global" if scope is InstallScope.USER else "",
         )
         if not projection_targets:
             from apm_cli.claude_plugins.admission import queue_native_claude
@@ -445,6 +442,17 @@ def integrate_package_primitives(  # noqa: PLR0913
                     reconcile_package_targets(package_info, project_root, targets),
                     "Could not fully remove hooks the executables gate no longer deploys",
                 )
+            from apm_cli.install.withheld_hooks import announce_withheld_hook_files
+
+            announce_withheld_hook_files(
+                package_name,
+                package_info,
+                project_root,
+                targets,
+                managed_files,
+                logger,
+                user_scope=scope is InstallScope.USER,
+            )
             continue
         # Executable approval gate: skip canvas if not approved.
         # First-party (is_first_party=True) always deploys.
@@ -500,7 +508,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Sibling integrators don't accept this kwarg, so include it only
             # for hooks.
             if _prim_name == "hooks":
-                _call_kwargs["user_scope"] = scope is InstallScope.USER
+                _call_kwargs["user_scope"] = scope is InstallScope.USER or native_claude_user_scope
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
                 # Mirror retiring_targets (#3129) so a fallback preflight isn't

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import statistics
 import subprocess
 import sys
 import time
@@ -604,35 +603,42 @@ def test_large_multiline_metadata_preserves_final_response(tmp_path: Path) -> No
 @pytest.mark.benchmark
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix shell installer")
 def test_metadata_parser_scales_linearly(tmp_path: Path) -> None:
-    """Median tenfold-input scaling includes the actual production parser and shell pipes."""
+    """Fourfold input costs about fourfold time through the production parser and pipes.
+
+    Both sizes run well above process start-up cost, samples of the two sizes
+    are interleaved so host load hits both alike, and each size keeps its
+    fastest sample. Linear parsing gives a ratio near 4 and quadratic near 16;
+    the limit of 8 leaves a factor of two either way.
+    """
     script = (
         "curl() { cat; }\n"
         + _metadata_helper()
         + "\nfetch_release_metadata anonymous\n"
         + 'printf "%s\\n%s\\n%s\\n" "$METADATA_STATUS" "$METADATA_HEADERS" "$LATEST_RELEASE"\n'
     )
-    timings = []
-    for count in (2000, 20000):
+    cases = []
+    for count in (10000, 40000):
         body = json.dumps({"tag_name": "v99.0.0", "notes": ["x" * 90] * count}, indent=2)
         payload = (
             "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\nHTTP/1.1 200 OK\r\n\r\n"
             + body
             + "\n200\n"
         )
-        samples = []
-        for _ in range(5):
+        cases.append((payload, "200\nHTTP/1.1 200 OK\n\n" + body + "\n"))
+    fastest = [float("inf")] * len(cases)
+    for _ in range(5):
+        for index, (payload, expected) in enumerate(cases):
             started = time.perf_counter()
             result = subprocess.run(
                 ["/bin/bash", "-c", script],
                 input=payload,
                 capture_output=True,
                 text=True,
-                timeout=15,
+                timeout=30,
                 check=False,
                 env={"PATH": os.defpath, "HOME": str(tmp_path)},
             )
-            samples.append(time.perf_counter() - started)
+            fastest[index] = min(fastest[index], time.perf_counter() - started)
             assert result.returncode == 0
-            assert result.stdout == "200\nHTTP/1.1 200 OK\n\n" + body + "\n"
-        timings.append(statistics.median(samples))
-    assert timings[1] / timings[0] < 15, timings
+            assert result.stdout == expected
+    assert fastest[1] / fastest[0] < 8, fastest

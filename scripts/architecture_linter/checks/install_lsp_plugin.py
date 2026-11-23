@@ -66,6 +66,8 @@ _TRUST_OWNER_CALLERS = frozenset(
         ("src/apm_cli/security/trust.py", "pins"),
         (_EXEC_GATE, "_trust_ctx"),
         (_EXEC_GATE, "_resolve"),
+        # apm audit --ci judges withheld hooks on its own routed policy (#4821).
+        (_EXEC_GATE, "trust_context_for_policy"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
         # The offline dry-run preview reads the same layers, policy-free (#4018).
         ("src/apm_cli/install/dry_run_plan.py", "with_allowed_lsp_dependencies"),

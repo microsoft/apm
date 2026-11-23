@@ -38,13 +38,14 @@ import json
 import re
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from hypothesis import strategies as st
 from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
 from tests.lifecycle.generator.rules import FIRST_PARTY_MCP_CELL
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.machines._kit import (
     Bench,
     KnownCell,
@@ -60,7 +61,11 @@ from tests.lifecycle.oracles import Evidence, Observation, check_obligation
 from tests.lifecycle.receipts import current_node
 from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _SURFACE_GLOBS
 from tests.lifecycle.world import registry
+from tests.lifecycle.world.packages import _BIN as BIN
+from tests.lifecycle.world.packages import _CANVAS as CANVAS
+from tests.lifecycle.world.packages import _SESSION_HOOK as SESSION_HOOK
 from tests.lifecycle.world.packages import INERT_COMMAND
+from tests.lifecycle.world.packages import _skill as skill_text
 from tests.lifecycle.world.routes import PROXY_HOST, PROXY_PREFIX
 from tests.lifecycle.world.scopes import use_registry_proxy
 from tests.lifecycle.world.services import (
@@ -74,6 +79,7 @@ from tests.lifecycle.world.services import (
     REGISTRY_HOST,
     REGISTRY_SERVER,
 )
+from tests.utils.local_package import LocalPackageFactory
 
 
 @pytest.fixture(autouse=True)
@@ -115,6 +121,8 @@ FORMS = (
     "pkg-registry",
     "mcp-registry",
     "inline-mcp",
+    "local-mkt",
+    "file-mkt",
 )
 # A GHES host on a non-default port: the lock key carries host and port (HOSTID).
 PORTED = "ghes-port"
@@ -150,7 +158,13 @@ _NO_DRY_RUN = frozenset({"lock", "marketplace"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
 _KEEPING = frozenset({"lock", "compile", "marketplace"})
 # Forms a marketplace catalog declares: ``apm marketplace update`` acts on their source.
-_MARKET_FORMS = frozenset({"marketplace-object", "plugin-at-mkt"})
+# Local catalogs: a directory (marketplace-local) and a direct marketplace.json file
+# (marketplace-file); each lists one plugin carrying every observable primitive.
+LOCAL_CATALOGS: Mapping[str, tuple[str, str]] = {
+    "local-mkt": ("lifecycle-local", "p-lmkt"),
+    "file-mkt": ("lifecycle-file", "p-fmkt"),
+}
+_MARKET_FORMS = frozenset({"marketplace-object", "plugin-at-mkt", *LOCAL_CATALOGS})
 _MARKET_CACHE = ".apm/cache/marketplace"
 _PINS = f"{_MARKET_CACHE}/version-pins.json"
 # The marketplace catalog cache a project install may refresh under APM_HOME.
@@ -210,6 +224,10 @@ CHOICES = (
     Choice("pkg-registry", "p-skill", _SKILL),
     Choice("pkg-registry", "p-exec", _EXEC),
     Choice("mcp-registry", "p-registry", frozenset({"mcp"})),
+    *(
+        Choice(form, package, frozenset({"skill", "hook", "bin", "mcp", "lsp", "canvas"}))
+        for form, (_, package) in LOCAL_CATALOGS.items()
+    ),
     Choice("inline-mcp", INLINE_SERVER, frozenset({"mcp"})),
 )
 _BY_FORM = {choice.form: choice for choice in CHOICES}
@@ -224,7 +242,18 @@ KINDS: Mapping[str, frozenset[str]] = {
     "p-child": _SKILL,
     # A native plugin is gated as one unit; its carried skill and MCP server are observed
     # too, so an unapproved native deployment is an I4 violation (bin/ has no surface here).
-    **{c.package: c.kinds | c.prims for c in CHOICES if c.form in ("local-path", "native")},
+    **{
+        c.package: c.kinds | c.prims
+        for c in CHOICES
+        if c.form in ("local-path", "native", *LOCAL_CATALOGS)
+    },
+}
+# At project scope a Claude plugin deploys whole to .agents/plugins for claude and copilot
+# (#3921): its carried skill and MCP server get no loose surface. The model expects only
+# the gated native unit; the oracle still observes the carried kinds, so a loose deploy fails.
+_EXPECTED_KINDS: Mapping[str, frozenset[str]] = {
+    **KINDS,
+    **{c.package: c.kinds for c in CHOICES if c.form == "native"},
 }
 _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
@@ -311,6 +340,7 @@ X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
     },
     **{(op, "shorthand"): _hostid("proxy-logical", lock) for op, lock in _HOST_LOCKS},
     ("update", "pkg-registry"): ("DEPLOYED=clean",),
+    **{("install", form): (*_MANIFEST_CONTEXT, "DEPLOYED=clean") for form in LOCAL_CATALOGS},
 }
 _FLAG_CONTEXT = {
     "--force": "FORCE=on",
@@ -383,9 +413,63 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
-# Strict known cells this machine discharges; #4214 and #4572 are fixed (LSP-only
-# packages survive uninstall; a git -> registry switch drops the stale .apm-pin).
+# Strict known cells this machine discharges; #4214, #4572 and #4639 are fixed (LSP-only
+# packages survive uninstall; a git -> registry switch drops the stale .apm-pin; a
+# local-catalog plugin keeps its marketplace identity under install --frozen).
 KNOWN_CELLS: tuple[KnownCell, ...] = ()
+
+
+def author_catalog(root: Path, name: str, package: str, *, as_file: bool) -> Path:
+    """A local catalog listing one plugin that carries skill, hook, bin, MCP, LSP and canvas.
+
+    Returns the source ``apm marketplace add`` takes: the catalog directory, or (with
+    *as_file*) its ``marketplace.json``, whose relative plugin sources resolve from
+    the file's own directory (marketplace/resolver.py resolve_local_plugin_path).
+    """
+    factory = LocalPackageFactory(root / "plugins")
+    plugin = factory.create(
+        package,
+        version="1.0.0",
+        mcp_dependencies=[
+            {
+                "name": f"{package}-mcp",
+                "registry": False,
+                "transport": "stdio",
+                "command": INERT_COMMAND,
+                "args": ["--stdio"],
+            }
+        ],
+        lsp_dependencies=[
+            {
+                "name": f"{package}-server",
+                "command": INERT_COMMAND,
+                "args": ["--stdio"],
+                "extensionToLanguage": {".fixture": "fixture"},
+            }
+        ],
+    )
+    factory.add_skill(plugin, package, skill_text(package, f"Use {package}."))
+    factory.add_hook(plugin, "session", SESSION_HOOK)
+    factory.add_canvas(plugin, package, CANVAS, assets={PurePosixPath("icon.txt"): b"c\n"})
+    script = plugin.root / "bin" / package
+    script.parent.mkdir(parents=True)
+    script.write_text(BIN, encoding="ascii")
+    script.chmod(0o755)
+    document = {
+        "name": name,
+        "owner": {"name": "APM Lifecycle"},
+        "plugins": [
+            {
+                "name": package,
+                "description": f"Lifecycle local catalog plugin {package}",
+                "source": f"./{plugin.root.relative_to(root).as_posix()}",
+            }
+        ],
+    }
+    catalog = root / "marketplace.json" if as_file else root / ".claude-plugin" / "marketplace.json"
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    catalog.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
+    return catalog if as_file else root
 
 
 class SourceMachine(MachineBase):
@@ -406,6 +490,8 @@ class SourceMachine(MachineBase):
         self.resolved_targets: dict[str, frozenset[str]] = {}
         self.lock_before = "absent"
         self.proxy = False
+        # Local catalog form -> its marketplace.json (the file ``marketplace update`` reads).
+        self.catalogs: dict[str, Path] = {}
 
     # -- model -----------------------------------------------------------------
 
@@ -478,6 +564,8 @@ class SourceMachine(MachineBase):
             return {"git": f"{self.host_url()}/p-skill.git", "ref": REF}
         if choice.form == "marketplace-object":
             return {"name": "p-skill", "marketplace": MARKET}
+        if choice.form in LOCAL_CATALOGS:
+            return {"name": choice.package, "marketplace": LOCAL_CATALOGS[choice.form][0]}
         if choice.form == "pkg-registry":
             return {
                 "registry": registry.NAME,
@@ -530,6 +618,8 @@ class SourceMachine(MachineBase):
         """The ``apm uninstall`` argument that selects *choice*."""
         if choice.form in ("marketplace-object", "plugin-at-mkt"):
             return f"{choice.package.split('-bundle')[0]}@{MARKET}"
+        if choice.form in LOCAL_CATALOGS:
+            return f"{choice.package}@{LOCAL_CATALOGS[choice.form][0]}"
         if choice.form in ("shorthand", "pkg-registry"):
             return f"lifecycle/{choice.package}"
         entry = self.entries[choice.slot]
@@ -685,10 +775,39 @@ class SourceMachine(MachineBase):
         self.egress(self.marketplace_add(url.rsplit("/", 1)[0] + "/no-such-catalog", {1}, False))
         self.registered = True
 
-    def refresh_marketplace(self) -> None:
-        """``apm marketplace update NAME``: revalidates the catalog cache, never the project."""
-        choices = [c for c in self._choices() if c.form in _MARKET_FORMS]
-        args = ("marketplace", "update", MARKET)
+    def ensure_catalog(self, form: str) -> None:
+        """Author and register the local catalog of *form* once (``apm marketplace add``)."""
+        if form in self.catalogs:
+            return
+        name, package = LOCAL_CATALOGS[form]
+        root = self.bench.world.root / "catalogs" / name
+        source = author_catalog(root, name, package, as_file=form == "file-mkt")
+        self.egress(self.marketplace_add(str(source), {0}, False))
+        self.catalogs[form] = (
+            source if source.is_file() else root / ".claude-plugin" / "marketplace.json"
+        )
+
+    def refresh_marketplace(self, *, every: bool = False) -> None:
+        """``apm marketplace update [NAME]``: revalidates catalog caches, never the project.
+
+        Named, it revalidates the world's git catalog; with *every*, all registered ones.
+        A local catalog is read without a cache, so each one gains a probe plugin first:
+        its refreshed plugin count proves the command re-read that catalog.
+        """
+        choices = [
+            c
+            for c in self._choices()
+            if c.form in _MARKET_FORMS and (every or c.form not in LOCAL_CATALOGS)
+        ]
+        args = ("marketplace", "update") if every else ("marketplace", "update", MARKET)
+        probed = {c.form: self.catalogs[c.form] for c in choices if c.form in LOCAL_CATALOGS}
+        saved = {form: path.read_bytes() for form, path in probed.items()}
+        for path in probed.values():
+            document = json.loads(path.read_text(encoding="ascii"))
+            probe = {**document["plugins"][0]}
+            probe["name"] = f"{probe['name']}-probe"
+            document["plugins"].append(probe)
+            path.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
         step = self.step(
             args,
             exits={0},
@@ -703,6 +822,12 @@ class SourceMachine(MachineBase):
             if entry["status"] == 200 and f"/{ORG}/{MARKETPLACE_REPO}" in entry["path"]
         ]
         assert catalog, "marketplace update revalidated nothing (no catalog request)"
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        for form, path in probed.items():
+            name = LOCAL_CATALOGS[form][0]
+            refreshed = re.search(rf"^\s*{re.escape(name)} \(2 plugins\)\s*$", output, re.M)
+            assert refreshed, f"marketplace update did not re-read {name}: {output}"
+            path.write_bytes(saved[form])
         self.egress(step)
         cells = self.cells("marketplace", "real", choices)
         for choice in choices:
@@ -729,6 +854,8 @@ class SourceMachine(MachineBase):
 
     @rule(choice=st.sampled_from(CHOICES), dry_run=st.booleans())
     def declare(self, choice: Choice, dry_run: bool) -> None:
+        if choice.form in LOCAL_CATALOGS:
+            self.ensure_catalog(choice.form)
         if choice.form in _CLI_FORMS:
             self.declare_by_cli(choice, dry_run)
             return
@@ -812,7 +939,7 @@ class SourceMachine(MachineBase):
         self.converged = False
         manifest = [c for c in self._choices() if c.form != "bundle"]
         self.command("install", (), manifest, False, verify=self.gate_off_deploys_everything)
-        self.refresh_marketplace()
+        self.refresh_marketplace(every=True)
         self.edit("executables-gate-on", set_gate(saved))
         self.model = self.model.with_exec_gate(True)
         self.converged = False
@@ -822,7 +949,7 @@ class SourceMachine(MachineBase):
         """A resolving step deploys exactly the observable surfaces the model allows."""
         wanted = {
             "/".join(cell)
-            for cell in expected_deployed(self.declared_model(), self.kinds)
+            for cell in expected_deployed(self.declared_model(), _EXPECTED_KINDS)
             if (cell[1], cell[2]) in _SURFACE_GLOBS
         }
         deployed = set(step.after.deployed)
@@ -849,6 +976,22 @@ class SourceMachine(MachineBase):
     def gate_off_deploys_everything(self, step: Step) -> None:
         """No gate: every allowed surface is deployed and no MCP server is parked."""
         self.deploys_what_the_model_allows(step)
+        # A plugin that ships bin/ stays parked without --trust-bin, gate or not.
+        plugins = self.bench.deploy_root / ".agents" / "plugins"
+        missing = [
+            c.package
+            for c in self._choices()
+            if c.form == "native"
+            and "bin" not in c.prims
+            and not (plugins / c.package / ".claude-plugin").is_dir()
+        ]
+        assert not missing, f"native plugins not deployed whole: {missing}"
+        parked = [
+            c.package
+            for c in self._choices()
+            if c.form == "native" and "bin" in c.prims and (plugins / c.package).exists()
+        ]
+        assert not parked, f"bin/ plugins deployed without --trust-bin: {parked}"
         problems = self.root_mcp_problems(step)
         assert not problems, "; ".join(problems)
         output = f"{step.result.stdout}\n{step.result.stderr}"
@@ -890,7 +1033,7 @@ class SourceMachine(MachineBase):
             # The first install under the new targets widens them; the second is unchanged.
             self.declare_by_cli(bundle, False)
             self.declare_by_cli(bundle, False, ("--force", *selected))
-        self.refresh_marketplace()
+        self.refresh_marketplace(every=True)
         self.retarget(TARGET_SETS[0])
         self.reconcile("install", False)
 
@@ -903,6 +1046,17 @@ class SourceMachine(MachineBase):
         if self.entries.get(slot) not in self._apm_entries():
             self.slots.pop(slot, None)
             self.entries.pop(slot, None)
+
+    def uninstall_together(self, choices: Collection[Choice], dry_run: bool) -> None:
+        """One ``apm uninstall`` naming several declared packages."""
+        chosen = [c for c in choices if self.slots.get(c.slot) is c]
+        if not chosen:
+            return
+        self.command("uninstall", tuple(map(self.selector, chosen)), chosen, dry_run)
+        for choice in chosen:
+            if self.entries.get(choice.slot) not in self._apm_entries():
+                self.slots.pop(choice.slot, None)
+                self.entries.pop(choice.slot, None)
 
     @rule(mode=st.sampled_from(NETWORK))
     def network_mode(self, mode: str) -> None:
@@ -981,7 +1135,7 @@ def replay_spine(machine: SourceMachine) -> None:
     """Visit every T3 and T5 cell: each form through each op, with and without --dry-run."""
     machine.register_marketplace()
     for choice in CHOICES:
-        if choice.form in ("local-path", "native"):
+        if choice.form in ("local-path", "native", *LOCAL_CATALOGS):
             machine.declare(choice, False)
     for form in ("plugin-at-mkt", "bundle", "mcp-registry", "inline-mcp"):
         for choice in CHOICES:
@@ -1010,6 +1164,7 @@ def replay_spine(machine: SourceMachine) -> None:
         machine.declare(choice, False)
         machine.reconcile("install", False)
         machine.uninstall("remote-skill", True)
+    machine.uninstall_together([c for c in CHOICES if c.form in LOCAL_CATALOGS], True)
     for slot in ("p-parent", "p-canvas", "p-native-claude", "p-native-claude-bin"):
         machine.uninstall(slot, True)
     for slot in _MCP_SERVERS:
@@ -1108,5 +1263,6 @@ def test_source_generated_sequences_keep_cross_cutting_laws(
     )
 
 
-# T3/T5 cells whose oracle fails on main -> tracking issue (a strict known cell discharges them).
-KNOWN_CELLS_BY_ID: dict[str, str] = {}
+# T3/T5/X cells whose oracle fails on main -> their known failure (tracking issue and
+# failure signature); the generator marks the obligations they imply known-failing.
+KNOWN_CELLS_BY_ID: dict[str, KnownFailure] = {}

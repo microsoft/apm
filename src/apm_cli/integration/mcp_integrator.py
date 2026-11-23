@@ -36,6 +36,7 @@ from apm_cli.deps.lockfile import (
     installed_apm_version,
 )
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
+from apm_cli.integration import write_seam
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
@@ -131,6 +132,31 @@ def _is_vscode_available(project_root: Path | str | None = None) -> bool:
     return shutil.which("code") is not None or (root / ".vscode").is_dir()
 
 
+def _write_cleaned_json_config(
+    config_path: Path,
+    config: dict,
+    servers_key: str,
+    *,
+    trailing_newline: bool,
+    delete_emptied: bool,
+) -> None:
+    """Write a cleaned MCP JSON config, or delete it once APM's last entry left.
+
+    With *delete_emptied*, a file whose servers were all removed by this
+    cleanup and that holds no other key goes, as a fresh deploy never writes
+    it (#4852). A file with any other key, even an empty one, stays.
+    """
+    if delete_emptied and not config.get(servers_key) and set(config) <= {servers_key}:
+        write_seam.unlink(config_path)
+        return
+    write_json_config(
+        config_path,
+        config,
+        default_trailing_newline=trailing_newline,
+        new_file_mode=0o600,
+    )
+
+
 def _clean_json_mcp_config(
     config_path: Path,
     stale_names: builtins.set,
@@ -142,6 +168,7 @@ def _clean_json_mcp_config(
     fail_on_write_error: bool = False,
     nested_servers: Callable[[dict], dict | None] | None = None,
     nested_settings: frozenset[str] = frozenset(),
+    delete_emptied: bool = False,
 ) -> int:
     """Remove stale entries from a JSON-based MCP config file.
 
@@ -161,6 +188,8 @@ def _clean_json_mcp_config(
             not declare the same name, since that entry is not APM's.
         nested_settings: Top-level keys that hold settings rather than
             servers whenever ``nested_servers`` returns a map.
+        delete_emptied: Delete the file once this cleanup removed every server
+            it held and no other key remains (project ``.mcp.json``, #4852).
 
     Returns:
         Number of entries removed.
@@ -199,11 +228,12 @@ def _clean_json_mcp_config(
                 del nested[name]
             removed = sorted(builtins.set(removed) | builtins.set(nested_removed))
         if removed:
-            write_json_config(
+            _write_cleaned_json_config(
                 config_path,
                 config,
-                default_trailing_newline=trailing_newline,
-                new_file_mode=0o600,
+                servers_key,
+                trailing_newline=trailing_newline,
+                delete_emptied=delete_emptied and nested is None,
             )
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
@@ -373,11 +403,12 @@ def _clean_claude_config(
         for name in removed:
             del servers[name]
         if removed:
-            write_json_config(
+            _write_cleaned_json_config(
                 config_path,
                 config,
-                default_trailing_newline=True,
-                new_file_mode=0o600,
+                "mcpServers",
+                trailing_newline=True,
+                delete_emptied=not is_user_scope,
             )
             for name in removed:
                 logger.progress(f"Removed stale MCP server '{name}' from {label}")
@@ -956,6 +987,7 @@ class MCPIntegrator:
                     trailing_newline=True,
                     use_rich=True,
                     fail_on_write_error=fail_on_write_error,
+                    delete_emptied=True,
                 )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
@@ -1190,6 +1222,10 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
                 label=claude_label,
             )
+
+        from apm_cli.install.mcp.write_receipts import forget_removed_mcp_writes
+
+        forget_removed_mcp_writes(project_root_path, user_scope=clean_user_scope)
 
     # ------------------------------------------------------------------
     # Lockfile persistence

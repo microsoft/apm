@@ -48,7 +48,7 @@
     {
       "id": "dependency-identity-materialization",
       "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; host-bound exact policy require identity (required_package_policy_hosts), resolved once by policy/matcher.py DependencyPolicyIndex.find for the manifest and, via the matched dependency's unique key, the lockfile; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation; the anchor a relative local_path resolves against (the declaring package at every scope; a root-declared relative path at user scope is refused)",
-      "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison; update plans compare the ref the lockfile records) + install/phases/lockfile.py (including empty-graph root intent persistence) + deps/path_anchoring.py local_dep_base_dir (local_path anchor: it decides which directory a relative dependency path names, so it is the local half of materialization identity)",
+      "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison; update plans compare the ref the lockfile records) + install/phases/lockfile.py (including empty-graph root intent persistence) + deps/path_anchoring.py local_dep_base_dir (local_path anchor: it decides which directory a relative dependency path names, so it is the local half of materialization identity) + deps/local_identity.py transitive_local_identity (one anchored directory is one dependency: the node key of a declared local edge for install, the --frozen verdict and the reachability walk, #4731)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
         "src/apm_cli/models/dependency/materialization.py",
@@ -65,9 +65,10 @@
         "src/apm_cli/install/presentation/resolution.py",
         "src/apm_cli/install/helpers/no_work.py",
         "src/apm_cli/install/plan.py",
-        "src/apm_cli/deps/path_anchoring.py"
+        "src/apm_cli/deps/path_anchoring.py",
+        "src/apm_cli/deps/local_identity.py"
       ],
-      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-local-path-anchor", "contracts-tooling-policy-identity", "contracts-tooling-source-replacements", "contracts-tooling-update-plan-recorded-ref"]
+      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-local-identity", "contracts-tooling-local-path-anchor", "contracts-tooling-policy-identity", "contracts-tooling-source-replacements", "contracts-tooling-update-plan-recorded-ref"]
     },
     {
       "id": "native-lifecycle-evidence",
@@ -98,8 +99,9 @@
     {
       "id": "cached-policy-shape",
       "decision": "Cached policy shape, that a cached policy document is verified against its recorded fingerprint and the project policy.hash pin before any command uses it (#4218), and the APM_POLICY_DISABLE switch reader",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; _read_cache_entry, the only policy cache reader, verifying through policy/_cache_verify.py _cached_policy_verified; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; _read_cache_entry, the only policy cache reader, verifying through policy/_cache_verify.py _cached_policy_verified; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env); a GitHub Contents 404 is reused only within one command run through core/invocation_memo.py (invocation_scope opened once by cli.py, memoized_per_invocation), never persisted",
       "selectors": [
+        "src/apm_cli/core/invocation_memo.py",
         "src/apm_cli/policy/discovery.py",
         "src/apm_cli/policy/_cache_verify.py",
         "src/apm_cli/policy/_cached_candidates.py"
@@ -173,7 +175,8 @@
         "src/apm_cli/install/phases/services.py",
         "src/apm_cli/deps/lockfile_extensions.py",
         "src/apm_cli/models/extension_keys.py",
-        "src/apm_cli/deps/lockfile_container.py"
+        "src/apm_cli/deps/lockfile_container.py",
+        "src/apm_cli/deps/lockfile_document.py"
       ],
       "guards": ["contracts-tooling-lockfile-write-authority"]
     },

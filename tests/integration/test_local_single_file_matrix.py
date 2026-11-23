@@ -274,10 +274,11 @@ def test_project_absolute_and_home_file_claude_lifecycle(
         "instructions": (
             "instructions",
             "Local rules",
-            b"---\ndescription: Local rules\napplyTo: 'src/**'\n"
+            # Path-scoped: Claude loads directory globs from AGENTS.md (#3939).
+            b"---\ndescription: Local rules\napplyTo: 'src/**/*.py'\n"
             b"---\n# Rule\nUse initial guidance.\n",
             ".claude/rules/xyz.md",
-            b'---\npaths:\n  - "src/**"\n---\n\n# Rule\nUse initial guidance.\n',
+            b'---\npaths:\n  - "src/**/*.py"\n---\n\n# Rule\nUse initial guidance.\n',
         ),
         "prompt": (
             "prompts",

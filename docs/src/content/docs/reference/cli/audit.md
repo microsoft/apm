@@ -79,14 +79,17 @@ targets in the project's `apm.yml` (`targets: [copilot]`), not an audit
 `--target` option. Invalid native manifests fail replay rather than falling back
 to legacy conversion. Audit does not modify plugin sources or live harness state.
 
-Native plugins remain whole under `apm_modules/`, rather than becoming loose
-managed skills. Replay compares admitted local plugins with a scratch copy of
-their original source, using the same validated copying as install. Modified
-or missing cached skills fail audit; run `apm install` to restore them. Remote
+Native plugins stay whole, rather than becoming loose managed skills. Audit
+checks both the `apm_modules/` source and the deployed copy under
+`.agents/plugins/<plugin>/` against the lockfile's `native_plugin` fingerprint.
+At project scope that fingerprint covers paths and bytes only, so a checkout
+without exec bits (Windows, `core.fileMode=false`) still passes. Replay
+compares admitted local plugins with a scratch copy of their original source.
+Modified or missing files fail audit; run `apm install` to restore them. Remote
 native plugins use their recorded package content hash, including in cold-cache
-CI; a missing hash requires reinstalling to establish that baseline. These
-checks do not turn cache files into deployed-file claims. Native registration
-files are not covered by this content comparison.
+CI; a missing hash requires reinstalling to establish that baseline. Settings
+files are not covered by this content comparison. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 
 This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../enterprise/drift-detection/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
@@ -338,6 +341,13 @@ findings are advisory by default and render as `[!] Drift detected`. With
 `security.audit.fail_on_drift: true`, a failed drift check (including one that
 could not run) promotes the audit to exit `1` and drift renders as `[x]`. An advisory cache-miss skip remains non-failing
 (see [Exit codes](#exit-codes)).
+When drift fails and the org policy cannot be resolved, the audit says so:
+`[x] Org policy could not be resolved; fail_on_drift could not be applied: <cause>`
+with exit `1` when the project requires the policy (`policy.fetch_failure_default: block`).
+Some outcomes always exit `1`, even under `warn`: a rejected inheritance chain
+(cycle, cross-host `extends`, or too deep), a policy hash mismatch, and an
+ambiguous git remote. Any other unresolved policy prints a `[!]` notice and
+drift stays advisory.
 
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
 informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
@@ -388,7 +398,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | Clean, info-only findings, advisory drift without `security.audit.fail_on_drift`, an advisory cache-miss skip, or successful `--strip`. |
-| `1` | Critical findings, `PACKAGE` not installed, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, drift-check failures promoted by `security.audit.fail_on_drift`, or (except with `--file`) an `apm.lock.yaml` written by a newer APM (the message names both versions). |
+| `1` | Critical findings, `PACKAGE` not installed, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, drift-check failures promoted by `security.audit.fail_on_drift` or by a required org policy that cannot be resolved, or (except with `--file`) an `apm.lock.yaml` written by a newer APM (the message names both versions). |
 | `2` | Warning-only findings, or usage error (mutually exclusive flags). |
 | `3` | Configuration or infrastructure error (feature not enabled, scanner not found, malformed SARIF). |
 
@@ -397,7 +407,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | All checks passed. |
-| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), an explicit `--policy` source could not be loaded, or `apm.lock.yaml` was written by a newer APM. |
+| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), an explicit `--policy` source could not be loaded, a required org policy (`policy.fetch_failure_default: block`) could not be resolved, or `apm.lock.yaml` was written by a newer APM. |
 
 CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 

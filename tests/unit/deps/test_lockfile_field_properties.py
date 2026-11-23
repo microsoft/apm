@@ -171,6 +171,9 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
             ]
         ),
     )
+    kwargs["package_targets"] = draw(
+        st.one_of(st.just([]), st.permutations(["copilot", "claude"]).map(sorted))
+    )
     kwargs["resolved_url"] = maybe(None, st.just("https://registry.example.invalid/pkg.tgz"))
     kwargs["resolved_hash"] = maybe(None, _SHA.map(lambda s: f"sha256:{s}"))
     kwargs["constraint"] = maybe(None, st.just("^1.0.0"))
@@ -191,6 +194,10 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
                 "plugin", "sha256:" + "0" * 64, "apm-u-0a1b2c3d", "/h/.agents/plugins"
             )
         ),
+    )
+    # Recorded only beside a native_plugin record, so it round-trips only there.
+    kwargs["native_declared"] = (
+        None if kwargs["native_plugin"] is None else maybe(None, st.just(["claude", "copilot"]))
     )
     # Empty maps are omitted from to_dict(); from_dict restores {}. Include
     # both so the round trip covers omission and a non-empty vendor map.

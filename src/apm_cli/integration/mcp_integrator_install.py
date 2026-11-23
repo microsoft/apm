@@ -504,6 +504,7 @@ def _install_registry_group(  # noqa: PLR0913
                                 native_hashes=native_hashes,
                                 written_hashes=written_hashes,
                                 written_connections=written_connections,
+                                requested_info=server_info_cache.get(dep),
                             )
                     else:
                         failed_runtimes.append(rt)
@@ -609,15 +610,31 @@ def _skip_unsupported_remote_transport(
 def _remove_native_entry(client: Any, key: str, logger: Any) -> None:
     """Remove exactly *key* from *client*'s native MCP config, failing loudly."""
     from apm_cli.adapters.client._remote_shapes import remote_shape_of
-    from apm_cli.integration.mcp_integrator import _clean_json_mcp_config, _clean_toml_mcp_config
+    from apm_cli.adapters.client.hermes import HermesClientAdapter
+    from apm_cli.adapters.client.opencode import V2_MCP_SETTINGS, OpenCodeClientAdapter
+    from apm_cli.integration.mcp_integrator import (
+        _clean_hermes_mcp_config,
+        _clean_json_mcp_config,
+        _clean_toml_mcp_config,
+    )
 
     path = Path(client.get_config_path())
     label = f"{remote_shape_of(client).label} MCP config"
+    if isinstance(client, HermesClientAdapter):
+        _clean_hermes_mcp_config(path, {key}, logger, fail_on_write_error=True)
+        return
     if path.suffix == ".toml":
         _clean_toml_mcp_config(
             path, {key}, label, logger=logger, use_rich=False, fail_on_write_error=True
         )
         return
+    nested: dict[str, Any] = {}
+    if isinstance(client, OpenCodeClientAdapter):
+        # OpenCode v2 keeps servers under mcp.servers beside the v1 entries.
+        nested = {
+            "nested_servers": OpenCodeClientAdapter.native_v2_servers,
+            "nested_settings": V2_MCP_SETTINGS,
+        }
     _clean_json_mcp_config(
         path,
         {key},
@@ -626,6 +643,7 @@ def _remove_native_entry(client: Any, key: str, logger: Any) -> None:
         servers_key=client.mcp_servers_key,
         trailing_newline=client.json_config_trailing_newline,
         fail_on_write_error=True,
+        **nested,
     )
 
 
@@ -813,8 +831,12 @@ def _record_managed_server(
     native_hashes: dict[str, dict[str, str]] | None = None,
     written_hashes: dict[str, str] | None = None,
     written_connections: set[tuple[str, str]] | None = None,
+    requested_info: dict | None = None,
 ) -> None:
     """Record a server only after APM successfully writes its target config."""
+    from apm_cli.install.mcp.write_receipts import note_mcp_write
+
+    note_mcp_write(runtime, server_name, (written_hashes or {}).get(server_name), requested_info)
     if managed_target_servers is not None:
         managed_target_servers.setdefault(runtime, set()).add(server_name)
     if native_hashes is not None and written_hashes and server_name in written_hashes:
@@ -1053,12 +1075,14 @@ def _resolve_target_runtimes(
     scope: InstallScope | None,
     logger,
     console,
+    materialize: bool = True,
 ) -> list[str] | None:
     """Detect, filter, and gate the target runtimes for MCP installation.
 
     Returns a (possibly empty) list of runtime names to target, or ``None``
     when the caller should immediately return 0 (e.g. all runtimes excluded,
-    no user-scope-capable runtimes available).
+    no user-scope-capable runtimes available). ``materialize=False`` resolves
+    read-only, creating no target directory (the #4268 install preflight).
     """
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -1247,7 +1271,8 @@ def _resolve_target_runtimes(
         )
 
     if (
-        not user_scope
+        materialize
+        and not user_scope
         and target_decision is not None
         and target_decision.canonical_targets is not None
     ):
@@ -1632,6 +1657,7 @@ def _install_self_defined_deps(
                         native_hashes=native_hashes,
                         written_hashes=written_hashes,
                         written_connections=written_connections,
+                        requested_info=synthetic_info,
                     )
             else:
                 failed_runtimes.append(rt)
