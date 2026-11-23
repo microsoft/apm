@@ -158,22 +158,28 @@ def apply_entry_modes(staged: Path, mode: int | dict[str, int]) -> None:
     place: a read-only directory cannot be renamed into another directory.
     """
     if isinstance(mode, int):
-        os.chmod(staged, mode)
+        _chmod_nofollow(staged, mode)
         return
     for rel in sorted((rel for rel in mode if rel), key=lambda n: n.count("/"), reverse=True):
-        os.chmod(staged / rel, mode[rel])
+        entry = staged / rel
+        _chmod_nofollow(entry, mode[rel], directory=stat.S_ISDIR(os.lstat(entry).st_mode))
 
 
 def apply_own_mode(path: Path, mode: int | dict[str, int]) -> None:
     """Give a restored directory its own recorded mode, never through a link."""
-    if not isinstance(mode, dict):
-        return
+    if isinstance(mode, dict):
+        _chmod_nofollow(path, mode[""], directory=True)
+
+
+def _chmod_nofollow(path: Path, mode: int, *, directory: bool = False) -> None:
+    """Set *path*'s mode through a handle that refuses a link (#5134)."""
     if not hasattr(os, "O_NOFOLLOW"):
-        os.chmod(path, mode[""])  # Windows: only the read-only flag
+        os.chmod(path, mode)  # Windows: only the read-only flag
         return
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    flags = os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if directory else 0)
+    fd = os.open(path, flags)
     try:
-        os.fchmod(fd, mode[""])
+        os.fchmod(fd, mode)
     finally:
         os.close(fd)
 
