@@ -186,6 +186,8 @@ def sources_scan_clean(project_root: Path, lock: Any) -> bool:
         if key == ".":
             continue
         root = dep.to_dependency_ref().get_install_path(modules)
+        if os.path.islink(root):
+            return False
         for directory, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d != ".git"]
             if any(os.path.islink(os.path.join(directory, n)) for n in (*dirnames, *filenames)):

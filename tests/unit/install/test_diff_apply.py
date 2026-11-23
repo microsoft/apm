@@ -276,6 +276,23 @@ def test_a_symlink_in_a_package_copy_takes_the_full_pipeline(tmp_path: Path) -> 
     assert (agents / "real.agent.md").read_text(encoding="ascii") == "# agent\n"
 
 
+def test_a_symlinked_package_root_takes_the_full_pipeline(tmp_path: Path) -> None:
+    """apm_modules/<pkg> pointing elsewhere is never walked as the package (W3c)."""
+    from apm_cli.install import noop_diff
+
+    lock = _lock(**{"o/p": {}})
+    lock.dependencies["o/p"].to_dependency_ref = lambda: SimpleNamespace(
+        get_install_path=lambda modules: modules / "o" / "p"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "apm.yml").write_text("name: p\n", encoding="ascii")
+    (tmp_path / "apm_modules" / "o").mkdir(parents=True)
+    (tmp_path / "apm_modules" / "o" / "p").symlink_to(elsewhere)
+    assert not noop_diff.sources_scan_clean(tmp_path, lock)
+    assert (elsewhere / "apm.yml").read_text(encoding="ascii") == "name: p\n"
+
+
 def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     rel = ".github/prompts/a.prompt.md"
     lock = _lock(**{"o/p": {rel: _digest(b"locked\n")}})
