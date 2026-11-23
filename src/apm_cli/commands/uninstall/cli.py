@@ -1238,9 +1238,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
         surviving_deps = list(current_deps)
         for declaration in manifest_declarations_of(current_deps, packages_to_remove):
             surviving_deps.remove(declaration)
-        removed_keys = builtins.set()
-        for package in packages_to_remove:
-            removed_keys.add(_removed_lock_key(package, lockfile))
+        removed_keys = {_removed_lock_key(package, lockfile) for package in packages_to_remove}
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
@@ -1324,9 +1322,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
         surviving_deps = _surviving_declarations(
             current_deps, [*packages_to_remove, *still_needed_packages]
         )
-        removed_keys = builtins.set()
-        for package in packages_to_remove:
-            removed_keys.add(_removed_lock_key(package, lockfile))
+        removed_keys = {_removed_lock_key(package, lockfile) for package in packages_to_remove}
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
