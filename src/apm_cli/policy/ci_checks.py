@@ -1386,8 +1386,7 @@ def _check_drift(
 
         try:
             scratch = run_replay(config, logger)
-        except (AgentPluginDeploymentBoundaryError, CodexNativeError, NativeRouteError) as exc:
-            # A failed check, so JSON and SARIF output still carry the refusal.
+        except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:
             return (
                 CheckResult(
                     name="drift",
@@ -1397,8 +1396,9 @@ def _check_drift(
                 ),
                 [],
             )
-        except PolicyViolationError as exc:
-            # Org policy asked to block when it cannot be resolved.
+        except (PolicyViolationError, NativeRouteError) as exc:
+            # Org policy asked to block when it cannot be resolved, or apm.yml's
+            # native route is refused (#4995): a failed check JSON/SARIF still carry.
             return (
                 CheckResult(
                     name="drift",
