@@ -308,7 +308,7 @@ class TestSkillSpectorAdapter:
     def test_unavailable_when_binary_absent(self, monkeypatch) -> None:
         import apm_cli.security.external.skillspector as mod
 
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(mod.git_env, "trusted_executable", lambda _name: None)
         ok, reason = mod.SkillSpectorAdapter().is_available()
         assert ok is False
         assert "PATH" in reason
@@ -318,14 +318,18 @@ class TestSkillSpectorAdapter:
     def test_available_when_binary_present(self, monkeypatch) -> None:
         import apm_cli.security.external.skillspector as mod
 
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
         assert mod.SkillSpectorAdapter().is_available() == (True, None)
 
     def test_scan_passes_no_llm_flag(self, monkeypatch, tmp_path: Path) -> None:
         """--no-llm must be part of the command so scans work without an API key."""
         import apm_cli.security.external.skillspector as mod
 
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
 
         captured_cmd: list[str] = []
         sarif = (
@@ -346,7 +350,9 @@ class TestSkillSpectorAdapter:
         import apm_cli.security.external.skillspector as mod
         from apm_cli.security.external.base import ExternalScanError
 
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
 
         error_text = "Error: NVIDIA_API_KEY not set. Please configure an API key."
 
@@ -363,7 +369,9 @@ class TestSkillSpectorAdapter:
         import apm_cli.security.external.skillspector as mod
         from apm_cli.security.external.base import ExternalScanError
 
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        monkeypatch.setattr(
+            mod.git_env, "trusted_executable", lambda _name: "/usr/bin/skillspector"
+        )
 
         # ANSI escape + non-ASCII char embedded in vendor error output.
         error_text = "\x1b[31mError\x1b[0m: caf\u00e9 failure"

@@ -224,7 +224,7 @@ class HermesClientAdapter(CopilotClientAdapter):
             from .config_journal import journal_config_write, journal_config_written
 
             text = yaml_to_str(data)
-            journal_config_write(path, text)
+            journal_config_write(path, text, lf=True)
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(path, text, new_file_mode=_CONFIG_FILE_MODE)
             # Tighten perms even when the file pre-existed with a looser mode
