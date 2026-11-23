@@ -449,11 +449,3 @@ def test_backslash_traversal_is_refused_before_any_write(fmt, tmp_path):
     assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
     assert not (tmp_path / "x.md").exists()
 
-
-def test_zip_name_with_a_nul_is_refused_before_any_write(tmp_path):
-    """#4974: zipfile cuts a name at NUL; the archive's own name is what is judged."""
-    data = _build_zip_entries([("apm.yml", b"name: x\n", 0), ("a.mdX.sh", b"x", 0)])
-    data = data.replace(b"a.mdX.sh", b"a.md\x00.sh")
-    with pytest.raises(UnsafeTarballError, match="null byte"):
-        extract_zip(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
-    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))

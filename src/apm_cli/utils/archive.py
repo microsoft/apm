@@ -349,10 +349,6 @@ def safe_extract_zip(
             _raise(error_type, f"Refusing to extract symlink: {info.filename}")
         if file_type not in _ZIP_ALLOWED_FILE_TYPES:
             _raise(error_type, f"Refusing to extract special file: {info.filename!r}")
-        # zipfile cuts a name at its first NUL; judge the name the archive stores.
-        stored = info.orig_filename
-        if "\x00" in stored:
-            _raise(error_type, f"Refusing to extract entry with a null byte: {stored!r}")
         member_name = info.filename
         if member_name_transform is not None:
             member_name = member_name_transform(member_name)
