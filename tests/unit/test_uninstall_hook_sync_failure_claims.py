@@ -408,3 +408,41 @@ def test_a_retained_claim_with_a_survivors_identity_joins_that_survivor(tmp_path
     assert row.depth == 1
     assert row.resolved_by is None
     assert set(row.deployed_files) == {".x/kept.md", ".github/hooks/s.json"}
+
+
+def test_a_retained_hook_claim_survives_the_removal_of_an_emptied_mcp_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Clash cell: #4862 deletes the .mcp.json APM created once its last
+    # server leaves, in the same uninstall that keeps a hook claim (#4851).
+    _hook_package(tmp_path / "pkg")
+    (tmp_path / "pkg" / "apm.yml").write_text(
+        "name: hooked\nversion: 1.0.0\ndependencies:\n  mcp:\n"
+        "    - name: hooked-srv\n      registry: false\n      transport: stdio\n"
+        "      command: echo\n",
+        encoding="ascii",
+    )
+    project = tmp_path / "app"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: app\nversion: 1.0.0\ntargets: [copilot]\n"
+        "dependencies:\n  apm:\n    - path: ../pkg\n",
+        encoding="ascii",
+    )
+    monkeypatch.chdir(project)
+    install = CliRunner().invoke(cli, ["install", "--target", "copilot"])
+    assert install.exit_code == 0, install.output
+    assert (project / ".mcp.json").is_file()
+    hooks = [path for path in _claims(project)["hooked"] if "/hooks/" in path]
+    attempts = _fail_second_unlink(monkeypatch, {(project / path).resolve() for path in hooks})
+
+    uninstall = CliRunner().invoke(cli, ["uninstall", "../pkg"])
+
+    monkeypatch.undo()
+    assert len(attempts) >= 2, uninstall.output
+    assert uninstall.exit_code == 1, uninstall.output
+    assert not (project / ".mcp.json").exists(), uninstall.output
+    lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    assert not lock.get("mcp_servers"), lock
+    assert all((project / path).is_file() for path in hooks)
+    assert set(hooks) <= set(_claims(project).get("hooked", [])), _claims(project)
