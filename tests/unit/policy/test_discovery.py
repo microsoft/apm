@@ -239,6 +239,20 @@ class TestCacheReadWrite(unittest.TestCase):
             meta_file.write_text(json.dumps(meta), encoding="utf-8")
             self.assertIsNone(_read_cache(repo_ref, root))
 
+    def test_a_pre_trust_transitive_cache_entry_is_not_read(self):
+        """Schema 6 serialized an omitted mcp.trust_transitive as false (req-sc-016)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+            _write_cache(repo_ref, _make_test_policy(), root)
+            meta_file = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta["schema_version"] = "6"
+            meta_file.write_text(json.dumps(meta), encoding="utf-8")
+            self.assertIsNone(_read_cache(repo_ref, root))
+            # The stale entry is dropped from disk, so the next run fetches afresh.
+            self.assertFalse(meta_file.exists())
+
     def test_project_local_policy_cache_is_not_read(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1171,7 +1185,7 @@ class TestAutoDiscover(unittest.TestCase):
 
     # --- GitLab namespace ancestry walk (#2753) ---
 
-    def _walk(self, side_effect, namespaces=None, **kwargs):
+    def _walk(self, side_effect, namespaces=None, prepare=None, no_cache=True, **kwargs):
         """Run _auto_discover over a nested GitLab ancestry with a fake fetch."""
         levels = namespaces or ["acme/dept-a/team-x", "acme/dept-a", "acme"]
         with (
@@ -1185,7 +1199,9 @@ class TestAutoDiscover(unittest.TestCase):
             ) as fetch,
             tempfile.TemporaryDirectory() as tmpdir,
         ):
-            result = _auto_discover(Path(tmpdir), no_cache=True, **kwargs)
+            if prepare is not None:
+                prepare(Path(tmpdir))
+            result = _auto_discover(Path(tmpdir), no_cache=no_cache, **kwargs)
         return result, fetch
 
     @staticmethod
@@ -1286,6 +1302,28 @@ class TestAutoDiscover(unittest.TestCase):
 
         self.assertIs(result, mismatch)
         fetch.assert_called_once()
+
+    def test_gitlab_ancestry_pinned_never_reads_a_namespace_from_the_cache(self):
+        """A pinned project resolves every namespace from the source, never the cache."""
+        levels = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        ancestry_ref = "gitlab.com/acme/dept-a/team-x/apm-policy#ancestry"
+
+        def poison(root):
+            # Cache entries that say less than the namespaces do.
+            refs = [ancestry_ref] + [f"gitlab.com/{level}/apm-policy" for level in levels]
+            for ref in refs:
+                _write_cache(ref, ApmPolicy(), root)
+                self.assertTrue((_get_cache_dir(root) / f"{_cache_key(ref)}.yml").exists())
+
+        result, fetch = self._walk(
+            [self._found(level) for level in levels],
+            prepare=poison,
+            no_cache=False,
+            expected_hash="sha256:" + "a" * 64,
+        )
+
+        self.assertEqual(result.source, "org:gitlab.com/acme/dept-a/team-x/apm-policy")
+        self.assertEqual([c.kwargs["no_cache"] for c in fetch.call_args_list], [True] * 3)
 
     def test_gitlab_ancestry_empty_child_does_not_shadow_ancestor(self):
         """An empty team policy is the leaf; the company policy still composes."""

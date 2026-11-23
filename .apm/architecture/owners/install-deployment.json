@@ -23,7 +23,7 @@
       "id": "orphan-package-selection",
       "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
       "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner)",
-      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py"],
+      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py"],
       "guards": ["install-deployment-orphan-selection"]
     },
     {
@@ -144,7 +144,8 @@
         "src/apm_cli/install/deploy_snapshot.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",
-        "src/apm_cli/integration/write_seam.py"
+        "src/apm_cli/integration/write_seam.py",
+        "src/apm_cli/policy/depth_check.py"
       ],
       "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
     },
@@ -237,7 +238,7 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text) and for command writers (CommandIntegrator._rendered_command); a differing managed file is replaced only with this checkout's trusted receipt or bytes equal to the locked render (OverwriteGate bound by recorded_writes, #4360), never on a lockfile hash; case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text) and for command writers (CommandIntegrator._rendered_command); a differing managed file is replaced only with this checkout's trusted receipt or bytes equal to the locked render (OverwriteGate bound by recorded_writes, #4360), never on a lockfile hash, decided by keeps_unproven_file for file primitives (_check_adopt_or_skip) and for hook files, copied hook scripts and canvas bundles (keeps_edited_output; a bundle with a kept member is left whole, #4626); case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
       "selectors": [
         "src/apm_cli/integration/base_integrator.py",
         "src/apm_cli/integration/cleanup.py",
@@ -440,7 +441,7 @@
     {
       "id": "policy-outcome-routing",
       "decision": "How every policy-discovery outcome is handled (enforce, report and skip, or block) for every command that reads org policy, over a closed outcome set where an unknown outcome blocks; including which org policy an executables-trust reader applies when discovery does not return a usable policy, and that a wrongly typed policy field is a malformed policy (#4027, #4084, #4140)",
-      "owner": "policy/outcome_routing.py (POLICY_DISCOVERY_OUTCOMES and _OUTCOME_ROUTES; classify_discovery_outcome decides, route_discovery_outcome logs and raises, classify_project_policy and resolve_trust_policy serve readers with policy.fetch_failure_default); consumers: install/phases/policy_gate.py, policy/install_preflight.py, commands/audit.py _audit_ci_gate, commands/approve.py _load_org_policy, commands/update.py _executables_need_reconcile, security/trust.py McpAdmission.for_project, security/executables.py resolve_project_exec_allow_map, install/exec_gate.py ReplayExecAllowMap, install/local_bundle_handler.py effective_bundle_allow_map, commands/audit.py _audit_ci_gate drift replay; policy/parser.py validate_policy type-checks every field (_ENUM_FIELDS, _check_enums) so a wrongly typed field routes as malformed, core/lifecycle_scripts.py build_runner_from_context",
+      "owner": "policy/outcome_routing.py (POLICY_DISCOVERY_OUTCOMES and _OUTCOME_ROUTES; classify_discovery_outcome decides, route_discovery_outcome logs and raises, classify_project_policy and resolve_trust_policy serve readers with policy.fetch_failure_default); consumers: install/phases/policy_gate.py, policy/install_preflight.py, commands/audit.py _audit_ci_gate, commands/approve.py _load_org_policy, commands/update.py _executables_need_reconcile, security/trust.py McpAdmission.for_project, security/executables.py resolve_project_exec_allow_map, install/exec_gate.py ReplayExecAllowMap, install/local_bundle_handler.py effective_bundle_allow_map, commands/audit.py _audit_ci_gate drift replay, commands/audit.py _resolve_fail_on_drift; policy/parser.py validate_policy type-checks every field (_ENUM_FIELDS, _check_enums) so a wrongly typed field routes as malformed, core/lifecycle_scripts.py build_runner_from_context",
       "selectors": ["src/apm_cli/policy/outcome_routing.py"],
       "guards": ["install-deployment-policy-field-types", "install-deployment-policy-outcome-routing", "install-deployment-trust-policy-outcome"]
     },

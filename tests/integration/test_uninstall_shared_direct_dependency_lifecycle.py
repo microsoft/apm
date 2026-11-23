@@ -13,6 +13,7 @@ A dependency no other package reaches is still removed in full.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -302,3 +303,127 @@ def test_uninstall_reparents_to_a_surviving_local_parent_by_its_lock_key(
     world.apm("uninstall", "test/e")
     assert _rows(world)["test/e"]["depth"] == 2
     _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_reparents_a_descendant_to_its_nearest_surviving_parent(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: d -> e -> f and g -> f; once e is not direct, f sits under g at depth 2."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e"), ("g", "f")),
+        ["test/d", "test/e", "test/g"],
+    )
+    world.apm("uninstall", "test/e")
+    rows = _rows(world)
+    assert (rows["test/e"]["resolved_by"], rows["test/e"]["depth"]) == ("test/d", 2)
+    assert (rows["test/f"]["resolved_by"], rows["test/f"]["depth"]) == ("test/g", 2)
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_takes_the_shorter_dev_path_through_an_expanded_node(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: p -> q -> x -> e and b -> c -> e, with x also a direct dev dependency."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("e", None), ("x", "e"), ("q", "x"), ("p", "q"), ("c", "e"), ("b", "c")),
+        ["test/p", "test/b", "test/e"],
+        dev=["test/x"],
+    )
+    world.apm("uninstall", "test/e")
+    row = _rows(world)["test/e"]
+    assert (row["resolved_by"], row["depth"], row.get("is_dev")) == ("test/x", 2, None)
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_makes_a_shared_descendant_dev_only_graph_wide(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: dev d -> e, e -> f, dev a -> f; once e is not direct, f is dev-only."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e"), ("a", "f")),
+        ["test/e"],
+        dev=["test/d", "test/a"],
+    )
+    world.apm("uninstall", "test/e")
+    rows = _rows(world)
+    assert rows["test/e"].get("is_dev") is True
+    assert rows["test/f"].get("is_dev") is True
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_refuses_a_local_dependency_another_package_still_needs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4882: dev ./vendor/d declares ../e; uninstalling direct ./vendor/e refuses.
+
+    A kept local dependency would change lock identity (its anchored key), so
+    uninstall refuses before any write instead of leaving a lock that
+    ``install --frozen`` rejects.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+        },
+        world.project / "apm.yml",
+    )
+    world.apm("install")
+    before = tree_digest(world.project)
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    assert refused.returncode == 1
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert (
+        "./vendor/e stays: ./vendor/d still needs it; apm.yml and apm.lock.yaml were not changed."
+    ) in output
+    assert "Uninstall the package that still needs it first" in output
+    assert tree_digest(world.project) == before
+    world.apm("install", "--frozen")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX sh lifecycle script")
+def test_still_needed_local_refusal_runs_before_pre_uninstall_scripts(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4882: the refusal fires before a trusted pre-uninstall script can write."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+            "lifecycle": {"pre-uninstall": [{"type": "command", "run": "sh ./hook.sh"}]},
+        },
+        world.project / "apm.yml",
+    )
+    write(world.project / "hook.sh", "echo ran > hook-ran.txt\n")
+    world.apm("install")
+    world.apm("lifecycle", "trust")
+    before = tree_digest(world.project)
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "./vendor/e stays: ./vendor/d still needs it" in output
+    assert not (world.project / "hook-ran.txt").exists()
+    assert tree_digest(world.project) == before

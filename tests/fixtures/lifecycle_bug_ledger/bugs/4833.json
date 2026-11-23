@@ -1,0 +1,18 @@
+{
+  "issue": 4833,
+  "fixed_in": "Unreleased",
+  "summary": "After apm uninstall kept a dependency another package still needed, rows beyond the kept dependency's recorded subtree kept stale metadata: a descendant another survivor also declares kept its old parent, a shorter dev path through an already-walked package was missed, and a shared descendant stayed production; parent, depth and dev status now come from one graph-wide pass, matching a full apm install byte for byte.",
+  "failure_modes": [
+    "idempotency",
+    "outcome"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_reparents_a_descendant_to_its_nearest_surviving_parent",
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_takes_the_shorter_dev_path_through_an_expanded_node",
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_makes_a_shared_descendant_dev_only_graph_wide"
+  ]
+}

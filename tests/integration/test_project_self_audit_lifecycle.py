@@ -131,14 +131,13 @@ def test_required_project_self_audit_replays_install_without_sibling_skills(
     changed = audit("project-self-audit-changed", expected_returncode=1)
     assert {"content-integrity", "drift"} <= _failed_checks(changed)
     # A changed managed file is never overwritten without evidence (#4360):
-    # install keeps it and exits 1; the printed remedy (move it aside) converges.
+    # install keeps it and exits 0 (#4873); the printed remedy (move it aside) converges.
     _run_refused(
         scenario,
         project,
         managed,
         "project-self-repair-changed-refused",
         environment=scenario.environment,
-        local=True,
     )
     managed.unlink()
     run(_INSTALL_ARGS, "project-self-repair-changed")

@@ -30,7 +30,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     (APPROVE, "_confirm_first_approval"): "project first-approval prompt",
     (APPROVE, "_record_and_save"): "names the --user store flag of the grant it lifts",
     (APPROVE, "_lift_deny_hint"): "names the deny layer's own store flag",
-    ("src/apm_cli/install/mcp/integration.py", "warn_one_off_trust"): "project one-off trust",
     ("src/apm_cli/security/executables.py", "_filter_declared_services"): "catalog in #4143",
     ("src/apm_cli/security/executables.py", "_item_error"): "grant parse error",
     ("src/apm_cli/security/executables.py", "_parse_grant_block"): "grant parse error",

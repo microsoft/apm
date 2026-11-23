@@ -442,3 +442,18 @@ def test_prune_names_an_empty_kind_native_survivor_once(monkeypatch, tmp_path):
 
     warnings = [call.args[0] for call in logger.warning.call_args_list]
     assert warnings == [f"{key} native plugin is no longer allowed (not approved); removing it"]
+
+
+def test_refusal_names_an_absolute_local_parent_portably():
+    """A still-needed refusal never prints a machine-specific parent path (#4882)."""
+    from apm_cli.commands.uninstall.cli import _locked_parent_label, lockfile_parent_identity
+
+    lockfile = LockFile()
+    parent = LockedDependency(repo_url="_local/d", source="local", local_path="/home/user/vendor/d")
+    lockfile.add_dependency(parent)
+    identity = lockfile_parent_identity(parent, lockfile.replacements)
+
+    label = _locked_parent_label(lockfile, identity)
+
+    assert "/home/user" not in label
+    assert label.startswith("_local/")

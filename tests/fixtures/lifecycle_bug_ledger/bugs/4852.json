@@ -1,0 +1,17 @@
+{
+  "issue": 4852,
+  "fixed_in": "Unreleased",
+  "summary": "apm install that retired the last APM entry from a config file APM created left the file behind as an empty skeleton (.mcp.json as {\"mcpServers\": {}}, .claude/settings.json as {}) and an empty mcp_target_servers lock field; the file now goes when nothing else is in it and the lock omits the empty field, so the result equals a fresh deploy, while a file holding the user's own entries or keys stays.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/security/test_incremental_deploy_differential.py::test_install_after_a_change_equals_a_fresh_deploy",
+    "tests/lifecycle/security/test_incremental_deploy_differential.py::test_retiring_apm_entries_keeps_a_config_file_with_user_content"
+  ]
+}
