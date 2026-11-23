@@ -439,17 +439,19 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
     for key in keys:
         kept = []
         for entry in env.get(key, "").split(os.pathsep):
-            if not entry or not Path(entry).expanduser().is_absolute():
+            expanded = Path(entry).expanduser() if entry else None
+            if expanded is None or not expanded.is_absolute():
                 continue
             try:
-                directory = Path(entry).expanduser().resolve()
+                directory = expanded.resolve()
                 if _within(directory, exclusion_root):
                     continue
                 if _links_into(directory, exclusion_root):
                     continue
             except (OSError, ValueError):
                 continue
-            kept.append(entry)
+            # The shell would read a literal ``~`` as a directory under the cwd.
+            kept.append(str(expanded))
         if not kept:
             # An empty PATH makes POSIX shells search the working directory.
             raise FileNotFoundError(
