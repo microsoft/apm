@@ -1017,6 +1017,44 @@ def test_a_reanchor_ranks_shared_skill_writers_as_install_orders_them(
     _assert_reanchored_like_a_full_install(world)
 
 
+def test_a_reanchor_keeps_a_third_provider_that_still_writes_last(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 R2: e, z and y ship ``shared``; y, never re-ranked, still installs last.
+
+    After the re-anchor ``local:vendor/e`` and ``local:vendor/y`` share depth 2
+    and y sorts after e, so a fresh install keeps y as the writer: the
+    prediction must weigh every provider, not prefer the re-anchored one.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "y", "y")
+    _skill_package(vendor / "z", "z", ("../e", "../y"))
+    for name in ("e", "y", "z"):
+        write(
+            vendor / name / ".apm/skills/shared/SKILL.md",
+            "---\nname: shared\ndescription: Shared skill\n---\n# E\n",
+        )
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    owners = {
+        row["value"]: row["active_owner"]
+        for row in load_yaml(world.project / "apm.lock.yaml")["deployments"]
+    }
+    assert owners[_SHARED_SKILL] == "local:vendor/y", owners
+
+    world.apm("uninstall", "./vendor/e")
+
+    owners = {
+        row["value"]: row["active_owner"]
+        for row in load_yaml(world.project / "apm.lock.yaml")["deployments"]
+    }
+    assert owners[_SHARED_SKILL] == "local:vendor/y", owners
+    _assert_reanchored_like_a_full_install(world)
+
+
 def test_a_reanchor_refuses_a_shared_file_whose_owner_declares_no_rule(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
