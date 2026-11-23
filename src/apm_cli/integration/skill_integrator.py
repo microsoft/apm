@@ -572,47 +572,10 @@ class SkillIntegrator(BaseIntegrator):
     def verbatim_destinations(
         self, package_info, project_root: Path, targets, source_plan=None
     ) -> dict[Path, Path] | None:
-        """``{target_path: source}`` the sub-skill copy may write for *targets*, else ``None``.
+        """See :func:`apm_cli.integration.skill_bundle_routes.verbatim_destinations`."""
+        from apm_cli.integration.skill_bundle_routes import verbatim_destinations
 
-        The same route, skill-root dedup, promoted name and admitted member
-        walk the sub-skill and bundle promotion uses. Native skills and
-        marketplace plugins are not mapped (``None``). Whether a member is a
-        byte copy is proven by its bytes.
-        """
-        from copy import copy
-
-        from apm_cli.integration.skill_support import _build_deployable_copy_ignore
-        from apm_cli.models.apm_package import PackageType
-
-        info = copy(package_info)
-        info.install_path = Path(package_info.install_path).resolve()
-        selection = self.selected_skill_sources(info)
-        if selection.route == "none":
-            return {}
-        # Bundle and sub-skill routes promote each selected child the same way;
-        # native skills and marketplace plugins have their own deploy paths.
-        if selection.route not in ("subskills", "bundle") or (
-            getattr(info, "package_type", None) is PackageType.MARKETPLACE_PLUGIN
-        ):
-            return None
-        ignore = _build_deployable_copy_ignore(source_plan=source_plan)
-        planned: dict[Path, Path] = {}
-        seen_roots: set[Path] = set()
-        for target in targets:
-            if not target.supports("skills"):
-                continue
-            skills_root = project_root / target.skills_rel_root
-            if skills_root.resolve() in seen_roots:
-                continue
-            seen_roots.add(skills_root.resolve())
-            for name in sorted(selection.children):
-                child = selection.children[name]
-                if not child.is_dir() or not (child / "SKILL.md").exists():
-                    continue
-                destination = skills_root / promoted_skill_name(child.name)
-                for member in self.admitted_source_members(child, ignore):
-                    planned[destination / member.relative_to(child)] = member
-        return planned
+        return verbatim_destinations(self, package_info, project_root, targets, source_plan)
 
     def _ownership_maps(self, lockfile_root: Path) -> tuple[Mapping[str, str], Mapping[str, str]]:
         """Read durable ownership once per used root in the current integration phase."""
