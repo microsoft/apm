@@ -57,6 +57,8 @@ def _assert_exit(result: CommandResult, expected: int = 0) -> None:
 
 
 def _hook_commands(settings_path: Path) -> set[str]:
+    if not settings_path.exists():
+        return set()  # an emptied settings file APM created is deleted (#4852)
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     return {
         str(handler["command"])
