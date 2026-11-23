@@ -601,3 +601,6 @@ def test_trust_context_setters_survive_an_injected_ssl_context(monkeypatch):
 
     assert context.verify_mode == arl.ssl.CERT_REQUIRED
     assert context.minimum_version == arl.ssl.TLSVersion.TLSv1_2
+    assert context.check_hostname is True
+    with pytest.raises(ValueError, match="check_hostname"):
+        context.verify_mode = arl.ssl.CERT_NONE
