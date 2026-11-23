@@ -3220,6 +3220,66 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A trust reader drops the policy discovery outcome and keeps only .policy.",
     ),
     MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="if not absence_proven(Path(deploy_root), path, pinned=root_pin)",
+        new="if Path(deploy_root, path).exists()",
+        intent="An aborted uninstall sync probes the file itself, following a swapped link.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-access",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="if not absence_proven(Path(deploy_root), path, pinned=root_pin)",
+        new=(
+            "if os.access(Path(deploy_root, path), os.F_OK)"
+            " or not absence_proven(Path(deploy_root), path, pinned=root_pin)"
+        ),
+        intent="The absence decision consults os.access beside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-binding",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="from .hook_absence import absence_proven, root_identity\n",
+        new=(
+            "from os.path import exists as absence_proven\n"
+            "\n"
+            "from .hook_absence import root_identity\n"
+        ),
+        intent="absence_proven is rebound to a plain path probe under the same spelling.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-child-no-follow",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/hook_absence.py",
+        old="os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)",
+        new="os.open(part, os.O_RDONLY | os.O_DIRECTORY, dir_fd=handle)",
+        intent="The walk below the root follows a parent swapped for a link.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-helper",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="    failed = list(integration_cleanup.failed_paths)\n",
+        new=(
+            "    def _gone(target):\n"
+            "        return not Path(target).exists()\n"
+            "\n"
+            "    failed = [p for p in integration_cleanup.failed_paths if not _gone(p)]\n"
+        ),
+        intent="A local helper wrapping Path.exists decides absence beside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-moved-pin",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="(deploy_root, manifest_path.parent, root_pin)",
+        new="(deploy_root, manifest_path.parent, root_identity(deploy_root))",
+        intent="The root is pinned again after the sync, so a replaced root is trusted.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-preflight",
         rule_id="install-deployment-uninstall-preflight",
         path="src/apm_cli/commands/uninstall/cli.py",
