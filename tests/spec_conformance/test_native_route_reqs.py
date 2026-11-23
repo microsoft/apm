@@ -11,10 +11,11 @@ from apm_cli.models.apm_package import APMPackage, DependencyReference
 from apm_cli.native_plugins.route import effective_native_route
 from tests.spec_conformance._helpers import assert_spec_contains
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-claude-native-plugin-registration")]
 
 
 def _manifest(tmp_path: Path, body: str) -> APMPackage:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "apm.yml"
     path.write_text("name: root\nversion: 1.0.0\n" + body, encoding="utf-8")
     return APMPackage.from_apm_yml(path)
@@ -94,3 +95,52 @@ def test_an_opted_out_plugin_is_never_planned_natively(tmp_path: Path) -> None:
     )
 
     assert plan is None
+
+
+@pytest.mark.req("req-mf-030")
+def test_spec_states_the_folded_route_clauses() -> None:
+    assert_spec_contains(
+        "except where [req-tg-011](#req-tg-011) makes the dependency opaque",
+        "under [req-tg-013](#req-tg-013) MUST NOT register such a dependency there either",
+        "Under a frozen install ([req-lk-006](#req-lk-006)), when the lockfile records a",
+        "per [req-na-004](#req-na-004) from the previous and the next lockfile",
+    )
+
+
+@pytest.mark.req("req-mf-030")
+def test_frozen_names_a_locked_native_plugin_the_manifest_opts_out(tmp_path: Path) -> None:
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.native_plugins.record import NativePluginRecord
+    from apm_cli.native_plugins.route import frozen_route_change_reasons
+
+    lock = LockFile()
+    for key, native in (("acme/native", True), ("acme/loose", False)):
+        locked = LockedDependency(repo_url=key, resolved_commit="a" * 40)
+        if native:
+            locked.native_plugin = NativePluginRecord(
+                "n", "sha256:" + "0" * 64, "apm-p-00000000", "./.agents/plugins"
+            )
+        lock.dependencies[key] = locked
+    entries = "".join(
+        f"    - git: {key}\n      native: false\n" for key in ("acme/native", "acme/loose")
+    )
+    opted_out = _manifest(tmp_path, "dependencies:\n  apm:\n" + entries)
+
+    reasons = frozen_route_change_reasons(lock, opted_out)
+
+    assert len(reasons) == 1 and "acme/native" in reasons[0]
+    auto = _manifest(
+        tmp_path / "auto", "dependencies:\n  apm:\n    - acme/native\n    - acme/loose\n"
+    )
+    assert frozen_route_change_reasons(lock, auto) == []
+
+
+@pytest.mark.req("req-mf-030")
+@pytest.mark.parametrize("order", [("true", "false"), ("false", "true")], ids=["f-last", "f-first"])
+def test_conflicting_root_declarations_resolve_false_in_any_order(
+    tmp_path: Path, order: tuple[str, str]
+) -> None:
+    entries = "".join(f"    - path: ./pkg\n      native: {value}\n" for value in order)
+    manifest = _manifest(tmp_path, "dependencies:\n  apm:\n" + entries)
+
+    assert effective_native_route(DependencyReference.parse("./pkg"), manifest) is False

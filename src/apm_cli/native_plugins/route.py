@@ -12,15 +12,20 @@ from typing import Any
 
 
 def _declared_native(dep: Any, manifest: Any) -> bool | None:
-    """The ``native:`` key on *manifest*'s own declaration of *dep*, if any."""
+    """The ``native:`` key on *manifest*'s own declarations of *dep*, if any.
+
+    Declarations that disagree resolve to ``False`` whatever their order.
+    """
     getter = getattr(manifest, "get_all_apm_dependencies", None)
     if dep is None or getter is None:
         return None
     key = dep.get_unique_key()
-    for declared in getter():
-        if declared.get_unique_key() == key:
-            return getattr(declared, "native", None)
-    return None
+    values = {
+        getattr(declared, "native", None)
+        for declared in getter()
+        if declared.get_unique_key() == key
+    } - {None}
+    return None if not values else all(values)
 
 
 def effective_native_route(dep: Any, manifest: Any) -> bool:

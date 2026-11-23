@@ -468,13 +468,11 @@ def plan_native_claude_plugin(
     """
     from apm_cli.native_plugins.route import effective_native_route
 
-    if not effective_native_route(package_info.dependency_ref, manifest):
-        return None
     user_scope = is_user_scope(scope)
     harnesses = plugin_harnesses(agent_plugin=False, user_scope=user_scope) & {
         t.name for t in targets
     }
-    if not harnesses:
+    if not harnesses or not effective_native_route(package_info.dependency_ref, manifest):
         return None
     root = Path(package_info.install_path)
     package_type = package_info.package_type

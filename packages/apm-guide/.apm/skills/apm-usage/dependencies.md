@@ -299,6 +299,14 @@ dependencies mentioned in prose are collected. Use a directory package with
   targets: [claude]
 ```
 
+`native: false` on a dependency (or top-level `native_plugins: false` for every
+dependency without its own key) installs a Claude-format plugin loose on every
+harness instead of as a native plugin under `.agents/plugins/`: every primitive
+deploys, including skills a later version adds. `native: true` overrides the
+project default. Only booleans are accepted. Transitive plugins follow the
+project default. Switching routes moves an installed plugin on the next
+`apm install`; `--frozen` refuses that move.
+
 After install, `apm deps list` presents a local dependency as
 `_local/<directory-or-file-name>`. For a direct declaration with matching
 `apm.lock.yaml` metadata, that portable key is accepted verbatim by

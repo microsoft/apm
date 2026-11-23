@@ -122,13 +122,9 @@ def _assert_native(world: _World, name: str) -> None:
     assert any(key.startswith(f"{name}@") for key in _apm_registration(world.settings()))
 
 
-@pytest.fixture
-def world(tmp_path: Path, apm_binary_path: Path) -> _World:
-    return _World(tmp_path, apm_binary_path)
-
-
-def test_native_false_deploys_every_primitive_loose(world: _World) -> None:
+def test_native_false_deploys_every_primitive_loose(tmp_path: Path, apm_binary_path: Path) -> None:
     """(1) native: false projects the plugin loose, with no native registration."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     world.manifest([{"path": plugin.as_posix(), "native": "false"}])
 
@@ -138,8 +134,11 @@ def test_native_false_deploys_every_primitive_loose(world: _World) -> None:
     assert not (world.project / ".agents/plugins").exists()
 
 
-def test_project_default_goes_loose_and_a_dependency_key_overrides_it(world: _World) -> None:
+def test_project_default_goes_loose_and_a_dependency_key_overrides_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
     """(2) native_plugins: false sends keyless deps loose; native: true stays native."""
+    world = _World(tmp_path, apm_binary_path)
     loose, native = world.plugin("lo"), world.plugin("na")
     world.manifest(
         [loose.as_posix(), {"path": native.as_posix(), "native": "true"}],
@@ -154,8 +153,12 @@ def test_project_default_goes_loose_and_a_dependency_key_overrides_it(world: _Wo
     _assert_native(world, "na")
 
 
-def test_flipping_the_route_moves_the_plugin_and_keeps_user_entries(world: _World) -> None:
+@pytest.mark.req("req-mf-030")
+def test_flipping_the_route_moves_the_plugin_and_keeps_user_entries(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
     """(3) native -> loose retires APM's registration only; loose -> native removes loose files."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     world.manifest([plugin.as_posix()])
     world.ok("install", "--no-policy")
@@ -182,9 +185,10 @@ def test_flipping_the_route_moves_the_plugin_and_keeps_user_entries(world: _Worl
 
 
 def test_a_skill_a_later_version_adds_deploys_loose_without_a_manifest_change(
-    world: _World,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """(4) native: false follows the package: a new skill arrives on the next install."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     world.manifest([{"path": plugin.as_posix(), "native": "false"}])
     world.ok("install", "--no-policy")
@@ -195,8 +199,12 @@ def test_a_skill_a_later_version_adds_deploys_loose_without_a_manifest_change(
     _assert_loose(world, "dn", skills=("alpha", "beta"))
 
 
-def test_frozen_refuses_a_route_change_until_a_normal_install(world: _World) -> None:
+@pytest.mark.req("req-mf-030")
+def test_frozen_refuses_a_route_change_until_a_normal_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
     """(5) --frozen names the route change; after a normal install it passes."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     world.manifest([plugin.as_posix()])
     world.ok("install", "--no-policy")
@@ -215,9 +223,10 @@ def test_frozen_refuses_a_route_change_until_a_normal_install(world: _World) -> 
 
 @pytest.mark.parametrize("project_default", ["", "native_plugins: false"], ids=["auto", "off"])
 def test_a_transitive_plugin_follows_the_project_default(
-    world: _World, project_default: str
+    tmp_path: Path, apm_binary_path: Path, project_default: str
 ) -> None:
     """(6) A parent's native key binds only the parent; its plugin dep follows the project."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("tp")
     parent = world.packages / "parent"
     (parent / ".apm/instructions").mkdir(parents=True)
@@ -238,8 +247,11 @@ def test_a_transitive_plugin_follows_the_project_default(
         _assert_native(world, "tp")
 
 
-def test_user_scope_native_false_deploys_loose_under_the_claude_home(world: _World) -> None:
+def test_user_scope_native_false_deploys_loose_under_the_claude_home(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
     """(7) At user scope the same key reads from ~/.apm/apm.yml."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     user_manifest = world.isolated.config_root
     user_manifest.mkdir(parents=True, exist_ok=True)
@@ -257,17 +269,23 @@ def test_user_scope_native_false_deploys_loose_under_the_claude_home(world: _Wor
     )
 
 
-def test_an_opted_out_dependency_gets_no_native_route_notice(world: _World) -> None:
+def test_an_opted_out_dependency_gets_no_native_route_notice(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
     """(8) A native: false dependency is not on the native route, so no notice names it."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     world.manifest([{"path": plugin.as_posix(), "native": "false"}])
 
     result = world.ok("install", "--no-policy")
 
-    assert "native plugin" not in _text(result).lower(), _evidence(result)
-    assert "worktree" not in _text(result).lower(), _evidence(result)
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    assert "native plugin" not in output, _evidence(result)
+    assert "worktree" not in output, _evidence(result)
+    assert (world.project / ".claude/skills/alpha/SKILL.md").is_file()
 
 
+@pytest.mark.req("req-mf-030")
 @pytest.mark.parametrize(
     ("dep_key", "top", "field"),
     [
@@ -277,9 +295,10 @@ def test_an_opted_out_dependency_gets_no_native_route_notice(world: _World) -> N
     ids=["native", "native_plugins"],
 )
 def test_an_invalid_value_is_refused_at_parse_time(
-    world: _World, dep_key: str, top: str, field: str
+    tmp_path: Path, apm_binary_path: Path, dep_key: str, top: str, field: str
 ) -> None:
     """(9) Only booleans are accepted; the error names the field and writes nothing."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     dep = {"path": plugin.as_posix(), "native": dep_key} if dep_key else plugin.as_posix()
     world.manifest([dep], top=top)
@@ -292,14 +311,69 @@ def test_an_invalid_value_is_refused_at_parse_time(
     assert not (world.project / ".agents").exists()
 
 
-def test_the_native_route_prints_one_diagnostic_naming_the_opt_out(world: _World) -> None:
+def test_the_native_route_prints_one_diagnostic_naming_the_opt_out(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
     """(10) One diagnostic names worktrees, claude -p, Copilot CLI 1.0.106 and native: false."""
+    world = _World(tmp_path, apm_binary_path)
     plugin = world.plugin("dn")
     world.manifest([plugin.as_posix()])
 
     result = world.ok("install", "--no-policy")
 
-    text = _text(result)
+    text = " ".join(f"{result.stdout}\n{result.stderr}".split())
     assert text.count("native: false") == 1, _evidence(result)
     for needle in ("worktree", "claude -p", "claude-code-action", "1.0.106"):
         assert needle in text, (needle, _evidence(result))
+
+
+def test_an_opted_out_agent_plugin_is_skipped_not_projected(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An Agent Plugin has no loose route: native: false skips it with one diagnostic."""
+    world = _World(tmp_path, apm_binary_path)
+    root = world.packages / "ap"
+    (root / "skills/alpha").mkdir(parents=True)
+    (root / "skills/alpha/SKILL.md").write_text(
+        "---\nname: alpha\ndescription: a\n---\nAlpha.\n", encoding="utf-8"
+    )
+    (root / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+                "name": "ap",
+                "version": "1.0.0",
+                "description": "d",
+                "license": "MIT",
+            }
+        ),
+        encoding="utf-8",
+    )
+    world.manifest([{"path": root.as_posix(), "native": "false"}])
+
+    result = world.run("install", "--no-policy")
+
+    output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert output.count("keeps this dependency off native plugins") == 1, _evidence(result)
+    assert not (world.project / ".agents").exists()
+    assert not (world.project / ".github/skills").exists()
+    assert not (world.project / ".claude/skills").exists()
+
+
+def test_conflicting_declarations_keep_the_plugin_loose(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two root declarations that disagree resolve to loose, whatever their order."""
+    world = _World(tmp_path, apm_binary_path)
+    plugin = world.plugin("dn")
+    world.manifest(
+        [
+            {"path": plugin.as_posix(), "native": "true"},
+            {"path": plugin.as_posix(), "native": "false"},
+        ]
+    )
+
+    result = world.run("install", "--no-policy")
+
+    assert result.returncode == 0, _evidence(result)
+    _assert_loose(world, "dn")

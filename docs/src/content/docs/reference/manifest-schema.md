@@ -501,6 +501,26 @@ dependencies:
 
 The value MUST be a bare hostname: no scheme, port, or path. Each manifest uses its own value, so a dependency's `apm.yml` without `default_host:` falls back to the default above, not to the consumer's value. Normative contract: [req-mf-019](../../specs/openapm-v01/#req-mf-019).
 
+### 3.16. `native_plugins`
+
+| | |
+|---|---|
+| **Type** | `boolean` |
+| **Required** | OPTIONAL |
+| **Default** | Absent: APM decides the route per plugin, as it does today. |
+| **Description** | `false` installs every plugin dependency loose instead of as a native plugin: its skills, commands and other primitives go into each harness's own directories, and nothing goes under `.agents/plugins/` or into `extraKnownMarketplaces`/`enabledPlugins`. A dependency's own [`native`](#412-object-form) key overrides it. |
+
+```yaml
+native_plugins: false           # every plugin dependency deploys loose
+dependencies:
+  apm:
+    - dotnet/skills/plugins/dotnet11
+    - git: contoso/review-kit
+      native: true              # this one stays a native plugin
+```
+
+Transitive plugin dependencies follow this default; a `native` key on a dependency binds only that entry. At user scope APM reads it from `~/.apm/apm.yml`. Any value other than `true` or `false` is rejected. Normative contract: [req-mf-030](../../specs/openapm-v01/#req-mf-030).
+
 ---
 
 ## 4. Dependencies
@@ -601,6 +621,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
+| `native` | `boolean` | OPTIONAL | `true` or `false` | `false` installs this plugin loose on every harness, never as a native plugin; every primitive it ships deploys, including skills a later version adds. `true` or omitted follows the [`native_plugins`](#316-native_plugins) default, else the automatic route. |
 | `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`, `grok-bot`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. `vscode` is accepted as a deprecated alias and recorded as `copilot`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list; `agent-skills` is also accepted by the `grok-bot` target. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an

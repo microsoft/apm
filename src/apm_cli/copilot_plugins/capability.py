@@ -41,6 +41,8 @@ class NativeRegistrationCapability:
     supported: bool
     reason: str | None = None
     target: str | None = None
+    # Root manifest the native route is decided by (#4995); None leaves it automatic.
+    manifest: Any = None
 
     def require(self) -> None:
         """Raise the canonical boundary error when registration is unavailable."""
@@ -139,4 +141,10 @@ def admits_native_plugin(package_info: Any | None) -> bool:
     if package is None or getattr(package, "agent_plugin", None) is None:
         return False
     capability = current_native_registration()
-    return capability is not None and capability.supported
+    if capability is None or not capability.supported:
+        return False
+    from ..native_plugins.route import effective_native_route
+
+    return effective_native_route(
+        getattr(package_info, "dependency_ref", None), capability.manifest
+    )

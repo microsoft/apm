@@ -1213,6 +1213,12 @@ FROZEN_TARGET_DROPPED = _entry(
     f"retire the dropped target and update apm.lock.yaml ({_UNFROZEN})",
     then="commit apm.lock.yaml",
 )
+FROZEN_NATIVE_ROUTE_CHANGED = _entry(
+    "frozen-native-route-changed",
+    "apm install",
+    f"move the plugin to its new route and update apm.lock.yaml ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
+)
 FROZEN_LOCKFILE_WITHHELD = _entry(
     "frozen-lockfile-withheld",
     "apm install",

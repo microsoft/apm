@@ -24,6 +24,13 @@ AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED = (
     "local-bundle route, which deploys loose primitives and owns no lockfile "
     "row. " + AGENT_PLUGIN_BUNDLE_ROUTE.sentence()
 )
+AGENT_PLUGIN_NATIVE_OPTED_OUT = (
+    "Agent Plugins v1.0.0 deployment is skipped because apm.yml keeps this "
+    "dependency off native plugins (native: false or native_plugins: false), "
+    "and an Agent Plugin has no loose deployment. Remove the opt-out for this "
+    "dependency to install it."
+)
+
 AGENT_PLUGIN_IR_MISSING = (
     "Native Agent Plugin canonical IR is missing, so deployment was blocked. "
     + AGENT_PLUGIN_RECOVERY
@@ -103,6 +110,11 @@ def enforce_agent_plugin_deployment_boundary(
         raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_IR_MISSING)
     capability = current_native_registration()
     if capability is not None and capability.supported:
+        from apm_cli.native_plugins.route import effective_native_route
+
+        # An opted-out Agent Plugin stays opaque: skipped, never projected (#4995).
+        if not effective_native_route(package_info.dependency_ref, capability.manifest):
+            raise AgentPluginTargetExcludedError(AGENT_PLUGIN_NATIVE_OPTED_OUT)
         return
     # Not supported: the only reason admission is unsupported is that the
     # effective target set never selected ``copilot`` -- admission never

@@ -26,6 +26,10 @@ _REGISTRATION_ATTR = "_copilot_registration_token"
 def activate(ctx: InstallContext) -> None:
     """Resolve and publish the native registration capability for this install."""
     capability = resolve_native_registration_capability(getattr(ctx, "targets", None))
+    if capability.supported:
+        from dataclasses import replace
+
+        capability = replace(capability, manifest=getattr(ctx, "apm_package", None))
     ctx.copilot_registration = capability
     _log_capability_decision(ctx, capability)
     setattr(ctx, _REGISTRATION_ATTR, activate_native_registration(capability))

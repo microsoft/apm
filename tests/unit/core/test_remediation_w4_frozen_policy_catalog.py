@@ -59,6 +59,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "deployment-ownership-missing": _FAULT,
     "drift-cache-unpopulated": "audit replay re-fetches a missing remote package; only a "
     "missing local source misses, and install cannot restore that",
+    "frozen-native-route-changed": "executed by test_native_plugin_opt_out_lifecycle::"
+    "test_frozen_refuses_a_route_change_until_a_normal_install (#4995)",
     "frozen-target-dropped": "executed by test_frozen_dropped_target_lifecycle::"
     "test_frozen_refuses_a_dropped_target_with_zero_writes_and_its_remedy_runs (#4519)",
     "frozen-local-content-changed": "needs a frozen local-path dependency; covered by the "

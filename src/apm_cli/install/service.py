@@ -650,7 +650,7 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: apm.yml changes a dependency's native plugin route.",
                 reasons=route_reasons,
-                tip="Run 'apm install' without --frozen to move it, then commit apm.lock.yaml.",
+                tip=f"Tip: {remediation.FROZEN_NATIVE_ROUTE_CHANGED.sentence()}",
             )
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
 

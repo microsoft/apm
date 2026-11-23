@@ -193,13 +193,14 @@
     {
       "id": "claude-native-plugin-registration",
       "decision": "Intact native plugin admission, lockfile-derived native ownership (native_plugin records), deployment to .agents/plugins (user home or committed project), and settings-only declaration to Claude Code and GitHub Copilot through the shared native settings writer without any vendor CLI",
-      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_native_plugins, verify_claude_native_cache) for Claude Code and GitHub Copilot at both scopes; native_plugins/ (record, layout, settings, scopes, uninstall, carry)",
+      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_native_plugins, verify_claude_native_cache) for Claude Code and GitHub Copilot at both scopes; native_plugins/ (record, layout, settings, scopes, uninstall, carry; route.effective_native_route decides native or loose per dependency, #4995)",
       "selectors": [
         "src/apm_cli/claude_plugins/admission.py",
         "src/apm_cli/claude_plugins/registrar.py",
         "src/apm_cli/native_plugins/carry.py",
         "src/apm_cli/native_plugins/layout.py",
         "src/apm_cli/native_plugins/record.py",
+        "src/apm_cli/native_plugins/route.py",
         "src/apm_cli/native_plugins/scopes.py",
         "src/apm_cli/native_plugins/settings.py",
         "src/apm_cli/native_plugins/uninstall.py"

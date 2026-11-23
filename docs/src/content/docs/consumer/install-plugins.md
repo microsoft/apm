@@ -40,7 +40,7 @@ What APM does depends on the plugin format:
 
 | Plugin format | What APM does today |
 |---|---|
-| Claude Code plugin (`.claude-plugin/plugin.json`), targets `claude`, or `copilot` at project scope | Deploys the publisher's files whole to `.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`) and declares them in each harness's settings, so the harness loads a real plugin. See [Native plugins](#native-plugins). A plugin with only a root `plugin.json` (an `apm pack` bundle), or a dependency with a `skills:` selection, deploys loose at project scope and is parked with `-g`. |
+| Claude Code plugin (`.claude-plugin/plugin.json`), targets `claude`, or `copilot` at project scope | Deploys the publisher's files whole to `.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`) and declares them in each harness's settings, so the harness loads a real plugin. See [Native plugins](#native-plugins). A plugin with only a root `plugin.json` (an `apm pack` bundle), or a dependency with a `skills:` selection, deploys loose at project scope and is parked with `-g`. A dependency with `native: false` (or a project with `native_plugins: false`) deploys loose in both scopes; see [Keep a plugin loose](#keep-a-plugin-loose). |
 | Claude Code plugin, other targets | Splits it into primitives for each selected harness, in that harness's own skill, agent, command, hook and MCP paths. |
 | Agent Plugin (`plugin.json` with the Agent Plugins `$schema`) | For GitHub Copilot: deploys it whole to `.agents/plugins/<plugin>/` and declares it in `.github/copilot/settings.json` (`~/.copilot/settings.json` with `-g`); Copilot CLI 1.0.81 or later loads it. A target list without `copilot` refuses it. Its root `mcp.json` is an executable (`mcp`, plus `bin` for a server that runs a command); approve the whole plugin with `apm approve <package>` ([details](../../reference/cli/approve/)). |
 | Codex bundle (`.codex-plugin/plugin.json`) | With `apm install -g --target codex` and Codex CLI 0.163.0 or later: registers the whole bundle with Codex at user scope, disabled until you enable it ([details](../installing-from-marketplaces/#codex-compatibility-bundles-through-apm)). |
@@ -175,6 +175,31 @@ Any other command (`apm uninstall`, `apm prune`, `--target claude`) leaves the
 old registration in place and warns you to run `apm install`. An unreadable
 ledger is never deleted.
 
+### Keep a plugin loose
+
+Native plugins don't load everywhere: not in a git worktree, not in
+non-interactive Claude Code (`claude -p`, `anthropics/claude-code-action`),
+and Copilot CLI 1.0.106 registers the marketplace without listing the
+plugin's skills. To deploy a plugin's skills, commands and other primitives
+loose instead, as before 0.37, set `native: false` on the dependency:
+
+```yaml
+dependencies:
+  apm:
+    - git: dotnet/skills
+      path: plugins/dotnet11
+      native: false
+```
+
+Or set `native_plugins: false` at the top of `apm.yml` for every dependency,
+and `native: true` on the ones that should stay native. A skill a later
+version adds deploys on the next `apm install` without a manifest change.
+The next install moves an installed plugin: it removes the plugin from
+`.agents/plugins/` and the `extraKnownMarketplaces`/`enabledPlugins` entries
+APM wrote, keeps entries you wrote, and deploys loose. `apm install --frozen`
+refuses that move until a normal install records it.
+[Manifest reference](../../reference/manifest-schema/#316-native_plugins).
+
 ## Known gaps
 
 | Gap | Effect | Workaround |
@@ -182,7 +207,7 @@ ledger is never deleted.
 | Hooks or commands that expect the plugin root, on targets other than `claude` and `copilot`, where APM splits the plugin ([#2824](https://github.com/microsoft/apm/issues/2824), [#3191](https://github.com/microsoft/apm/issues/3191), [#3181](https://github.com/microsoft/apm/issues/3181)) | Hook or command fails or points at a missing path | Use the plugin through Claude Code or Copilot |
 | Two plugins split for non-native targets ship a skill or agent with the same name ([#1120](https://github.com/microsoft/apm/issues/1120)) | Names collide | Install one of them, or select skills with `--skill` |
 | A plugin that declares other plugins in `plugin.json` `dependencies` | Parked until APM can resolve plugin dependencies | Declare the dependencies in your `apm.yml` and exclude the plugin from `claude` and `copilot` |
-| A git worktree | Claude Code resolves `./.agents/plugins` against the main checkout | Run `apm install` in the main checkout too |
+| A git worktree | Claude Code resolves `./.agents/plugins` against the main checkout | Run `apm install` in the main checkout too, or [keep the plugin loose](#keep-a-plugin-loose) |
 | A newly declared plugin | Claude Code may load it only from the second session | Start another session |
 | Codex bundles | User scope, qualified on macOS arm64; the route is planned to change ([#3920](https://github.com/microsoft/apm/issues/3920)) | Use Codex's own `codex plugin add` |
 
