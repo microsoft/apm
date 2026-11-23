@@ -1380,3 +1380,49 @@ def test_uninstall_user_bundle_with_a_claude_config_outside_home(
     claims = load_yaml(lock_path).get("local_deployed_files") or []
     assert not [p for p in claims if p.endswith("/x.sh")], claims
     assert not any(Path(p).exists() for p in scripts), scripts
+
+
+def test_uninstall_retry_by_bundle_path_finishes_an_aliased_bundle_record(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5003: a bundle installed with --as is retried by its path after a failed record update."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "alias-retry-consumer", key)
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    assert "hooks" in _pending_types(consumer)["team-hooks"]
+
+    _source_apm(world, consumer, "uninstall", str(bundle), expect=1)
+    assert _hook_entries(consumer) == {}
+    assert "hooks" in _pending_types(consumer)["team-hooks"]
+
+    before = tree_bytes(consumer)
+    retried = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'team-hooks'" in retried, retried
+    after = tree_bytes(consumer)
+    changed = {p for p in before.keys() | after.keys() if before.get(p) != after.get(p)}
+    assert changed == {"apm_modules/.local-bundle-pending.json"}, changed
+    assert "hooks" not in _pending_types(consumer).get("team-hooks", [])
+
+
+def test_uninstall_retry_by_bundle_path_refuses_two_aliased_copies(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5003 control: two retiring copies of one bundle stay ambiguous by path."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "alias-twins-consumer", key)
+    world.apm(consumer, "install", str(bundle), "--as", "team-a")
+    world.apm(consumer, "install", str(bundle), "--as", "team-b")
+    for slug in ("team-a", "team-b"):
+        _source_apm(world, consumer, "uninstall", slug, expect=1, locked=slug)
+    assert {"team-a", "team-b"} <= {
+        slug for slug, types in _pending_types(consumer).items() if "hooks" in types
+    }
+    before = tree_bytes(consumer)
+
+    refused = " ".join(output(world.apm(consumer, "uninstall", str(bundle), expect=1)).split())
+
+    assert "matches 2 installed local bundles (team-a, team-b)" in refused, refused
+    assert tree_bytes(consumer) == before
+    world.apm(consumer, "uninstall", "team-a")
