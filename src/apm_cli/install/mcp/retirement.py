@@ -49,6 +49,34 @@ def retire_mcp_claims(
         raise
 
 
+def stale_claim_remover(
+    logger: Any,
+    destination: tuple[Path | None, bool, Any],
+    baselines: tuple[dict, dict],
+) -> Callable[[builtins.set, str | None, str | None], None]:
+    """Return the ``remove`` step: retire stale claims against their recorded baselines."""
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    project_root, user_scope, scope = destination
+    stored_configs, native_hashes = baselines
+
+    def remove(names: builtins.set, runtime: str | None, exclude: str | None) -> None:
+        MCPIntegrator.remove_stale(
+            names,
+            runtime,
+            exclude,
+            project_root=project_root,
+            user_scope=user_scope,
+            scope=scope,
+            fail_on_write_error=True,
+            stored_configs=stored_configs,
+            native_hashes=native_hashes,
+        )
+        logger.record_mcp_removed(names)
+
+    return remove
+
+
 def record_refused_retirement(
     lock_path: Path,
     logger: Any,
