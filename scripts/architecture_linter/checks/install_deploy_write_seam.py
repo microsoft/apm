@@ -398,10 +398,17 @@ def check_deploy_write_seam(provider: FactsProvider) -> tuple[Violation, ...]:
         return (*found, *failures)
     transaction_text = "\n".join(_lines(transaction))
     # The journal token lets the config file records name this install (#5051).
-    listen = "write_seam.listen(self._record_deploy_write, self._seal_deploy_write, journal="
-    if listen not in transaction_text:
+    listen = "write_seam.listen(self._record_deploy_write, self._seal_deploy_write, journal=token)"
+    if (
+        listen not in transaction_text
+        or "token = self._deploy_journal.token" not in transaction_text
+    ):
         found.append(
-            _summary(rule_id, _TRANSACTION, "InstallTransaction must journal at the write seam")
+            _summary(
+                rule_id,
+                _TRANSACTION,
+                "InstallTransaction must journal at the write seam with its journal's token",
+            )
         )
     return tuple(found)
 
