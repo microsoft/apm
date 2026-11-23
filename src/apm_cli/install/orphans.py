@@ -493,6 +493,22 @@ def _decide_installed_paths(
         if lockfile is not None
         else frozenset()
     )
+    walk = walks[0] if walks and walks[0].complete else None
+    # Rows kept because a survivor reached through an alias still resolves
+    # through them join the retained graph before any selection, so
+    # inspection (deps list, compile) agrees with prune.
+    declared_keys = {ref.get_unique_key() for ref in declared}
+    anchors = _alias_anchors(
+        lockfile,
+        {
+            key
+            for key in (lockfile.dependencies if lockfile is not None else ())
+            if key != _SELF_KEY and key not in declared_keys and key not in retained
+        },
+        retained,
+        walk,
+    )
+    retained = frozenset(retained | set(anchors))
     apm_modules_dir = installed_paths.root
     expected = _build_expected_install_paths(
         declared,
@@ -512,7 +528,7 @@ def _decide_installed_paths(
         _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
     )
     orphaned = set(_find_orphaned_packages(installed | set(lock_keys_by_path), expected))
-    expected_keys = {ref.get_unique_key() for ref in declared} | retained
+    expected_keys = declared_keys | retained
     removed_paths = tuple(sorted(installed & orphaned))
     stale_keys = tuple(
         sorted(
@@ -530,17 +546,6 @@ def _decide_installed_paths(
     removed_keys = set(stale_keys)
     for keys in path_keys.values():
         removed_keys.update(keys)
-    walk = walks[0] if walks and walks[0].complete else None
-    anchors = _alias_anchors(lockfile, removed_keys, retained, walk)
-    if anchors:
-        removed_keys -= set(anchors)
-        stale_keys = tuple(key for key in stale_keys if key not in anchors)
-        path_keys = {
-            path: kept
-            for path, keys in path_keys.items()
-            if (kept := tuple(key for key in keys if key not in anchors))
-        }
-        removed_paths = tuple(path for path in removed_paths if path in path_keys)
     reparented = _reparented_survivors(lockfile, removed_keys, retained, walk)
     return OrphanRemovalDecision(
         operation=operation,

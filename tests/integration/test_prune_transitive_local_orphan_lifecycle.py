@@ -417,10 +417,17 @@ def test_prune_keeps_the_parent_of_a_survivor_reached_through_an_alias(
     world.apm("install")
     _manifest(world, ["./vendor/a"])
     f_row = _row_named(world, "f")
+    # An unrelated, unlocked root is still pruned alongside the kept chain.
+    stray = world.project / "apm_modules" / "acme" / "stray"
+    _write(stray / "SKILL.md", "---\nname: stray\ndescription: Stray skill\n---\n# stray\n")
 
     pruned = _output(world.apm("prune"))
 
     assert "Retained _local/e:" in pruned, pruned
+    assert not stray.exists()
+    # Inspection agrees with prune: the kept chain is not reported as orphaned.
+    listed = _output(world.apm("deps", "list"))
+    assert "orphaned package(s) found" not in listed, listed
     rows = _rows(world)
     assert "_local/e" in rows, sorted(rows)
     assert _row_named(world, "f") == f_row
