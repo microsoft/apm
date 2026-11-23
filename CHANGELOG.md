@@ -11,9 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- Upgrade notes: plain `apm audit` exits 1 on drift when a required org policy cannot be resolved; org policies now gate transitive MCP servers. (#4920, #4827)
-- Upgrade notes: blocking org policies now stop `apm install` on `manifest.scripts`, `unmanaged_files` and `dependencies.max_depth` violations. (#4853)
-- `apm install` cleans up emptied MCP and Claude config files and narrowed Claude plugins; `apm audit --ci` flags edited MCP entries. (#4862, #4895, #4905)
+- Upgrade notes: org policy is stricter on audit drift, transitive MCP servers and blocking `apm install` fields. (#4920, #4827, #4853)
+- `apm uninstall` adds `--trust-lockfile`, keeps files a local bundle owns, and cleans up orphaned MCP servers and emptied settings. (#4650, #4715, #4900, #4955)
+- `apm pack --format plugin` ships one rendering per primitive, and `apm outdated` runs about 2x faster for github.com dependencies. (#4693, #4960)
+- `apm install` re-verifies cached checkouts and org policies and hardens bundle extraction. (#4891, #4961, #4976, #4978)
 
 ### Breaking changes and upgrade notes
 
@@ -21,15 +22,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Any non-empty org policy now requires an `mcp.allow` entry per transitive MCP server unless it sets `mcp.trust_transitive: true`; add entries or opt in. (#4827)
 - **BREAKING:** Under a blocking org policy, `apm install` now refuses `manifest.scripts: deny`, `unmanaged_files.action: deny` and `dependencies.max_depth` violations; fix the named field. (#4853)
 
+### Added
+
+- `apm uninstall --trust-lockfile` deletes a file lacking deployment evidence only when its bytes match `apm.lock.yaml` and no receipt or render exists. (closes #4295, #4650)
+
+### Changed
+
+- `apm pack --format plugin` ships one rendering per primitive and names the dropped ones; bundle installs convert packed instructions to each target's rule format. (closes #3686, #4693)
+- `apm outdated` and other ref listings for public github.com dependencies run about 2x faster, with no git process per dependency. (#4960)
+
 ### Fixed
 
 - `apm install` now deletes a `.mcp.json` or `.claude/settings.json` it created once its last entry leaves, and omits an empty `mcp_target_servers`. (#4862)
 - `apm install` removes a whole Claude plugin's `enabledPlugins` entry from a harness `targets:` no longer declares; the remaining harness keeps it. (#4895)
 - `apm audit --ci` now fails with `native-mcp-drift`, naming the server and config file, when you edit an MCP entry APM recorded writing. (closes #4757, #4905)
+- A failed `apm install` that keeps an edited MCP entry now records the new MCP entries it wrote in `apm.lock.yaml`. (#4847)
+- A blocked LSP server update no longer deletes the server's OpenCode entry when the new config moves it to a socket transport. (#4885)
+- `apm install --target claude` keeps Claude Code command frontmatter such as `disable-model-invocation` and `effort`; inline `hooks` stay withheld with a warning. -- by @abhishekacharya200 (closes #3067, #3748, #4910, #4932)
+- A command prompt with a non-string frontmatter key (such as `1:`) is skipped with a warning naming it; the other commands still install. (#4971)
+- `apm install --root` now checks `unmanaged_files` against the destination's org policy, also for `--mcp` installs. (closes #4983, #4985)
+- `apm install`, `apm approve` and other trust readers report a rejected org policy inheritance chain as a named error, not a traceback. (#4947)
+- `apm approve` now refuses a package an org or other-store deny still blocks before writing, leaving `apm.yml` and the user store unchanged. (#4928)
+- `apm uninstall` keeps a file a local bundle still owns, and exits non-zero when it reports a package failure. (closes #4703, #4715)
+- `apm uninstall` no longer keeps an MCP server alive for a package `apm.yml` no longer declares and nothing still needs. (#4900)
+- `apm uninstall` names canvas extensions among retired kinds only when the lock records them as deployed, so a Claude-only install says hooks. (#4839)
+- `apm uninstall -g` now deletes an emptied Claude `settings.json` APM created under a `CLAUDE_CONFIG_DIR` outside HOME instead of leaving `{}`. (#4955)
+- `apm audit` no longer fails a JavaScript hook on the module-type `package.json` that `apm install` deploys with it. (closes #4921, #4929)
+- `apm audit --ci` now checks deployed transitive Codex native plugins against `mcp.allow` under `mcp.trust_transitive: false`. (closes #4937, #4938)
+- `apm audit --ci` passes after `apm install -g` when a user-root Claude hook runs only an inline command. (closes #4837, #4883)
 
 ### Security
 
 - Harden `apm install` so it rebuilds any cached repository whose configuration APM did not write. (#4902)
+- Harden `apm install` so cached and cloned package checkouts must match their commit; mismatched checkouts are rebuilt or refused. (#4891)
+- Pinned org policies are re-verified on cached reads, and a cached policy stays fresh for at most 24 hours. (#4961)
+- Harden bundle extraction so entry names resolve the same way on every OS; ambiguous or platform-rewritten names are refused. (#4976, #4978)
+- Align Codex and Hermes MCP config writes with the safeguards the other MCP clients already apply. (#4986)
 
 ## [0.38.1] - 2026-11-23
 
