@@ -616,6 +616,7 @@ def _inputs(
     run_env: list[str],
     surfaces: list[str],
     git_system: str,
+    deployed: frozenset[str],
 ) -> None:
     """Every verdict input, read live (QL D3-D6, O3); a writer reads the run's entry state."""
     digest.put("version", str(RECORD_VERSION).encode())
@@ -676,6 +677,8 @@ def _inputs(
             listing = [entry.name for entry in files] + ["/", *dirs]
             digest.put(f"listing:{here}", "\x00".join(listing).encode("utf-8", "surrogateescape"))
             for entry in files:
+                if f"{here}/{entry.name}" in deployed and not entry.is_symlink():
+                    continue  # its bytes are judged against the MAC'd lock (_deployed_intact)
                 if entry.is_symlink():
                     target = os.readlink(entry.path)
                     digest.put(
@@ -807,16 +810,27 @@ def _provable(lock: dict) -> bool:
     return all(isinstance(row, dict) and _provable_row(row.get) for row in rows)
 
 
+def _deployed_rels(lock: dict) -> frozenset[str]:
+    """Deployed files the lock records a content hash for (mapping rows)."""
+    return frozenset(
+        rel
+        for row in lock.get("dependencies") or []
+        if isinstance(row, dict)
+        for rel in row.get("deployed_file_hashes") or {}
+    )
+
+
 def _deployed_intact(root: Path, lock: dict) -> bool:
     """Every deployed file and package copy, re-hashed no-follow (QL D5)."""
+    from apm_cli.utils.content_hash import canonical_digest
+
     if not _provable(lock):
         return False
     for dep in lock.get("dependencies") or []:
         for rel, expected in (dep.get("deployed_file_hashes") or {}).items():
             data = _read_nofollow(root / rel)
-            if data is None:
-                return False
-            if "sha256:" + hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest() != expected:
+            # The engine's own judgment of a present deployed file (diff_apply._plan_files).
+            if data is None or f"sha256:{canonical_digest(data)}" != expected:
                 return False
         repo = str(dep.get("repo_url", ""))
         expected = dep.get("content_hash")
@@ -879,8 +893,13 @@ def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
     lock_tag = hmac.new(key, lock_text, hashlib.sha256).hexdigest()[:16]
     if dict(record.get("tags") or []).get("lock") != lock_tag:
         raise _Miss("inputs changed: lock")  # before any other input is read
+    import yaml
+
+    lock = yaml.load(lock_text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
+    if not isinstance(lock, dict):
+        raise _Miss("lock")
     digest = _Digest(key)
-    _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system)
+    _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, _deployed_rels(lock))
     _body(digest, record)
     now = time.time()
     issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
@@ -890,10 +909,7 @@ def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
         old = dict(record.get("tags") or [])
         changed = sorted(t for t, h in digest.tags if old.get(t) != h)
         raise _Miss(f"inputs changed: {', '.join(changed[:6])}")
-    import yaml
-
-    lock = yaml.load(lock_text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
-    if not isinstance(lock, dict) or not _deployed_intact(root, lock):
+    if not _deployed_intact(root, lock):
         raise _Miss("deployed bytes")
     return record, _render_ages(str(record.get("stdout", "")))
 
@@ -1057,8 +1073,14 @@ def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
     lock = _committed_lock()
     if lock is None:
         return
+    deployed = frozenset(
+        rel
+        for key, dep in lock.dependencies.items()
+        if key != "."
+        for rel in getattr(dep, "deployed_file_hashes", None) or {}
+    )
     if noop:
-        _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts))
+        _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts), deployed)
         return
     start, end = _SEGMENTS["services"]
     try:
@@ -1067,7 +1089,7 @@ def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
         _trace(f"no record (no-op form: {type(exc).__name__})")
         return
     if text is not None:
-        _write_at_entry(entry, argv, text, "")
+        _write_at_entry(entry, argv, text, "", deployed)
 
 
 def _committed_lock() -> Any:
@@ -1090,13 +1112,17 @@ def _committed_lock() -> Any:
 
 
 def _write_at_entry(
-    entry: tuple[dict[str, str], bytes], argv: list[str], out: str, err: str
+    entry: tuple[dict[str, str], bytes],
+    argv: list[str],
+    out: str,
+    err: str,
+    deployed: frozenset[str],
 ) -> None:
     """Write the record keyed by the run's entry state (what a hit will see)."""
     global _ENTRY_ENV, _ENTRY_PRESENTATION
     _ENTRY_ENV, _ENTRY_PRESENTATION = entry
     try:
-        _write(argv, out, err)
+        _write(argv, out, err, deployed)
     finally:
         _ENTRY_ENV, _ENTRY_PRESENTATION = None, None
 
@@ -1142,7 +1168,7 @@ def _noop_form(argv: list[str], services_text: str, lock: Any) -> str | None:
     return "".join(capture.parts)
 
 
-def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
+def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozenset[str]) -> None:
     root = Path.cwd()
     try:
         if not _location_trusted(root):
@@ -1173,7 +1199,7 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
         surfaces = _owner_surfaces(root)
         git_system = _git_system()
         digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system)
+        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, deployed)
         stderr_kept = "".join(
             line
             for line in stderr_text.splitlines(keepends=True)
