@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -41,6 +42,7 @@ import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -1580,5 +1582,6 @@ def test_missing_digest_for_a_repointed_alias_refuses_and_the_remedy_converges(
     assert re.search(
         rf"\[x\] {registered}\S*\. Re-run with --yes to replace it", " ".join(refusal.split())
     ), refusal
-    assert locked in remedy.group(1), remedy.group(1)
+    advised_source = shlex.split(remedy.group(1))[3]
+    assert urlsplit(advised_source) == urlsplit(locked), (advised_source, locked)
     _converges_after(world, f"{remedy.group(1)} --yes")
