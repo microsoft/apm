@@ -593,6 +593,29 @@ def test_admission_expands_a_hex_name_no_ref_holds(tmp_path: Path, origin: _Orig
     ]
 
 
+@pytest.mark.parametrize("kind", ["tag", "abbreviation"])
+def test_admission_judges_the_full_commit_a_hex_name_resolves_to(
+    tmp_path: Path, origin: _Origin, kind: str
+) -> None:
+    from apm_cli.cache.commit_reachability import admit_pinned_commit
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    if kind == "tag":
+        name, ref_type = origin.f1[:8], GitReferenceType.TAG
+        origin.bare("tag", name, origin.m1)
+    else:
+        name, ref_type = origin.m1[:10], GitReferenceType.COMMIT
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+    resolved = ResolvedReference(
+        original_ref=name, ref_type=ref_type, resolved_commit=origin.m1, ref_name=name
+    )
+
+    admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
+
+    markers = [m.name for m in (tmp_path / "cache" / "reachability").rglob("verified/*")]
+    assert markers == [origin.m1]
+
+
 class TestRefCacheLinks:
     """The ref cache never follows a link."""
 

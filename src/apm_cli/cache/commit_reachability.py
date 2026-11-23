@@ -383,24 +383,30 @@ def _record_tip(downloader, dep_ref, sha: str) -> None:
 def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> None:
     """Admit a dependency's commit before any cache, bare or clone fetch.
 
-    *sha* is the dependency's own ref. When it is not a commit, the commit
-    *resolved* (or ``downloader.resolve_git_reference``) names is used: a
-    commit this run read from the origin's current branch or tag is a tip, so
-    it is recorded as reachable without a check; a commit replayed from the
-    lockfile is checked like any pin. Runs under the credentials the fetch
-    would use.
+    *sha* is the dependency's own ref. A full commit is checked as written.
+    Any other ref, including a hex-like name (a branch or tag first, else a
+    commit abbreviation), is judged by the full commit *resolved* (or
+    ``downloader.resolve_git_reference``) names: a commit this run read from
+    the origin's current branch or tag is a tip, so it is recorded as
+    reachable without a check; an expanded abbreviation or a commit replayed
+    from the lockfile is checked like any pin. Runs under the credentials the
+    fetch would use.
 
     Raises:
         CommitNotReachableError: The commit is not admitted.
     """
-    if not sha or not _COMMIT_RE.match(sha):
-        sha, fresh_tip = _resolved_commit(downloader, dep_ref, resolved)
-        if sha is None:
-            return
-        if fresh_tip:
-            _record_tip(downloader, dep_ref, sha)
-            return
-    _require_at_origin(downloader, dep_ref, sha)
+    if sha and len(sha) in (40, 64) and _COMMIT_RE.match(sha):
+        _require_at_origin(downloader, dep_ref, sha.lower())
+        return
+    commit, fresh_tip = _resolved_commit(downloader, dep_ref, resolved)
+    if commit is None:
+        if sha and _COMMIT_RE.match(sha):
+            raise CommitNotReachableError(f"Could not resolve {sha!r} to an origin commit.")
+        return
+    if fresh_tip:
+        _record_tip(downloader, dep_ref, commit)
+        return
+    _require_at_origin(downloader, dep_ref, commit.lower())
 
 
 def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
@@ -408,18 +414,26 @@ def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
 
     ``git clone --branch`` takes only a short name, which the origin's other
     namespace could also hold, so ``refs/heads/<x>`` and ``refs/tags/<x>``
-    are fetched by the commit they resolve to exactly.
+    are fetched by the commit they resolve to exactly; so is a hex-like name
+    shorter than a full commit, which names a branch or tag first and else an
+    abbreviation, so that admission and the fetch judge the same commit.
 
     Raises:
         CommitNotReachableError: The commit is not admitted.
     """
-    admit_pinned_commit(downloader, dep_ref, ref)
-    if ref and ref.startswith(("refs/heads/", "refs/tags/")):
-        commit = downloader.resolve_git_reference(dep_ref).resolved_commit
-        if not commit or not _COMMIT_RE.match(commit):
-            raise CommitNotReachableError(f"Could not resolve {ref!r} to an origin commit.")
-        return commit.lower()
-    return ref
+    by_commit = ref and (
+        ref.startswith(("refs/heads/", "refs/tags/"))
+        or (len(ref) not in (40, 64) and _COMMIT_RE.match(ref))
+    )
+    if not by_commit:
+        admit_pinned_commit(downloader, dep_ref, ref)
+        return ref
+    resolved = downloader.resolve_git_reference(dep_ref)
+    commit = resolved.resolved_commit
+    if not commit or len(commit) not in (40, 64) or not _COMMIT_RE.match(commit):
+        raise CommitNotReachableError(f"Could not resolve {ref!r} to an origin commit.")
+    admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
+    return commit.lower()
 
 
 def admit_and_resolve(downloader, dep_ref):
