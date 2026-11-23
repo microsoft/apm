@@ -85,6 +85,16 @@ class TestDependencyReferenceSkillSubset:
         with pytest.raises(ValueError, match="must contain at least one"):
             DependencyReference.parse_from_dict(entry)
 
+    def test_parse_skills_star_selects_every_skill(self):
+        ref = DependencyReference.parse_from_dict({"git": "owner/repo", "skills": ["*"]})
+        assert ref.skill_subset == ["*"]
+        assert skill_subset_filter_tokens(ref.skill_subset) is None
+
+    @pytest.mark.parametrize("skills", [["*", "alpha"], ["alpha", "*"], ["*", "*", "beta"]])
+    def test_parse_skills_star_mixed_with_names_raises(self, skills: list[str]) -> None:
+        with pytest.raises(ValueError, match=r"'\*' selects every skill and cannot be combined"):
+            DependencyReference.parse_from_dict({"git": "owner/repo", "skills": skills})
+
     @pytest.mark.parametrize("invalid_name", [None, 7, " "])
     def test_parse_skills_rejects_non_string_or_blank_name(self, invalid_name: object) -> None:
         with pytest.raises(ValueError, match="non-empty string"):

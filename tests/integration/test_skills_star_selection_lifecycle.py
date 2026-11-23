@@ -105,11 +105,10 @@ class _World:
             assert "enabledPlugins" not in declared, declared
 
 
-def test_star_selection_deploys_every_skill_loose_and_picks_up_new_skills(
+def test_star_selection_deploys_every_skill_loose_without_native_registration(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = _World(tmp_path, apm_binary_path, ["*"])
-    manifest = (world.project / "apm.yml").read_bytes()
 
     world.apm("install")
     assert world.loose_skills() == {"alpha", "beta"}
@@ -122,10 +121,19 @@ def test_star_selection_deploys_every_skill_loose_and_picks_up_new_skills(
     world.apm("install")
     assert world.snap() == converged
 
+
+def test_star_selection_deploys_a_skill_added_in_a_later_release(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _World(tmp_path, apm_binary_path, ["*"])
+    manifest = (world.project / "apm.yml").read_bytes()
+    world.apm("install")
+    assert world.loose_skills() == {"alpha", "beta"}
+
     # A later release adds a skill; it arrives with no manifest change.
     world.write_plugin("alpha", "beta", "gamma")
     world.factory.commit(world.repository, message="add gamma")
-    world.apm("update")
+    world.apm("update", "--yes")
     assert world.loose_skills() == {"alpha", "beta", "gamma"}
     world.assert_not_native()
     assert (world.project / "apm.yml").read_bytes() == manifest

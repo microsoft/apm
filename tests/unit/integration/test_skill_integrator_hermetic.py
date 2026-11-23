@@ -1090,6 +1090,29 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
         assert "'skills:' in apm.yml" in warning_msg
         mock_warn.assert_not_called()
 
+    def test_star_selection_on_a_package_without_skills_errors(
+        self, tmp_path: Path, capfd
+    ) -> None:
+        """``skills: ["*"]`` keeps the named no-match error when nothing is available."""
+        pkg_dir = tmp_path / "instr-pkg"
+        pkg_dir.mkdir()
+        dep_ref = MagicMock()
+        dep_ref.is_virtual = False
+        dep_ref.get_unique_key.return_value = "owner/instr-pkg"
+        pi = _make_package_info(pkg_dir, dep_ref=dep_ref)
+
+        count, deployed = SkillIntegrator()._promote_sub_skills_standalone(
+            pi,
+            tmp_path,
+            targets=[_make_target(name="copilot", root_dir=".github")],
+            skill_subset=("*",),
+        )
+
+        captured = capfd.readouterr()
+        out = " ".join((captured.out + captured.err).split())
+        assert (count, deployed) == (0, [])
+        assert "matched no available skills. Requested: *. Available: (none)." in out
+
     def test_missing_skills_directory_errors_without_crashing(self, tmp_path: Path) -> None:
         """An absent source directory is represented as an empty available set."""
         available = SkillIntegrator._skill_names_in_directory(tmp_path / "missing")
