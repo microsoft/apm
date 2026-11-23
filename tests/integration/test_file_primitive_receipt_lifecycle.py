@@ -322,6 +322,41 @@ def test_an_edited_local_output_is_kept_with_exit_zero(
     assert (project / "apm.lock.yaml").read_bytes() == lock
 
 
+def test_a_kept_edit_newly_claimed_locally_never_hashes_the_edit(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A dependency output the project now also renders locally keeps no edited hash (#4873)."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.utils.content_hash import content_hash_of_bytes
+
+    isolated, project, _apm = _setup(tmp_path, apm_binary_path)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    env = isolated.subprocess_env()
+
+    def install():
+        return runner.run(("install", "--no-policy"), cwd=project, env=env)
+
+    first = install()
+    assert first.returncode == 0, first.stdout + first.stderr
+    relative = _ADOPTABLE[0]
+    edited = project / relative
+    source = isolated.work_root / "prims/.apm/instructions/style.instructions.md"
+    _write(project / ".apm/instructions/style.instructions.md", source.read_text())
+    edited.write_bytes(edited.read_bytes() + b"EDIT\n")
+    edited_bytes = edited.read_bytes()
+
+    kept = install()
+
+    output = kept.stdout + kept.stderr
+    assert edited.read_bytes() == edited_bytes, output
+    lock = LockFile.read(project / "apm.lock.yaml")
+    recorded = [
+        *lock.local_deployed_file_hashes.values(),
+        *(h for dep in lock.dependencies.values() for h in dep.deployed_file_hashes.values()),
+    ]
+    assert content_hash_of_bytes(edited_bytes) not in recorded, output
+
+
 def test_a_differing_file_is_never_receipted_by_adoption(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

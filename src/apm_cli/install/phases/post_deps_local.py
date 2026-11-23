@@ -98,7 +98,11 @@ def run(ctx: InstallContext) -> None:
     _current_files = sorted(
         path for path in ctx.local_deployed_files if path not in _dependency_claimed
     )
-    _current_hashes = _hash_deployed(_current_files, ctx.project_root)
+    # A kept edited local output never hashes the edit (#4873), as for dependencies.
+    _retained = getattr(ctx, "package_cleanup_retained", {}).get(".", {})
+    _current_hashes = _hash_deployed(
+        (path for path in _current_files if path not in _retained), ctx.project_root
+    )
     _ghost_count = 0
 
     def _log_local_ghost_drop(path: str) -> None:
@@ -133,8 +137,7 @@ def run(ctx: InstallContext) -> None:
         on_ghost_drop=_log_local_ghost_drop,
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
-        # A kept edited local output keeps its prior hash, never the edit's (#4873).
-        cleanup_retained_hashes=getattr(ctx, "package_cleanup_retained", {}).get("."),
+        cleanup_retained_hashes=_retained,
         current_run_trusted=not _local_had_errors,
         retained_values=frozenset(_kept),
         include_ledger=True,
