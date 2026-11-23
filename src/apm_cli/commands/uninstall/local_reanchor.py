@@ -219,14 +219,21 @@ def plan_local_reanchor(
 def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
     """Each re-keyed root's current install directory and the one install now uses.
 
-    A re-anchored directory that already exists refuses before any write.
+    A missing current copy, or a re-anchored directory that already exists,
+    refuses before any write: either leaves apm_modules unlike a fresh install.
     """
     moves = []
     for key, node in nodes.items():
         current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
         target = node.get_install_path(modules_dir)
-        if current == target or not current.is_dir():
+        if current == target:
             continue
+        if current.is_symlink() or not current.is_dir():
+            raise LocalReanchorRefused(
+                f"{label(key)} stays, but its apm_modules copy "
+                f"{current.relative_to(modules_dir).as_posix()} is missing, so it cannot move "
+                "with the re-anchor"
+            )
         if target.exists():
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its re-anchored directory "
@@ -238,11 +245,13 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
 
 def move_materializations(
     moves: tuple[tuple[Path, Path], ...], modules_dir: Path
-) -> tuple[tuple[Path, Path], ...]:
+) -> tuple[tuple[Path, Path, tuple[Path, ...]], ...]:
     """Move each install directory to its re-anchored path inside *modules_dir*.
 
-    Every path is checked before the first move; a failed move undoes the
-    ones already made and re-raises, so nothing outside apm_modules changes.
+    Every path is checked before the first move. The journal records each move
+    with the parent directories it created; a failed move removes the parents
+    it made and undoes the earlier moves, then re-raises, so apm_modules is
+    left as it was and nothing outside it changes.
     """
     from ...utils.path_security import PathTraversalError, ensure_path_within
 
@@ -252,28 +261,38 @@ def move_materializations(
             ensure_path_within(path, root)
         except PathTraversalError as exc:
             raise ValueError(f"{path} is outside apm_modules") from exc
-    done: list[tuple[Path, Path]] = []
-    try:
-        for current, target in moves:
+    done: list[tuple[Path, Path, tuple[Path, ...]]] = []
+    for current, target in moves:
+        created = tuple(
+            parent
+            for parent in reversed(target.parents)
+            if parent != root and root in parent.parents and not parent.exists()
+        )
+        try:
             target.parent.mkdir(parents=True, exist_ok=True)
             current.rename(target)
-            done.append((current, target))
-    except OSError:
-        restore_materializations(tuple(done), root)
-        raise
+        except OSError:
+            _remove_created(created)
+            restore_materializations(tuple(done), root)
+            raise
+        done.append((current, target, created))
     return tuple(done)
 
 
-def restore_materializations(moved: tuple[tuple[Path, Path], ...], modules_dir: Path) -> None:
-    """Put each moved directory back and drop the parents the move created."""
-    root = Path(modules_dir)
-    for current, target in reversed(moved):
-        current.parent.mkdir(parents=True, exist_ok=True)
-        target.rename(current)
-        parent = target.parent
-        while parent != root and root in parent.parents and not any(parent.iterdir()):
+def _remove_created(created: tuple[Path, ...]) -> None:
+    """Remove the parents a move created, deepest first, while they stay empty."""
+    for parent in reversed(created):
+        if parent.is_dir() and not any(parent.iterdir()):
             parent.rmdir()
-            parent = parent.parent
+
+
+def restore_materializations(
+    moved: tuple[tuple[Path, Path, tuple[Path, ...]], ...], modules_dir: Path
+) -> None:
+    """Put each moved directory back and remove only the parents its move created."""
+    for current, target, created in reversed(moved):
+        target.rename(current)
+        _remove_created(created)
 
 
 def _rekey_requests(

@@ -62,7 +62,7 @@ def _outside_modules(project: Path) -> dict[str, bytes]:
         for path in sorted(project.rglob("*"))
         if path.is_file()
         and path.relative_to(project).parts[0] not in ("apm_modules", ".git")
-        and path.name not in ("apm.yml", "apm.lock.yaml")
+        and path.relative_to(project).as_posix() not in ("apm.yml", "apm.lock.yaml")
     }
 
 

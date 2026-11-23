@@ -471,6 +471,24 @@ def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
         )
 
 
+def _persist_reanchored_lockfile(
+    lockfile, lockfile_path, logger, integration_cleanup, moved, modules_dir, repair
+):
+    """Persist the lock; with re-anchor moves made, any failure rolls them all back (#4999)."""
+    try:
+        return _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    except Exception as exc:
+        if not moved:
+            raise
+        # One transaction: the moved directories and the re-anchor go back together.
+        from .local_reanchor import _roll_back_and_exit
+
+        _restore_reanchored_dirs(moved, modules_dir)
+        _roll_back_and_exit(
+            repair.reanchor, logger, f"The re-anchored lockfile could not be committed ({exc})"
+        )
+
+
 def _restore_reanchored_dirs(moved: tuple, modules_dir) -> None:
     """Undo the directory moves of a re-anchor whose transaction did not commit."""
     if moved:
@@ -504,7 +522,15 @@ def _persist_lock_then_resync_native(
     moved = ()
     if lock_changed and persist_allowed:
         moved = _move_reanchored_dirs(still_needed_repairs, modules_dir, logger)
-        saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+        saved = _persist_reanchored_lockfile(
+            lockfile,
+            lockfile_path,
+            logger,
+            integration_cleanup,
+            moved,
+            modules_dir,
+            still_needed_repairs,
+        )
     if lock_changed and (saved is None or not saved.saved):
         _restore_reanchored_dirs(moved, modules_dir)
         _hold_native_registration(native_before, logger)

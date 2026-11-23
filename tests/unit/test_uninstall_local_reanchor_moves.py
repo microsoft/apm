@@ -72,3 +72,80 @@ def test_a_move_outside_apm_modules_is_refused_before_any_move(tmp_path: Path) -
 
     assert _tree(modules) == before
     assert not (tmp_path / "elsewhere").exists()
+
+
+def test_a_failed_rename_removes_only_the_parents_it_created(tmp_path: Path) -> None:
+    """mkdir succeeds, the rename fails: the parent it made goes, an existing one stays."""
+    modules = tmp_path / "apm_modules"
+    first = _package(modules, "a")
+    (modules / "_local" / "kept-empty").mkdir()
+    before = _tree(modules)
+    moves = (
+        (first, modules / "_local" / "kept-empty" / "a"),
+        (modules / "_local" / "missing", modules / "_local" / "h2" / "x"),
+    )
+
+    with pytest.raises(OSError):
+        move_materializations(moves, modules)
+
+    assert _tree(modules) == before
+    assert not (modules / "_local" / "h2").exists()
+    assert (modules / "_local" / "kept-empty").is_dir()
+
+
+def test_a_save_that_raises_after_the_move_rolls_everything_back(tmp_path: Path) -> None:
+    """Binding raises after the move and the save: directory, apm.yml and lock restored."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import (
+        _persist_lock_then_resync_native,
+        _StillNeededRepair,
+    )
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        snapshot_for_rollback,
+    )
+    from apm_cli.deps.lockfile import LockFile
+
+    modules = tmp_path / "apm_modules"
+    current = _package(modules, "e")
+    manifest, lock = tmp_path / "apm.yml", tmp_path / "apm.lock.yaml"
+    manifest.write_text("name: proj\n", encoding="utf-8")
+    lock.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    plan = snapshot_for_rollback(
+        LocalReanchorPlan(
+            renames={"./vendor/e": "local:vendor/e"},
+            moves=((current, modules / "_local" / "h1" / "e"),),
+        ),
+        (manifest, lock),
+    )
+    before = (_tree(modules), manifest.read_bytes(), lock.read_bytes())
+    manifest.write_text("name: changed\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        _persist_lock_then_resync_native(
+            lock_changed=True,
+            persist_allowed=True,
+            lockfile=LockFile(),
+            lockfile_path=lock,
+            logger=MagicMock(),
+            integration_cleanup=IntegrationCleanupOutcome(
+                counts={},
+                deployed_files={},
+                failed_paths=[],
+                error_count=0,
+                # The lock saves, then binding its receipt claims raises.
+                materialization_session=MagicMock(
+                    bind_committed_claims=MagicMock(side_effect=RuntimeError("binding failed"))
+                ),
+            ),
+            deploy_root=tmp_path,
+            modules_dir=modules,
+            scope=None,
+            native_before=None,
+            still_needed_repairs=_StillNeededRepair({}, {}, {}, frozenset(), plan),
+        )
+
+    assert exc.value.code == 1
+    assert (_tree(modules), manifest.read_bytes(), lock.read_bytes()) == before
