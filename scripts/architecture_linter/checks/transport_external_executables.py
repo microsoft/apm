@@ -292,59 +292,10 @@ def _launch_program(
     return True, next((kw.value for kw in node.keywords if kw.arg in _PROGRAM_KEYWORDS), None)
 
 
-def _callee_name(func: ast.AST) -> str | None:
-    if isinstance(func, ast.Name):
-        return func.id
-    return func.attr if isinstance(func, ast.Attribute) else None
-
-
-def _forwarders(
-    index: TreeIndex | None, nodes: tuple[ast.AST, ...], aliases: _Aliases, binders: frozenset[str]
-) -> frozenset[str]:
-    """Names of functions in the file that hand their ``executable`` or ``**kwargs`` to a launch.
-
-    Followed through other such wrappers, so ``_run(argv, executable="git")``
-    counts like the launch it forwards to.
-    """
-    candidates = []
-    for node in nodes:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and index is not None:
-            arguments = node.args
-            forwarded = {
-                arg.arg
-                for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)
-                if arg.arg == "executable"
-            }
-            if arguments.kwarg is not None:
-                forwarded.add(arguments.kwarg.arg)
-            if forwarded:
-                calls = [child for child in index.walk(node) if isinstance(child, ast.Call)]
-                candidates.append((node.name, forwarded, calls))
-    names: set[str] = set()
-    changed = True
-    while changed:
-        changed = False
-        for name, forwarded, calls in candidates:
-            if name not in names and any(
-                (_launch_program(call, aliases, binders)[0] or _callee_name(call.func) in names)
-                and any(
-                    keyword.arg in {"executable", None}
-                    and isinstance(keyword.value, ast.Name)
-                    and keyword.value.id in forwarded
-                    for keyword in call.keywords
-                )
-                for call in calls
-            ):
-                names.add(name)
-                changed = True
-    return frozenset(names)
-
-
 def _bare_launch_lines(index: TreeIndex | None, nodes: tuple[ast.AST, ...]) -> list[int]:
     """Lines launching a program by literal name, directly or through a local name."""
     modules = _modules(nodes)
     aliases = _Aliases(index, nodes, modules)
-    forwarders = _forwarders(index, nodes, aliases, modules.binders)
     literal_names = {
         target.id
         for node in nodes
@@ -356,8 +307,10 @@ def _bare_launch_lines(index: TreeIndex | None, nodes: tuple[ast.AST, ...]) -> l
     for node in nodes:
         if not isinstance(node, ast.Call):
             continue
+        # A literal ``executable=`` counts on any call: a wrapper, possibly from
+        # another module, can forward it to a launcher.
         launches, program = _launch_program(node, aliases, modules.binders)
-        if not launches and _callee_name(node.func) not in forwarders:
+        if not launches and not any(keyword.arg == "executable" for keyword in node.keywords):
             continue
         bare = (
             _is_literal_argv(program)

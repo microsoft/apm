@@ -4758,6 +4758,18 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="The lock evidence probe passes a literal executable through a wrapper's keyword arguments.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from apm_cli.utils.tools import run_tool\n\n"
+            '        run_tool([get_git_executable()], executable="git")\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe passes a literal executable to a wrapper from another module.",
+    ),
+    MutationCase(
         guard_id="install-deployment-gate-retirement",
         rule_id="install-deployment-gate-retirement",
         path="src/apm_cli/commands/uninstall/engine.py",
@@ -7678,10 +7690,6 @@ def test_bundle_policy_and_canvas_gate_routes_are_guarded(
             "        probe.spawn = asyncio.create_subprocess_exec\n"
             '        probe.spawn(get_git_executable(), "--version")\n',
             id="exec-alias-spelled-spawn",
-        ),
-        pytest.param(
-            '        metadata(executable="git")\n',
-            id="executable-keyword-on-a-non-launcher",
         ),
         pytest.param(
             "        class _Runner:\n"
