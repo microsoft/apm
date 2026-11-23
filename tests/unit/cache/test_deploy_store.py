@@ -59,6 +59,28 @@ def test_a_tampered_entry_is_rejected_and_evicted(tmp_path: Path) -> None:
     assert store.put(key, _TEXT) and store.get(key) == _TEXT, "the next full install heals it"
 
 
+def test_a_read_only_decision_rejects_a_tampered_entry_without_touching_the_store(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.cache.paths import read_only_caches
+
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    store.put(key, _TEXT)
+    good = canonical_digest(b"other\n")
+    store.put(good, b"other\n")
+    entry = root / key[:2] / key
+    entry.write_bytes(_TEXT + b"injected\n")
+    good_entry = root / good[:2] / good
+    os.utime(good_entry, (1, 1))
+
+    with read_only_caches():
+        assert store.get(key) is None
+        assert store.get(good) == b"other\n"
+    assert entry.read_bytes() == _TEXT + b"injected\n"
+    assert good_entry.stat().st_mtime == 1
+
+
 def test_bytes_that_do_not_hash_to_the_key_are_never_stored(tmp_path: Path) -> None:
     store, root = _store(tmp_path)
     key = hashlib.sha256(b"something else").hexdigest()

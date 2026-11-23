@@ -41,7 +41,7 @@ from pathlib import Path
 
 from ..core.invocation_memo import invocation_memo
 from ..utils.content_hash import canonical_digest
-from .paths import get_cache_root
+from .paths import cache_writes_allowed, get_cache_root
 
 DEPLOY_BUCKET = "deploy_v1"
 MAX_DEPLOY_STORE_BYTES = 256 * 1024 * 1024
@@ -142,14 +142,15 @@ class DeployStore:
             return None
         data = _read_bounded(entry)
         if data is None or canonical_digest(data) != key:
-            if data is not None or _oversized(entry):
+            if (data is not None or _oversized(entry)) and cache_writes_allowed():
                 with contextlib.suppress(OSError):
                     entry.unlink()
             return None
         if raw_sha256 is not None and hashlib.sha256(data).hexdigest() != raw_sha256:
             return None
-        with contextlib.suppress(OSError):
-            os.utime(entry, None)
+        if cache_writes_allowed():
+            with contextlib.suppress(OSError):
+                os.utime(entry, None)
         return data
 
     def _holds(self, entry: Path, key: str) -> bool:
@@ -287,7 +288,7 @@ class DeployStore:
             record = _valid_record(json.loads(raw.decode("ascii")))
         except (UnicodeDecodeError, ValueError):
             return None
-        if record is not None:
+        if record is not None and cache_writes_allowed():
             with contextlib.suppress(OSError):
                 os.utime(path, None)
         return record

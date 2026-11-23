@@ -71,10 +71,10 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
             return _run(frozen)
 
     def _run(frozen: bool) -> Any:
-        from contextlib import nullcontext
         from pathlib import Path
         from types import SimpleNamespace
 
+        from apm_cli.cache.paths import read_only_caches
         from apm_cli.install import diff_apply
         from apm_cli.install.locking import lifecycle_operation
         from apm_cli.install.service import InstallService
@@ -84,8 +84,8 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
         disposition = InstallService.frozen_disposition(SimpleNamespace(frozen=frozen))
         options = {"frozen": disposition.replay}
         decide = _decide_only()
-        # Deciding only reads; it never takes the lifecycle lock (that writes lock state).
-        with nullcontext() if decide else lifecycle_operation():
+        # Deciding only reads: no lifecycle lock (it writes lock state) and no cache upkeep.
+        with read_only_caches() if decide else lifecycle_operation():
             done = diff_apply.try_apply(
                 options, argv, root, frozen_disposition=disposition, decide_only=decide
             )

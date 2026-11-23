@@ -16,7 +16,7 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 import requests
 import yaml
 
-from ..cache.paths import get_cache_root
+from ..cache.paths import cache_writes_allowed, get_cache_root
 from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..core.invocation_memo import memoized_per_invocation
 from ..utils.file_ops import robust_replace
@@ -1949,7 +1949,8 @@ def _read_cache_entry(
 
         # Schema version check -- auto-invalidate on format change
         if meta.get("schema_version") != CACHE_SCHEMA_VERSION:
-            meta_file.unlink(missing_ok=True)
+            if cache_writes_allowed():
+                meta_file.unlink(missing_ok=True)
             return None
 
         cached_at = meta.get("cached_at", 0)
@@ -2043,9 +2044,10 @@ def _write_cache(
     sidecar so subsequent cached reads can verify against the project's
     pin without re-fetching (#827).
     """
+    if not cache_writes_allowed():
+        return
     cache_dir = _get_cache_dir(project_root)
     cache_dir.mkdir(parents=True, exist_ok=True)
-
     key = _cache_key(repo_ref)
     policy_file = cache_dir / f"{key}.yml"
     meta_file = cache_dir / f"{key}.meta.json"
