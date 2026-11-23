@@ -7,6 +7,7 @@ to ``~/.apm/config.json`` only with ``--user`` (personal, lowest authority).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1017,7 +1018,7 @@ def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
     monkeypatch.chdir(project)
     policy = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+    with _serve_policy(policy):
         result = CliRunner().invoke(approve_cmd, ["--all"])
 
     allow = (yaml.safe_load(manifest.read_text(encoding="utf-8")).get("executables") or {}).get(
@@ -1026,3 +1027,77 @@ def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
     assert not any("org-denied" in key for key in allow), result.output
     assert any("fine" in key for key in allow), result.output
     assert "Skipped org-denied" in " ".join(result.output.split())
+
+
+def _bundle_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    """A project with an installed local bundle 'bun' parked on hooks; returns apm.yml, config."""
+    from apm_cli.install.local_bundle_pending import record_bundle_executables
+
+    project = tmp_path / "project"
+    project.mkdir()
+    apm_home = tmp_path / "home" / ".apm"
+    apm_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(apm_home.parent))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(apm_home / "config.json"))
+    manifest = project / "apm.yml"
+    manifest.write_text("name: consumer\nversion: '1.0'\nexecutables: {}\n", encoding="utf-8")
+    record_bundle_executables(project, "bun", _BUNDLE_KEY, ["hooks"])
+    monkeypatch.chdir(project)
+    return manifest, apm_home / "config.json"
+
+
+def _serve_policy(policy: ApmPolicy):
+    found = PolicyFetchResult(policy=policy, source="org:contoso/.github", outcome="found")
+    return patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=found)
+
+
+@pytest.mark.parametrize("layer", ["org", "user"])
+def test_bundle_approve_refuses_before_any_write_when_another_layer_denies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str
+) -> None:
+    """A still-denied bundle approve exits 1 and leaves every store unchanged (#4933)."""
+    manifest, config = _bundle_project(tmp_path, monkeypatch)
+    policy = ApmPolicy()
+    if layer == "org":
+        policy = ApmPolicy(executables=ExecutablesPolicy(deny=[_BUNDLE_KEY]))
+    else:
+        store = {"executables": {"allow": {}, "deny": {_BUNDLE_KEY: {"hooks": True}}}}
+        config.write_text(json.dumps(store), encoding="utf-8")
+    legacy = config.parent / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    stores = [path for path in (manifest, config, legacy) if path.exists()]
+    before = {path: path.read_bytes() for path in stores}
+
+    with _serve_policy(policy):
+        result = CliRunner().invoke(approve_cmd, [_BUNDLE_KEY])
+
+    assert result.exit_code == 1, result.output
+    assert {path: path.read_bytes() for path in stores} == before, result.output
+    assert config.exists() == (layer == "user")
+    text = " ".join(result.output.split())
+    assert f"{_BUNDLE_KEY} is still denied by another trust layer" in text
+    assert "Approved local bundle" not in text
+
+
+@pytest.mark.parametrize("own_deny", [False, True], ids=["fresh", "clears-own-deny"])
+def test_bundle_approve_records_a_grant_no_layer_denies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, own_deny: bool
+) -> None:
+    """Control for #4933: an approve no other layer denies writes its exact-key grant."""
+    manifest, _config = _bundle_project(tmp_path, monkeypatch)
+    if own_deny:
+        manifest.write_text(
+            f"name: consumer\nversion: '1.0'\nexecutables:\n  deny:\n"
+            f"    '{_BUNDLE_KEY}':\n      hooks: true\n",
+            encoding="utf-8",
+        )
+
+    with _serve_policy(ApmPolicy()):
+        result = CliRunner().invoke(approve_cmd, [_BUNDLE_KEY])
+
+    assert result.exit_code == 0, result.output
+    executables = yaml.safe_load(manifest.read_text(encoding="utf-8"))["executables"]
+    assert executables["allow"][_BUNDLE_KEY] == {"hooks": True}
+    assert not executables.get("deny")
+    assert "Approved local bundle 'bun': hooks" in " ".join(result.output.split())
