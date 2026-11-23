@@ -40,9 +40,7 @@ def _cached_pin_matches(raw_bytes_hash: str, expected_hash: str | None) -> bool:
     return raw_bytes_hash.lower() == f"{exp_algo}:{exp_hex}"
 
 
-def _cached_policy_verified(
-    serialized: str | None, meta: dict, expected_hash: str | None
-) -> bool:
+def _cached_policy_verified(serialized: str | None, meta: dict, expected_hash: str | None) -> bool:
     """Whether a cached policy document may be used (#827, #4218).
 
     The recorded raw-bytes hash must satisfy the project pin, and the cached
