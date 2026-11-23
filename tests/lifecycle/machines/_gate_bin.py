@@ -245,6 +245,15 @@ class GateBin(StepRunner):
         self.state.denied_by_policy = True
 
 
+def _reads(machine: GateBin) -> None:
+    """The commands that read bin/ but never resolve it, at the current gate level:
+    each keeps bin/ byte-identical (GateBin._check_outcome)."""
+    machine.run("audit", "audit")
+    machine.run("lock", "lock")
+    machine.run("compile", "compile")
+    machine.run("prune", "prune")
+
+
 def replay_bin(machine: GateBin) -> None:
     """Walk the five user-scope gate levels over the plugin."""
     install = ("install", "--trust-bin")
@@ -262,17 +271,31 @@ def replay_bin(machine: GateBin) -> None:
     machine.run("approve", "approve", SPEC)
     machine.gate_on()
     machine.run("mcp-install", *mcp)
+    _reads(machine)
+    machine.run("update", "update", "--yes")
+    machine.run("uninstall", "uninstall", SPEC)
+    machine.run("install", *install, SPEC)
     # revoked-after-deploy: install --mcp keeps bin/ (U7); install retires it.
     machine.run("deny", "deny", SPEC)
     machine.run("mcp-install", *mcp)
+    _reads(machine)
+    machine.run("deny", "deny", SPEC)
+    machine.run("update", "update", "--yes")
     machine.run("install", *install)
     machine.run("uninstall", "uninstall", SPEC)
     # denied-executable: denied before any deploy.
     machine.run("install", *install, SPEC)
     machine.run("mcp-install", *mcp)
+    _reads(machine)
+    machine.run("deny", "deny", SPEC)
+    machine.run("update", "update", "--yes")
+    machine.run("uninstall", "uninstall", SPEC)
+    machine.run("install", *install, SPEC)
     # unapproved-exec: the decision is gone.
     machine.revoke()
     machine.run("mcp-install", *mcp)
+    _reads(machine)
+    machine.run("update", "update", "--yes")
     machine.run("install", *install)
     machine.run("uninstall", "uninstall", SPEC)
     # denied-dependency: the org denies the plugin; user scope never sees it (#3703).
