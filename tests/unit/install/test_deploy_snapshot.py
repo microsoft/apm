@@ -1988,3 +1988,162 @@ def test_a_file_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
 
     assert outside.stat().st_mode & 0o7777 == 0o400
     assert staged.is_symlink()
+
+
+# -- replay trusts only a store private to this user; recreated modes honor the umask --
+# (#5134) A snapshot store, and each journal file in it, must be a real directory or
+# regular file owned by this user with no group or other write; otherwise every path in
+# it is kept and reported. A path recreated from absence never gets more than the cap
+# (0o644 file, 0o755 directory) narrowed by the current umask.
+
+_NOT_PRIVATE = "the snapshot store is not private to this user; nothing was restored"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_a_store_others_can_write_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    store.chmod(0o775)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_a_store_another_user_owns_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    monkeypatch.setattr(os, "geteuid", lambda: os.stat(config).st_uid + 1)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_journal_that_is_a_link_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    planted = tmp_path / "planted.jsonl"
+    planted.write_bytes((store / "journal.jsonl").read_bytes())
+    (store / "journal.jsonl").unlink()
+    (store / "journal.jsonl").symlink_to(planted)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+def _with_umask(mask: int):
+    previous = os.umask(mask)
+    return previous
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_file_recreated_from_absence_honors_the_umask(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    config.chmod(0o644)
+    ledger = {".mcp.json": ledger[".mcp.json"]}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(config)
+    config.unlink()
+    journal.after_write(config)
+
+    previous = _with_umask(0o077)
+    try:
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        os.umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+    assert config.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_directory_recreated_from_absence_honors_the_umask(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill = project / ".kiro" / "skills" / "s"
+    skill.mkdir(parents=True)
+    skill.chmod(0o755)
+    (skill / "SKILL.md").write_bytes(b"prior\n")
+    (skill / "SKILL.md").chmod(0o644)
+    ledger = {".kiro/skills/s/SKILL.md": compute_file_hash(skill / "SKILL.md")}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    (skill / "SKILL.md").unlink()
+    skill.rmdir()
+    journal.after_write(skill)
+
+    previous = _with_umask(0o077)
+    try:
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        os.umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert skill.stat().st_mode & 0o7777 == 0o700
+    assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_planted_wider_mode_never_widens_a_recorded_0o644_file(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """W3d: a journal whose unit line claims 0o755 for a file apm recorded as 0o644."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    config.chmod(0o644)
+    store = _killed_journal(apm_home, project, config)
+    _rewrite_unit_mode(store, 0o755)
+
+    _replay(apm_home, project, lambda: ledger)
+
+    assert config.stat().st_mode & 0o7777 == 0o644
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="acceptance cell for the optional journal seal (#5134): a same-user plant in a "
+    "private store passes the store check, and a narrower mode passes the bound",
+)
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_valid_but_different_recorded_mode_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    _rewrite_unit_mode(store, 0o400)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert [rel for rel, _reason in outcome.kept] == [".mcp.json"]
+    assert config.read_bytes() == b"killed\n"
+    assert config.stat().st_mode & 0o7777 == 0o600
