@@ -48,6 +48,7 @@ def render(
 
     logger = InstallLogger(verbose=False, dry_run=False, partial=False)
     logger.resolution_start(to_install_count=0, lockfile_count=0, update_count=0)
+    policy_fetch = run_policy_gate(project_root, manifest, lock, logger)
     _announce_targets(project_root, manifest, logger)
     for dep in lock.get_all_dependencies():
         key = dep.get_unique_key()
@@ -59,7 +60,7 @@ def render(
             logger.tree_item("  |-- (files unchanged)")
         else:
             body(logger)
-    services = run_services(project_root, manifest, lock, logger)
+    services = run_services(project_root, manifest, lock, logger, policy_fetch)
     render_post_install_summary(
         logger=logger,
         apm_count=installed,
@@ -93,7 +94,45 @@ def _package_header(dep: Any, logger: Any) -> None:
     logger.download_complete(name, ref=ref, sha=sha, cached=True)
 
 
-def run_services(project_root: Path, manifest: Any, lock: Any, logger: Any) -> Any:
+def run_policy_gate(project_root: Path, manifest: Any, lock: Any, logger: Any) -> Any:
+    """The install's policy-gate phase itself (``install/phases/policy_gate.py``).
+
+    It announces the org policy outcome exactly as the full run does (and
+    records the banner, so later trust readers do not repeat it), then runs
+    the dependency policy checks against the locked set. Returns the fetch.
+    """
+    from types import SimpleNamespace
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.phases import policy_gate
+
+    locked = [dep.to_dependency_ref() for key, dep in lock.dependencies.items() if key != "."]
+    gate = SimpleNamespace(
+        project_root=project_root,
+        scope=InstallScope.PROJECT,
+        apm_package=manifest,
+        logger=logger,
+        no_policy=False,
+        dry_run=False,
+        only_packages=None,
+        deps_to_install=locked,
+        all_apm_deps=list(manifest.get_apm_dependencies()),
+        existing_lockfile=lock,
+        dependency_graph=None,
+        declared_direct_refs=None,
+        marketplace_provenance=None,
+        prefetch_policy_denials=[],
+        direct_mcp_deps=list(manifest.get_all_mcp_dependencies()),
+        policy_fetch=None,
+        policy_enforcement_active=False,
+    )
+    policy_gate.run(gate)
+    return gate.policy_fetch
+
+
+def run_services(
+    project_root: Path, manifest: Any, lock: Any, logger: Any, policy_fetch: Any = None
+) -> Any:
     """The install's MCP/LSP reconciliation phase itself, as a plain install runs it."""
     from types import SimpleNamespace
 
@@ -106,7 +145,9 @@ def run_services(project_root: Path, manifest: Any, lock: Any, logger: Any) -> A
     from apm_cli.policy.outcome_routing import discover_trust_policy
 
     trust = SimpleNamespace(
-        policy_fetch=discover_trust_policy(project_root),
+        policy_fetch=policy_fetch
+        if policy_fetch is not None
+        else discover_trust_policy(project_root),
         source_root=project_root,
         project_root=project_root,
         scope=InstallScope.PROJECT,
