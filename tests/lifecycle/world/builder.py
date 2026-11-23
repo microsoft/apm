@@ -9,6 +9,7 @@ Layout under ``base`` (an ``IsolatedApmEnvironment`` root, cloned per test)::
     work/elsewhere/  the cwd of user-scope commands (no apm.yml)
     bundles/         ``apm pack`` output of p-exec (default plugin format)
     bundles-lsp/     ``apm pack`` output of p-lsp (default plugin format)
+    bundles-pack/    ``apm pack`` output of p-pack (default plugin format)
     bundles-apm/     ``apm pack --format apm`` of a consumer of approved p-exec
                      (what ``apm unpack`` reads: the deployed hook and MCP entry)
     executables/     OS-aware shims (``shims.py``): trap ``claude`` / ``codex``
@@ -263,6 +264,7 @@ def build_template(base: Path) -> World:
         _checked(_engine(bind, user_cwd, env), "apm config set registry url")
         bundle = _pack_bundle(authored["p-exec"].root, base / "bundles", env)
         lsp_bundle = _pack_bundle(authored["p-lsp"].root, base / "bundles-lsp", env)
+        pack_bundle = _pack_bundle(authored["p-pack"].root, base / "bundles-pack", env)
         # ``apm unpack`` reads only the legacy APM bundle layout.
         apm_bundle = _pack_apm_bundle(authored["p-exec"].root, base / "bundles-apm", env)
     except Exception:
@@ -301,6 +303,9 @@ def build_template(base: Path) -> World:
     )
     packages["p-lsp:bundle"] = PackageRef(
         "p-lsp", str(lsp_bundle), authored["p-lsp"].kinds, "local-bundle"
+    )
+    packages["p-pack:bundle"] = PackageRef(
+        "p-pack", str(pack_bundle), authored["p-pack"].kinds, "local-bundle"
     )
     packages["p-exec:apm-bundle"] = PackageRef(
         "p-exec", str(apm_bundle), authored["p-exec"].kinds, "local-bundle"

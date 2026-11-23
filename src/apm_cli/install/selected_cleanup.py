@@ -30,6 +30,8 @@ class SelectedCleanupOutcome:
     retained_paths: set[str] = field(default_factory=set)
     # Paths cleanup could not process (I/O failure), as opposed to kept for evidence.
     failed_paths: set[str] = field(default_factory=set)
+    # Paths a cleanup safety gate rejected, with the reason; never waived (#4815).
+    rejected_paths: dict[str, str] = field(default_factory=dict)
 
     @staticmethod
     def observer(outcome: SelectedCleanupOutcome | None, logger, dep_key: str):
@@ -44,8 +46,9 @@ class SelectedCleanupOutcome:
 
         def observe(cleanup) -> None:
             surface(cleanup)
-            # Paths cleanup failed on stay retained; no consent waiver hides them.
+            # Paths cleanup failed on or rejected stay retained; no consent waiver hides them.
             outcome.failed_paths.update(cleanup.failed)
+            outcome.rejected_paths.update(cleanup.rejected)
 
         return observe
 

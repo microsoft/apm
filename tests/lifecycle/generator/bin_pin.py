@@ -12,7 +12,9 @@ tables live with tests/lifecycle/security (T3). Here the generator only
 records the digest of those elements' source tokens (comments and docstrings
 dropped, so the digest is stable across Python versions); ``rules.U_BIN_PIN``
 holds the approved value, and a mismatch turns the project-scope bin cells
-into must-cover obligations.
+into must-cover obligations. ``user_org_policy_digest`` pins
+``core/scope.policy_discovery_uses_git_remote`` the same way for
+U-USER-SCOPE-ORG-POLICY (``rules.U_USER_ORG_POLICY_PIN``).
 """
 
 from __future__ import annotations
@@ -82,3 +84,14 @@ def predicate_tokens(src_root: Path = SRC_ROOT) -> str:
 @cache
 def predicate_digest(src_root: Path = SRC_ROOT) -> str:
     return hashlib.sha256(predicate_tokens(src_root).encode("utf-8")).hexdigest()
+
+
+# U-USER-SCOPE-ORG-POLICY: the single user-scope org-policy decision (#3703).
+USER_ORG_POLICY = ("core/scope.py", "policy_discovery_uses_git_remote")
+
+
+@cache
+def user_org_policy_digest(src_root: Path = SRC_ROOT) -> str:
+    module, name = USER_ORG_POLICY
+    tokens = element_tokens(src_root / module, name)
+    return hashlib.sha256(tokens.encode("utf-8")).hexdigest()

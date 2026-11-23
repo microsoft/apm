@@ -85,6 +85,13 @@
       "guards": ["transport-platform-windows-stable-path"]
     },
     {
+      "id": "deploy-store",
+      "decision": "Content-addressed store of deployed file bytes: hex-digest keys, verify on every read, no symlink following, atomic owner-only writes",
+      "owner": "cache/deploy_store.py (DeployStore); install/phases/lockfile_deploy_records.py stages the lockfile phase's deployed bytes and package records through it",
+      "selectors": ["src/apm_cli/cache/deploy_store.py", "src/apm_cli/install/phases/lockfile_deploy_records.py"],
+      "guards": ["transport-platform-deploy-store-verified-reads"]
+    },
+    {
       "id": "cached-repository-git",
       "decision": "Git runs in persisted repositories: their config is allow-listed before any run, and every run is inert",
       "owner": "cache/cached_repo.py (require_trusted_cached_repo / inert_git_args / cached_repo_env)",
@@ -108,9 +115,10 @@
     {
       "id": "git-child-repository-isolation",
       "decision": "Git child-process repository location and URL rewrite safety",
-      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, and the dependency core.symlinks and line-ending pins)",
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, the dependency core.symlinks and line-ending pins, and trusted_executable: every helper program APM launches or probes resolves on PATH outside the project, never the working directory)",
       "selectors": ["src/apm_cli/utils/git_env.py"],
       "guards": [
+        "transport-platform-external-executable-owner",
         "transport-platform-git-child-environment",
         "transport-platform-git-clone-hooks-disabled",
         "transport-platform-git-clone-templates-disabled",
