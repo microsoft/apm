@@ -93,6 +93,27 @@ def never_wider(path: Path, copy: Path, kind: str, mode: int | dict[str, int]) -
     )
 
 
+_ACL_XATTRS = frozenset({"system.posix_acl_access", "system.posix_acl_default"})
+
+
+def carries_acl(*paths: Path) -> bool:
+    """Whether any of *paths* (or an entry below one) carries a POSIX ACL.
+
+    Restored bytes are staged with permission bits only, so an ACL would be lost.
+    """
+    if not hasattr(os, "listxattr"):
+        return False
+    for root in paths:
+        for path in [root, *(_entries(root) if root.is_dir() and not root.is_symlink() else ())]:
+            try:
+                names = os.listxattr(path, follow_symlinks=False)
+            except OSError:
+                continue  # no extended attributes here (or unsupported): no ACL
+            if _ACL_XATTRS.intersection(names):
+                return True
+    return False
+
+
 def _write_private(path: Path, data: bytes) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
     with os.fdopen(fd, "wb") as handle:

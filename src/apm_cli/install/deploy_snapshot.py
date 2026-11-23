@@ -748,6 +748,7 @@ def _keep(store: Path) -> Path:
 
 _KEEP_CHANGED = "it changed after the interrupted install"
 _KEEP_WIDER = "its recorded mode is wider than it has now"
+_KEEP_ACL = "it carries a POSIX ACL"
 
 
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
@@ -769,6 +770,8 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
             ours = False  # unreadable now: never destroy what cannot be inspected
         if not ours:
             kept.append((unit.rel, _KEEP_CHANGED))
+        elif unit.copy is not None and _modes.carries_acl(unit.path, unit.copy):
+            kept.append((unit.rel, _KEEP_ACL))
         elif unit.copy is not None and not _modes.never_wider(
             unit.path, unit.copy, unit.kind, unit.mode
         ):
