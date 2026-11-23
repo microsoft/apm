@@ -54,7 +54,11 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "cache"))
+    (tmp_path / "user").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "user"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
     for name in (
+        "XDG_CONFIG_HOME",
         "CI",
         "GITHUB_ACTIONS",
         "APM_INSTALL_FAST_PATH",
@@ -242,7 +246,7 @@ def test_every_environment_variable_the_cli_reads_is_classified() -> None:
 def test_the_record_module_reads_the_environment_only_through_its_classified_helper() -> None:
     tree = ast.parse(Path(verdict_record.__file__).read_text(encoding="utf-8"))
     for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
-        if func.name == "_env":
+        if func.name in {"_env", "_env_prefixed", "_env_log"}:
             continue
         for node in ast.walk(func):
             assert "os.environ" not in ast.unparse(node) or not isinstance(
@@ -332,40 +336,78 @@ def test_change_only_lines_are_shown_and_never_in_the_no_op_view(project: Path, 
     assert "All servers up to date" in replayed and "Configured 1 server" not in replayed
 
 
-def _covered(path: Path, project: Path, home: Path) -> bool:
-    if path.is_relative_to(project):
-        rel = path.relative_to(project).as_posix()
-        return (
-            rel.split("/")[0] in verdict_record._GOVERNED_DIRS
-            or rel in verdict_record._PROJECT_SURFACES
-        )
-    if path.is_relative_to(home):
-        return path.relative_to(home).as_posix() in verdict_record._USER_SURFACES
-    return False
-
-
 def test_every_target_root_and_mcp_config_path_is_a_verdict_input(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Coverage (W3d R4): owners name the surfaces; the record must read each of them."""
+    """Coverage (W3d R4): each file an MCP adapter names, in or out of the project, misses."""
     from apm_cli.factory import ClientFactory
     from apm_cli.integration.targets import KNOWN_TARGETS
 
-    project, home = tmp_path / "project", tmp_path / "home"
-    project.mkdir()
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
+    user = project.parent / "user"
+    for name in ("LOCALAPPDATA", "APPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HERMES_HOME"):
+        monkeypatch.setenv(name, str(user / name.lower()))
     roots = {
         profile.root_dir
         for profile in KNOWN_TARGETS.values()
         if profile.root_dir.startswith(".") or profile.root_dir == "agent-data"
     }
     assert sorted(roots - set(verdict_record._GOVERNED_DIRS)) == []
-    uncovered = []
     for runtime in sorted(ClientFactory.supported_clients()):
         adapter = ClientFactory.create_client(runtime, project_root=project, user_scope=False)
-        path = Path(os.path.expanduser(str(adapter.get_config_path()))).resolve()
-        if not _covered(path, project.resolve(), home.resolve()):
-            uncovered.append(f"{runtime}: {path}")
-    assert uncovered == []
+        path = Path(os.path.expanduser(str(adapter.get_config_path())))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _record()
+        before = path.read_bytes() if path.exists() else None
+        path.write_bytes((before or b"") + b"\n")
+        capsys.readouterr()
+        verdict_record.replay(["install"])
+        assert capsys.readouterr().out == "", f"{runtime}: {path} is not a verdict input"
+        if before is None:
+            path.unlink()
+        else:
+            path.write_bytes(before)
+
+
+def test_a_variable_the_run_read_by_name_misses_and_never_leaves_its_value(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Names built at run time (MCP ${VAR} placeholders) are keyed by the run's own reads."""
+    monkeypatch.setenv("MY_MCP_TOKEN", "s3cr3t-token-value")
+    monkeypatch.setenv("UNREAD_TOOL_FLAG", "1")
+    with verdict_record.recording(["install"]):
+        assert os.environ.get("MY_MCP_TOKEN") == "s3cr3t-token-value"
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+    records = list((_home(project) / "verdicts").iterdir())
+    assert b"s3cr3t-token-value" not in records[0].read_bytes()
+    monkeypatch.setenv("UNREAD_TOOL_FLAG", "2")
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert "up to date in " in capsys.readouterr().out
+    monkeypatch.setenv("MY_MCP_TOKEN", "rotated")
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""
+
+
+def test_git_config_a_child_git_reads_is_a_verdict_input(project: Path, capsys) -> None:
+    """The no-op's `git remote` honors url.insteadOf: a hit keys every git config scope."""
+    _record()
+    gitconfig = project.parent / "user" / ".gitconfig"
+    gitconfig.write_text('[url "https://mirror.example/"]\n\tinsteadOf = https://github.com/\n')
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""
+
+
+def test_a_git_config_with_an_include_is_never_recorded(project: Path) -> None:
+    (project.parent / "user" / ".gitconfig").write_text("[include]\n\tpath = other\n")
+    _record()
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.parametrize("row", ["  source: local\n", "  virtual_path: skills/x\n"])
+def test_a_package_copy_a_hit_cannot_prove_is_never_recorded(project: Path, row: str) -> None:
+    with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(row)
+    _record()
+    assert not (_home(project) / "verdicts").exists()

@@ -67,6 +67,7 @@ ENV_ALLOWLIST = (
     "APM_TEMP_DIR",
     "APM_TIERED_RESOLVER",
     "APM_VERBOSE",
+    "APPDATA",
     "ARTIFACTORY_APM_TOKEN",
     "ARTIFACTORY_BASE_URL",
     "ARTIFACTORY_MAX_ARCHIVE_MB",
@@ -85,10 +86,13 @@ ENV_ALLOWLIST = (
     "GITHUB_URL",
     "GITLAB_HOST",
     "GIT_SSH_COMMAND",
+    "HERMES_HOME",
+    "HOME",
     "LOCALAPPDATA",
     "MCP_REGISTRY_ALLOW_HTTP",
     "MCP_REGISTRY_URL",
     "NO_COLOR",
+    "PATH",
     "PATHEXT",
     "PROGRAMDATA",
     "PROXY_REGISTRY_ALLOW_HTTP",
@@ -99,8 +103,11 @@ ENV_ALLOWLIST = (
     "SOURCE_DATE_EPOCH",
     "TERM",
     "USER",
+    "USERPROFILE",
     "VERSION",
     "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
     "XDG_STATE_HOME",
 )
 # Read by the CLI, but never part of a verdict or its output: test seams and the
@@ -200,11 +207,52 @@ _CLOCK_RE = re.compile(
 )
 
 
-def _env(name: str) -> str | None:
-    """The one environment read of this module; only classified names."""
-    if name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT:
+def _env(name: str, *, read_by_run: bool = False) -> str | None:
+    """The one environment read of this module: classified names, or names the
+    recorded run itself read (see :func:`_env_log`)."""
+    if not read_by_run and name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT:
         raise KeyError(name)
     return os.environ.get(name)
+
+
+def _env_prefixed(prefix: str) -> list[tuple[str, str]]:
+    """Every variable a child git process reads by its documented prefix (``GIT_``)."""
+    return sorted((name, value) for name, value in os.environ.items() if name.startswith(prefix))
+
+
+_ENV_READS: set[str] = set()
+
+
+@contextmanager
+def _env_log() -> Iterator[None]:
+    """Log each variable the recorded run reads by name (``get``, ``[]``, ``in``).
+
+    The static allowlist cannot see names built at run time (an MCP server's
+    ``${VAR}`` placeholders, an adapter's XDG root); the record keys every such
+    name too, so a change in any value the run consulted misses.
+    """
+    original = os.environ
+
+    class _Logged(type(original)):  # type: ignore[misc]
+        def __getitem__(self, key: Any) -> Any:
+            if isinstance(key, str):
+                _ENV_READS.add(key.upper() if os.name == "nt" else key)
+            return super().__getitem__(key)
+
+    logged = _Logged(
+        original._data,  # type: ignore[attr-defined]
+        original.encodekey,  # type: ignore[attr-defined]
+        original.decodekey,  # type: ignore[attr-defined]
+        original.encodevalue,  # type: ignore[attr-defined]
+        original.decodevalue,  # type: ignore[attr-defined]
+    )
+    # A logging view over the same mapping, never a different environment.
+    os.environ = logged  # type: ignore[assignment]  # noqa: B003
+    try:
+        yield
+    finally:
+        if os.environ is logged:
+            os.environ = original  # type: ignore[assignment]  # noqa: B003
 
 
 def note_verified_noop() -> None:
@@ -311,7 +359,82 @@ def _walk_files(base: Path, skip: tuple[str, ...] = ()) -> Iterator[Path]:
             yield Path(directory) / name
 
 
-def _inputs(digest: _Digest, root: Path, argv: list[str], lock_text: bytes) -> None:
+def _git_files(root: Path) -> list[Path]:
+    """The config files a child ``git`` reads for this checkout, at every scope.
+
+    The no-op runs ``git remote`` for policy discovery; a hit runs no git, so it
+    keys what git would read: the repository's own config (found upward, a
+    ``.git`` file followed to its gitdir and common dir), the global and XDG
+    files and the system file beside the ``git`` on PATH (PATH and ``GIT_*``
+    are keyed too). A config with an ``include`` is never recorded.
+    """
+    files: list[Path] = []
+    for base in (root, *root.parents):
+        dot = base / ".git"
+        if dot.is_dir():
+            files += [dot / "config", dot / "config.worktree"]
+            break
+        if dot.is_file():
+            text = dot.read_text(encoding="utf-8", errors="replace").strip()
+            if not text.startswith("gitdir:"):
+                break
+            gitdir = (base / text[len("gitdir:") :].strip()).resolve()
+            files += [dot, gitdir / "config", gitdir / "config.worktree"]
+            common = gitdir / "commondir"
+            if common.is_file():
+                files.append(common)
+                files.append((gitdir / common.read_text(encoding="utf-8").strip()) / "config")
+            break
+    home = Path(os.path.expanduser("~"))
+    xdg = _env("XDG_CONFIG_HOME") or str(home / ".config")
+    files += [home / ".gitconfig", Path(xdg) / "git" / "config", Path("/etc/gitconfig")]
+    import shutil
+
+    git = shutil.which("git")
+    if git:
+        exe = Path(git).resolve()
+        files += [parent / "etc" / "gitconfig" for parent in list(exe.parents)[:3]]
+    if os.name == "nt":
+        files.append(Path(_env("PROGRAMDATA") or "C:/ProgramData") / "Git" / "config")
+    return files
+
+
+_INCLUDE_RE = re.compile(rb"^\s*\[\s*include", re.IGNORECASE | re.MULTILINE)
+
+
+def _owner_surfaces(root: Path) -> list[str]:
+    """MCP config files outside the project, named by their adapters (W3d R4)."""
+    from apm_cli.factory import ClientFactory
+
+    inside = os.path.realpath(root)
+    found: set[str] = set()
+    for runtime in sorted(ClientFactory.supported_clients()):
+        try:
+            adapter = ClientFactory.create_client(runtime, project_root=root, user_scope=False)
+            paths = [adapter.get_config_path()]
+            legacy = getattr(adapter, "get_legacy_config_path", None)
+            if callable(legacy):
+                paths.append(legacy())
+        except Exception:  # an adapter that cannot name its file cannot write it either
+            found.add(f"\x00unnamed:{runtime}")
+            continue
+        for path in paths:
+            if not path:
+                continue
+            real = os.path.realpath(os.path.expanduser(str(path)))
+            if real != inside and not real.startswith(inside + os.sep):
+                found.add(real)
+    return sorted(found)
+
+
+def _inputs(
+    digest: _Digest,
+    root: Path,
+    argv: list[str],
+    lock_text: bytes,
+    run_env: list[str],
+    surfaces: list[str],
+) -> None:
     """Every verdict input, read live (QL D3-D6, O3)."""
     import locale
 
@@ -334,6 +457,25 @@ def _inputs(digest: _Digest, root: Path, argv: list[str], lock_text: bytes) -> N
     for name in ENV_ALLOWLIST:
         value = _env(name)
         digest.put(f"env:{name}", b"\x00unset" if value is None else b"\x01" + value.encode())
+    digest.put("run-env", "\x00".join(run_env).encode("utf-8", "surrogateescape"))
+    for name in run_env:
+        value = _env(name, read_by_run=True)
+        digest.put(f"env:{name}", b"\x00unset" if value is None else b"\x01" + value.encode())
+    for name, value in _env_prefixed("GIT_"):
+        digest.put(f"git-env:{name}", value.encode("utf-8", "surrogateescape"))
+    for path in _git_files(root):
+        # Keyed bytes only, never trusted content: a dotfile symlink is followed.
+        try:
+            data: bytes | None = path.read_bytes()
+        except (FileNotFoundError, NotADirectoryError):
+            data = None
+        if data is not None and _INCLUDE_RE.search(data):
+            raise ValueError("git config include")
+        digest.put(f"git:{path}", b"\x00absent" if data is None else b"\x01" + data)
+    digest.put("surfaces", "\x00".join(surfaces).encode("utf-8", "surrogateescape"))
+    for surface in surfaces:
+        if not surface.startswith("\x00"):
+            digest.file(f"surface:{surface}", Path(surface))
     digest.put("lock", lock_text)
     for rel in _PROJECT_SURFACES:
         digest.file(f"project:{rel}", root / rel)
@@ -390,17 +532,39 @@ def _expiry(issued: float) -> float:
     return expiry
 
 
+def _names(value: Any) -> bool:
+    """A record's name list: a list of strings (an empty list is a list)."""
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
 def _body(digest: _Digest, record: dict) -> None:
     """The replayed bytes and their validity window are authenticated too (W3d R1)."""
     for field in ("stdout", "stderr", "exit", "issued_at", "expires_at"):
         digest.put(f"body:{field}", repr(record.get(field)).encode("utf-8", "surrogateescape"))
 
 
-def _deployed_intact(root: Path, lock: dict) -> bool:
-    """Every deployed file and package copy, re-hashed no-follow (QL D5)."""
+def _provable(lock: dict) -> bool:
+    """Every package copy has a locked content hash at a plain path (W3d R3).
+
+    Local, virtual and unhashed packages cannot be proven by a hit, so a run
+    over them records nothing instead of a record that could never hit.
+    """
     for dep in lock.get("dependencies") or []:
         if not isinstance(dep, dict):
             return False
+        repo = str(dep.get("repo_url", ""))
+        if not repo or ".." in repo.split("/") or not dep.get("content_hash"):
+            return False
+        if dep.get("virtual_path") or dep.get("source"):
+            return False
+    return True
+
+
+def _deployed_intact(root: Path, lock: dict) -> bool:
+    """Every deployed file and package copy, re-hashed no-follow (QL D5)."""
+    if not _provable(lock):
+        return False
+    for dep in lock.get("dependencies") or []:
         for rel, expected in (dep.get("deployed_file_hashes") or {}).items():
             data = _read_nofollow(root / rel)
             if data is None:
@@ -409,8 +573,6 @@ def _deployed_intact(root: Path, lock: dict) -> bool:
                 return False
         repo = str(dep.get("repo_url", ""))
         expected = dep.get("content_hash")
-        if not repo or ".." in repo.split("/") or not expected or dep.get("virtual_path"):
-            return False  # no locked content hash: the copy cannot be proven (W3d R3)
         package = root / "apm_modules" / Path(*repo.split("/"))
         if package.is_symlink() or not package.is_dir():
             return False
@@ -465,8 +627,11 @@ def replay(argv: list[str]) -> bool:
         lock_text = _read_nofollow(root / "apm.lock.yaml")
         if lock_text is None or record.get("v") != RECORD_VERSION:
             return False
+        run_env, surfaces = record.get("run_env"), record.get("surfaces")
+        if not _names(run_env) or not _names(surfaces):
+            return False
         digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text)
+        _inputs(digest, root, argv, lock_text, run_env, surfaces)
         _body(digest, record)
         now = time.time()
         issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
@@ -596,12 +761,14 @@ def recording(argv: list[str]) -> Iterator[None]:
     for state in (_VERIFIED_NOOP, _UNKNOWN, _FULL_SUCCESS):
         state.clear()
     _SEGMENTS.clear()
+    _ENV_READS.clear()
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
     _ACTIVE.append(out)
     code: object = 1
     try:
-        yield
+        with _env_log():
+            yield
         code = 0
     except SystemExit as exc:
         code = 0 if exc.code is None else exc.code
@@ -614,9 +781,17 @@ def recording(argv: list[str]) -> Iterator[None]:
                 _write(argv, "".join(out.parts), "".join(err.parts))
             elif _FULL_SUCCESS and "services" in _SEGMENTS:
                 start, end = _SEGMENTS["services"]
-                text = _noop_form(argv, "".join(out.parts[start:end]))
+                try:
+                    text = _noop_form(argv, "".join(out.parts[start:end]))
+                except Exception as exc:  # the install succeeded; only the record is lost
+                    _trace(f"no record (no-op form: {type(exc).__name__})")
+                    text = None
                 if text is not None:
                     _write(argv, text, "")
+            else:
+                _trace("no record (no verified no-op or full success)")
+        elif _UNKNOWN:
+            _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
 
 
 def _noop_form(argv: list[str], services_text: str) -> str | None:
@@ -663,16 +838,35 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
     root = Path.cwd()
     try:
         if not _location_trusted(root):
+            _trace("no record (APM_HOME inside the project or cache)")
             return  # never create a key or record inside the project or cache
-        key = _key(create=True)
         lock_text = _read_nofollow(root / "apm.lock.yaml")
-        if key is None or lock_text is None:
+        if lock_text is None:
+            _trace("no record (no lockfile)")
             return
-        digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text)
+        import yaml
+
+        try:
+            lock = yaml.load(lock_text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
+        except yaml.YAMLError:
+            lock = None
+        if not isinstance(lock, dict) or not _provable(lock):
+            _trace("no record (a package copy a hit cannot prove)")
+            return
         stdout_text, stamps = _ELAPSED_RE.subn(rf"\g<1>{_ELAPSED}\g<2>", stdout_text)
         if stamps != 1 or _CLOCK_RE.search(stdout_text) or _CLOCK_RE.search(stderr_text):
+            _trace("no record (clock-dependent output)")
             return  # O1: only the elapsed seconds may depend on the clock
+        key = _key(create=True)
+        if key is None:
+            _trace("no record (no private key)")
+            return
+        run_env = sorted(
+            name for name in _ENV_READS if name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT
+        )
+        surfaces = _owner_surfaces(root)
+        digest = _Digest(key)
+        _inputs(digest, root, argv, lock_text, run_env, surfaces)
         stderr_kept = "".join(
             line
             for line in stderr_text.splitlines(keepends=True)
@@ -686,6 +880,8 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
             "exit": 0,
             "issued_at": issued,
             "expires_at": _expiry(issued),
+            "run_env": run_env,
+            "surfaces": surfaces,
         }
         _body(digest, record)
         record["mac"] = digest.hexdigest()
@@ -702,5 +898,7 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
-    except (OSError, ValueError, TypeError):
+        _trace("recorded")
+    except (OSError, ValueError, TypeError) as exc:
+        _trace(f"no record ({type(exc).__name__})")
         return
