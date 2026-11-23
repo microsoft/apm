@@ -12,6 +12,6 @@
   ],
   "regression_tests": [
     "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_for_a_runtime_no_longer_targeted_is_retired_without_the_lockfile",
-    "tests/unit/install/test_mcp_write_receipts.py::test_a_declared_entry_for_a_runtime_no_longer_targeted_is_kept_and_reported"
+    "tests/unit/install/test_mcp_write_receipts.py::test_a_declared_entry_no_targeted_runtime_deploys_is_kept_and_reported"
   ]
 }

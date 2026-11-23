@@ -12,7 +12,7 @@ tests/lifecycle/oracles.py).
 CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=copilot.
 CELL: OP=install SCOPE=user LOCK=absent PRIM=mcp MCPOWN=copilot (two COPILOT_HOME
 profiles, #4801).
-CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=cursor DECL=retarget (#4784),
+CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp TGT=multi-narrowed (#4784),
 and the same with no targets: in apm.yml (auto-detected: nothing is reported).
 OWNER: install/mcp/write_receipts.py -- per-entry write evidence bound to this
 installation, keyed by (runtime, config file, native key), read by install when
@@ -62,7 +62,13 @@ _DECLARATION = {
 _RENDERED = {"type": "stdio", "command": "apm-lifecycle-inert-server", "args": ["--stdio"]}
 _NO_LOCK = {"OP": "install", "SCOPE": "project", "LOCK": "absent", "MCPOWN": "copilot"}
 _NO_LOCK_USER = {**_NO_LOCK, "SCOPE": "user"}
-_NO_LOCK_RETARGET = {**_NO_LOCK, "MCPOWN": "cursor", "DECL": "retarget"}
+_NO_LOCK_RETARGET = {
+    "OP": "install",
+    "SCOPE": "project",
+    "LOCK": "absent",
+    "PRIM": "mcp",
+    "TGT": "multi-narrowed",
+}
 _KEPT = f"Kept MCP server '{SERVER}' in .mcp.json"
 
 CREDITS = credits(
