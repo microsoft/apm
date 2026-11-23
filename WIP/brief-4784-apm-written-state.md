@@ -1,7 +1,7 @@
 # Design brief: persisted APM-written MCP/hook state (#4784, #4864, #4867; context #4899)
 
 Owner: P3 lead (9a22ec4b) with QL. Rule 22: hourly steps, each a pushed SHA.
-Status: STEP 1 OUTLINE (Mon 08:45). Steps: S1 outline (09:40) -> S2 options A/B/C/P
+Status: STEP 2 OPTIONS (Mon 09:40). Steps: S1 outline (09:40) -> S2 options A/B/C/P
 with mechanism and call sites (10:40) -> S3 risks + OpenAPM/compat cells per option (11:40)
 -> S4 QL review folded + recommendation + decision memo for A/B (12:40).
 Any option that changes MCP retirement behavior goes to the Regent as a decision memo.
@@ -30,17 +30,50 @@ entry and report it.
   (done-when: cursor entry retired, OR kept AND reported)
 - INT draft scopes: session 982e07e9 files/records/4864.md, records/4867.md
 
-## 4. Options (to fill in with QL)
-- C (report only): a declared server on an untargeted runtime is kept and reported
-  ("Kept MCP server ..." + audit --ci kept-mcp-entries). No schema change. This satisfies
-  the strict cell's "kept AND reported" arm.
-- A (deployed-destination set + explicit skip set): retire a proven record whose
-  (runtime, config, key) was not deployed this run, only on full-project installs,
-  never for --exclude / unavailable / failed-write skips.
-- B (persistent per-runtime target set / baseline): record per-runtime state in the
-  lockfile or receipts (additive). Same mechanism as #4864's baseline.
-- P (provenance, #4867): record file creation by APM; delete an emptied file only
-  with that record. Orthogonal to A/B/C, and shares the receipt store.
+## 4. Options: mechanism and call sites (STEP 2)
+Shared anchor: `McpWriteReceipts.retire_undeclared` (install/mcp/write_receipts.py:329).
+Today it skips a record when `write.name in declared` (line 347), so a still-declared
+server is never retired from a runtime the project dropped. Records are already keyed
+(runtime, config, native key) (#4818); the gap is the NAME-level skip, not the key.
+
+### C. Report only (no behavior change to removal)
+- Mechanism: in `retire_undeclared`, a record whose server is declared but whose
+  runtime is outside this run's deployed runtimes goes to `mark_kept` + `warn_kept`
+  ("Kept MCP server '<name>' in <config>: APM no longer targets <runtime>").
+- Needs: the set of runtimes deployed this run, from the install journal
+  (`note_mcp_write`, line 118) passed by `retire_undeclared_mcp_writes` (line 435).
+- `audit --ci` already fails on kept-mcp-entries, so the "passes silently" half closes.
+- Schema: none. Spec: none (reporting only). Satisfies QL cell arm "kept AND reported".
+
+### A. Retire by deployed destination, with an explicit skip set
+- Mechanism: replace the NAME skip with a DESTINATION skip: keep the record iff
+  (runtime, config, key) was deployed this run OR its runtime is in `skipped`
+  (--exclude, unavailable/undetected runtime, failed write). Otherwise, if proven,
+  `_remove_native_entry` as for undeclared servers.
+- Needs: journal of deployed destinations + a skip-reason set produced by the MCP
+  integrator (mcp_integrator_install); retirement only on full-project installs
+  (not `apm install <pkg>`, --only); keep `_selected` and `_declared_keys` guards.
+- Schema: none if the skip set is per run; behavior change = removal, so Regent memo.
+
+### B. Persistent per-runtime target baseline (shared with #4864)
+- Mechanism: the lockfile (or receipt store) records, per runtime, the declaration
+  baseline APM last wrote (additive field). Retire only for runtimes outside the
+  project's resolved target set, never on per-run skips; a refused retirement keeps
+  its old per-runtime baseline (#4864) so a newly targeted runtime is judged on its own.
+- Needs: lockfile field + reader/writer round-trip; OpenAPM lockfile reference update.
+- Schema: additive lockfile field (old readers ignore it). Behavior change = removal,
+  so Regent memo; one schema change should serve #4784 and #4864 together.
+
+### P. File-creation provenance (#4867, orthogonal)
+- Mechanism: when APM creates a native MCP/hook config file, the receipt store records
+  "created by APM" for that file; deleting a file APM emptied requires that record.
+  Files without the record keep today's content-proof behavior until APM next creates them.
+- Call sites: the emptied-file delete paths (MCP config writers; hook_integrator cleanup).
+- Schema: additive receipt field. Tightens deletion only (safety-positive): no memo.
+
+### Overlap
+- #4864 == B's baseline (same field); #4784 can ship as C now and A or B later.
+- #4899 stays narrow (existing fields) per its record; it must not pre-empt B's field.
 
 ## 5. Risks to weigh (from ENG-B, to be confirmed by QL)
 transient vs durable skips; auto-detected targets; shared destinations; partial installs;
