@@ -265,6 +265,22 @@ def test_narrowing_one_surface_keeps_another_approved_surface(
     assert "hook" in machine.world.observe().deployed
 
 
+def test_frozen_refuses_a_declared_package_the_lock_lacks(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Nightly falsifier: after a package is declared on a locked project, audit --ci
+    and install --frozen both refuse (install.md "Frozen mode"); the lock is untouched."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.declare("hook")
+    machine.update()
+    machine.declare("plugin")
+    world = machine.world
+    lock = (world.workspace / "apm.lock.yaml").read_text(encoding="utf-8")
+    machine.audit_ci(json_output=False)
+    assert (world.workspace / "apm.lock.yaml").read_text(encoding="utf-8") == lock
+    assert str(world.packages["plugin"]) not in lock
+
+
 @pytest.mark.parametrize("scope", SCOPES)
 def test_verdict_on_an_uninstalled_package_ignores_the_operation_lock(
     tmp_path: Path, lifecycle_entry_point: tuple[str, ...], scope: str
