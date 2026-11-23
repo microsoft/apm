@@ -891,7 +891,13 @@ _SHARED_SKILL = ".claude/skills/shared/SKILL.md"
 
 
 def _shared_skill_world(
-    tmp_path: Path, apm_binary_path: Path, *, same: bool, e_first: bool = True
+    tmp_path: Path,
+    apm_binary_path: Path,
+    *,
+    same: bool,
+    e_first: bool = True,
+    target: str = "claude",
+    install: tuple[str, ...] = (),
 ) -> ReplayWorld:
     """e and z both ship skill ``shared``; z declares ``../e`` (#5048).
 
@@ -911,8 +917,11 @@ def _shared_skill_world(
         _manifest(world, ["./vendor/e"], ["./vendor/z"])
     else:
         _manifest(world, ["./vendor/z", "./vendor/e"], [])
-    (world.project / ".claude").mkdir()
-    world.apm("install")
+    manifest = load_yaml(world.project / "apm.yml")
+    manifest["targets"] = [target]
+    dump_yaml(manifest, world.project / "apm.yml")
+    (world.project / f".{target}").mkdir()
+    world.apm("install", *install)
     return world
 
 
@@ -1053,6 +1062,44 @@ def test_a_reanchor_keeps_a_third_provider_that_still_writes_last(
     }
     assert owners[_SHARED_SKILL] == "local:vendor/y", owners
     _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_reanchor_refuses_a_shared_skill_in_a_layout_the_render_cannot_reproduce(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: a legacy per-client skill layout is not reproduced offline; refuse."""
+    world = _shared_skill_world(
+        tmp_path, apm_binary_path, same=False, target="cursor", install=("--legacy-skill-paths",)
+    )
+    assert (world.project / ".cursor/skills/shared/SKILL.md").is_file()
+
+    _assert_refused_before_any_write(world, ".cursor/skills/")
+
+
+def test_a_reanchor_refuses_a_directory_only_shared_skill_claim(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: a directory claim alone cannot prove its files' bytes; refuse."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=False)
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    lock["deployments"] = [row for row in lock["deployments"] if row["value"] != _SHARED_SKILL]
+    for row in lock["dependencies"]:
+        if _SHARED_SKILL in (row.get("deployed_files") or []):
+            row["deployed_files"].remove(_SHARED_SKILL)
+            (row.get("deployed_file_hashes") or {}).pop(_SHARED_SKILL, None)
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+
+    _assert_refused_before_any_write(world, ".claude/skills/shared", "would change its writer")
+
+
+def test_a_reanchor_refuses_a_shared_skill_on_a_root_several_targets_deploy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: on .agents/skills the new writer's target is not provable; refuse."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True, target="copilot")
+    assert (world.project / ".agents/skills/shared/SKILL.md").is_file()
+
+    _assert_refused_before_any_write(world, ".agents/skills/shared", "would change its writer")
 
 
 def test_a_reanchor_refuses_a_shared_file_whose_owner_declares_no_rule(
