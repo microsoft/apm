@@ -461,18 +461,32 @@ def _records(scratch: Path):
 
 
 def _intact_within(records, path: Path, seconds: float = 5.0) -> bool | None:
-    """``intact()``'s verdict, or ``None`` when it is still blocked after *seconds*."""
+    """``intact()``'s verdict, or ``None`` when it is still blocked after *seconds*.
+
+    An exception raised by ``intact()`` is re-raised here, so it never reads as a block.
+    """
     import threading
 
     verdict: list[bool] = []
-    worker = threading.Thread(target=lambda: verdict.append(records.intact()), daemon=True)
+    raised: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            verdict.append(records.intact())
+        except BaseException as exc:
+            raised.append(exc)
+
+    worker = threading.Thread(target=_run, daemon=True)
     worker.start()
     worker.join(seconds)
-    if worker.is_alive() and stat.S_ISFIFO(os.lstat(path).st_mode):
-        # Release a reader blocked on the FIFO so the thread can end.
-        os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+    if worker.is_alive():
+        if stat.S_ISFIFO(os.lstat(path).st_mode):
+            # Release a reader blocked on the FIFO so the thread can end.
+            os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
         return None
-    return verdict[0] if verdict else None
+    if raised:
+        raise raised[0]
+    return verdict[0]
 
 
 def test_a_served_regular_file_with_its_bytes_is_intact(tmp_path: Path) -> None:
