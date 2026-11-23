@@ -1833,3 +1833,59 @@ def test_on_windows_only_clearing_a_read_only_flag_is_wider(tmp_path: Path, apm_
 
     assert (outcome.restored, outcome.kept) == (1, ())
     assert config.read_bytes() == _CONFIG_BYTES
+
+
+def _set_restrictive_acl(path: Path) -> None:
+    """Give *path* a POSIX ACL (user rw, a named user r, group none), or skip."""
+    import struct
+
+    undefined = 0xFFFFFFFF
+    entries = [(0x01, 6, undefined), (0x02, 4, 65534), (0x04, 0, undefined)]
+    entries += [(0x10, 4, undefined), (0x20, 0, undefined)]
+    data = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    try:
+        os.setxattr(path, "system.posix_acl_access", data)
+    except OSError as exc:
+        pytest.skip(f"POSIX ACLs unavailable here: {exc}")
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="Linux extended attributes")
+def test_a_path_that_carries_a_posix_acl_is_kept_not_restored_without_it(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Restored bytes are staged with permission bits only, so a restrictive ACL would be
+    lost: such a path is kept and reported instead."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _set_restrictive_acl(config)
+    _killed_journal(apm_home, project, config)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == ((".mcp.json", "it carries a POSIX ACL"),)
+    assert config.read_bytes() == b"killed\n"
+    assert "system.posix_acl_access" in os.listxattr(config)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_restored_directory_is_never_published_with_staging_permissions(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rename that publishes a restored directory already sees its recorded mode."""
+    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o550)
+    published: list[int] = []
+    real_replace = os.replace
+
+    def replace(source, destination, *args, **kwargs):
+        if Path(destination) == skill:
+            published.append(os.lstat(source).st_mode & 0o7777)
+        return real_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", replace)
+    restored = _replay(apm_home, tmp_path / "project", lambda: ledger)
+    monkeypatch.undo()
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert published == [0o550]
+    assert skill.stat().st_mode & 0o7777 == 0o550
+    skill.chmod(0o755)  # let pytest clean up
