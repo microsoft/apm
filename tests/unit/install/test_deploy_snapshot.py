@@ -1473,3 +1473,31 @@ def test_a_path_that_is_now_a_link_is_refused_and_its_target_untouched(
     assert config.is_symlink()
     assert outside.read_bytes() == b"{}\n"
     assert outside.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_an_entry_the_path_cannot_reach_now_is_kept_not_a_crash(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A sealed write turned a journaled entry's parent directory into a file: the
+    entry's mode cannot be bounded, so the unit is kept and reported."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill = project / ".kiro" / "skills" / "s"
+    (skill / "ref").mkdir(parents=True)
+    (skill / "ref" / "notes.md").write_bytes(b"prior\n")
+    ledger = {".kiro/skills/s/ref/notes.md": compute_file_hash(skill / "ref" / "notes.md")}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    (skill / "ref" / "notes.md").unlink()
+    (skill / "ref").rmdir()
+    (skill / "ref").write_bytes(b"now a file\n")
+    (skill / "ref").chmod(0o777)  # no narrower than the directory it replaced
+    journal.after_write(skill)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert [rel for rel, _reason in outcome.kept] == [".kiro/skills/s"]
+    assert (skill / "ref").read_bytes() == b"now a file\n"

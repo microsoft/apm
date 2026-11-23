@@ -62,6 +62,8 @@ def _ceiling(path: Path, directory: bool) -> int | None:
         st = os.lstat(path)
     except FileNotFoundError:
         return _NEW_DIR if directory else _NEW_FILE
+    except OSError:
+        return None  # cannot be reached now (a parent is not a directory): refused
     if stat.S_ISLNK(st.st_mode):
         return None
     return stat.S_IMODE(st.st_mode) & _PERMISSION_BITS
