@@ -299,3 +299,34 @@ def test_a_home_inside_the_project_never_records_or_hits(
     assert verdict_record.replay(["install"]) is False
     assert capsys.readouterr().out == ""
     assert not (project / ".apm-home" / "verdicts").exists()
+
+
+def test_an_owner_without_a_known_no_op_form_records_nothing(project: Path, capsys) -> None:
+    """Registry MCP, MCP updates, LSP...: a safe miss, never a guessed no-op text."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_full_success()
+        verdict_record.unknown("lsp")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_change_only_lines_are_shown_and_never_in_the_no_op_view(project: Path, capsys) -> None:
+    """An owner's change-only line prints; its no-op form records without printing."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write("[>] Installing dependencies from apm.yml...\n")
+        with verdict_record.change_only():
+            sys.stdout.write("[*] Configured 1 server\n")
+        with verdict_record.noop_only():
+            sys.stdout.write("[*] All servers up to date\n")
+        sys.stdout.write("[i] No changes -- install state already up to date in 0.4s.\n")
+        verdict_record.note_verified_noop()
+    shown = capsys.readouterr().out
+
+    assert "Configured 1 server" in shown and "All servers up to date" not in shown
+    assert verdict_record.replay(["install"]) is True
+    replayed = capsys.readouterr().out
+    assert "All servers up to date" in replayed and "Configured 1 server" not in replayed

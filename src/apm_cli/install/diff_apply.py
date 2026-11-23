@@ -794,9 +794,11 @@ def try_apply(
         if files or packages
         else "no-op (desired state already deployed)"
     )
-    if not files and not packages:
-        from apm_cli.install import verdict_record
+    from apm_cli.install import verdict_record
 
+    if files or packages:
+        verdict_record.note_full_success()
+    else:
         verdict_record.note_verified_noop()
     return True
 

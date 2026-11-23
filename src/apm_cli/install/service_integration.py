@@ -44,7 +44,20 @@ class ServiceIntegrationResult:
     target_decision: EffectiveTargetDecision | None
 
 
-def run_service_integrations(  # noqa: PLR0913
+def run_service_integrations(ctx: ServiceCommandContext, **kwargs: Any) -> ServiceIntegrationResult:
+    """Reconcile services; the block is the services segment of the no-op view (#4977)."""
+    from apm_cli.install import verdict_record
+
+    package, existing = kwargs.get("apm_package"), kwargs.get("existing_lock")
+    if (package is not None and package.get_lsp_dependencies()) or (
+        existing is not None and existing.lsp_servers
+    ):
+        verdict_record.unknown("lsp")  # its no-op form is not known: record nothing
+    with verdict_record.segment("services"):
+        return _reconcile_services(ctx, **kwargs)
+
+
+def _reconcile_services(  # noqa: PLR0913
     ctx: ServiceCommandContext,
     *,
     apm_package: Any,

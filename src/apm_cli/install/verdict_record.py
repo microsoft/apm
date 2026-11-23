@@ -216,8 +216,9 @@ def _location_trusted(root: Path) -> bool:
 
 
 def _hits_allowed() -> bool:
-    if (_env("APM_INSTALL_FAST_PATH") or "").strip().lower() in _KILL_VALUES:
-        return False  # the documented fast-path kill switch also disables the record
+    mode = _fast_path_mode()
+    if mode in _KILL_VALUES or mode == "decide":
+        return False  # the kill switch disables the record; deciding never replays
     return not any((_env(name) or "").strip() for name in _NO_HIT_ENV)
 
 
@@ -412,8 +413,13 @@ class _Row:
         return self._data.get(name)
 
 
+def _fast_path_mode() -> str:
+    return (_env("APM_INSTALL_FAST_PATH") or "").strip().lower()
+
+
 def _trace(message: str) -> None:
-    if (_env("APM_INSTALL_FAST_PATH") or "").strip().lower() in {"trace", "decide"}:
+    """Diagnostics only under APM_INSTALL_FAST_PATH=verdict (never in the trace contract)."""
+    if _fast_path_mode() == "verdict":
         sys.stderr.write(f"[i] verdict record: {message}\n")
 
 
@@ -466,32 +472,112 @@ def replay(argv: list[str]) -> bool:
     sys.stdout.write(str(record.get("stdout", "")).replace(_ELAPSED, elapsed))
     sys.stderr.write(str(record.get("stderr", "")))
     sys.stdout.flush()
+    if _fast_path_mode() == "trace":  # the one decision line of the fast-path trace contract
+        sys.stderr.write("[i] install fast path: no-op (verified-state record)\n")
     _trace("hit")
     return True
 
 
 class _Tee:
+    """Shown stream plus the no-op view: what this run would print had it been a no-op.
+
+    Owners whose output differs between a change and a no-op print their change-only
+    lines inside :func:`change_only` (shown, not recorded) and the no-op form inside
+    :func:`noop_only` (recorded, not shown); everything else is both.
+    """
+
     def __init__(self, stream: Any) -> None:
         self.stream = stream
         self.parts: list[str] = []
+        self.mode = "both"
 
     def write(self, text: str) -> int:
-        self.parts.append(text)
+        if self.mode != "shown":
+            self.parts.append(text)
+        if self.mode == "recorded":
+            return len(text)
         return self.stream.write(text)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.stream, name)
 
 
+class _Capture(_Tee):
+    """Records only (the write-time render); isatty and encoding stay the real stream's."""
+
+    def __init__(self, stream: Any) -> None:
+        super().__init__(stream)
+        self.mode = "recorded"
+
+
+_ACTIVE: list[_Tee] = []
+_SEGMENTS: dict[str, tuple[int, int]] = {}
+_UNKNOWN: list[str] = []
+_FULL_SUCCESS: list[bool] = []
+
+
+def recording_active() -> bool:
+    return bool(_ACTIVE)
+
+
+@contextmanager
+def _mode(mode: str) -> Iterator[None]:
+    tee = _ACTIVE[-1] if _ACTIVE else None
+    if tee is None:
+        yield
+        return
+    previous, tee.mode = tee.mode, mode
+    try:
+        yield
+    finally:
+        tee.mode = previous
+
+
+def change_only() -> Any:
+    """Lines printed only because something changed: shown, never in the no-op view."""
+    return _mode("shown")
+
+
+def noop_only() -> Any:
+    """The no-op form of a changed line: in the no-op view, never shown."""
+    return _mode("recorded")
+
+
+@contextmanager
+def segment(name: str) -> Iterator[None]:
+    """Mark the no-op view of one owner phase (the services block)."""
+    tee = _ACTIVE[-1] if _ACTIVE else None
+    start = len(tee.parts) if tee is not None else 0
+    try:
+        yield
+    finally:
+        if tee is not None:
+            _SEGMENTS[name] = (start, len(tee.parts))
+
+
+def unknown(reason: str) -> None:
+    """An owner printed something whose no-op form it does not know: record nothing."""
+    if _ACTIVE:
+        _UNKNOWN.append(reason)
+
+
+def note_full_success() -> None:
+    """A full (or applied) install finished: its no-op form may be recorded."""
+    _FULL_SUCCESS.append(True)
+
+
 @contextmanager
 def recording(argv: list[str]) -> Iterator[None]:
-    """Run the CLI; after a verified no-op with exit 0, record its inputs and output."""
+    """Run the CLI; after a verified no-op or install with exit 0, record the no-op form."""
     if not _served(argv) or not _hits_allowed():
         yield
         return
-    _VERIFIED_NOOP.clear()
+    for state in (_VERIFIED_NOOP, _UNKNOWN, _FULL_SUCCESS):
+        state.clear()
+    _SEGMENTS.clear()
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
+    _ACTIVE.append(out)
     code: object = 1
     try:
         yield
@@ -500,9 +586,56 @@ def recording(argv: list[str]) -> Iterator[None]:
         code = 0 if exc.code is None else exc.code
         raise
     finally:
+        _ACTIVE.remove(out)
         sys.stdout, sys.stderr = out.stream, err.stream
-        if code == 0 and _VERIFIED_NOOP:
-            _write(argv, "".join(out.parts), "".join(err.parts))
+        if code == 0 and not _UNKNOWN:
+            if _VERIFIED_NOOP and not _FULL_SUCCESS:
+                _write(argv, "".join(out.parts), "".join(err.parts))
+            elif _FULL_SUCCESS and "services" in _SEGMENTS:
+                start, end = _SEGMENTS["services"]
+                text = _noop_form(argv, "".join(out.parts[start:end]))
+                if text is not None:
+                    _write(argv, text, "")
+
+
+def _noop_form(argv: list[str], services_text: str) -> str | None:
+    """Today's no-op text, rendered by the engine's own renderer with the services block's
+    no-op view (fast_output.render), in this process after the install committed."""
+    import time as _time
+
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.install import fast_output
+    from apm_cli.install.service import InstallService
+    from apm_cli.models.apm_package import APMPackage
+
+    root = Path.cwd()
+    lock = LockFile.read(get_lockfile_path(root))
+    if lock is None:
+        return None
+    manifest = APMPackage.from_apm_yml(manifest_file(root))
+    from types import SimpleNamespace
+
+    disposition = InstallService.frozen_disposition(SimpleNamespace(frozen="--frozen" in argv))
+    capture = _Capture(sys.stdout)
+    real = sys.stdout
+    sys.stdout = capture  # type: ignore[assignment]
+    _ACTIVE.append(capture)
+    try:
+        fast_output.render(
+            root,
+            lock,
+            manifest,
+            started=_time.perf_counter(),
+            bodies=None,
+            installed=0,
+            frozen_disposition=disposition,
+            services_text=services_text,
+        )
+    finally:
+        _ACTIVE.remove(capture)
+        sys.stdout = real
+    return "".join(capture.parts)
 
 
 def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:

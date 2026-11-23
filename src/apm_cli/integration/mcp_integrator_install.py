@@ -1495,6 +1495,9 @@ def _install_self_defined_deps(
     ]
 
     if already_configured_self_defined:
+        from apm_cli.install import verdict_record
+
+        verdict_record.unknown("mcp already-configured listing")
         if console:
             for name in already_configured_self_defined:
                 console.print(
@@ -1512,6 +1515,10 @@ def _install_self_defined_deps(
             continue
 
         is_update = dep.name in servers_to_update
+        if is_update:
+            from apm_cli.install import verdict_record
+
+            verdict_record.unknown("mcp update")
         synthetic_info = MCPIntegrator._build_self_defined_info(dep)
         self_defined_cache = {dep.name: synthetic_info}
         transport_label = dep.transport or "stdio"
@@ -1677,18 +1684,24 @@ def _install_self_defined_deps(
 
         if successful_runtimes:
             if console:
+                from apm_cli.install import verdict_record
+
                 label = "updated" if is_update else "configured"
-                console.print(
-                    f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
-                    f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
-                    f" [dim]({label})[/dim]"
-                )
-                if not user_scope:
-                    _print_user_wide_configs(console, successful_runtimes)
+                with verdict_record.change_only():  # a no-op writes nothing to report
+                    console.print(
+                        f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
+                        f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
+                        f" [dim]({label})[/dim]"
+                    )
+                    if not user_scope:
+                        _print_user_wide_configs(console, successful_runtimes)
             configured_count += 1
             if is_update:
                 successful_updates.add(dep.name)
         if failed_runtimes:
+            from apm_cli.install import verdict_record
+
+            verdict_record.unknown("mcp failure")
             strict_failures = sorted(
                 failed_runtimes
                 if fail_on_write_error
@@ -1720,20 +1733,31 @@ def _print_mcp_summary(
     """Print the MCP install summary footer panel."""
     if not console:
         return
-    if configured_count > 0:
-        # Use successful_updates (not servers_to_update) for accurate counts.
-        # servers_to_update = all drift-detected servers (some may have failed).
-        # successful_updates = servers that were re-applied AND succeeded.
-        update_count = builtins.len(successful_updates)
-        new_count = configured_count - update_count
-        parts = []
-        if new_count > 0:
-            parts.append(f"configured {new_count} server{'s' if new_count != 1 else ''}")
-        if update_count > 0:
-            parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
+    if configured_count == 0:
+        _print_servers_up_to_date(console)
+        return
+    from apm_cli.install import verdict_record
+
+    if verdict_record.recording_active():
+        # The no-op form of this footer, for the verified-state record (#4977).
+        with verdict_record.noop_only():
+            _print_servers_up_to_date(console)
+    # Use successful_updates (not servers_to_update) for accurate counts.
+    # servers_to_update = all drift-detected servers (some may have failed).
+    # successful_updates = servers that were re-applied AND succeeded.
+    update_count = builtins.len(successful_updates)
+    new_count = configured_count - update_count
+    parts = []
+    if new_count > 0:
+        parts.append(f"configured {new_count} server{'s' if new_count != 1 else ''}")
+    if update_count > 0:
+        parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
+    with verdict_record.change_only():
         console.print(f"[green]{STATUS_SYMBOLS['success']} {', '.join(parts).capitalize()}[/green]")
-    else:
-        console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
+
+
+def _print_servers_up_to_date(console: Any) -> None:
+    console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
 def run_mcp_install(  # noqa: PLR0913
@@ -1815,6 +1839,10 @@ def run_mcp_install(  # noqa: PLR0913
         dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
     ]
     registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
+    if registry_deps:
+        from apm_cli.install import verdict_record
+
+        verdict_record.unknown("registry mcp")
 
     console = _get_console()
     # Track servers that were re-applied due to config drift

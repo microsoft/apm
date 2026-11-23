@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
@@ -100,8 +101,13 @@ def render(
     installed: int = 0,
     frozen_disposition: Any,
     fetched: frozenset[str] = frozenset(),
+    services_text: str | None = None,
 ) -> Any:
     """Print the install output for an already applied (or empty) diff.
+
+    *services_text* is the services block's no-op view an install just
+    recorded (install/verdict_record.py): it stands in for re-running the
+    services phase when the verified-state record renders the no-op form.
 
     *bodies* maps a dependency key to the callable that prints that package's
     integration lines (given the ``InstallLogger``); a package without one
@@ -135,9 +141,20 @@ def render(
     # APM package the full run returns before integrate and leaves it alone.
     if locked:
         update_gitignore_for_apm_modules(logger=logger)
-    services = run_services(
-        project_root, manifest, lock, logger, policy_fetch, frozen_disposition=frozen_disposition
-    )
+    if services_text is None:
+        services = run_services(
+            project_root,
+            manifest,
+            lock,
+            logger,
+            policy_fetch,
+            frozen_disposition=frozen_disposition,
+        )
+    else:
+        from apm_cli.install.service_integration import ServiceIntegrationResult
+
+        sys.stdout.write(services_text)
+        services = ServiceIntegrationResult(mcp_count=0, lsp_count=0, target_decision=None)
     result = render_post_install_summary(
         logger=logger,
         apm_count=installed,
