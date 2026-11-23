@@ -480,7 +480,10 @@ def _refuse_target_policy(project_root: Path, fetch: Any) -> None:
 
     manifest = APMPackage.from_apm_yml(manifest_file(project_root))
     decision = resolve_effective_target_decision(
-        project_root, explicit_target=None, manifest_target=package_target_selection(manifest)
+        project_root,
+        explicit_target=None,
+        manifest_target=package_target_selection(manifest),
+        create_config=False,  # deciding never writes APM_HOME/config.json
     )
     if decision.canonical_targets is None:
         return
