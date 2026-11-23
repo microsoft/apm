@@ -71,6 +71,9 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
             staged = staged_file(root / rel) if rel in produced else None
             if staged is None or f"sha256:{staged[0]}" != value or staged[1] is None:
                 break
+            if _executable(root / rel):
+                # A replay writes plain files: a mode it cannot reproduce takes the full run.
+                break
             files[rel] = [staged[0], staged[1]]
             ascii_only = ascii_only and staged[2]
         else:
@@ -91,6 +94,13 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
                 body = _recorded_body(dep, ctx, version, files)
             record = {"v": 1, "files": files, "ascii_only": ascii_only, "body": body}
             stage_record(key, record)
+
+
+def _executable(path: Path) -> bool:
+    try:
+        return bool(path.stat().st_mode & 0o111)
+    except OSError:
+        return True
 
 
 def _recorded_body(dep: Any, ctx: Any, version: str, files: dict) -> list[str] | None:

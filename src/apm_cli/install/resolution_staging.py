@@ -24,22 +24,39 @@ _STAGING_NAME = re.compile(r"[0-9a-f]{12}|[0-9a-f]{32}")
 
 
 def _publish_no_clobber(staged: Path, destination: Path) -> None:
-    """Rename *staged* to *destination* only if nothing is there, atomically.
+    """Rename *staged* to *destination* only if nothing is there, in one atomic step.
 
-    Windows ``rename`` never replaces. Elsewhere the destination is first
-    claimed by an exclusive ``mkdir``; the rename can then only replace that
-    empty claim, and fails if anything was put into or in place of it.
+    Windows ``rename`` never replaces; macOS has ``renamex_np(RENAME_EXCL)`` and
+    Linux ``renameat2(RENAME_NOREPLACE)``. Without such a call the publish
+    fails (the fast apply then rolls back and the full install runs).
     """
     if os.name == "nt":
         os.rename(staged, destination)
         return
-    os.mkdir(destination)
+    import ctypes
+    import ctypes.util
+    import errno
+    import sys
+
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    source, target = os.fsencode(staged), os.fsencode(destination)
+    if sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        result = libc.renamex_np(source, target, ctypes.c_uint(0x4))  # RENAME_EXCL
+    elif sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        result = libc.renameat2(-100, source, -100, target, ctypes.c_uint(1))  # NOREPLACE
+    else:
+        raise OSError(errno.ENOSYS, "no atomic no-replace rename on this platform")
+    if result != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(destination))
+
+
+def _identity(path: Path) -> tuple[int, int] | None:
     try:
-        os.rename(staged, destination)
+        info = os.lstat(path)
     except OSError:
-        with contextlib.suppress(OSError):
-            os.rmdir(destination)  # only our own claim, and only while still empty
-        raise
+        return None
+    return (info.st_dev, info.st_ino)
 
 
 class ResolutionStagingSession:
@@ -64,6 +81,8 @@ class ResolutionStagingSession:
         self._replacement_by_destination: dict[Path, Path] = {}
         self._destination_by_replacement: dict[Path, Path] = {}
         self._relocations: list[tuple[Path, Path]] = []
+        # No-clobber publications: rollback removes one only while it is still that directory.
+        self._published: dict[Path, tuple[int, int]] = {}
         self._lock = threading.Lock()
 
     def prepare_path(self, path: Path) -> None:
@@ -135,6 +154,8 @@ class ResolutionStagingSession:
             if not clobber:
                 resolved.parent.mkdir(parents=True, exist_ok=True)
                 _publish_no_clobber(staged, resolved)
+                info = os.lstat(resolved)
+                self._published[resolved] = (info.st_dev, info.st_ino)
                 self._backups[resolved] = None  # rollback removes what this created
                 self._replacement_by_destination.pop(resolved)
                 self._destination_by_replacement.pop(staged)
@@ -285,6 +306,11 @@ class ResolutionStagingSession:
                         path.parent.mkdir(parents=True, exist_ok=True)
                         backup.replace(path)
                     elif backup is None:
+                        current = _identity(path)
+                        if current is not None and current != self._published.get(path, current):
+                            block_recovery(path)
+                            cleanup_issues.append((path, "replaced after publish; left in place"))
+                            continue
                         if path.exists():
                             safe_rmtree(path, self._modules_dir)
                         self._remove_empty_parents(path.parent)
