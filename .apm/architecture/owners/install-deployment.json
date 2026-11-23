@@ -10,8 +10,8 @@
     },
     {
       "id": "single-file-package-materialization",
-      "decision": "Single-file dependency package layout, local source admission and the local package image shared by install, uninstall refresh and audit replay",
-      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, materialize_local_package, compute_local_package_hash, materialize_local_package_for_replay); DependencyReference owns suffix vocabulary",
+      "decision": "Single-file dependency package layout, local source admission, the local package image shared by install, uninstall refresh and audit replay, and whether a local source still matches its materialized copy",
+      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, materialize_local_package, compute_local_package_hash, materialize_local_package_for_replay, local_source_matches_copy, which normalizes through install/drift.py); DependencyReference owns suffix vocabulary; the uninstall survivor refresh and re-anchor checks consume local_source_matches_copy",
       "selectors": [
         "src/apm_cli/deps/virtual_file.py",
         "src/apm_cli/deps/github_downloader.py",
@@ -152,6 +152,7 @@
       "selectors": [
         "src/apm_cli/install/commit_gate.py",
         "src/apm_cli/install/deploy_snapshot.py",
+        "src/apm_cli/install/deploy_state.py",
         "src/apm_cli/install/journal_modes.py",
         "src/apm_cli/adapters/client/config_journal.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
@@ -260,6 +261,12 @@
         "src/apm_cli/commands/uninstall/hook_absence.py"
       ],
       "guards": [
+        "install-deployment-uninstall-absence-proof",
+        "install-deployment-uninstall-absence-proof-access",
+        "install-deployment-uninstall-absence-proof-binding",
+        "install-deployment-uninstall-absence-proof-child-no-follow",
+        "install-deployment-uninstall-absence-proof-helper",
+        "install-deployment-uninstall-absence-proof-moved-pin",
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
         "install-deployment-cleanup-spelling-aliases",
