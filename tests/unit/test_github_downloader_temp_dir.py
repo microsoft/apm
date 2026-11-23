@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
 pytestmark = pytest.mark.component
 
@@ -78,6 +79,23 @@ class TestDownloadSubdirectoryPermissionError:
             )
         msg = str(exc_info.value)
         assert "apm config set temp-dir" in msg
+
+    def test_permission_error_for_a_named_ref_raises_runtime_error_with_suggestion(self, tmp_path):
+        """A named ref reaches the same mkdtemp handling once resolved to its commit."""
+        downloader = _make_downloader()
+        dep_ref = _make_virtual_dep_ref(ref="main")
+        resolved = ResolvedReference("main", GitReferenceType.BRANCH, "a" * 40, "main")
+        downloader.resolve_git_reference = MagicMock(return_value=resolved)
+        with (
+            patch("apm_cli.cache.commit_reachability.admit_pinned_commit") as admit,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            self._invoke_with_mkdtemp_error(
+                downloader, dep_ref, PermissionError("denied"), tmp_path
+            )
+        assert "apm config set temp-dir" in str(exc_info.value)
+        assert admit.call_args.kwargs["resolved"] is resolved
+        assert not (tmp_path / "target").exists()
 
     def test_permission_error_message_mentions_access_denied(self, tmp_path):
         """RuntimeError message explains that access was denied."""
