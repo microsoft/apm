@@ -308,14 +308,33 @@ def _build_local_dir_index(
     return index
 
 
-def _rejected_local_file(ref: DependencyReference, anchor: Path) -> str | None:
-    """Why install would reject *ref*'s local file, or ``None`` when it admits it."""
-    from apm_cli.install.phases.local_content import read_local_package_source
+def _local_file_not_a_leaf(local_path: str, anchor: Path) -> str | None:
+    """``None`` when install admits *local_path* as a single-file primitive; else why not.
 
+    The one leaf test both offline walks use. The name is checked first with
+    ``lstat`` (a regular file, not a link), then install's own admission
+    reads it; the verdict needs the bytes it read, so a file swapped for a
+    directory between the checks is never admitted (#4989).
+    """
+    import os
+    import stat
+
+    from apm_cli.install.phases.local_content import read_local_package_source
+    from apm_cli.models.dependency import DependencyReference
+
+    spelled = Path(local_path).expanduser()
+    if not spelled.is_absolute():
+        spelled = anchor / spelled
     try:
-        read_local_package_source(ref, anchor)
+        if not stat.S_ISREG(os.lstat(spelled).st_mode):
+            return f"{local_path} is not a regular file"
+        source = read_local_package_source(
+            DependencyReference.parse_from_dict({"path": local_path}), anchor
+        )
     except (ValueError, OSError) as exc:
         return str(exc)
+    if source.content is None:
+        return f"{local_path} is no longer a single file"
     return None
 
 
@@ -379,7 +398,9 @@ def local_sources_reach(
             continue
         seen.add(directory)
         if directory.is_file():
-            continue  # a standalone primitive file declares no dependencies
+            if _local_file_not_a_leaf(local_path, anchor) is None:
+                continue  # an admitted primitive file declares no dependencies
+            return True  # any other file proves nothing
         try:
             package = _read_node(directory, local=True)
         except (OSError, ValueError, RuntimeError):
@@ -529,6 +550,7 @@ def compute_forward_reachable_keys(
 
     while queue or dev_queue:
         ref, anchor, parent_repo_url, is_dev, chain, parent_key = (queue or dev_queue).popleft()
+        edge: tuple[str, Path] | None = None
         if ref.is_marketplace:
             ref = locked_marketplace_form(ref, lockfile, marketplace_index)
         try:
@@ -554,6 +576,8 @@ def compute_forward_reachable_keys(
                 continue
             if real_dir is None:
                 continue
+            # The edge as declared: a file is admitted against it, not the node identity.
+            edge = (ref.local_path, anchor)
             if ref.replacement is None and parent_repo_url is not None:
                 ref = transitive_local_identity(
                     ref,
@@ -628,10 +652,10 @@ def compute_forward_reachable_keys(
             manifest_dir = install_path
             node_key = visit_key
 
-        if ref.is_local and manifest_dir.is_file():
+        if edge is not None and manifest_dir.is_file():
             # An admitted primitive file declares no dependencies; any other
             # file is not a package, so its subtree is unknown.
-            if (reason := _rejected_local_file(ref, anchor)) is not None:
+            if (reason := _local_file_not_a_leaf(*edge)) is not None:
                 unverifiable.append((visit_key, reason))
             continue
         try:
