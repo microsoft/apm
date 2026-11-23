@@ -98,8 +98,9 @@ def parse_registration_source(
     """Parse SOURCE plus an optional explicit ref exactly like ``marketplace add``.
 
     Raises:
-        ValueError: The source is malformed or combines a ``#ref`` fragment
-            with an explicit ref.
+        ValueError: The source is malformed, combines a ``#ref`` fragment
+            with an explicit ref, or names a ref that is not a branch, tag
+            or commit of the catalog origin.
         PathTraversalError: The source contains a traversal sequence.
     """
     from .source_identity import parse_marketplace_source
@@ -111,6 +112,12 @@ def parse_registration_source(
         )
     identity = parse_marketplace_source(source_arg, host)
     is_direct_url = url_names_remote_manifest(identity.url)
+    if not is_direct_url:
+        from .catalog_ref_pins import check_catalog_ref
+
+        for explicit in (fragment_ref or None, ref):
+            if explicit is not None:
+                check_catalog_ref(explicit)
     return ParsedSource(
         url=identity.url,
         kind=identity.kind,

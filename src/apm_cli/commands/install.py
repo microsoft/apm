@@ -482,6 +482,11 @@ def _resolve_package_references(
                 dependency_reference_cls=DependencyReference,
                 default_registry=default_registry,
                 logger=logger,
+                # install <pkg>#<ref> alone changes only the entry's ref (#5154).
+                ref_only=bool(dep_ref.reference)
+                and not skill_subset_from_cli
+                and marketplace_dep_ref is None
+                and not dep_ref.is_insecure,
             )
             if update_error:
                 _reject(invalid_outcomes, logger, package, update_error)

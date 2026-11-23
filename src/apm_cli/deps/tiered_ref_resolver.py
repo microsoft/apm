@@ -210,6 +210,88 @@ class L0PerRunCache:
 # ---------------------------------------------------------------------------
 
 
+_ABBREVIATED_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,39}$")
+
+
+_UNSAFE_REF_RE = re.compile(r"\.\.|@\{|[\x00-\x20\x7f%~^:?*\[\\]")
+
+
+_VERSION_LIKE_RE = re.compile(r"^v?\d")
+
+
+def _exact_ref_queries(ref: str) -> tuple[str, ...]:
+    """Commits-API names that match only an origin branch or tag named *ref*.
+
+    A name the API could read as a revision expression or an encoded path
+    (``..``, ``@{``, ``^``, ``~``, ``%``) gets no query at all.
+    """
+    if _UNSAFE_REF_RE.search(ref):
+        return ()
+    for namespace in ("heads", "tags"):
+        if ref.startswith(f"refs/{namespace}/"):
+            return (ref.removeprefix("refs/"),)
+    if ref.startswith("refs/"):
+        return ()
+    if _ABBREVIATED_COMMIT_RE.match(ref):
+        return (ref,)
+    if _VERSION_LIKE_RE.match(ref):
+        # A version-like name is usually a tag: ask that namespace first.
+        return (f"tags/{ref}", f"heads/{ref}")
+    return (f"heads/{ref}", f"tags/{ref}")
+
+
+def _listed_exactly(
+    resolver: object, dep_ref: DependencyReference, ref: str
+) -> tuple[bool, str | None]:
+    """``(named, commit)`` for the origin branch or tag named *ref*, from its ref listing.
+
+    The commits API resolves a name like ``git rev-parse``, so ``heads/<x>``
+    could answer with a tag named ``heads/<x>``; the listing matches the
+    namespace exactly, with no fallback to another ref. *named* is true when
+    a branch or tag of that name exists, even if it is ambiguous (no commit).
+    """
+    if not _exact_ref_queries(ref):
+        return False, None
+    from .git_remote_ops import exact_branch_or_tag_sha
+
+    records = [
+        (
+            remote.commit_sha,
+            f"refs/{'heads' if remote.ref_type == GitReferenceType.BRANCH else 'tags'}/{remote.name}",
+        )
+        for remote in resolver.list_remote_refs(dep_ref)
+    ]
+    wanted = {ref} if ref.startswith("refs/") else {f"refs/heads/{ref}", f"refs/tags/{ref}"}
+    if not wanted & {name for _sha, name in records}:
+        return False, None
+    try:
+        sha = exact_branch_or_tag_sha(records, ref, str(dep_ref.repo_url))
+    except RuntimeError:
+        return True, None
+    return True, sha.lower() if _SHA_RE.match(sha or "") else None
+
+
+def _resolve_exactly(resolver: object, dep_ref: DependencyReference, ref: str) -> str | None:
+    """The commit *ref* names at the origin: an exact branch or tag, else an abbreviation.
+
+    The commits API resolves a name like rev-parse, so a branch or tag name
+    resolves from the exact ref listing. A hex name is a branch or tag first,
+    as Git prefers a ref; only with none does the API expand it as an
+    abbreviated commit, which admission then checks like any pin.
+    """
+    available = getattr(resolver, "commits_api_available", None)
+    if available is not None and not available(dep_ref):
+        return None
+    named, sha = _listed_exactly(resolver, dep_ref, ref)
+    if named or not _ABBREVIATED_COMMIT_RE.match(ref):
+        return sha
+    for query in _exact_ref_queries(ref):
+        sha = resolver.resolve_commit_sha_for_ref(dep_ref, query)
+        if sha and _SHA_RE.match(sha):
+            return sha.lower()
+    return None
+
+
 class L1CommitsAPI:
     """Resolve via the GitHub-family commits API.
 
@@ -250,10 +332,7 @@ class L1CommitsAPI:
             resolver = getattr(self._host, "_refs", None)
             if resolver is None:
                 return None
-            sha = resolver.resolve_commit_sha_for_ref(dep_ref, ref)
-            if sha and _SHA_RE.match(sha):
-                return sha.lower()
-            return None
+            return _resolve_exactly(resolver, dep_ref, ref)
         except Exception as exc:
             _log.debug(
                 "L1 commits API failed for %s@%s (%s)",

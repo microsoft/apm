@@ -769,7 +769,7 @@ class TestDownloadSubdirCommitShaBranch:
         dep_ref.repo_url = "owner/repo"
         dep_ref.host = "github.com"
         dep_ref.virtual_path = "sub/pkg"
-        dep_ref.reference = "abc1234def5678901234567890123456789012"  # 40 hex chars
+        dep_ref.reference = "abc1234def567890123456789012345678901234"  # 40 hex chars
 
         target = tmp_path / "target"
         target.mkdir()

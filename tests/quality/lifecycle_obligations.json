@@ -6589,7 +6589,6 @@
   },
   "T2|SCOPE=project|GATE=denied-dependency|FROZEN=on": {
    "credited_by": [
-    "G1|install-frozen|bin|denied-dependency|project",
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
@@ -6769,15 +6768,11 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=canvas": {
-   "credited_by": [
-    "T3|approve-deny|bundle|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
@@ -6791,15 +6786,11 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=lsp": {
-   "credited_by": [
-    "T3|approve-deny|bundle|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -7241,37 +7232,25 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=canvas": {
-   "credited_by": [
-    "T3|audit|bundle|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=hook": {
-   "credited_by": [
-    "T3|audit|bundle|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=lsp": {
-   "credited_by": [
-    "T3|audit|bundle|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -7598,37 +7577,25 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=canvas": {
-   "credited_by": [
-    "T3|audit|pkg-registry|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=hook": {
-   "credited_by": [
-    "T3|audit|pkg-registry|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=lsp": {
-   "credited_by": [
-    "T3|audit|pkg-registry|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -7771,15 +7738,11 @@
    "strength": "e2e"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
-   "credited_by": [
-    "T3|compile|bundle|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=other-file": {
    "credited_by": [
@@ -7988,15 +7951,11 @@
    "strength": "e2e"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=canvas": {
-   "credited_by": [
-    "T3|compile|pkg-registry|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=other-file": {
    "credited_by": [
@@ -8514,37 +8473,25 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
-   "credited_by": [
-    "T3|lock|bundle|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=hook": {
-   "credited_by": [
-    "T3|lock|bundle|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=lsp": {
-   "credited_by": [
-    "T3|lock|bundle|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -8871,37 +8818,25 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=canvas": {
-   "credited_by": [
-    "T3|lock|pkg-registry|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=hook": {
-   "credited_by": [
-    "T3|lock|pkg-registry|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=lsp": {
-   "credited_by": [
-    "T3|lock|pkg-registry|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -9494,37 +9429,25 @@
    "strength": "e2e"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=canvas": {
-   "credited_by": [
-    "T3|prune|pkg-registry|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=hook": {
-   "credited_by": [
-    "T3|prune|pkg-registry|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=lsp": {
-   "credited_by": [
-    "T3|prune|pkg-registry|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -9896,37 +9819,25 @@
    "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=canvas": {
-   "credited_by": [
-    "T3|uninstall|pkg-registry|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=hook": {
-   "credited_by": [
-    "T3|uninstall|pkg-registry|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=lsp": {
-   "credited_by": [
-    "T3|uninstall|pkg-registry|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -10317,37 +10228,25 @@
    "strength": "e2e"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=canvas": {
-   "credited_by": [
-    "T3|update|pkg-registry|canvas"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=hook": {
-   "credited_by": [
-    "T3|update|pkg-registry|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=lsp": {
-   "credited_by": [
-    "T3|update|pkg-registry|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -12870,7 +12769,6 @@
   },
   "pair|GATE=denied-dependency|FROZEN=on": {
    "credited_by": [
-    "G1|install-frozen|bin|denied-dependency|project",
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
@@ -14839,10 +14737,7 @@
   },
   "pair|OP=approve-deny|SRC=local-bundle": {
    "credited_by": [
-    "T3|approve-deny|bundle|bin",
-    "T3|approve-deny|bundle|canvas",
     "T3|approve-deny|bundle|hook",
-    "T3|approve-deny|bundle|lsp",
     "T3|approve-deny|bundle|mcp",
     "T3|approve-deny|bundle|other-file",
     "T3|approve-deny|bundle|skill",
@@ -14865,7 +14760,6 @@
   },
   "pair|OP=approve-deny|SRC=marketplace-file": {
    "credited_by": [
-    "T3|approve-deny|file-mkt|bin",
     "T3|approve-deny|file-mkt|canvas",
     "T3|approve-deny|file-mkt|hook",
     "T3|approve-deny|file-mkt|lsp",
@@ -14883,11 +14777,9 @@
   },
   "pair|OP=approve-deny|SRC=marketplace-git": {
    "credited_by": [
-    "T3|approve-deny|marketplace-object|bin",
     "T3|approve-deny|marketplace-object|canvas",
     "T3|approve-deny|marketplace-object|lsp",
     "T3|approve-deny|marketplace-object|skill",
-    "T3|approve-deny|plugin-at-mkt|bin",
     "T3|approve-deny|plugin-at-mkt|hook",
     "T3|approve-deny|plugin-at-mkt|mcp",
     "T5|real|approve-deny|marketplace-object",
@@ -14902,7 +14794,6 @@
   },
   "pair|OP=approve-deny|SRC=marketplace-local": {
    "credited_by": [
-    "T3|approve-deny|local-mkt|bin",
     "T3|approve-deny|local-mkt|canvas",
     "T3|approve-deny|local-mkt|hook",
     "T3|approve-deny|local-mkt|lsp",
@@ -14920,7 +14811,6 @@
   },
   "pair|OP=approve-deny|SRC=native-plugin": {
    "credited_by": [
-    "T3|approve-deny|native|bin",
     "T3|approve-deny|native|hook",
     "T3|approve-deny|native|lsp",
     "T3|approve-deny|native|mcp",
@@ -14936,7 +14826,6 @@
   },
   "pair|OP=approve-deny|SRC=pkg-registry": {
    "credited_by": [
-    "T3|approve-deny|pkg-registry|bin",
     "T3|approve-deny|pkg-registry|canvas",
     "T3|approve-deny|pkg-registry|hook",
     "T3|approve-deny|pkg-registry|lsp",
@@ -15058,7 +14947,6 @@
   },
   "pair|OP=audit|GATE=denied-dependency": {
    "credited_by": [
-    "G1|audit-ci|bin|denied-dependency|project",
     "G1|audit-ci|canvas|denied-dependency|project",
     "G1|audit-ci|hook|denied-dependency|project",
     "G1|audit-ci|lsp|denied-dependency|project",
@@ -15281,10 +15169,6 @@
   },
   "pair|OP=audit|SRC=local-bundle": {
    "credited_by": [
-    "T3|audit|bundle|bin",
-    "T3|audit|bundle|canvas",
-    "T3|audit|bundle|hook",
-    "T3|audit|bundle|lsp",
     "T3|audit|bundle|mcp",
     "T3|audit|bundle|other-file",
     "T3|audit|bundle|skill",
@@ -15308,7 +15192,6 @@
   },
   "pair|OP=audit|SRC=marketplace-file": {
    "credited_by": [
-    "T3|audit|file-mkt|bin",
     "T3|audit|file-mkt|canvas",
     "T3|audit|file-mkt|hook",
     "T3|audit|file-mkt|lsp",
@@ -15327,11 +15210,9 @@
   },
   "pair|OP=audit|SRC=marketplace-git": {
    "credited_by": [
-    "T3|audit|marketplace-object|bin",
     "T3|audit|marketplace-object|canvas",
     "T3|audit|marketplace-object|lsp",
     "T3|audit|marketplace-object|skill",
-    "T3|audit|plugin-at-mkt|bin",
     "T3|audit|plugin-at-mkt|hook",
     "T3|audit|plugin-at-mkt|mcp",
     "T5|dry-run|audit|marketplace-object",
@@ -15348,7 +15229,6 @@
   },
   "pair|OP=audit|SRC=marketplace-local": {
    "credited_by": [
-    "T3|audit|local-mkt|bin",
     "T3|audit|local-mkt|canvas",
     "T3|audit|local-mkt|hook",
     "T3|audit|local-mkt|lsp",
@@ -15380,7 +15260,6 @@
   },
   "pair|OP=audit|SRC=native-plugin": {
    "credited_by": [
-    "T3|audit|native|bin",
     "T3|audit|native|hook",
     "T3|audit|native|lsp",
     "T3|audit|native|mcp",
@@ -15397,10 +15276,6 @@
   },
   "pair|OP=audit|SRC=pkg-registry": {
    "credited_by": [
-    "T3|audit|pkg-registry|bin",
-    "T3|audit|pkg-registry|canvas",
-    "T3|audit|pkg-registry|hook",
-    "T3|audit|pkg-registry|lsp",
     "T3|audit|pkg-registry|mcp",
     "T3|audit|pkg-registry|other-file",
     "T3|audit|pkg-registry|skill",
@@ -15556,7 +15431,6 @@
   },
   "pair|OP=bundle-install|GATE=denied-dependency": {
    "credited_by": [
-    "G1|bundle|bin|denied-dependency|project",
     "G1|bundle|canvas|denied-dependency|project",
     "G1|bundle|hook|denied-dependency|project",
     "G1|bundle|lsp|denied-dependency|project",
@@ -15970,7 +15844,6 @@
   },
   "pair|OP=compile|GATE=denied-dependency": {
    "credited_by": [
-    "G1|compile|bin|denied-dependency|project",
     "G1|compile|canvas|denied-dependency|project",
     "G1|compile|hook|denied-dependency|project",
     "G1|compile|lsp|denied-dependency|project",
@@ -16160,8 +16033,6 @@
   },
   "pair|OP=compile|SRC=local-bundle": {
    "credited_by": [
-    "T3|compile|bundle|bin",
-    "T3|compile|bundle|canvas",
     "T3|compile|bundle|hook",
     "T3|compile|bundle|lsp",
     "T3|compile|bundle|mcp",
@@ -16187,7 +16058,6 @@
   },
   "pair|OP=compile|SRC=marketplace-file": {
    "credited_by": [
-    "T3|compile|file-mkt|bin",
     "T3|compile|file-mkt|canvas",
     "T3|compile|file-mkt|hook",
     "T3|compile|file-mkt|lsp",
@@ -16206,11 +16076,9 @@
   },
   "pair|OP=compile|SRC=marketplace-git": {
    "credited_by": [
-    "T3|compile|marketplace-object|bin",
     "T3|compile|marketplace-object|canvas",
     "T3|compile|marketplace-object|lsp",
     "T3|compile|marketplace-object|skill",
-    "T3|compile|plugin-at-mkt|bin",
     "T3|compile|plugin-at-mkt|hook",
     "T3|compile|plugin-at-mkt|mcp",
     "T5|dry-run|compile|marketplace-object",
@@ -16227,7 +16095,6 @@
   },
   "pair|OP=compile|SRC=marketplace-local": {
    "credited_by": [
-    "T3|compile|local-mkt|bin",
     "T3|compile|local-mkt|canvas",
     "T3|compile|local-mkt|hook",
     "T3|compile|local-mkt|lsp",
@@ -16259,7 +16126,6 @@
   },
   "pair|OP=compile|SRC=native-plugin": {
    "credited_by": [
-    "T3|compile|native|bin",
     "T3|compile|native|hook",
     "T3|compile|native|lsp",
     "T3|compile|native|mcp",
@@ -16276,8 +16142,6 @@
   },
   "pair|OP=compile|SRC=pkg-registry": {
    "credited_by": [
-    "T3|compile|pkg-registry|bin",
-    "T3|compile|pkg-registry|canvas",
     "T3|compile|pkg-registry|hook",
     "T3|compile|pkg-registry|lsp",
     "T3|compile|pkg-registry|mcp",
@@ -16431,14 +16295,12 @@
   },
   "pair|OP=install|GATE=denied-dependency": {
    "credited_by": [
-    "G1|install-frozen|bin|denied-dependency|project",
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
     "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project",
-    "G1|install|bin|denied-dependency|project",
     "G1|install|canvas|denied-dependency|project",
     "G1|install|hook|denied-dependency|project",
     "G1|install|lsp|denied-dependency|project",
@@ -16730,7 +16592,6 @@
   },
   "pair|OP=install|SRC=marketplace-file": {
    "credited_by": [
-    "T3|install|file-mkt|bin",
     "T3|install|file-mkt|canvas",
     "T3|install|file-mkt|hook",
     "T3|install|file-mkt|lsp",
@@ -16763,11 +16624,9 @@
   },
   "pair|OP=install|SRC=marketplace-git": {
    "credited_by": [
-    "T3|install|marketplace-object|bin",
     "T3|install|marketplace-object|canvas",
     "T3|install|marketplace-object|lsp",
     "T3|install|marketplace-object|skill",
-    "T3|install|plugin-at-mkt|bin",
     "T3|install|plugin-at-mkt|hook",
     "T3|install|plugin-at-mkt|mcp",
     "T5|dry-run|install|marketplace-object",
@@ -16799,7 +16658,6 @@
   },
   "pair|OP=install|SRC=marketplace-local": {
    "credited_by": [
-    "T3|install|local-mkt|bin",
     "T3|install|local-mkt|canvas",
     "T3|install|local-mkt|hook",
     "T3|install|local-mkt|lsp",
@@ -16854,7 +16712,6 @@
   },
   "pair|OP=install|SRC=native-plugin": {
    "credited_by": [
-    "T3|install|native|bin",
     "T3|install|native|hook",
     "T3|install|native|lsp",
     "T3|install|native|mcp",
@@ -16884,7 +16741,6 @@
   },
   "pair|OP=install|SRC=pkg-registry": {
    "credited_by": [
-    "T3|install|pkg-registry|bin",
     "T3|install|pkg-registry|canvas",
     "T3|install|pkg-registry|hook",
     "T3|install|pkg-registry|lsp",
@@ -17020,7 +16876,6 @@
   },
   "pair|OP=lock|GATE=denied-dependency": {
    "credited_by": [
-    "G1|lock|bin|denied-dependency|project",
     "G1|lock|canvas|denied-dependency|project",
     "G1|lock|hook|denied-dependency|project",
     "G1|lock|lsp|denied-dependency|project",
@@ -17264,10 +17119,6 @@
   },
   "pair|OP=lock|SRC=local-bundle": {
    "credited_by": [
-    "T3|lock|bundle|bin",
-    "T3|lock|bundle|canvas",
-    "T3|lock|bundle|hook",
-    "T3|lock|bundle|lsp",
     "T3|lock|bundle|mcp",
     "T3|lock|bundle|other-file",
     "T3|lock|bundle|skill",
@@ -17290,7 +17141,6 @@
   },
   "pair|OP=lock|SRC=marketplace-file": {
    "credited_by": [
-    "T3|lock|file-mkt|bin",
     "T3|lock|file-mkt|canvas",
     "T3|lock|file-mkt|hook",
     "T3|lock|file-mkt|lsp",
@@ -17308,11 +17158,9 @@
   },
   "pair|OP=lock|SRC=marketplace-git": {
    "credited_by": [
-    "T3|lock|marketplace-object|bin",
     "T3|lock|marketplace-object|canvas",
     "T3|lock|marketplace-object|lsp",
     "T3|lock|marketplace-object|skill",
-    "T3|lock|plugin-at-mkt|bin",
     "T3|lock|plugin-at-mkt|hook",
     "T3|lock|plugin-at-mkt|mcp",
     "T5|real|lock|marketplace-object",
@@ -17327,7 +17175,6 @@
   },
   "pair|OP=lock|SRC=marketplace-local": {
    "credited_by": [
-    "T3|lock|local-mkt|bin",
     "T3|lock|local-mkt|canvas",
     "T3|lock|local-mkt|hook",
     "T3|lock|local-mkt|lsp",
@@ -17357,7 +17204,6 @@
   },
   "pair|OP=lock|SRC=native-plugin": {
    "credited_by": [
-    "T3|lock|native|bin",
     "T3|lock|native|hook",
     "T3|lock|native|lsp",
     "T3|lock|native|mcp",
@@ -17373,10 +17219,6 @@
   },
   "pair|OP=lock|SRC=pkg-registry": {
    "credited_by": [
-    "T3|lock|pkg-registry|bin",
-    "T3|lock|pkg-registry|canvas",
-    "T3|lock|pkg-registry|hook",
-    "T3|lock|pkg-registry|lsp",
     "T3|lock|pkg-registry|mcp",
     "T3|lock|pkg-registry|other-file",
     "T3|lock|pkg-registry|skill",
@@ -17652,7 +17494,6 @@
   },
   "pair|OP=marketplace|SRC=marketplace-file": {
    "credited_by": [
-    "T3|marketplace|file-mkt|bin",
     "T3|marketplace|file-mkt|canvas",
     "T3|marketplace|file-mkt|hook",
     "T3|marketplace|file-mkt|lsp",
@@ -17670,11 +17511,9 @@
   },
   "pair|OP=marketplace|SRC=marketplace-git": {
    "credited_by": [
-    "T3|marketplace|marketplace-object|bin",
     "T3|marketplace|marketplace-object|canvas",
     "T3|marketplace|marketplace-object|lsp",
     "T3|marketplace|marketplace-object|skill",
-    "T3|marketplace|plugin-at-mkt|bin",
     "T3|marketplace|plugin-at-mkt|hook",
     "T3|marketplace|plugin-at-mkt|mcp",
     "T5|real|marketplace|marketplace-object",
@@ -17700,7 +17539,6 @@
   },
   "pair|OP=marketplace|SRC=marketplace-local": {
    "credited_by": [
-    "T3|marketplace|local-mkt|bin",
     "T3|marketplace|local-mkt|canvas",
     "T3|marketplace|local-mkt|hook",
     "T3|marketplace|local-mkt|lsp",
@@ -17839,7 +17677,6 @@
   },
   "pair|OP=mcp-install|GATE=denied-dependency": {
    "credited_by": [
-    "G1|mcp-install|bin|denied-dependency|project",
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
@@ -18213,7 +18050,6 @@
   },
   "pair|OP=pack|GATE=denied-dependency": {
    "credited_by": [
-    "G1|pack|bin|denied-dependency|project",
     "G1|pack|canvas|denied-dependency|project",
     "G1|pack|hook|denied-dependency|project",
     "G1|pack|lsp|denied-dependency|project",
@@ -18723,7 +18559,6 @@
   },
   "pair|OP=prune|SRC=marketplace-file": {
    "credited_by": [
-    "T3|prune|file-mkt|bin",
     "T3|prune|file-mkt|canvas",
     "T3|prune|file-mkt|hook",
     "T3|prune|file-mkt|lsp",
@@ -18742,11 +18577,9 @@
   },
   "pair|OP=prune|SRC=marketplace-git": {
    "credited_by": [
-    "T3|prune|marketplace-object|bin",
     "T3|prune|marketplace-object|canvas",
     "T3|prune|marketplace-object|lsp",
     "T3|prune|marketplace-object|skill",
-    "T3|prune|plugin-at-mkt|bin",
     "T3|prune|plugin-at-mkt|hook",
     "T3|prune|plugin-at-mkt|mcp",
     "T5|dry-run|prune|marketplace-object",
@@ -18763,7 +18596,6 @@
   },
   "pair|OP=prune|SRC=marketplace-local": {
    "credited_by": [
-    "T3|prune|local-mkt|bin",
     "T3|prune|local-mkt|canvas",
     "T3|prune|local-mkt|hook",
     "T3|prune|local-mkt|lsp",
@@ -18795,7 +18627,6 @@
   },
   "pair|OP=prune|SRC=native-plugin": {
    "credited_by": [
-    "T3|prune|native|bin",
     "T3|prune|native|hook",
     "T3|prune|native|lsp",
     "T3|prune|native|mcp",
@@ -18812,10 +18643,6 @@
   },
   "pair|OP=prune|SRC=pkg-registry": {
    "credited_by": [
-    "T3|prune|pkg-registry|bin",
-    "T3|prune|pkg-registry|canvas",
-    "T3|prune|pkg-registry|hook",
-    "T3|prune|pkg-registry|lsp",
     "T3|prune|pkg-registry|mcp",
     "T3|prune|pkg-registry|other-file",
     "T3|prune|pkg-registry|skill",
@@ -19146,7 +18973,6 @@
     "T3|uninstall|local-path|lsp",
     "T3|uninstall|marketplace-object|lsp",
     "T3|uninstall|native|lsp",
-    "T3|uninstall|pkg-registry|lsp",
     "T3|uninstall|shorthand|lsp"
    ],
    "family": "pair",
@@ -19218,7 +19044,6 @@
   },
   "pair|OP=uninstall|SRC=marketplace-file": {
    "credited_by": [
-    "T3|uninstall|file-mkt|bin",
     "T3|uninstall|file-mkt|canvas",
     "T3|uninstall|file-mkt|hook",
     "T3|uninstall|file-mkt|lsp",
@@ -19237,11 +19062,9 @@
   },
   "pair|OP=uninstall|SRC=marketplace-git": {
    "credited_by": [
-    "T3|uninstall|marketplace-object|bin",
     "T3|uninstall|marketplace-object|canvas",
     "T3|uninstall|marketplace-object|lsp",
     "T3|uninstall|marketplace-object|skill",
-    "T3|uninstall|plugin-at-mkt|bin",
     "T3|uninstall|plugin-at-mkt|hook",
     "T3|uninstall|plugin-at-mkt|mcp",
     "T5|dry-run|uninstall|marketplace-object",
@@ -19258,7 +19081,6 @@
   },
   "pair|OP=uninstall|SRC=marketplace-local": {
    "credited_by": [
-    "T3|uninstall|local-mkt|bin",
     "T3|uninstall|local-mkt|canvas",
     "T3|uninstall|local-mkt|hook",
     "T3|uninstall|local-mkt|lsp",
@@ -19277,7 +19099,6 @@
   },
   "pair|OP=uninstall|SRC=native-plugin": {
    "credited_by": [
-    "T3|uninstall|native|bin",
     "T3|uninstall|native|hook",
     "T3|uninstall|native|lsp",
     "T3|uninstall|native|mcp",
@@ -19294,10 +19115,6 @@
   },
   "pair|OP=uninstall|SRC=pkg-registry": {
    "credited_by": [
-    "T3|uninstall|pkg-registry|bin",
-    "T3|uninstall|pkg-registry|canvas",
-    "T3|uninstall|pkg-registry|hook",
-    "T3|uninstall|pkg-registry|lsp",
     "T3|uninstall|pkg-registry|mcp",
     "T3|uninstall|pkg-registry|other-file",
     "T3|uninstall|pkg-registry|skill",
@@ -19441,7 +19258,6 @@
   },
   "pair|OP=update|GATE=denied-dependency": {
    "credited_by": [
-    "G1|update|bin|denied-dependency|project",
     "G1|update|canvas|denied-dependency|project",
     "G1|update|hook|denied-dependency|project",
     "G1|update|lsp|denied-dependency|project",
@@ -19707,7 +19523,6 @@
   },
   "pair|OP=update|SRC=marketplace-file": {
    "credited_by": [
-    "T3|update|file-mkt|bin",
     "T3|update|file-mkt|canvas",
     "T3|update|file-mkt|hook",
     "T3|update|file-mkt|lsp",
@@ -19726,11 +19541,9 @@
   },
   "pair|OP=update|SRC=marketplace-git": {
    "credited_by": [
-    "T3|update|marketplace-object|bin",
     "T3|update|marketplace-object|canvas",
     "T3|update|marketplace-object|lsp",
     "T3|update|marketplace-object|skill",
-    "T3|update|plugin-at-mkt|bin",
     "T3|update|plugin-at-mkt|hook",
     "T3|update|plugin-at-mkt|mcp",
     "T5|dry-run|update|marketplace-object",
@@ -19748,7 +19561,6 @@
   },
   "pair|OP=update|SRC=marketplace-local": {
    "credited_by": [
-    "T3|update|local-mkt|bin",
     "T3|update|local-mkt|canvas",
     "T3|update|local-mkt|hook",
     "T3|update|local-mkt|lsp",
@@ -19780,7 +19592,6 @@
   },
   "pair|OP=update|SRC=native-plugin": {
    "credited_by": [
-    "T3|update|native|bin",
     "T3|update|native|hook",
     "T3|update|native|lsp",
     "T3|update|native|mcp",
@@ -19797,10 +19608,6 @@
   },
   "pair|OP=update|SRC=pkg-registry": {
    "credited_by": [
-    "T3|update|pkg-registry|bin",
-    "T3|update|pkg-registry|canvas",
-    "T3|update|pkg-registry|hook",
-    "T3|update|pkg-registry|lsp",
     "T3|update|pkg-registry|mcp",
     "T3|update|pkg-registry|other-file",
     "T3|update|pkg-registry|skill",
@@ -21527,7 +21334,6 @@
   },
   "pair|SCOPE=project|GATE=denied-dependency": {
    "credited_by": [
-    "G1|bundle|bin|denied-dependency|project",
     "G1|bundle|canvas|denied-dependency|project",
     "G1|bundle|hook|denied-dependency|project",
     "G1|bundle|lsp|denied-dependency|project",
@@ -22802,7 +22608,6 @@
   },
   "pair|SRC=local-bundle|GATE=denied-dependency": {
    "credited_by": [
-    "G1|bundle|bin|denied-dependency|project",
     "G1|bundle|canvas|denied-dependency|project",
     "G1|bundle|hook|denied-dependency|project",
     "G1|bundle|lsp|denied-dependency|project",
@@ -25480,13 +25285,7 @@
   "pair|SRC=pkg-registry|PRIM=canvas": {
    "credited_by": [
     "T3|approve-deny|pkg-registry|canvas",
-    "T3|audit|pkg-registry|canvas",
-    "T3|compile|pkg-registry|canvas",
-    "T3|install|pkg-registry|canvas",
-    "T3|lock|pkg-registry|canvas",
-    "T3|prune|pkg-registry|canvas",
-    "T3|uninstall|pkg-registry|canvas",
-    "T3|update|pkg-registry|canvas"
+    "T3|install|pkg-registry|canvas"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -25498,13 +25297,8 @@
   "pair|SRC=pkg-registry|PRIM=hook": {
    "credited_by": [
     "T3|approve-deny|pkg-registry|hook",
-    "T3|audit|pkg-registry|hook",
     "T3|compile|pkg-registry|hook",
-    "T3|install|pkg-registry|hook",
-    "T3|lock|pkg-registry|hook",
-    "T3|prune|pkg-registry|hook",
-    "T3|uninstall|pkg-registry|hook",
-    "T3|update|pkg-registry|hook"
+    "T3|install|pkg-registry|hook"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -25516,13 +25310,8 @@
   "pair|SRC=pkg-registry|PRIM=lsp": {
    "credited_by": [
     "T3|approve-deny|pkg-registry|lsp",
-    "T3|audit|pkg-registry|lsp",
     "T3|compile|pkg-registry|lsp",
-    "T3|install|pkg-registry|lsp",
-    "T3|lock|pkg-registry|lsp",
-    "T3|prune|pkg-registry|lsp",
-    "T3|uninstall|pkg-registry|lsp",
-    "T3|update|pkg-registry|lsp"
+    "T3|install|pkg-registry|lsp"
    ],
    "family": "pair",
    "issue": "#4096",

@@ -93,3 +93,28 @@ def test_retire_keeps_a_file_another_bundle_still_records(tmp_path: Path) -> Non
 
     assert (project / _ROOT / "extension.mjs").is_file()
     assert f"{_ROOT}extension.mjs" in LockFile.read(get_lockfile_path(project)).local_deployed_files
+
+
+def test_recording_the_canvas_classifies_an_unrecorded_hook_record_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recording a bundle's canvas is an install write: a hook record file the config
+    file records never saw is classified as the user's, not left unrecorded."""
+    import json
+
+    home = tmp_path / "apm-home"
+    monkeypatch.setenv("APM_HOME", str(home))
+    project = tmp_path / "p"
+    sidecar = project / ".github" / "apm-hooks.json"
+    sidecar.parent.mkdir(parents=True)
+    sidecar.write_text("{}\n", encoding="utf-8")
+    row = f"{_ROOT}extension.mjs"
+    (project / row).parent.mkdir(parents=True)
+    (project / row).write_text("export default 'first';\n", encoding="utf-8")
+
+    record_bundle_canvas(project, _TARGETS, "first", None, [row])
+
+    store = home / "deployment-receipts" / "config-files" / "records.json"
+    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    origins = {entry["path"]: entry["origin"] for entry in rows}
+    assert origins.get(sidecar.resolve().as_posix()) == "preexisting"
