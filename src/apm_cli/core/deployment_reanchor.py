@@ -46,6 +46,9 @@ class _ReanchorSession(DeploymentMaterializationSession):
         owner set. A renamed writer's claim must hold its receipt.
         """
         problems = []
+        # A receipt's writer must already own something in this lock: the
+        # rename must never turn an untrusted writer into a trusted one.
+        valid_writers = DeploymentLedgerCodec.valid_owner_keys(lockfile)
         for claim in _renamed_claims(lockfile, renames):
             value = DeploymentLedgerCodec.legacy_value(claim.locator)
             receipt = self._records.get(claim.locator.key)
@@ -56,6 +59,9 @@ class _ReanchorSession(DeploymentMaterializationSession):
                     claim.content_hash is not None or not self._is_directory(value)
                 ):
                     problems.append(value)
+                continue
+            if receipt.active_owner not in valid_writers:
+                problems.append(value)
                 continue
             expected = [receipt.active_owner, self._claim_signature(value)]
             if (

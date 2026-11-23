@@ -315,14 +315,13 @@ def _directory_identities(path: Path) -> set[tuple]:
     """Identities two spellings of one directory share: inode, else a normalized path.
 
     Case-insensitive and normalizing filesystems (macOS, Windows) give one
-    directory several spellings; the stat identity sees through them.
+    directory several spellings; the stat identity sees through them. The path
+    fallback keeps the Unicode spelling, since a filesystem that preserves both
+    NFC and NFD may hold two different directories.
     """
     import os
-    import unicodedata
 
-    identities: set[tuple] = {
-        ("path", unicodedata.normalize("NFC", os.path.normcase(os.path.abspath(path))))
-    }
+    identities: set[tuple] = {("path", os.path.normcase(os.path.abspath(path)))}
     try:
         stat = path.stat()
     except (OSError, RuntimeError):
@@ -357,6 +356,8 @@ def local_sources_reach(
         if directory in seen:
             continue
         seen.add(directory)
+        if directory.is_file():
+            continue  # a standalone primitive file declares no dependencies
         try:
             package = _read_node(directory, local=True)
         except (OSError, ValueError, RuntimeError):
