@@ -470,3 +470,72 @@ def test_empty_hook_event_scaffolding_with_a_lockfile_is_the_users(tmp_path, apm
     assert config_file_origin(settings) is Origin.PREEXISTING
     assert _apm_empties(settings, root=project) is False
     assert settings.is_file()
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Replace *path* as APM's atomic writers do: a new file renamed over it."""
+    staged = path.with_name(path.name + ".staged")
+    staged.write_text(text, encoding="utf-8")
+    os.replace(staged, path)
+
+
+def test_a_users_origin_survives_an_atomic_rewrite_of_a_hardlinked_path(tmp_path, apm_home) -> None:
+    """The user's record under another hard link keeps the rewritten path the user's:
+    the origin is decided before the write, not looked up after the link breaks."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.lock.yaml").write_text("lockfile_version: '1'\n", encoding="utf-8")
+    first = project / "first.json"
+    first.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(first, _WITH_ENTRY, manifest_root=project)  # the user's file, merged into
+    assert config_file_origin(first) is Origin.PREEXISTING
+    second = project / ".mcp.json"
+    try:
+        os.link(first, second)
+    except OSError:
+        pytest.skip("hard links are unavailable")
+
+    with recorded_config_write(second, manifest_root=project):
+        _atomic_write(second, _WITH_ENTRY.replace("srv", "srv2"))
+
+    assert config_file_origin(second) is Origin.PREEXISTING
+    assert _apm_empties(second, root=project) is False
+    assert second.is_file() and config_file_origin(first) is Origin.PREEXISTING
+
+
+def test_a_new_config_never_probes_unrelated_records(
+    tmp_path, apm_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recording a new config costs no identity checks against other records,
+    however many the machine holds: a file APM creates is never looked up."""
+    for index in range(20):
+        _apm_writes(tmp_path / f"p{index}" / f"other-{index}.json", _WITH_ENTRY)
+    calls: list[tuple] = []
+    real = os.path.samefile
+    monkeypatch.setattr(os.path, "samefile", lambda a, b: calls.append((a, b)) or real(a, b))
+
+    config = tmp_path / "new" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+
+    assert calls == []
+    assert config_file_origin(config) is Origin.CREATED
+    assert config.is_file()
+
+
+def test_a_record_of_a_file_linked_for_now_survives_other_saves(tmp_path, apm_home) -> None:
+    """A stored key is checked as written, never re-resolved: project A's config, a
+    link for a while, keeps its record through project B's saves."""
+    a_config = tmp_path / "a" / ".mcp.json"
+    a_config.parent.mkdir()
+    a_config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(a_config, _WITH_ENTRY, manifest_root=tmp_path / "a")
+    held = a_config.read_bytes()
+    a_config.unlink()
+    a_config.symlink_to(tmp_path / "elsewhere.json")
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)  # project B saves the store
+    a_config.unlink()
+    a_config.write_bytes(held)
+
+    assert config_file_origin(a_config) is Origin.PREEXISTING
+    assert _apm_empties(a_config, root=tmp_path / "a") is False
+    assert a_config.read_bytes() == held

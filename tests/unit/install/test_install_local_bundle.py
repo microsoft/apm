@@ -1078,6 +1078,216 @@ class TestLocalBundlePathRouting:
             else:
                 assert deployed == (bundle / packed).read_bytes()
 
+    @staticmethod
+    def _install_bundle_files(
+        tmp_path: Path,
+        files: dict[str, str],
+        target_name: str,
+        deployed: list[str] | None = None,
+    ):
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.services import integrate_local_bundle
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
+        project = _make_project(tmp_path / "dst")
+        diagnostics = DiagnosticCollector()
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        if deployed is not None:
+            lockfile["dependencies"][0]["deployed_files"] = deployed
+        bundle_info = LocalBundleInfo(
+            source_dir=bundle,
+            plugin_json={"id": "test-plugin"},
+            package_id="test-plugin",
+            lockfile=lockfile,
+            pack_targets=["claude"],
+        )
+        result = integrate_local_bundle(
+            bundle_info,
+            project,
+            targets=(KNOWN_TARGETS[target_name],),
+            diagnostics=diagnostics,
+            scope=InstallScope.PROJECT,
+        )
+        return project, result, diagnostics
+
+    def test_packed_native_claude_rule_with_dotted_stem_keeps_its_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """#3686: a Claude rule packed as py.instructions.md is not converted twice."""
+        rule = '---\npaths:\n  - "**/*.py"\n---\n\n# Python rule\n'
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path, {"instructions/py.instructions.md": rule}, "claude"
+        )
+        assert result["deployed_files"] == [".claude/rules/py.md"]
+        assert (project / ".claude/rules/py.md").read_text(encoding="utf-8") == rule
+
+    def test_malformed_instruction_frontmatter_skips_only_that_file(self, tmp_path: Path) -> None:
+        """#3686: an unparseable packed instruction is named and skipped; its sibling installs."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/bad.instructions.md": "---\napplyTo: [unclosed\n---\nbody\n",
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/bad.md").exists()
+        assert ".claude/rules/bad.md" not in result["deployed_file_hashes"]
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+        assert "paths:" in (project / ".claude/rules/good.md").read_text(encoding="utf-8")
+        warnings = [w.message for w in diagnostics.by_category().get(CATEGORY_WARNING, [])]
+        assert len(warnings) == 1 and ".claude/rules/bad.md" in warnings[0], warnings
+        assert "not valid YAML" in warnings[0]
+
+    def test_non_string_frontmatter_keys_install_with_their_sibling(self, tmp_path: Path) -> None:
+        """#3686: valid YAML with a numeric mapping key passes the decoded preflight."""
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/keys.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: {1: numeric, note: text}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert result["deployed_files"] == [".claude/rules/good.md", ".claude/rules/keys.md"]
+        assert "paths:" in (project / ".claude/rules/keys.md").read_text(encoding="utf-8")
+        assert "paths:" in (project / ".claude/rules/good.md").read_text(encoding="utf-8")
+        assert not diagnostics.has_diagnostics
+
+    def test_hidden_character_under_a_colliding_numeric_key_is_still_scanned(
+        self, tmp_path: Path
+    ) -> None:
+        """#3686: keys 1 and '1' stay separate, so neither decoded value escapes the scan."""
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: {1: \"x\\u202ey\", '1': ok}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+
+    def test_hidden_character_in_a_yaml_set_is_still_scanned(self, tmp_path: Path) -> None:
+        """#3686: a decoded override character inside a !!set member is not hidden by repr."""
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: !!set {\"x\\u202ey\": null}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+
+    def test_hidden_character_in_decoded_frontmatter_rejects_the_rule(self, tmp_path: Path) -> None:
+        """#3686: packed rules pass the instruction owner's decoded-frontmatter preflight."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    '---\napplyTo: "src/\\u202e*.py"\n---\nbody\n'
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert ".claude/rules/evil.md" not in result["deployed_file_hashes"]
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+        warnings = [w.message for w in diagnostics.by_category().get(CATEGORY_WARNING, [])]
+        assert any(".claude/rules/evil.md" in w and "hidden Unicode" in w for w in warnings), (
+            warnings
+        )
+
+    @pytest.mark.parametrize(
+        ("deployed", "expected"),
+        [
+            # Two distinct Claude agents: provenance keeps both names apart.
+            (
+                [".claude/agents/rv.md", ".claude/agents/rv.agent.md"],
+                [".claude/agents/rv.agent.md", ".claude/agents/rv.md"],
+            ),
+            # A pre-fix bundle's Claude and Copilot renderings of one agent.
+            ([".claude/agents/rv.md", ".github/agents/rv.agent.md"], [".claude/agents/rv.md"]),
+        ],
+    )
+    def test_packed_agents_lower_by_rendering_provenance(
+        self, tmp_path: Path, deployed: list[str], expected: list[str]
+    ) -> None:
+        """#3686: distinct native agents rv.md and rv.agent.md both install for Claude."""
+        files = {
+            "agents/rv.md": "---\nname: rv\n---\nrv\n",
+            "agents/rv.agent.md": "---\nname: rv-agent\n---\nother\n",
+        }
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path, files, "claude", deployed
+        )
+        assert sorted(result["deployed_files"]) == expected
+        assert (project / ".claude/agents/rv.md").read_text(encoding="utf-8") == files[
+            "agents/rv.md"
+        ]
+
+    @pytest.mark.parametrize(
+        ("pack_extra", "expected"),
+        [
+            # pack.renderings is authoritative, even against deployed_files.
+            ({"renderings": {"agents/rv.agent.md": ".md"}}, {"agents/rv.agent.md": ".md"}),
+            # An own source has no entry, so no deployed_files fallback applies.
+            ({"renderings": {}}, {}),
+            # Pre-renderings bundle: a path claimed with two extensions is dropped.
+            ({}, {"agents/rv.md": ".md"}),
+        ],
+    )
+    def test_rendering_provenance_prefers_the_packed_winner(
+        self, pack_extra: dict, expected: dict
+    ) -> None:
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.install.local_bundle_paths import bundle_rendering_extensions
+
+        lockfile = {
+            "pack": {"format": "plugin", **pack_extra},
+            "dependencies": [
+                {"deployed_files": [".claude/agents/rv.md", ".github/agents/rv.agent.md"]},
+                {"deployed_files": [".claude/agents/rv.agent.md"]},
+            ],
+        }
+        info = LocalBundleInfo(
+            source_dir=Path("."),
+            plugin_json={"id": "p"},
+            package_id="p",
+            lockfile=lockfile,
+            pack_targets=["claude"],
+        )
+        assert bundle_rendering_extensions(info) == expected
+
+    def test_superseded_renderings_count_as_skipped(self, tmp_path: Path) -> None:
+        """#3686: a rendering skipped for another one is counted in the install summary."""
+        _project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/py.md": '---\npaths:\n  - "**/*.py"\n---\n\nbody\n',
+                "instructions/py.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert result["deployed_files"] == [".claude/rules/py.md"]
+        assert result["skipped"] == 1
+
     @pytest.mark.parametrize(
         "target_name",
         sorted(KNOWN_TARGETS),
@@ -1286,6 +1496,135 @@ class TestLocalBundlePathRouting:
                 canvas_approved=True,
             )
             == "prompts/review.prompt.md"
+        )
+
+    @pytest.mark.parametrize(
+        ("target_name", "superseded"),
+        [
+            (
+                "claude",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.instructions.md",
+                    "instructions/py.mdc",
+                },
+            ),
+            (
+                "copilot",
+                {"agents/rv.md", "agents/rv.toml", "instructions/py.md", "instructions/py.mdc"},
+            ),
+            (
+                "cursor",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.instructions.md",
+                    "instructions/py.md",
+                },
+            ),
+            ("codex", {"agents/rv.agent.md"}),
+            # Grok Build copies instructions verbatim under their source name.
+            (
+                "grok-build",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.md",
+                    "instructions/py.mdc",
+                },
+            ),
+        ],
+    )
+    def test_duplicated_bundle_keeps_the_target_own_rendering(
+        self, target_name: str, superseded: set[str]
+    ) -> None:
+        """#3686: a pre-fix bundle deploys one rendering per primitive and target."""
+        from apm_cli.install.local_bundle_paths import (
+            known_bundle_deploy_prefixes,
+            superseded_bundle_renderings,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        rels = [
+            "agents/rv.agent.md",
+            "agents/rv.md",
+            "agents/rv.toml",
+            "agents/solo.md",
+            "instructions/py.instructions.md",
+            "instructions/py.md",
+            "instructions/py.mdc",
+            "skills/s/SKILL.md",
+        ]
+        assert (
+            superseded_bundle_renderings(
+                rels,
+                target_bundle_deploy_prefixes(target),
+                known_bundle_deploy_prefixes(),
+                target=target,
+            ).keys()
+            == superseded
+        )
+
+    @pytest.mark.parametrize(
+        ("target_name", "deployed"),
+        [("grok-build", "rules/py.instructions.md"), ("claude", "rules/py.md")],
+    )
+    def test_packed_instruction_lowers_to_the_target_deployed_name(
+        self, target_name: str, deployed: str
+    ) -> None:
+        """#3686: a bundle installs an instruction under the name a source install gives it."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        lowered = bundle_deploy_relative_path(
+            "instructions/py.instructions.md",
+            target_bundle_deploy_prefixes(target),
+            known_bundle_deploy_prefixes(),
+            target=target,
+            hooks_approved=True,
+            canvas_approved=True,
+            rendering_extension=".instructions.md",
+        )
+        assert lowered == deployed
+
+    @pytest.mark.parametrize(
+        ("target_name", "rel", "rule_format"),
+        [
+            ("claude", "instructions/py.instructions.md", "claude_rules"),
+            ("claude", "instructions/py.md", None),
+            ("cursor", "instructions/py.instructions.md", "cursor_rules"),
+            ("copilot", "instructions/py.instructions.md", None),
+            ("claude", "agents/rv.agent.md", None),
+        ],
+    )
+    def test_packed_apm_instructions_render_to_the_target_rule_format(
+        self, target_name: str, rel: str, rule_format: str | None
+    ) -> None:
+        """#3686: bundles carry applyTo instructions; rule targets convert them."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_rule_format_id,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        assert (
+            bundle_rule_format_id(
+                rel,
+                target_bundle_deploy_prefixes(target),
+                known_bundle_deploy_prefixes(),
+                target=target,
+            )
+            == rule_format
         )
 
     def test_rejects_traversal_before_prefix_routing(self) -> None:

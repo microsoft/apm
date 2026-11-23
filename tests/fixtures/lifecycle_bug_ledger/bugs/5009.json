@@ -13,6 +13,8 @@
     "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_shared_config_without_its_baseline_is_kept_and_reported",
     "tests/unit/install/test_deploy_snapshot.py::test_an_mcp_config_the_records_vouch_for_is_restored",
     "tests/unit/install/test_deploy_snapshot.py::test_a_tampered_seal_over_an_edited_mcp_config_keeps_the_journal",
-    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_shared_config_a_user_edits_after_the_kill_is_kept"
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_shared_config_a_user_edits_after_the_kill_is_kept",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_forged_journal_copy_with_a_matching_hash_keeps_the_journal",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_shared_config_replaced_by_a_directory_keeps_the_journal"
   ]
 }
