@@ -23,6 +23,7 @@ from apm_cli.utils.git_env import (
     clone_git_worktree,
     get_gh_executable,
     get_git_executable,
+    git_clone_env,
     git_line_ending_pin_args,
     git_network_env,
     git_remote_refs,
@@ -1610,6 +1611,47 @@ class TestGitSubprocessEnv:
             )
 
         assert token not in str(raised.value)
+
+
+def test_fresh_clone_dir_env_matches_probing_the_clone_dir(tmp_path: Path) -> None:
+    """A fresh clone directory, derived from the neutral probe, gets Git's own answer."""
+    gitconfig = tmp_path / "gitconfig"
+    gitconfig.write_text(
+        '[url "https://github.com/mirror/"]\n\tinsteadOf = https://github.com/acme/\n'
+        '[http "https://github.com/"]\n\textraHeader = X-Trace: 1\n'
+        "[core]\n\tautocrlf = true\n",
+        encoding="utf-8",
+    )
+    overrides = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path),
+        "GIT_CONFIG_GLOBAL": str(gitconfig),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "",
+    }
+    url = "https://github.com/acme/repo"
+    git = get_git_executable()
+    probed_dir = tmp_path / "probed.git"
+    for command in (
+        [git, "init", "--bare", "--template=", "--quiet", str(probed_dir)],
+        [git, "--git-dir", str(probed_dir), "remote", "add", "origin", url],
+    ):
+        _REAL_SUBPROCESS_RUN(command, env=git_subprocess_env(overrides), check=True)
+    expected = git_network_env(url, overrides, git_dir=probed_dir)
+    target = tmp_path / "staged.git"
+
+    derived = git_clone_env(url, overrides, target, bare=True)
+
+    assert not target.exists()
+    assert derived == expected
+    retained = {
+        derived[f"GIT_CONFIG_KEY_{index}"]: derived[f"GIT_CONFIG_VALUE_{index}"]
+        for index in range(int(derived["GIT_CONFIG_COUNT"]))
+    }
+    assert retained["url.https://github.com/mirror/.insteadof"] == "https://github.com/acme/"
+    assert retained["http.https://github.com/mirror/repo.extraheader"] == "X-Trace: 1"
 
 
 class TestUncachedFallbackLineEndings:

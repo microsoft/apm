@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.core.invocation_memo import memoized_per_invocation
 from apm_cli.utils.subprocess_env import external_process_env
 
 # Module-level cached git executable path (successful resolutions only).
@@ -646,10 +647,23 @@ def _read_effective_git_config(
     *,
     git_dir: Path | None = None,
     worktree: Path | None = None,
+    fresh_git_dir: bool = False,
 ) -> _GitConfigSnapshot:
-    """Return the flattened config visible to one Git child."""
+    """Return the flattened config visible to one Git child.
+
+    The repository-neutral probe is answered once per command for each
+    distinct Git executable, cwd and child environment. *fresh_git_dir* says
+    *git_dir* was just created by :func:`git_clone_env` without templates, so
+    its own config holds only ``git init`` / ``git remote add`` entries; its
+    snapshot then equals the neutral one minus repository scopes unless a
+    conditional include could select different files for that directory.
+    """
     if git_dir is not None and worktree is not None:
         raise ValueError("git_dir and worktree are mutually exclusive")
+    if fresh_git_dir and git_dir is not None:
+        derived = _fresh_git_dir_config(env)
+        if derived is not None:
+            return derived
     command = [get_git_executable()]
     probe_env = dict(env)
     probe_cwd: str | None = None
@@ -676,13 +690,26 @@ def _read_effective_git_config(
             "--list",
         )
     )
+    if git_dir is None and worktree is None:
+        return _probe_neutral_git_config(
+            tuple(command), probe_cwd, tuple(sorted(probe_env.items()))
+        )
+    return _probe_git_config(tuple(command), probe_cwd, probe_env)
+
+
+def _probe_git_config(
+    command: tuple[str, ...],
+    cwd: str | None,
+    env: dict[str, str],
+) -> _GitConfigSnapshot:
+    """Run one ``git config --list`` probe and parse its flattened entries."""
     try:
         result = _run_git_config_probe(
             command,
             capture_output=True,
             check=False,
-            cwd=probe_cwd,
-            env=probe_env,
+            cwd=cwd,
+            env=env,
             timeout_category="Git config probe timed out",
         )
     except OSError as exc:
@@ -710,18 +737,83 @@ def _read_effective_git_config(
             raise GitUrlRewriteProbeError("Git config returned non-UTF-8 output") from exc
         config_entry = GitConfigEntry(scope_text, key_text, value_text)
         entries.append(config_entry)
-        normalized = key_text.lower()
-        if normalized.startswith("http.") or normalized == "http.extraheader":
-            if normalized.endswith(".extraheader") and _is_valid_http_extraheader_value(value_text):
-                http_headers.append(config_entry)
-            continue
-        if not normalized.startswith("url.") or not normalized.endswith(".insteadof"):
-            continue
-        replacement = key_text[4 : -len(".insteadOf")]
-        if not replacement or not value_text:
-            raise GitUrlRewriteProbeError("Git config returned an incomplete rewrite")
-        rewrites.append((replacement, value_text))
+        _classify_git_config_entry(config_entry, rewrites, http_headers)
     return _GitConfigSnapshot(tuple(entries), tuple(rewrites), tuple(http_headers))
+
+
+@memoized_per_invocation("git-config-snapshot", keep=lambda _snapshot: True)
+def _probe_neutral_git_config(
+    command: tuple[str, ...],
+    cwd: str | None,
+    env_items: tuple[tuple[str, str], ...],
+) -> _GitConfigSnapshot:
+    """Probe repository-neutral config once per command and effective input.
+
+    The key is the whole probe: Git executable, cwd and every environment
+    variable, so any change to ``HOME``, ``XDG_CONFIG_HOME`` or a
+    ``GIT_CONFIG_*`` input probes again. A failed probe raises and is retried.
+    """
+    return _probe_git_config(command, cwd, dict(env_items))
+
+
+def _classify_git_config_entry(
+    entry: GitConfigEntry,
+    rewrites: list[tuple[str, str]],
+    http_headers: list[GitConfigEntry],
+) -> None:
+    """Collect one entry's URL rewrite or valid HTTP extra header."""
+    normalized = entry.key.lower()
+    if normalized.startswith("http.") or normalized == "http.extraheader":
+        if normalized.endswith(".extraheader") and _is_valid_http_extraheader_value(entry.value):
+            http_headers.append(entry)
+        return
+    if not normalized.startswith("url.") or not normalized.endswith(".insteadof"):
+        return
+    replacement = entry.key[4 : -len(".insteadOf")]
+    if not replacement or not entry.value:
+        raise GitUrlRewriteProbeError("Git config returned an incomplete rewrite")
+    rewrites.append((replacement, entry.value))
+
+
+_CONFIG_LOCATION_ENV = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "HOME", "XDG_CONFIG_HOME")
+
+
+def _has_relative_config_location(env: dict[str, str]) -> bool:
+    """Return whether a config file location in *env* depends on the cwd."""
+    locations = [env.get(name, "") for name in _CONFIG_LOCATION_ENV]
+    # Git for Windows derives HOME from these when HOME is unset.
+    locations.append(env.get("USERPROFILE", ""))
+    if env.get("HOMEDRIVE") or env.get("HOMEPATH"):
+        locations.append(env.get("HOMEDRIVE", "") + env.get("HOMEPATH", ""))
+    return any(location and not os.path.isabs(location) for location in locations)
+
+
+def _fresh_git_dir_config(env: dict[str, str]) -> _GitConfigSnapshot | None:
+    """Derive a fresh clone directory's config from the neutral probe, or ``None``.
+
+    Only ``includeIf`` can make system, global or command config depend on the
+    repository (``gitdir:``, ``onbranch:``, ``hasconfig:remote.*.url:``), and
+    Git lists every such directive it reads, so without one the directory sees
+    exactly the neutral non-repository entries. Its own ``core.*`` /
+    ``remote.origin.*`` entries are inert for every consumer of the snapshot,
+    which keeps only ``http.*`` and ``url.*.insteadOf`` from repository scopes.
+    A relative config location resolves against the probe's cwd, which differs
+    from the directory's, so it always probes the directory itself.
+    """
+    if _has_relative_config_location(env):
+        return None
+    try:
+        neutral = _read_effective_git_config(env)
+    except GitUrlRewriteProbeError:
+        return None
+    if any(entry.key.lower().startswith("includeif.") for entry in neutral.entries):
+        return None
+    entries = tuple(entry for entry in neutral.entries if entry.scope not in {"local", "worktree"})
+    rewrites: list[tuple[str, str]] = []
+    http_headers: list[GitConfigEntry] = []
+    for entry in entries:
+        _classify_git_config_entry(entry, rewrites, http_headers)
+    return _GitConfigSnapshot(entries, tuple(rewrites), tuple(http_headers))
 
 
 def _has_applicable_http_authorization(
@@ -774,6 +866,31 @@ def _urlmatched_header_group(
         probe_env[f"GIT_CONFIG_VALUE_{index}"] = f"X-Apm-Config-Probe: {index}"
 
     git_executable = get_git_executable()
+    selected_index = _probe_urlmatched_header_index(
+        git_executable,
+        remote_url,
+        str(Path(git_executable).resolve().parent),
+        tuple(sorted(probe_env.items())),
+    )
+    if selected_index is None:
+        return ()
+    selected_key = headers[selected_index].key.lower()
+    return tuple(entry for entry in headers if entry.key.lower() == selected_key)
+
+
+@memoized_per_invocation("git-urlmatch-header", keep=lambda _index: True)
+def _probe_urlmatched_header_index(
+    git_executable: str,
+    remote_url: str,
+    cwd: str,
+    env_items: tuple[tuple[str, str], ...],
+) -> int | None:
+    """Return the probe marker Git selects for *remote_url*, ``None`` if none.
+
+    Answered once per command for each Git executable, URL and probe
+    environment (which carries every candidate header key). A failed probe
+    raises and is retried.
+    """
     try:
         result = _run_git_config_probe(
             [
@@ -786,14 +903,14 @@ def _urlmatched_header_group(
             ],
             capture_output=True,
             check=False,
-            cwd=str(Path(git_executable).resolve().parent),
-            env=probe_env,
+            cwd=cwd,
+            env=dict(env_items),
             timeout_category="Git URL-match probe timed out",
         )
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git URL-match probe could not start") from exc
     if result.returncode == 1:
-        return ()
+        return None
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
         raise GitUrlRewriteProbeError(f"Git URL-match probe exited with status {result.returncode}")
     selected = result.stdout.rstrip(b"\0\n")
@@ -804,10 +921,9 @@ def _urlmatched_header_group(
         selected_index = int(selected.removeprefix(prefix))
     except ValueError as exc:
         raise GitUrlRewriteProbeError("Git URL-match probe returned malformed output") from exc
-    if selected_index < 0 or selected_index >= len(headers):
+    if selected_index < 0 or selected_index >= int(dict(env_items)["GIT_CONFIG_COUNT"]):
         raise GitUrlRewriteProbeError("Git URL-match probe returned malformed output")
-    selected_key = headers[selected_index].key.lower()
-    return tuple(entry for entry in headers if entry.key.lower() == selected_key)
+    return selected_index
 
 
 def git_url_has_authorization(
@@ -921,8 +1037,9 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
     and ``AuthResolver.git_env_for_context`` call this once per attempt, so
     an uncached probe would spawn one extra ``git config`` child process
     (with its own retry/timeout budget) per dependency in a large install.
-    Callers that pass an explicit ``env`` (tests) always re-probe. Use
-    :func:`reset_git_cache` to clear it (tests only).
+    Callers that pass an explicit ``env`` skip this cache; inside a CLI
+    command the underlying probe is still answered once per distinct
+    environment. Use :func:`reset_git_cache` to clear it (tests only).
 
     Parallel installs call this from multiple worker threads: the cache is
     populated under ``_real_git_tls_config_lock`` with a double-checked read
@@ -1054,6 +1171,7 @@ def _validated_git_url_rewrite_policy(
     *,
     git_dir: Path | None = None,
     worktree: Path | None = None,
+    fresh_git_dir: bool = False,
 ) -> tuple[str | None, _GitConfigSnapshot]:
     """Return one validated effective URL and the exact rewrite snapshot."""
     try:
@@ -1061,6 +1179,7 @@ def _validated_git_url_rewrite_policy(
             env,
             git_dir=git_dir,
             worktree=worktree,
+            fresh_git_dir=fresh_git_dir,
         )
     except GitUrlRewriteProbeError:
         raise
@@ -1158,6 +1277,7 @@ def _append_parent_git_config(
     *,
     git_dir: Path | None = None,
     worktree: Path | None = None,
+    fresh_git_dir: bool = False,
 ) -> _GitConfigSnapshot:
     """Retain parent URL rewrites without restoring config auth channels."""
     try:
@@ -1165,6 +1285,7 @@ def _append_parent_git_config(
             git_subprocess_env(),
             git_dir=git_dir,
             worktree=worktree,
+            fresh_git_dir=fresh_git_dir,
         )
     except GitUrlRewriteProbeError:
         raise
@@ -1370,20 +1491,28 @@ def git_network_env(
     *,
     git_dir: Path | None = None,
     worktree: Path | None = None,
+    fresh_git_dir: bool = False,
 ) -> dict[str, str]:
-    """Return the canonical validated environment for one network Git URL."""
+    """Return the canonical validated environment for one network Git URL.
+
+    *fresh_git_dir* is set only by :func:`git_clone_env` for a *git_dir* it
+    has just initialized; see :func:`_read_effective_git_config`.
+    """
     env = git_subprocess_env(overrides)
     if not _is_valid_http_extraheader_value(env.get("GIT_HTTP_EXTRAHEADER", "")):
         env.pop("GIT_HTTP_EXTRAHEADER", None)
     managed_auth_intent = env.get(_MANAGED_GIT_AUTH_INTENT_ENV) == "1"
     parent_snapshot: _GitConfigSnapshot | None = None
     if overrides is not None:
-        parent_snapshot = _append_parent_git_config(env, git_dir=git_dir, worktree=worktree)
+        parent_snapshot = _append_parent_git_config(
+            env, git_dir=git_dir, worktree=worktree, fresh_git_dir=fresh_git_dir
+        )
     effective_url, snapshot = _validated_git_url_rewrite_policy(
         remote_url,
         env,
         git_dir=git_dir,
         worktree=worktree,
+        fresh_git_dir=fresh_git_dir,
     )
     transport_url = effective_url or remote_url
     if urlsplit(transport_url).scheme.lower() not in {"http", "https"}:
@@ -1418,6 +1547,7 @@ def git_network_env(
             env,
             git_dir=git_dir,
             worktree=worktree,
+            fresh_git_dir=fresh_git_dir,
         )
         if materialized_url != effective_url:
             raise GitUrlRewriteProbeError(
@@ -1475,7 +1605,7 @@ def git_clone_env(
             )
             if result.returncode != 0:
                 raise ValueError("Unable to prepare Git clone configuration probe")
-        return git_network_env(remote_url, overrides, git_dir=git_dir)
+        return git_network_env(remote_url, overrides, git_dir=git_dir, fresh_git_dir=probe_created)
     finally:
         if probe_materialized:
             if bare:
