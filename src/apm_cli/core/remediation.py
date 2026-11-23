@@ -1347,7 +1347,10 @@ KEPT_MCP_ENTRIES = _entry(
     "kept-mcp-entries",
     "apm install",
     "forget the record of each kept MCP entry",
-    before="remove each kept entry you no longer use, or declare its server again",
+    before=(
+        "remove each kept entry you no longer use, or declare its server or target its "
+        "runtime again"
+    ),
 )
 WITHHELD_HOOK_FILE_UNRECORDED = _entry(
     "withheld-hook-file-unrecorded",

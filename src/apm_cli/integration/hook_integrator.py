@@ -33,11 +33,13 @@ from apm_cli.core.remediation import HOOK_PATH_ESCAPES_PACKAGE
 from apm_cli.core.scope import InstallScope, manifest_file
 from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
 from apm_cli.hook_contract import summarize_hook_command, walk_hook_commands
+from apm_cli.integration import config_file_provenance as provenance
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.copilot_hook_paths import copilot_hook_target
 from apm_cli.integration.hook_bundle import (
     copy_deployed_hook_bundle,
+    hook_cleanup_root,
     iter_deployable_hook_bundle_files,
 )
 from apm_cli.integration.hook_command_paths import (
@@ -67,11 +69,11 @@ from apm_cli.integration.hook_ownership import (
     dependency_hook_sources,
     drop_dependency_owned_entries,
     drop_source_entries,
-    hook_file_emptied,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
     read_hook_object,
     read_merged_hook_config,
+    remove_emptied_hook_file,
 )
 from apm_cli.integration.hook_ownership import (
     extract_apm_source_sidecar as _extract_apm_source_sidecar,
@@ -1522,7 +1524,8 @@ class HookIntegrator(BaseIntegrator):
 
         # Cursor's strict config must not be observable half-written by its watcher.
         rendered = json.dumps(json_config, indent=2) + "\n"
-        changed = self.write_text_if_changed(json_path, rendered, write_seam.atomic_write_text)
+        with provenance.recorded_install_write(json_path, project_root, user_scope):
+            changed = self.write_text_if_changed(json_path, rendered, write_seam.atomic_write_text)
 
         return HookIntegrationResult(
             files_integrated=hooks_integrated if changed else 0,
@@ -1753,7 +1756,7 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                 dry_run=dry_run,
                 defaults=config.top_level_defaults,
-                root=project_root,
+                root=hook_cleanup_root(target, project_root),
             )
             if existed and not dry_run and not json_path.exists():
                 stats["deleted_paths"].append(portable_relpath(json_path, project_root))
@@ -1839,10 +1842,9 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                if hook_file_emptied(json_path, data, defaults or {}, root):
-                    write_seam.unlink(json_path)  # a fresh deploy writes no file
-                else:
-                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
+                if not remove_emptied_hook_file(json_path, data, defaults or {}, root):
+                    with provenance.recorded_config_write(json_path):
+                        write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
@@ -1930,7 +1932,7 @@ class HookIntegrator(BaseIntegrator):
                     container=config.event_container_key,
                     sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                     defaults=config.top_level_defaults,
-                    root=project_root,
+                    root=hook_cleanup_root(t, project_root),
                 )
 
         return stats
@@ -2081,13 +2083,13 @@ class HookIntegrator(BaseIntegrator):
             if not data[container]:
                 del data[container]
 
-            if modified and hook_file_emptied(json_path, data, defaults or {}, root):
-                write_seam.unlink(json_path)  # a fresh deploy writes no file
+            if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root):
                 stats["files_removed"] += 1
             elif modified:
-                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
-                    f.write("\n")
+                with provenance.recorded_config_write(json_path):
+                    with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                        f.write("\n")
                 stats["files_removed"] += 1
             if kept:
                 write_seam.atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")

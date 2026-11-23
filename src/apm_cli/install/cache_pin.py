@@ -171,6 +171,20 @@ def verify_marker(install_path: Path, expected_commit: str) -> None:
         )
 
 
+def marker_is_current(install_path: Path, resolved_commit: str) -> bool:
+    """Whether the copy's ``.apm-pin`` already names *resolved_commit*.
+
+    The install's marker sync (:func:`sync_markers_for_lockfile`) rewrites a
+    missing or foreign marker on a proven copy; a run that skips that sync may
+    only accept a copy whose marker it would leave as is.
+    """
+    try:
+        verify_marker(install_path, resolved_commit)
+    except CachePinError:
+        return False
+    return True
+
+
 def find_unpinned_remote_deps(lockfile: LockFile) -> list[str]:
     """Return repo_url for every remote dep that lacks a ``resolved_commit``.
 

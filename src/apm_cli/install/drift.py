@@ -668,12 +668,14 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
     from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.integration import config_file_provenance
 
     try:
         with native_registration_scope(targets, route_manifest):
             with (
                 integrators["skill"].ownership_snapshot(replay_lockfile=lock),
                 _ReadOnlyProjectGuard(project_root, protected_subpaths),
+                config_file_provenance.replay_render(),
             ):
                 for lock_dep in lock.get_all_dependencies():
                     if lock_dep.local_path == _SELF_KEY:

@@ -57,8 +57,9 @@ OBSERVED: Mapping[str, frozenset[str]] = {
     name: kinds - {"other-file"} for name, kinds in KINDS.items()
 }
 # Kinds no spine step observes an outcome for, so the matrix credits none:
-# bin/ deploys only for a Claude marketplace plugin at user scope (U-BIN,
-# install/exec_gate.py plugin_bin_deployable); the p-mixed instruction
+# loose bin/ deploys only for a Claude marketplace plugin at user scope
+# (install/exec_gate.py plugin_bin_deployable; a whole plugin's bin/ at project
+# scope is the plugin bin spine's, U-BIN); the p-mixed instruction
 # (other-file) is observed only by ``render`` (compile deduplicates it for
 # copilot unless --force-instructions writes it into AGENTS.md).
 _UNOBSERVED = frozenset({"bin", "other-file"})

@@ -364,6 +364,7 @@ class InstallService:
             self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
+            request.hold_deploy_evidence()  # before a post-install script resets the memos
             post_event = self._build_event("post-install", request)
             if request.post_install_after_services:
                 result.post_install = lambda: runner.fire("post-install", post_event)

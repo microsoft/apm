@@ -14,6 +14,7 @@ Public API::
     yaml_to_str(data)               -- serialize dict -> YAML string
 """
 
+import copy
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -311,7 +312,50 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             self._flatten_depth -= 1
 
 
-def _bounded_load(stream: Any) -> Any:
+if getattr(yaml, "__with_libyaml__", False):
+    from yaml.cyaml import CParser as _CParser
+
+    _Composer = yaml.composer.Composer
+
+    class _BoundedCSafeLoader(_CParser, _BoundedSafeLoader):  # type: ignore[misc]
+        """libyaml scans and parses; Python composes and the bounded constructor builds.
+
+        Only libyaml's scanner and parser run in C: both are iterative (an
+        explicit state stack), so no input can recurse the C stack. The
+        node graph is composed by PyYAML's own Python ``Composer`` over the C
+        events -- libyaml's recursive C composer is never called -- so deep
+        nesting fails closed with ``RecursionError``, normalized by
+        ``_bounded_load`` exactly as in the pure loader. Construction is
+        ``_BoundedSafeLoader``'s: the alias-weight guard runs on the composed
+        graph before anything is built, then the merge budgets.
+        """
+
+        def __init__(self, stream: Any) -> None:
+            _CParser.__init__(self, stream)
+            _Composer.__init__(self)
+            yaml.constructor.SafeConstructor.__init__(self)
+            yaml.resolver.Resolver.__init__(self)
+            self._merge_entries = 0
+            self._flatten_depth = 0
+
+        # The Python composer, not CParser's C one (whose recursion is in C).
+        check_node = _Composer.check_node
+        get_node = _Composer.get_node
+        get_single_node = _Composer.get_single_node
+        compose_document = _Composer.compose_document
+        compose_node = _Composer.compose_node
+        compose_scalar_node = _Composer.compose_scalar_node
+        compose_sequence_node = _Composer.compose_sequence_node
+        compose_mapping_node = _Composer.compose_mapping_node
+
+else:  # pragma: no cover - PyYAML built without libyaml
+    _BoundedCSafeLoader = _BoundedSafeLoader  # type: ignore[misc]
+
+# A lockfile larger than this is refused before parsing (fail closed).
+_MAX_MACHINE_YAML_CHARS = 64 * 1024 * 1024
+
+
+def _bounded_load(stream: Any, loader: type = _BoundedSafeLoader) -> Any:
     """Parse *stream* with the merge-bounded SafeLoader, failing closed.
 
     Centralizes the round-16 bounded-loader entrypoint AND normalizes the
@@ -328,7 +372,7 @@ def _bounded_load(stream: Any) -> Any:
     ``.prompt.md`` -> whole-run DoS) instead of the intended per-file skip.
     """
     try:
-        return yaml.load(stream, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+        return yaml.load(stream, Loader=loader)  # noqa: S506 - SafeLoader subclass
     except yaml.YAMLError:
         raise
     except (ValueError, RecursionError) as exc:
@@ -378,6 +422,36 @@ def compose_yaml(text: str) -> Any:
         return yaml.compose(text, Loader=_BoundedSafeLoader)
     except (yaml.YAMLError, ValueError, RecursionError):
         return None
+
+
+def copy_plain_tree(node: Any) -> Any:
+    """Copy a parsed YAML tree of dicts and lists; scalars are immutable.
+
+    Equal to ``copy.deepcopy`` only for a tree that shares no node, i.e. text
+    without YAML anchors or aliases; other leaves fall back to deepcopy.
+    """
+    if isinstance(node, dict):
+        return {key: copy_plain_tree(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [copy_plain_tree(value) for value in node]
+    if node is None or isinstance(node, (str, int, float, bool)):
+        return node
+    return copy.deepcopy(node)
+
+
+def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
+    """``load_yaml_str`` for APM-written documents (``apm.lock.yaml``), parsed by libyaml.
+
+    Same composer, bounded constructor and fail-closed errors; only scanning
+    and parsing run in C (pure Python when libyaml is absent). Called only by
+    ``deps/lockfile_container.parse_lockfile_text`` (guarded).
+    """
+    if len(text) > _MAX_MACHINE_YAML_CHARS:
+        raise yaml.YAMLError(
+            f"YAML document of {len(text)} characters exceeds the {_MAX_MACHINE_YAML_CHARS} "
+            "character budget"
+        )
+    return _bounded_load(text, _BoundedCSafeLoader)
 
 
 def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
