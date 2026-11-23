@@ -392,7 +392,7 @@ def reconcile_native_plugins(
             retired_harnesses,
         )
         declarations = _settings_declarations(
-            harnesses, previous, settings_paths, marketplace, path, user_scope
+            harnesses, previous, settings_paths, marketplace, path, user_scope, retired_harnesses
         )
         for harness, target in settings_paths.items():
             _refuse_binding(preview_declaration(target, declarations[harness]), target, marketplace)
@@ -556,8 +556,13 @@ def _settings_declarations(
     marketplace: str,
     path: str,
     user_scope: bool,
+    retired: Collection[str] = (),
 ) -> dict[str, SettingsDeclaration]:
-    """The declaration each harness settings file converges onto."""
+    """The declaration each harness settings file converges onto.
+
+    In a harness target contraction *retired* (#4874), APM owns only the
+    plugins it wrote there, so a user's own enable entry stays.
+    """
     prior = previous or {}
     prior_names = {own.record.name for own in prior.values()}
     prior_bindings = {own.record.binding for own in prior.values()}
@@ -569,13 +574,42 @@ def _settings_declarations(
             marketplace,
             path,
             frozenset(name for name, on in harnesses.items() if harness in on),
-            None if previous is None else frozenset(prior_names),
+            _owned_in(
+                harness,
+                None if previous is None else frozenset(prior_names),
+                prior,
+                retired,
+                user_scope,
+            ),
             next(iter(prior_bindings)) if prior_bindings else None,
             suppressed if harness == COPILOT else frozenset(),
             managed if harness == COPILOT else frozenset(),
         )
         for harness in HARNESSES
     }
+
+
+def _owned_in(
+    harness: str,
+    owned: frozenset[str] | None,
+    prior: Mapping[str, NativeOwnership],
+    retired: Collection[str],
+    user_scope: bool,
+) -> frozenset[str] | None:
+    """*owned* narrowed, in a harness target contraction retired, to what APM wrote there.
+
+    That is the plugins APM declared to it (``native_declared``; an older row,
+    its harnesses), plus at project scope Copilot's value for a plugin
+    declared to Claude (#4874), so a user's own enable entry stays.
+    """
+    if owned is None or harness not in retired:
+        return owned
+    kept = set()
+    for own in prior.values():
+        wrote = own.harnesses if own.declared is None else own.declared
+        if harness in wrote or (harness == COPILOT and CLAUDE in wrote and not user_scope):
+            kept.add(own.record.name)
+    return owned & frozenset(kept)
 
 
 def preview_project_root_retirement(record: NativePluginRecord, deploy_root: Path) -> bool | None:

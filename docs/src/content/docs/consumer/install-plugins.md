@@ -111,8 +111,8 @@ APM downloads into `apm_modules/`; harnesses load from `.agents/`.
   edited root is kept with a warning. `apm lock` leaves the plugin in place
   until that install, and `apm install --frozen` refuses the change. When
   `targets:` drops only some of those harnesses, the plugin stays and the next
-  `apm install` removes the dropped harness's `enabledPlugins` entry, and its
-  marketplace entry once it loads no plugin.
+  `apm install` removes the entries APM wrote in the dropped harness's
+  settings (`--frozen` refuses); an entry you added there yourself is kept.
 - **Your settings win.** APM adds only what the next lockfile needs and removes
   only entries the previous one produced. An explicit `false` in
   `enabledPlugins`, your own entries and a root you edited are kept. If the

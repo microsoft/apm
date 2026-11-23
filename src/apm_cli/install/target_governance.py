@@ -112,6 +112,16 @@ def retired_native_harnesses(
     )
 
 
+def _allowed_harnesses(locked: Any) -> frozenset[str]:
+    """Harnesses a native lock row's format, scope and own ``targets:`` allow."""
+    from apm_cli.native_plugins.scopes import record_harnesses
+
+    harnesses = record_harnesses(locked.package_type, locked.native_plugin.marketplace_path)
+    if locked.target_subset:
+        harnesses &= frozenset(locked.target_subset)
+    return harnesses
+
+
 def retired_native_plugins(
     lockfile: Any, active_targets: Iterable[TargetProfile], declared_targets: Any
 ) -> dict[str, tuple[str, str]]:
@@ -119,8 +129,6 @@ def retired_native_plugins(
 
     A plugin another still-declared harness loads (#4559) keeps its record.
     """
-    from apm_cli.native_plugins.scopes import record_harnesses
-
     if declared_targets is None:
         return {}
     retired = {}
@@ -128,9 +136,7 @@ def retired_native_plugins(
         record = locked.native_plugin
         if record is None:
             continue
-        harnesses = record_harnesses(locked.package_type, record.marketplace_path)
-        if locked.target_subset:
-            harnesses &= frozenset(locked.target_subset)
+        harnesses = _allowed_harnesses(locked)
         if harnesses and all(
             target_retired(name, active_targets=active_targets, declared_targets=declared_targets)
             for name in harnesses
@@ -140,3 +146,32 @@ def retired_native_plugins(
             recorded = harnesses & frozenset(getattr(lockfile, "manifest_targets", None) or ())
             retired[key] = (record.root, min(recorded or harnesses))
     return retired
+
+
+def retired_native_paths(
+    lockfile: Any, active_targets: Iterable[TargetProfile], declared_targets: Any
+) -> dict[str, str]:
+    """``{path: harness}`` of native-plugin state target contraction retires.
+
+    The root of a plugin every harness of which is retired (#4744); for a
+    project-scope plugin another declared harness still loads, the settings
+    file of each retired harness that held APM's ``true`` (``native_declared``;
+    an older row, its allowed harnesses), as ``registrar._owned_in`` retires
+    it (#4874).
+    """
+    from apm_cli.native_plugins.scopes import PROJECT_SETTINGS_RELATIVE, is_project_path
+
+    if declared_targets is None:
+        return {}
+    active = tuple(active_targets)
+    whole = retired_native_plugins(lockfile, active, declared_targets)
+    found = dict(whole.values())
+    for key, locked in lockfile.dependencies.items():
+        record = locked.native_plugin
+        if record is None or key in whole or not is_project_path(record.marketplace_path):
+            continue
+        wrote = locked.native_declared
+        for harness in _allowed_harnesses(locked) if wrote is None else wrote:
+            if target_retired(harness, active_targets=active, declared_targets=declared_targets):
+                found[PROJECT_SETTINGS_RELATIVE[harness]] = harness
+    return found

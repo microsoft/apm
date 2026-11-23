@@ -380,6 +380,48 @@ def test_a_narrowed_target_retires_a_whole_plugins_enable_entry(lifecycle_world,
     scenario.finish()
 
 
+def _deployed_native(world, targets: tuple[str, ...]) -> Scenario:
+    use_policy(world, "allow")
+    scenario = Scenario(world, (_NATIVE,), targets=targets, policy="allow")
+    scenario.run(f"install {_NATIVE}")
+    scenario.run(f"approve {_NATIVE}")
+    scenario.run("install")
+    return scenario
+
+
+def test_a_users_enable_in_an_undeclared_harness_is_kept(lifecycle_world) -> None:
+    """#4874 control: the user enables APM's plugin in Claude, which APM never declared
+    it to; an install keeps that entry and its marketplace byte for byte."""
+    scenario = _deployed_native(lifecycle_world, ("copilot",))
+    copilot = _settings(scenario, "copilot")
+    (key,) = [key for key in copilot["enabledPlugins"] if key.startswith(f"{_NATIVE}@")]
+    market = key.split("@")[1]
+    mine = {
+        "enabledPlugins": {key: True},
+        "extraKnownMarketplaces": {market: copilot["extraKnownMarketplaces"][market]},
+    }
+    scenario.user_write(_NATIVE_SETTINGS["claude"], json.dumps(mine, indent=2) + "\n")
+    step = scenario.run("install")
+    assert_changes(step.changed, (), label="install beside the user's enable")
+    lock = scenario.lock()
+    (row,) = [dep for dep in lock.dependencies.values() if dep.native_plugin is not None]
+    assert row.native_declared == ["copilot"], row.native_declared
+    scenario.finish()
+
+
+def test_frozen_refuses_a_narrowed_native_harness(lifecycle_world) -> None:
+    """#4874: --frozen refuses retiring a dropped harness's enable entry and writes nothing."""
+    scenario = _deployed_native(lifecycle_world, ("copilot", "claude"))
+    scenario.set_targets("copilot")
+    step = scenario.run("install --frozen", exit=1)
+    assert "no longer declares target(s) claude" in step.output, step.output
+    assert _NATIVE_SETTINGS["claude"] in step.output, step.output
+    assert_changes(step.changed, (), label="frozen refusal")
+    scenario.run("install")
+    assert not _settings(scenario, "claude").get("enabledPlugins")
+    scenario.finish()
+
+
 def test_mcp_only_package_removal_keeps_unmanaged_and_sibling(lifecycle_world) -> None:
     factory = LocalPackageFactory(lifecycle_world.root / "owned")
     server = {

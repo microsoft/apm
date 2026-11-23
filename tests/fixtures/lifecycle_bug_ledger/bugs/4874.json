@@ -11,6 +11,8 @@
     "routing.authorized_targets_only"
   ],
   "regression_tests": [
-    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry"
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_enable_in_an_undeclared_harness_is_kept",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_frozen_refuses_a_narrowed_native_harness"
   ]
 }
