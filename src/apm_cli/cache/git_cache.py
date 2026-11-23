@@ -370,6 +370,10 @@ class GitCache:
         if self._read_only:
             return self._read_only_checkout(shard_key, ref, locked_sha, sparse_paths, env)
         sha = self._resolve_sha(url, ref, locked_sha=locked_sha, env=env)
+        if (locked_sha and _SHA_RE.match(locked_sha)) or (ref and _SHA_RE.match(ref)):
+            from .commit_reachability import require_reachable_commit
+
+            require_reachable_commit(self._cache_root, url, shard_key, sha, env=env)
         variant = _variant_key(sparse_paths)
 
         checkout_dir = self._checkouts_root / shard_key / sha / variant
@@ -721,8 +725,24 @@ class GitCache:
                 # verify it has our SHA.
                 if not self._bare_has_sha(bare_dir, sha, env=env):
                     self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
+            else:
+                self._fetch_tag_only_commit(bare_dir, url, sha, env=env)
 
             return bare_dir
+
+    def _fetch_tag_only_commit(
+        self, bare_dir: Path, url: str, sha: str, *, env: dict[str, str] | None = None
+    ) -> None:
+        """Best effort: fetch a commit only a tag reaches, which ``--no-tags`` skipped.
+
+        A failure leaves the bare as cloned; the checkout then reports the
+        missing commit as before.
+        """
+        try:
+            if not self._bare_has_sha(bare_dir, sha, env=env):
+                self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
+        except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
+            _log.debug("Tag-only commit fetch skipped for %s: %s", _sanitize_url(url), exc)
 
     def _create_checkout(
         self,

@@ -98,6 +98,14 @@ class TestGitCacheInit:
 
 @trust_cached_repos()
 class TestGetCheckout:
+    @pytest.fixture(autouse=True)
+    def _reachable_pins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Scripted git children; the reachability check has its own cells.
+        monkeypatch.setattr(
+            "apm_cli.cache.commit_reachability.require_reachable_commit",
+            lambda *_args, **_kwargs: None,
+        )
+
     def test_cache_hit_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"
         sha = "a" * 40

@@ -178,9 +178,9 @@
     },
     {
       "id": "ls-remote-tag-commits",
-      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike",
-      "owner": "deps/git_remote_ops.py (tag_commit_shas); consumers: parse_ls_remote_output and marketplace/ref_resolver.py",
-      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py"],
+      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike; a dependency ref resolves only to an exact origin branch or tag, and a pinned commit only when an origin branch or tag reaches it",
+      "owner": "deps/git_remote_ops.py (tag_commit_shas, exact_branch_or_tag_sha, refuse_non_branch_ref); cache/commit_reachability.py (require_reachable_commit, once per origin and commit); consumers: parse_ls_remote_output, cache/git_cache.py (_ls_remote_resolve, get_checkout) and marketplace/ref_resolver.py",
+      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py", "src/apm_cli/cache/commit_reachability.py"],
       "guards": ["transport-platform-ls-remote-tag-commits"]
     },
     {
