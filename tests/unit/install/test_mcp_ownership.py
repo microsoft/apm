@@ -824,7 +824,8 @@ def test_a_frozen_rewrite_after_a_project_move_is_not_a_hand_edit(
     from apm_cli.install.mcp.native_entry import edited_recorded_native_mcp_entries
 
     root = (tmp_path / "project" / "apm_modules" / "o" / "pkg").as_posix()
-    lock, project, root, path = _moved_codex_entry(tmp_path, command.format(root=root))
+    # --frozen substitutes the root in its native spelling (backslashes on Windows).
+    lock, project, root, path = _moved_codex_entry(tmp_path, command.format(root=Path(root)))
     before = path.read_bytes()
 
     edited = edited_recorded_native_mcp_entries(

@@ -136,7 +136,8 @@ def test_audit_accepts_a_frozen_rewrite_in_a_moved_clone_and_names_an_edit(
     config = second.project / ".codex" / "config.toml"
     second.ok("install", "--frozen")
     rewritten = config.read_text(encoding="utf-8")
-    assert "/clone/" in rewritten and "/world/" not in rewritten, rewritten
+    assert re.search(r"[\\/]clone[\\/]", rewritten), rewritten
+    assert not re.search(r"[\\/]world[\\/]", rewritten), rewritten
     audit = second.run("audit", "--ci")
     assert audit.returncode == 0, _text(audit)
     assert "native-mcp-drift" not in _text(audit)
