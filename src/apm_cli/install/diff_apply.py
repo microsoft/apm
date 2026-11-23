@@ -225,6 +225,10 @@ def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str, stag
                 raise Decline("symlink in a package")
     staging.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(checkout, staging, ignore=shutil.ignore_patterns(".git"))
+    # The cache keeps checkouts owner-only; a materialized copy gets a normal dir mode.
+    mask = os.umask(0)
+    os.umask(mask)
+    os.chmod(staging, 0o777 & ~mask)
     write_marker(staging, sha)
     if locked_content_mismatch(key, dep, staging, lockfile=lock):
         raise Decline("package copy differs from its locked content")
@@ -359,6 +363,17 @@ def _audit_gate(project_root: Path, fetch: Any, *, writes: bool) -> bool:
     if failing - tolerated:
         raise Decline(f"audit: {sorted(failing - tolerated)[0]}")
     return bool(failing)
+
+
+def _refuse_unsilent_executables(lock: Any) -> None:
+    """Only a silent allow hits: a gated or denied package prints the full run's lines."""
+    from apm_cli.security.executables import TRUST_DENIED, TRUST_GATED
+
+    if any(
+        getattr(dep, "exec_status", None) in (TRUST_GATED, TRUST_DENIED)
+        for dep in lock.dependencies.values()
+    ):
+        raise Decline("executables decision")
 
 
 def _refuse_lifecycle_scripts(project_root: Path) -> None:
@@ -517,6 +532,7 @@ def try_apply(
         files = _plan_files(project_root, lock, records, deploy, receipts)
         outcomes = _outcomes(lock, files, records)
         _refuse_lifecycle_scripts(project_root)
+        _refuse_unsilent_executables(lock)
         with quiet():
             recheck = _audit_gate(project_root, fetch, writes=bool(files or packages))
             if not noop_diff._policy_checks_pass(project_root, fetch):
