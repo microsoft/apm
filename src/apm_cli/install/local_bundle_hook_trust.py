@@ -499,6 +499,7 @@ def _configs_still_running(
     trust checks. Only the target's hook event container counts; permissions
     or environment values naming a script do not run it.
     """
+    from apm_cli.hook_contract import HOOK_COMMAND_KEYS
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
     from apm_cli.integration.hook_ownership import (
         LocalBundleMarkers,
@@ -506,14 +507,18 @@ def _configs_still_running(
         reinject_apm_source_from_sidecar,
     )
 
-    def strings(node: Any) -> list[str]:
-        if isinstance(node, str):
-            return [node.replace("\\", "/")]
-        if isinstance(node, dict):
-            return [text for item in node.values() for text in strings(item)]
-        if isinstance(node, list):
-            return [text for item in node for text in strings(item)]
-        return []
+    def commands(entry: Any) -> list[str]:
+        # Only a hook's command fields run anything, at the entry level
+        # (flat format) or in its nested handlers (matcher groups).
+        if not isinstance(entry, dict):
+            return []
+        handlers = [entry, *(h for h in entry.get("hooks") or () if isinstance(h, dict))]
+        return [
+            value.replace("\\", "/")
+            for handler in handlers
+            for key in HOOK_COMMAND_KEYS
+            if isinstance(value := handler.get(key), str)
+        ]
 
     markers = LocalBundleMarkers(slug)
     found: set[str] = set()
@@ -546,7 +551,7 @@ def _configs_still_running(
             for entry in entries
             if not (isinstance(entry, dict) and entry.get("_apm_source") in markers)
         ]
-        if any(tail in text for text in strings(foreign) for tail in tails):
+        if any(tail in text for entry in foreign for text in commands(entry) for tail in tails):
             found.add(_record_value(json_path, project_root))
     return found
 
