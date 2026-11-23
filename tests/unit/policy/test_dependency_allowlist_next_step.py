@@ -782,8 +782,12 @@ def test_a_hook_link_a_survivor_target_shrink_retires_keeps_the_advice(
     assert not (root / deployed).is_symlink()
 
 
-def test_a_retired_hook_link_with_only_a_ledger_hash_withholds_the_advice(tmp_path: Path) -> None:
-    """#5035: the hook sync keeps a link whose canonical ledger row records a hash."""
+@pytest.mark.parametrize("dangling", [False, True], ids=["live-link", "dangling-link"])
+def test_a_retired_hook_link_with_only_a_ledger_hash_withholds_the_advice(
+    tmp_path: Path, dangling: bool
+) -> None:
+    """#5035: the hook sync keeps a link whose canonical ledger row records a hash,
+    dangling or not: it never counts a hook link as already gone."""
     deployed = ".github/hooks/bundle.json"
     bundle = LockedDependency(
         repo_url="contoso/bundle",
@@ -810,7 +814,11 @@ def test_a_retired_hook_link_with_only_a_ledger_hash_withholds_the_advice(tmp_pa
     for row in data["dependencies"]:
         row.pop("deployed_file_hashes", None)
     lock_path.write_text(yaml.safe_dump(data), encoding="utf-8")
-    _symlinked_claim(root, deployed, tmp_path / "outside.json")
+    if dangling:
+        (root / deployed).parent.mkdir(parents=True)
+        (root / deployed).symlink_to(root / "docs" / "missing.json")
+    else:
+        _symlinked_claim(root, deployed, tmp_path / "outside.json")
 
     check = _allowlist(root)
 

@@ -413,7 +413,11 @@ def _final_symlinks(
     from ..commands.uninstall.engine import project_shrunk_selections
     from ..commands.uninstall.selection_shrink import uninstall_deletion_candidates
     from ..core.deployment_ledger import DeploymentLedgerCodec
-    from ..integration.cleanup import final_link_handled, hook_sync_unlinks
+    from ..integration.cleanup import (
+        final_link_handled,
+        hook_sync_unlinks,
+        managed_hook_prefixes,
+    )
 
     root = project.project_root
     lock = project.lock
@@ -424,16 +428,18 @@ def _final_symlinks(
         hashes = DeploymentLedgerCodec.cleanup_snapshot(lock, owners).hashes
         # Removed owners' files go through stale cleanup; retired-only ones through the syncs.
         removed_paths = set(uninstall_deletion_candidates(lock, cleanup_keys))
+        hook_prefixes = managed_hook_prefixes()
+
+        def handled(path: str) -> bool:
+            # The cleanup route decides first: the hook sync keeps its own absence rule.
+            if path not in removed_paths and path.startswith(hook_prefixes):
+                return hook_sync_unlinks(path, root, recorded_hash=hashes.get(path))
+            return final_link_handled(path, root)
+
         return [
             path
             for path in uninstall_deletion_candidates(lock, cleanup_keys, shrunk=shrunk)
-            if "://" not in path
-            and (root / path).is_symlink()
-            and not final_link_handled(path, root)
-            and (
-                path in removed_paths
-                or not hook_sync_unlinks(path, root, recorded_hash=hashes.get(path))
-            )
+            if "://" not in path and (root / path).is_symlink() and not handled(path)
         ]
     except (OSError, ValueError, RuntimeError):
         # An unreadable or looping link proves nothing: the advice is admin-only.
