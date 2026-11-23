@@ -603,3 +603,70 @@ def test_reachability_admits_a_shared_file_against_the_edge_that_declares_it(
     world.apm("uninstall", "./vendor/d")
 
     _assert_orphan_pruned(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_keeps_the_children_of_a_retained_unreadable_source(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """e (kept: its source is a symlink loop) also declares h, so h stays."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "h", "h")
+    _skill_package(vendor / "e", "e", ("../h",))
+    _skill_package(vendor / "d", "d", ("../e", "../h"))
+    _skill_package(vendor / "a", "a")
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    source = vendor / "e"
+    shutil.rmtree(source)
+    os.symlink(source, source, target_is_directory=True)
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" in rows and "_local/h" in rows, sorted(rows)
+    assert (world.project / ".claude/skills/h-skill/SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_with_a_looping_surviving_root_keeps_candidates_and_reports(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A surviving root whose source is a symlink loop makes the graph partial, not a crash."""
+    world = _world(tmp_path, apm_binary_path)
+    survivor = world.project / "vendor" / "a"
+    shutil.rmtree(survivor)
+    os.symlink(survivor, survivor, target_is_directory=True)
+
+    result = world.apm("prune", expect=None)
+
+    text = _output(result)
+    assert result.returncode == 0, text
+    assert "could not be read" in text, text
+    assert "_local/e" in _rows(world)
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="hard links on POSIX only here")
+def test_prune_matches_hard_linked_primitive_files_by_path(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two hard-linked agent files are distinct dependencies; the dropped one goes."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    agents = world.project / "ai"
+    _write(agents / "kept.agent.md", "---\nname: kept\ndescription: An agent\n---\n# agent\n")
+    os.link(agents / "kept.agent.md", agents / "dropped.agent.md")
+    _manifest(world, ["./ai/kept.agent.md", "./ai/dropped.agent.md"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./ai/kept.agent.md"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert not any("dropped" in key for key in rows), sorted(rows)
+    assert any("kept" in key for key in rows), sorted(rows)
+    assert (agents / "kept.agent.md").is_file()
