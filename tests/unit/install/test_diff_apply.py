@@ -116,7 +116,7 @@ def test_a_lock_path_outside_the_target_roots_declines_before_any_write(
     records = {"o/p": {"files": {rel: [_digest(b"x")[7:], hashlib.sha256(b"x").hexdigest()]}}}
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: b"x")
     with pytest.raises(Decline, match=r"unsafe path|outside the target roots"):
-        diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
+        diff_apply._plan_files(tmp_path, lock, records, deploy, _untrusted, targets=_targets())
     assert not any(tmp_path.iterdir())
 
 
@@ -125,7 +125,7 @@ def test_a_lock_path_under_a_target_root_is_planned(tmp_path: Path) -> None:
     lock = _lock(**{"o/p": {_REL: _digest(b"x")}})
     records = {"o/p": {"files": {_REL: [_digest(b"x")[7:], hashlib.sha256(b"x").hexdigest()]}}}
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: b"x")
-    plan = diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
+    plan = diff_apply._plan_files(tmp_path, lock, records, deploy, _untrusted, targets=_targets())
     assert [(path, data) for path, data, _d, _o in plan] == [(tmp_path / _REL, b"x")]
     assert not any(tmp_path.iterdir()), "planning writes nothing"
 
@@ -139,6 +139,79 @@ def test_a_dependency_without_a_locked_content_hash_declines(tmp_path: Path) -> 
     assert not any(tmp_path.iterdir())
 
 
+def _untrusted(path: Path) -> None:
+    return None
+
+
+def test_a_present_file_needs_the_ledger_s_trusted_receipt(tmp_path: Path) -> None:
+    """Identical bytes receipted under another owner or claim are not APM's file here."""
+    lock = _lock(**{"o/p": {_REL: _digest(b"locked\n")}})
+    target = tmp_path / _REL
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"locked\n")
+    asked: list[Path] = []
+
+    def stale(path: Path) -> None:
+        # The raw receipt exists, but its owner/claim binding is stale.
+        asked.append(path)
+
+    with pytest.raises(Decline, match="without a receipt"):
+        diff_apply._plan_files(tmp_path, lock, {}, None, stale, targets=_targets())
+    assert asked == [target]
+    trusted = diff_apply._plan_files(
+        tmp_path, lock, {}, None, lambda path: _digest(b"locked\n"), targets=_targets()
+    )
+    assert trusted == []
+    assert target.read_bytes() == b"locked\n"
+
+
+_SHA_B, _SHA_C = "b" * 40, "c" * 40
+
+
+def _edge_project(tmp_path: Path, child_ref: str):
+    from apm_cli.deps.lockfile import LockFile
+
+    (tmp_path / "apm.yml").write_text(
+        "name: root\nversion: 1.0.0\ndependencies:\n  apm:\n    - o/p#v1.0.0\n",
+        encoding="utf-8",
+    )
+    parent = tmp_path / "apm_modules" / "o" / "p"
+    parent.mkdir(parents=True)
+    (parent / "apm.yml").write_text(
+        f"name: p\nversion: 1.0.0\ndependencies:\n  apm:\n    - o/q#{child_ref}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "apm.lock.yaml").write_text(
+        "lockfile_version: '1'\n"
+        "generated_at: '2025-01-01T00:00:00Z'\n"
+        "dependencies:\n"
+        f"- repo_url: o/p\n  host: github.com\n  resolved_ref: v1.0.0\n"
+        f"  resolved_commit: {'a' * 40}\n  content_hash: sha256:{'d' * 64}\n"
+        f"- repo_url: o/q\n  host: github.com\n  resolved_ref: main\n"
+        f"  resolved_commit: {_SHA_C}\n  content_hash: sha256:{'e' * 64}\n  depth: 2\n"
+        "  resolved_by: o/p\n",
+        encoding="utf-8",
+    )
+    return LockFile.read(tmp_path / "apm.lock.yaml")
+
+
+def test_a_parent_pin_the_lock_does_not_satisfy_declines(tmp_path: Path) -> None:
+    """A verified parent pinning its child to B refuses a child locked at C (frozen resolver)."""
+    lock = _edge_project(tmp_path, _SHA_B)
+    before = (tmp_path / "apm.lock.yaml").read_bytes()
+    with pytest.raises(Decline, match="immutable requirement"):
+        diff_apply._refuse_unproven_edges(tmp_path, lock, [])
+    assert (tmp_path / "apm.lock.yaml").read_bytes() == before
+
+
+def test_a_parent_pin_the_lock_satisfies_is_admitted(tmp_path: Path) -> None:
+    """Control: the same edge pinned to the locked commit passes."""
+    lock = _edge_project(tmp_path, _SHA_C)
+    before = (tmp_path / "apm.lock.yaml").read_bytes()
+    diff_apply._refuse_unproven_edges(tmp_path, lock, [])
+    assert (tmp_path / "apm.lock.yaml").read_bytes() == before
+
+
 def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     rel = ".github/prompts/a.prompt.md"
     lock = _lock(**{"o/p": {rel: _digest(b"locked\n")}})
@@ -146,10 +219,10 @@ def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     target.parent.mkdir(parents=True)
     target.write_bytes(b"edited\n")
     with pytest.raises(Decline, match="edited"):
-        diff_apply._plan_files(tmp_path, lock, {}, None, {}, targets=_targets())
+        diff_apply._plan_files(tmp_path, lock, {}, None, _untrusted, targets=_targets())
     target.write_bytes(b"locked\n")
     with pytest.raises(Decline, match="without a receipt"):
-        diff_apply._plan_files(tmp_path, lock, {}, None, {}, targets=_targets())
+        diff_apply._plan_files(tmp_path, lock, {}, None, _untrusted, targets=_targets())
 
 
 def test_partially_applied_package_declines(tmp_path: Path) -> None:
@@ -183,7 +256,7 @@ def test_non_ascii_deployed_bytes_take_the_full_run(tmp_path: Path) -> None:
     records = {"o/p": {"files": {_REL: [_digest(data)[7:], hashlib.sha256(data).hexdigest()]}}}
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: data)
     with pytest.raises(Decline, match="non-ASCII"):
-        diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
+        diff_apply._plan_files(tmp_path, lock, records, deploy, _untrusted, targets=_targets())
 
 
 @pytest.mark.parametrize("argv", [["install"], ["install", "--only", "apm"]])
@@ -218,7 +291,7 @@ def test_escape_sequences_in_deployed_bytes_take_the_full_run(tmp_path: Path) ->
     }
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: data)
     with pytest.raises(Decline, match="non-ASCII"):
-        diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
+        diff_apply._plan_files(tmp_path, lock, records, deploy, _untrusted, targets=_targets())
 
 
 def test_a_failure_while_rendering_restores_the_pre_run_tree(
