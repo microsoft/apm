@@ -43,11 +43,24 @@ import yaml
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
 from tests.lifecycle.known import KnownFailure
-from tests.lifecycle.scenarios._deploy_diff import CHANGES, comparable, converge, diff, digest
+from tests.lifecycle.scenarios._deploy_diff import (
+    CHANGES,
+    comparable,
+    converge,
+    diff,
+    digest,
+    revoke_user_approval,
+)
 from tests.lifecycle.world import World
 from tests.lifecycle.world.clone import clone
 from tests.lifecycle.world.scopes import use_policy, use_registry
-from tests.lifecycle.world.services import ORG
+from tests.lifecycle.world.services import (
+    ORG,
+    POLICY_FILE,
+    POLICY_REPO,
+    policy_documents,
+    policy_org,
+)
 
 pytestmark = [
     pytest.mark.e2e,
@@ -69,6 +82,7 @@ _POLICY_AGE = re.compile(r" \(cached, fetched \d+s ago\)")
 BOTH = ("p-skill:git", "p-exec:git")
 # The deploy store (#4846): <APM_CACHE_DIR>/deploy_v1/<key[:2]>/<key>.
 DEPLOY_BUCKET = "deploy_v1"
+POLICY_CACHE = "policy_v1"  # policy/discovery.py POLICY_CACHE_DIR
 
 
 def _present(*modules: str) -> bool:
@@ -284,7 +298,11 @@ def test_reinstall_of_a_converged_project_is_a_noop(twin: Twin) -> None:
 @NEEDS_NOOP
 def test_frozen_reinstall_of_a_converged_project_is_a_noop(twin: Twin) -> None:
     _converge(twin, *BOTH)
-    _assert_decision(twin.ok("install", "--frozen"), NOOP)
+    locks = {w.root: (w.project / "apm.lock.yaml").read_bytes() for w in twin.worlds}
+    decision = twin.ok("install", "--frozen")
+    for world in twin.worlds:
+        assert (world.project / "apm.lock.yaml").read_bytes() == locks[world.root], "frozen rewrote"
+    _assert_decision(decision, NOOP)
 
 
 @NEEDS_ANY
@@ -407,12 +425,16 @@ def test_cleanup_on_a_doubt_prunes_like_the_full_pipeline(twin: Twin) -> None:
     "change", [pytest.param(c, marks=NEEDS_ANY.marks) for c in sorted(CHANGES)]
 )
 def test_install_after_a_change_matches_the_full_pipeline(twin: Twin, change: str) -> None:
+    """Same history in both worlds, so nothing is exempt: an edited or symlinked path is compared."""
     spec = CHANGES[change]
     twin.each(lambda w: converge(w, spec.start, run=twin.invoke))
-    exempt: tuple[str, ...] = ()
+    twin.each(spec.apply)
+    outside = {w.root: digest(w.root / "outside-skill", (), w) for w in twin.worlds}
+    decision = twin.run("install")
     for world in twin.worlds:
-        exempt = spec.apply(world)
-    _assert_decision(twin.run("install", exempt=exempt), DIFF, FULL)
+        after = digest(world.root / "outside-skill", (), world)
+        assert after == outside[world.root], "install wrote through a symlinked destination"
+    _assert_decision(decision, DIFF, FULL)
 
 
 # -- doubt triggers: the fast engine must decline ------------------------------------
@@ -467,15 +489,15 @@ def _nothing(world: World) -> None:
     del world
 
 
-DOUBTS: dict[str, tuple[Callable[[World], None], tuple[str, ...]]] = {
-    # trigger: (change after converging, install argv)
-    "apm-version-changed": (_lock_from_another_apm, ("install",)),
-    "apm-yml-changed": (_drop_exec_from_manifest, ("install",)),
-    "deployed-file-edited": (_edit_deployed, ("install",)),
-    "non-default-flag": (_nothing, ("install", "--force")),
-    "policy-changed": (_stricter_policy, ("install",)),
-    "store-miss": (_empty_store, ("install",)),
-    "store-entry-tampered": (_tamper_store, ("install",)),
+DOUBTS: dict[str, tuple[Callable[[World], None], tuple[str, ...], int]] = {
+    # trigger: (change after converging, install argv, exit code of the full pipeline)
+    "apm-version-changed": (_lock_from_another_apm, ("install",), 0),
+    "apm-yml-changed": (_drop_exec_from_manifest, ("install",), 0),
+    "deployed-file-edited": (_edit_deployed, ("install",), 0),
+    "non-default-flag": (_nothing, ("install", "--force"), 0),
+    "policy-changed": (_stricter_policy, ("install",), 1),
+    "store-miss": (_empty_store, ("install",), 0),
+    "store-entry-tampered": (_tamper_store, ("install",), 0),
 }
 
 
@@ -483,17 +505,21 @@ DOUBTS: dict[str, tuple[Callable[[World], None], tuple[str, ...]]] = {
     "trigger", [pytest.param(t, marks=NEEDS_ANY.marks) for t in sorted(DOUBTS)]
 )
 def test_doubt_trigger_declines_to_the_full_pipeline(twin: Twin, trigger: str) -> None:
-    change, argv = DOUBTS[trigger]
+    change, argv, code = DOUBTS[trigger]
     _converge(twin, *BOTH)
     twin.each(change)
-    _assert_decision(twin.run(*argv), FULL)
+    decision = twin.run(*argv)
+    assert twin.codes[-1] == code, (
+        f"{trigger}: exit {twin.codes[-1]}, expected {code}{twin.evidence}"
+    )
+    _assert_decision(decision, FULL)
 
 
 @NEEDS_ANY
 def test_external_scanners_flag_declines_to_the_full_pipeline(twin: Twin) -> None:
     _converge(twin, *BOTH)
     twin.ok("experimental", "enable", "external_scanners")
-    _assert_decision(twin.run("install"), FULL)
+    _assert_decision(twin.ok("install"), FULL)
 
 
 @pytest.mark.parametrize(
@@ -541,4 +567,110 @@ def test_source_without_an_immutable_pin_declines_to_the_full_pipeline(
     twin: Twin, source: str
 ) -> None:
     SOURCES[source](twin)
+    _assert_decision(twin.ok("install"), FULL)
+
+
+# -- Git-only security baselines: prove a hit, then the trust change must decline ----
+
+
+def _clear_policy_cache(world: World) -> None:
+    for root in _cache_roots(world):
+        shutil.rmtree(root / POLICY_CACHE, ignore_errors=True)
+
+
+def _deny_executables_at_the_same_origin(twin: Twin) -> None:
+    """Serve exec-deny-all from the project's existing policy origin (no remote change)."""
+    document = yaml.safe_dump(policy_documents()["exec-deny-all"] | {"name": "allow"})
+    twin.fast.services.publish_revision(
+        f"{policy_org('allow')}/{POLICY_REPO}", {POLICY_FILE: document}
+    )
+    twin.each(_clear_policy_cache)  # the next install rediscovers the policy live
+
+
+def _converge_exec_user_approved(twin: Twin) -> None:
+    twin.each(lambda w: _declare(w, "p-exec:git"))
+    twin.ok("install")
+    twin.ok("approve", "--user", "p-exec")
+    twin.ok("install")
+
+
+TRUST_CHANGES: dict[str, Callable[[Twin], None]] = {
+    "approval-revoked": lambda twin: twin.each(revoke_user_approval),
+    "executables-denied-at-same-origin": _deny_executables_at_the_same_origin,
+}
+
+
+@pytest.mark.parametrize(
+    "trust", [pytest.param(t, marks=NEEDS_NOOP.marks) for t in sorted(TRUST_CHANGES)]
+)
+def test_trust_change_after_a_noop_hit_declines(twin: Twin, trust: str) -> None:
+    """Manifest and lockfile bytes unchanged: only the trust input moved, so FULL decides."""
+    _converge_exec_user_approved(twin)
+    _assert_decision(twin.ok("install"), NOOP)
+    pinned = {w.root: _snapshot(w) for w in twin.worlds}
+    TRUST_CHANGES[trust](twin)
+    for world in twin.worlds:
+        assert _snapshot(world) == pinned[world.root], (
+            "the trust change touched apm.yml or the lock"
+        )
+    _assert_decision(twin.run("install"), FULL)
+
+
+# -- S4: FRESH install (no lockfile) on a warm machine ------------------------------
+
+
+def _fresh_checkout(world: World) -> None:
+    """A fresh clone of the project on a machine whose cache is warm: no lock, no deployed tree."""
+    _remove_deployed(world)
+    (world.project / "apm.lock.yaml").unlink()
+
+
+@NEEDS_DIFF
+def test_fresh_install_on_a_warm_cache_applies_the_diff(twin: Twin) -> None:
+    """Exit, output, project bytes AND the written lockfile bytes equal the full pipeline."""
+    _converge(twin, "p-skill:git")
+    twin.each(_fresh_checkout)
+    _assert_decision(twin.ok("install"), DIFF)
+
+
+def _fresh_store_miss(world: World) -> None:
+    _fresh_checkout(world)
+    for root in _cache_roots(world):
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _fresh_tampered_store(world: World) -> None:
+    _tamper_store(world)
+    (world.project / "apm.lock.yaml").unlink()
+
+
+def _fresh_under_stricter_policy(world: World) -> None:
+    _fresh_checkout(world)
+    use_policy(world, "exec-deny-all")
+
+
+FRESH_DOUBTS: dict[str, tuple[tuple[str, ...], Callable[[World], None]]] = {
+    # doubt: (packages converged on the warm machine, change before the fresh install)
+    "store-miss": (("p-skill:git",), _fresh_store_miss),
+    "store-entry-tampered": (("p-skill:git",), _fresh_tampered_store),
+    "policy-on": (("p-skill:git",), _fresh_under_stricter_policy),
+    "local-source": (("p-skill",), _fresh_checkout),
+    "mcp-heavy-package": (BOTH, _fresh_checkout),
+}
+
+
+@pytest.mark.parametrize(
+    "doubt", [pytest.param(d, marks=NEEDS_ANY.marks) for d in sorted(FRESH_DOUBTS)]
+)
+def test_fresh_install_doubt_declines_to_the_full_pipeline(twin: Twin, doubt: str) -> None:
+    keys, change = FRESH_DOUBTS[doubt]
+    _converge(twin, *keys)
+    twin.each(change)
+    _assert_decision(twin.ok("install"), FULL)
+
+
+@NEEDS_ANY
+def test_fresh_marketplace_install_declines_to_the_full_pipeline(twin: Twin) -> None:
+    _marketplace_source(twin)
+    twin.each(_fresh_checkout)
     _assert_decision(twin.ok("install"), FULL)
