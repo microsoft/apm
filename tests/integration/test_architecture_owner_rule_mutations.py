@@ -1044,6 +1044,12 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "        path.unlink(missing_ok=True)\n",
             id="bundle-pending-raw-unlink",
         ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "def _retire(\n",
+            "def _drop(path: Path) -> None:\n    path.unlink()\n\n\ndef _retire(\n",
+            id="bundle-retire-new-helper-raw-unlink",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(

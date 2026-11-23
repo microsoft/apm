@@ -109,15 +109,13 @@ _DIRECT_RECORDERS = {
     ("src/apm_cli/adapters/client/hermes.py", "update_config"): "journal_config_written",
     ("src/apm_cli/adapters/client/intellij.py", "_write_config"): "journal_config_written",
 }
-# Deploy writers outside integration/ that write through the seam (#5046).
-_SEAMED_FUNCTIONS = {
+# Deploy writers outside integration/ that write through the seam: named functions,
+# or None for every call in the module (the bundle route's retires, #5130).
+_SEAMED_FUNCTIONS: dict[str, frozenset[str] | None] = {
     "src/apm_cli/install/services.py": frozenset({"integrate_local_bundle"}),
-    # The bundle route's retire deletes (#5130).
-    "src/apm_cli/install/local_bundle_hook_trust.py": frozenset(
-        {"_retire_per_file", "_remove_unedited"}
-    ),
-    "src/apm_cli/install/local_bundle_canvas.py": frozenset({"_retire"}),
-    "src/apm_cli/install/local_bundle_pending.py": frozenset({"_write"}),
+    "src/apm_cli/install/local_bundle_canvas.py": None,
+    "src/apm_cli/install/local_bundle_hook_trust.py": None,
+    "src/apm_cli/install/local_bundle_pending.py": None,
 }
 _BUNDLE_ENTRY = "src/apm_cli/commands/install.py"
 _BUNDLE_JOURNALED = (
