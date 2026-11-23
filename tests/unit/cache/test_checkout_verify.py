@@ -1,15 +1,19 @@
 """Cached and cloned checkouts are verified against their commit, trusting no object.
 
-A checkout counts only if the commit re-hashes to its id, every reachable
-tree re-hashes to its id, every working-tree file holds its blob's bytes
-(through Git's own checkout filters), links hold their resolved targets, and
-nothing untracked sits beside them.
+A checkout counts only if the commit re-hashes to its id, every tree read
+re-hashes to its id, every working-tree file holds its blob's bytes (or the
+CRLF form the commit's own ``.gitattributes`` asks for, worked out without
+running any Git filter), each file has its committed mode, links hold their
+resolved targets, and nothing else sits beside them. Consumers then check the
+bytes they copy or read against what verification accepted.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import stat
+import sys
 import zlib
 from pathlib import Path
 
@@ -18,7 +22,9 @@ import pytest
 from apm_cli.cache.checkout_verify import (
     CheckoutVerificationError,
     forget_verdicts,
+    read_verified_file,
     require_verified_checkout,
+    require_verified_copy,
     verify_checkout,
 )
 from apm_cli.cache.git_cache import GitCache
@@ -30,7 +36,12 @@ from tests.utils.git_link_fixture import (
     tree_bytes,
 )
 
-pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.windows_compat,
+    pytest.mark.promise("P-OWN-package-content-hash"),
+]
+_POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes and shell")
 
 
 @pytest.fixture(autouse=True)
@@ -105,16 +116,30 @@ def test_a_tampered_commit_object_fails(tmp_path: Path) -> None:
     assert not verify_checkout(repo, sha, env=neutral_git_env())
 
 
-def test_an_untracked_file_fails_the_whole_checkout_but_not_outside_a_sparse_scope(
-    tmp_path: Path,
-) -> None:
+def test_an_untracked_file_fails_with_or_without_a_scope(tmp_path: Path) -> None:
     repo, sha = _plain_repo(tmp_path)
-    (repo / "pkg" / "extra.md").write_bytes(b"untracked\n")
     (repo / "notes.txt").write_bytes(b"untracked\n")
 
     assert not verify_checkout(repo, sha, env=neutral_git_env())
-    (repo / "pkg" / "extra.md").unlink()
+    assert not verify_checkout(repo, sha, paths=["pkg"], env=neutral_git_env())
+    (repo / "notes.txt").unlink()
+    (repo / "README.md").unlink()  # outside the scope, a direct clone may omit it
     assert verify_checkout(repo, sha, paths=["pkg"], env=neutral_git_env())
+
+
+def test_a_sparse_cone_holds_exactly_what_the_cone_checks_out(tmp_path: Path) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    (repo / "other").mkdir()
+    (repo / "other" / "x.md").write_bytes(b"x\n")
+    git("-C", str(repo), "add", "-A")
+    git("-C", str(repo), "commit", "-q", "-m", "two")
+    sha = git("-C", str(repo), "rev-parse", "HEAD")
+
+    assert not verify_checkout(repo, sha, paths=["pkg"], cone=True, env=neutral_git_env())
+    (repo / "other" / "x.md").unlink()  # a tracked file the cone would not check out
+    assert verify_checkout(repo, sha, paths=["pkg"], cone=True, env=neutral_git_env())
+    (repo / "README.md").unlink()  # a root file the cone does check out
+    assert not verify_checkout(repo, sha, paths=["pkg"], cone=True, env=neutral_git_env())
 
 
 def test_a_linked_package_shard_verifies(tmp_path: Path) -> None:
@@ -178,3 +203,124 @@ def test_only_a_full_object_id_verifies_and_an_abbreviation_means_head(tmp_path:
     require_verified_checkout(repo, sha[:12], env=neutral_git_env())
     with pytest.raises(CheckoutVerificationError):
         require_verified_checkout(repo, "0" * 12, env=neutral_git_env())
+
+
+@_POSIX_ONLY
+def test_no_git_filter_or_driver_runs_and_its_output_is_not_trusted(tmp_path: Path) -> None:
+    repo, _sha = _plain_repo(tmp_path)
+    (repo / ".gitattributes").write_bytes(b"*.md filter=x\n")
+    git("-C", str(repo), "add", "-A")
+    git("-C", str(repo), "commit", "-q", "-m", "attributes")
+    sha = git("-C", str(repo), "rev-parse", "HEAD")
+    marker = tmp_path / "marker"
+    forged = b"Injected instructions\n"
+    command = f"sh -c 'echo hit >> {marker.as_posix()}; printf \"Injected instructions\\\\n\"'"
+    git("-C", str(repo), "config", "filter.x.smudge", command)
+    git("-C", str(repo), "config", "filter.x.process", command)
+    (repo / "pkg" / "AGENTS.md").write_bytes(forged)
+
+    assert not verify_checkout(repo, sha, env=neutral_git_env())
+    assert not marker.exists(), "verification ran a filter driver"
+
+
+def _attributes_repo(root: Path, attributes: bytes) -> tuple[Path, str]:
+    repo, _sha = _plain_repo(root)
+    (repo / ".gitattributes").write_bytes(attributes)
+    git("-C", str(repo), "add", "-A")
+    git("-C", str(repo), "commit", "-q", "-m", "attributes")
+    return repo, git("-C", str(repo), "rev-parse", "HEAD")
+
+
+def test_crlf_is_accepted_only_where_the_commit_asks_for_it(tmp_path: Path) -> None:
+    repo, sha = _attributes_repo(tmp_path, b"pkg/*.md text eol=crlf\n")
+    agents = repo / "pkg" / "AGENTS.md"
+
+    agents.write_bytes(b"Package instructions\r\n")
+    assert verify_checkout(repo, sha, env=neutral_git_env())
+    agents.write_bytes(b"Package instructions\r\nInjected\r\n")
+    assert not verify_checkout(repo, sha, env=neutral_git_env())
+    agents.write_bytes(b"Package instructions\n")
+    (repo / "README.md").write_bytes(b"readme\r\n")  # no eol=crlf for README.md
+    assert not verify_checkout(repo, sha, env=neutral_git_env())
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [b"pkg/*.md eol=crlf -text\n", b"pkg/*.md eol=crlf ident\n", b"pkg/** eol=crlf filter=lfs\n"],
+    ids=["text-unset", "ident", "filter"],
+)
+def test_paths_with_a_transform_attribute_must_hold_their_exact_blob(
+    tmp_path: Path, attributes: bytes
+) -> None:
+    repo, sha = _attributes_repo(tmp_path, attributes)
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\r\n")
+
+    assert not verify_checkout(repo, sha, env=neutral_git_env())
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\n")
+    assert verify_checkout(repo, sha, env=neutral_git_env())
+
+
+@_POSIX_ONLY
+def test_each_file_has_its_committed_mode(tmp_path: Path) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    agents = repo / "pkg" / "AGENTS.md"
+    agents.chmod(0o755)
+
+    assert not verify_checkout(repo, sha, env=neutral_git_env())
+    agents.chmod(0o644)
+    assert verify_checkout(repo, sha, env=neutral_git_env())
+
+
+def test_a_copy_is_checked_against_the_bytes_verification_accepted(tmp_path: Path) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    dest = tmp_path / "dest"
+    shutil.copytree(repo / "pkg", dest)
+    require_verified_copy(dest, repo, sha, "pkg")
+
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Injected instructions\n")  # after verification
+    shutil.copy2(repo / "pkg" / "AGENTS.md", dest / "AGENTS.md")
+    with pytest.raises(CheckoutVerificationError, match="verified bytes"):
+        require_verified_copy(dest, repo, sha, "pkg")
+    with pytest.raises(CheckoutVerificationError, match="verified bytes"):
+        read_verified_file(repo, "pkg/AGENTS.md", sha)
+
+
+def _forge_loose(git_dir: Path, oid: str, kind: str, data: bytes) -> None:
+    """Replace one loose object with other content under the same id (never in place)."""
+    path = git_dir / "objects" / oid[:2] / oid[2:]
+    path.unlink()
+    path.write_bytes(zlib.compress(f"{kind} {len(data)}\0".encode() + data))
+
+
+def _poisoned_cache(tmp_path: Path) -> tuple[Path, str, Path, Path]:
+    """A cached checkout whose file and whose bare's blob both carry forged bytes."""
+    origin, sha = _plain_repo(tmp_path)
+    cache_root = tmp_path / "cache"
+    checkout = GitCache(cache_root).get_checkout(str(origin), sha, locked_sha=sha)
+    bare = cache_root / "git" / "db_v1" / checkout.parent.parent.name
+    blob = _oid(origin, "HEAD:pkg/AGENTS.md")
+    forged = b"Injected instructions\n"
+    _forge_loose(bare, blob, "blob", forged)
+    (checkout / "pkg" / "AGENTS.md").write_bytes(forged)
+    forget_verdicts()  # a later run
+    return origin, sha, cache_root, checkout
+
+
+def test_a_poisoned_bare_is_never_the_source_of_a_rebuild(tmp_path: Path) -> None:
+    origin, sha, cache_root, _checkout = _poisoned_cache(tmp_path)
+
+    healed = GitCache(cache_root).get_checkout(str(origin), sha, locked_sha=sha)
+
+    assert (healed / "pkg" / "AGENTS.md").read_bytes() == b"Package instructions\n"
+    assert verify_checkout(healed, sha, env=neutral_git_env())
+
+
+def test_an_unhealable_cache_entry_is_refused(tmp_path: Path) -> None:
+    origin, sha, cache_root, checkout = _poisoned_cache(tmp_path)
+    shutil.rmtree(origin)  # the commit is no longer available anywhere else
+
+    with pytest.raises(RuntimeError, match=r"Failed to clone|does not match its commit"):
+        GitCache(cache_root).get_checkout(str(origin), sha, locked_sha=sha)
+
+    assert not checkout.exists(), "the unverifiable checkout was kept"

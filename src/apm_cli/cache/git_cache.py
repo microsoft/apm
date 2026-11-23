@@ -364,25 +364,35 @@ class GitCache:
 
         Returns:
             Path to the checkout directory, verified against its commit
-            (``cache/checkout_verify.py``): a checkout that fails is evicted
-            and rebuilt once, then refused.
+            (``cache/checkout_verify.py``). A checkout that fails is rebuilt
+            once from a fresh fetch (its bare is discarded too, since the bare
+            may have supplied the bytes), then refused.
         """
         from ..utils.git_env import git_subprocess_env
         from .checkout_verify import verify_checkout
 
-        for _attempt in range(2):
+        for attempt in range(2):
             checkout = self._get_checkout(
                 url, ref, locked_sha=locked_sha, env=env, sparse_paths=sparse_paths
             )
             sha = checkout.parent.name
-            if verify_checkout(checkout, sha, paths=sparse_paths, env=git_subprocess_env(env)):
+            verify_env = git_subprocess_env(env)
+            cone = bool(sparse_paths)
+            if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):
                 return checkout
             if self._read_only:
                 raise LookupError("cached checkout does not match its commit")
-            _log.warning("[!] Rebuilding cached checkout that does not match %s", sha[:12])
-            self._evict_checkout(checkout)
+            if attempt == 0:
+                from ..utils.console import _rich_warning
+
+                _rich_warning(
+                    f"Cached copy of {_sanitize_url(url)} @ {sha[:12]} failed verification "
+                    "against its commit; rebuilding it from a fresh fetch."
+                )
+            self._discard_shard(checkout, url, partial=bool(sparse_paths))
         raise RuntimeError(
-            f"Cached checkout for {_sanitize_url(url)} does not match its commit; refusing it"
+            f"Cached checkout for {_sanitize_url(url)} @ {sha[:12]} does not match its commit "
+            "even after a fresh fetch; refusing it"
         )
 
     def _get_checkout(
@@ -1188,6 +1198,15 @@ class GitCache:
             origin_ok=lambda url: names_shard(url) or any(_same_path(url, b) for b in bares),
             alternates_root=self._db_root,
         )
+
+    def _discard_shard(self, checkout_dir: Path, url: str, *, partial: bool) -> None:
+        """Remove a checkout that failed verification and the bare it was cloned from."""
+        bare_dir = self._db_root / (
+            cache_shard_key(url) + (_PARTIAL_BARE_SUFFIX if partial else "")
+        )
+        for directory in (checkout_dir, bare_dir):
+            with shard_lock(directory):
+                self._evict_checkout(directory)
 
     def _checkout_trusted_or_evicted(self, checkout_dir: Path) -> bool:
         """Return True for a trusted checkout; evict an untrusted one and return False."""

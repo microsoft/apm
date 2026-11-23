@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Union
 import requests
 
 from ..cache.cached_repo import validate_cached_links
-from ..cache.checkout_verify import require_verified_checkout
+from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
@@ -1653,7 +1653,6 @@ class GitHubPackageDownloader:
                 raise RuntimeError(f"Path '{subdir_path}' is not a directory")
             _env, _scope = self._git_env_dict(), [subdir_path]
             validate_cached_links(temp_clone_path, _scope, _env)
-            require_verified_checkout(temp_clone_path, _ws2_resolved_commit, paths=_scope, env=_env)
 
             # Create target directory
             target_path.mkdir(parents=True, exist_ok=True)
@@ -1674,6 +1673,9 @@ class GitHubPackageDownloader:
                     robust_copytree(src, dst)
                 else:
                     robust_copy2(src, dst)
+            require_verified_copy(
+                target_path, temp_clone_path, _ws2_resolved_commit, subdir_path, _env
+            )
             # Sparse cones keep ancestor-directory files, so read the repository
             # licence before cleanup; it is written after validation (#3556).
             repository_license = read_repository_license(temp_clone_path, subdir_path)
@@ -1923,6 +1925,7 @@ class GitHubPackageDownloader:
                         robust_copytree(src, dst)
                     else:
                         robust_copy2(src, dst)
+                require_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)
@@ -2015,9 +2018,8 @@ class GitHubPackageDownloader:
                 progress_reporter.disabled = True
 
             # Links become their Git-object content while .git exists (#3457).
-            _env, _sha = self._git_env_dict(), resolved_ref.resolved_commit
-            materialize_tracked_symlinks("git", target_path, None, env=_env)
-            require_verified_checkout(target_path, _sha, env=_env)
+            materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
+            require_verified_checkout(target_path, resolved_ref.resolved_commit)
 
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"

@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..utils.git_sparse import _LINK_MODE, _TREE_MODE, _LinkResolver, _TreeEntry
+from .cached_repo import cached_repo_env, inert_git_args
 
 _MODES = {"40000": _TREE_MODE, "160000": "160000"}
 _EXECUTABLE = "100755"
@@ -83,26 +84,12 @@ class _Objects:
 
     def __init__(self, git_exe: str, repo: Path, env: dict[str, str] | None, algorithm: str):
         self._algorithm = algorithm
-        child_env = dict(os.environ if env is None else env)
-        child_env["GIT_NO_LAZY_FETCH"] = "1"
         self._process = subprocess.Popen(
-            [
-                git_exe,
-                "-c",
-                "core.fsmonitor=false",
-                "-c",
-                f"core.hooksPath={os.devnull}",
-                "-c",
-                "protocol.allow=never",
-                "-C",
-                str(repo),
-                "cat-file",
-                "--batch",
-            ],
+            [git_exe, *inert_git_args(), "-C", str(repo), "cat-file", "--batch"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=child_env,
+            env=cached_repo_env(dict(os.environ if env is None else env), offline=True),
         )
 
     def read(self, oid: str, kind: str) -> bytes:
@@ -526,14 +513,16 @@ def require_verified_copy(
     dest: Path,
     repo: Path,
     sha: str | None,
-    *,
     subdir: str = "",
-    paths: Iterable[str] | None = None,
     env: dict[str, str] | None = None,
 ) -> None:
-    """Raise unless every file copied from *repo* (``subdir`` of it) into *dest* holds verified bytes."""
-    manifest = _manifest(repo, sha, paths, env)
+    """Raise unless every file copied from *repo* (its *subdir*) into *dest* holds verified bytes.
+
+    The bytes are checked against the record of an earlier verification of
+    *repo* in this process, or *repo* is verified now (scoped to *subdir*).
+    """
     prefix = subdir.strip("/")
+    manifest = _manifest(repo, sha, [prefix] if prefix else None, env)
     for rel, path in _worktree_files(Path(dest)):
         source = _join(prefix, rel)
         _check_bytes(manifest, source, path.read_bytes(), os.lstat(path))
