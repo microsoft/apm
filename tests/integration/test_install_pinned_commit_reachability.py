@@ -630,3 +630,26 @@ def test_a_fetch_by_commit_applies_a_remote_activated_mirror_rewrite(
 
     assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m1"
     assert _git("rev-parse", "HEAD", cwd=target) == origin.m1
+
+
+def test_a_package_with_a_link_installs_from_a_host_that_will_not_serve_a_commit_by_id(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: the by-name fallback is verified after links are materialized."""
+    work = tmp_path / "remote" / "work"
+    instructions = work / ".apm" / "instructions"
+    (instructions / "linked.instructions.md").symlink_to("pkg.instructions.md")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "link", cwd=work)
+    linked = _git("rev-parse", "HEAD", cwd=work)
+    _git("push", "-q", str(origin.path), "main", cwd=work)
+    _wrapped_git(tmp_path, monkeypatch, _NOT_OUR_REF)
+    project = _project(tmp_path, "main")
+
+    result = _install(project, origin, monkeypatch, APM_NO_CACHE="1")
+
+    assert result.exit_code == 0, result.output
+    assert linked in (project / "apm.lock.yaml").read_text(encoding="utf-8")
+    [deployed] = (project / "apm_modules").rglob("linked.instructions.md")
+    assert not deployed.is_symlink()
+    assert deployed.read_text(encoding="utf-8") == "m2"

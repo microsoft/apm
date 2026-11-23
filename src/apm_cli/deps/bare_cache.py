@@ -181,10 +181,10 @@ def fetch_commit_worktree(
     Shallow: ``git init``, ``git fetch --depth=1 --no-tags <url> <sha>`` and a
     detached checkout. A server that refuses a want by commit falls back to a
     full clone and a checkout of *sha*. A server that answers "not our ref"
-    gets the ref fetched by name, only while it still points at *sha*, and the
-    checkout is verified against *sha*. Runs over the clone transport plan.
+    gets the ref fetched by name, only while it still points at *sha*; the
+    checkout is still of *sha*. Runs over the clone transport plan. The
+    caller verifies the checkout against *sha* once links are materialized.
     """
-    from ..cache.checkout_verify import require_verified_checkout
     from ..utils.git_env import (
         checkout_git_worktree,
         clone_git_worktree,
@@ -224,7 +224,6 @@ def fetch_commit_worktree(
                 if not _fetch_admitted_tip_by_name(git_exe, path, url, ref, sha, (env, fetch_env)):
                     raise
                 checkout_git_worktree(path, sha, env=env)
-                require_verified_checkout(path, sha, env=env)
                 return
             if not _refuses_want_by_commit(exc):
                 raise
