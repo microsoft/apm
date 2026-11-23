@@ -19,6 +19,7 @@ import yaml
 pytestmark = [
     pytest.mark.live,
     pytest.mark.requires_ado_pat,
+    pytest.mark.e2e,
 ]
 
 _DEFAULT_ADO_TEST_REPO = "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"

@@ -1,0 +1,17 @@
+{
+  "issue": 4749,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall of a remote direct dependency that another installed package still needs transitively dropped its shared apm.lock.yaml row, so the next apm install --frozen failed; uninstall now removes only the apm.yml declaration, keeps the package installed and re-parents the lock row to the dependent package.",
+  "failure_modes": [
+    "cleanup",
+    "outcome"
+  ],
+  "properties": [
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_keeps_a_direct_dependency_another_package_still_needs",
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_still_removes_a_dependency_nothing_else_needs"
+  ]
+}

@@ -42,7 +42,6 @@ import yaml
 
 from tests.lifecycle.scenarios._kit import (
     PROJECT_HOME_ALLOWED,
-    Known,
     Scenario,
     Tree,
     assert_changes,
@@ -214,6 +213,114 @@ def test_target_narrow_keeps_unmanaged_and_sibling(lifecycle_world) -> None:
         label="narrow to copilot",
     )
     _survives(scenario, tree, "target narrow")
+
+
+_PLUGIN_ROOT = ".agents/plugins/p-native-claude-bin"
+_PLUGIN_BIN = f"{_PLUGIN_ROOT}/bin/p-native-claude-bin"
+
+
+# How the first commands after dropping claude reach the lock: a full install; `apm
+# lock` (keeps the plugin, it touches no deployed state) then install; a partial
+# install of another package, which merges the untouched plugin's row (#4744).
+_NARROW_PATHS = {
+    "install": ((), "install --trust-bin", ()),
+    "lock-then-install": (("lock",), "install --trust-bin", ()),
+    "partial-install": (
+        (),
+        "install --trust-bin p-skill",
+        ("home:.apm/apm.yml", "home:.apm/apm_modules/*", "home:.agents/skills/p-skill*"),
+    ),
+}
+
+
+def _deployed_plugin_bin(world) -> Scenario:
+    """User scope, targets [copilot, claude]: p-native-claude-bin deployed with its bin/."""
+    use_policy(world, "allow")
+    specs = {
+        "p-native-claude-bin": world.packages["p-native-claude-bin:git"].spec,
+        "p-skill": world.packages["p-skill"].spec,
+    }
+    scenario = Scenario(world, specs, scope="user", targets=("copilot", "claude"), policy="allow")
+    scenario.run("install p-native-claude-bin")
+    scenario.run("approve p-native-claude-bin")
+    scenario.run("install --trust-bin")
+    assert (world.home / _PLUGIN_BIN).is_file()
+    return scenario
+
+
+def _assert_plugin_unowned(scenario: Scenario) -> None:
+    lock = scenario.lock_path.read_text(encoding="utf-8")
+    assert _PLUGIN_ROOT not in lock, "the lock still claims the retired plugin files"
+    settings_path = scenario.world.home / ".claude/settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert not settings.get("enabledPlugins"), settings
+
+
+@pytest.mark.parametrize("path", sorted(_NARROW_PATHS))
+def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world, path) -> None:
+    """#4744: dropping claude retires the plugin bin/ only claude received; the rest stays."""
+    scenario = _deployed_plugin_bin(lifecycle_world)
+    home = lifecycle_world.home
+    kept = sorted(
+        item.relative_to(home).as_posix()
+        for item in (home / ".agents/skills").rglob("*")
+        if item.is_file()
+    )
+
+    scenario.set_targets("copilot")
+    before, line, extra = _NARROW_PATHS[path]
+    for command in before:
+        scenario.run(command)
+        assert (home / _PLUGIN_BIN).is_file(), f"{command} touched deployed state"
+        lock = scenario.lock_path.read_text(encoding="utf-8")
+        assert _PLUGIN_ROOT in lock, f"{command} dropped the ownership of a deployed plugin"
+    step = scenario.run(line)
+    assert not (home / _PLUGIN_BIN).exists(), f"dropping claude left the plugin bin\n{step.output}"
+    _assert_plugin_unowned(scenario)
+    # The plugin root and its Claude registration (catalog and settings) retire together.
+    assert_changes(
+        step.changed,
+        (
+            "home:.apm/apm.lock.yaml",
+            "home:.agents/plugins/*",
+            "home:.claude/settings.json",
+            *extra,
+        ),
+        label=path,
+    )
+    for item in kept:
+        assert (home / item).is_file(), f"narrowing removed the copilot output {item}"
+    scenario.finish()
+
+
+def test_target_narrow_keeps_an_edited_plugin_bin_and_says_so(lifecycle_world) -> None:
+    """#4744 control: a bin/ the user edited is kept and reported; ownership still retires."""
+    scenario = _deployed_plugin_bin(lifecycle_world)
+    edited = (lifecycle_world.home / _PLUGIN_BIN).read_text(encoding="ascii") + "# mine\n"
+    scenario.user_write(_PLUGIN_BIN, edited)
+    scenario.set_targets("copilot")
+    step = scenario.run("install --trust-bin")
+    assert (lifecycle_world.home / _PLUGIN_BIN).read_text(encoding="ascii") == edited
+    assert "Kept ~/.agents/plugins/p-native-claude-bin: its files changed" in step.output, (
+        step.output
+    )
+    _assert_plugin_unowned(scenario)
+    scenario.finish()
+
+
+def test_frozen_refuses_a_dropped_claude_native_plugin(lifecycle_world) -> None:
+    """#4744: --frozen refuses the target mismatch (as for files, #4517) and changes nothing."""
+    scenario = _deployed_plugin_bin(lifecycle_world)
+    scenario.set_targets("copilot")
+    step = scenario.run("install --frozen", exit=1)
+    assert "no longer declares target(s) claude" in step.output, step.output
+    assert _PLUGIN_ROOT in step.output, step.output
+    assert_changes(step.changed, (), label="frozen refusal")
+    assert (lifecycle_world.home / _PLUGIN_BIN).is_file()
+    scenario.run("install --trust-bin")
+    assert not (lifecycle_world.home / _PLUGIN_BIN).exists()
+    _assert_plugin_unowned(scenario)
+    scenario.finish()
 
 
 def test_mcp_only_package_removal_keeps_unmanaged_and_sibling(lifecycle_world) -> None:
@@ -487,10 +594,13 @@ def test_operations_beside_a_users_skill_keep_its_bytes(lifecycle_world, deploye
     else:
         act("pack", "pack", ("project:.github/plugin*", "project:build*"))
     inline = f"install --mcp p-inline -- {INERT_COMMAND} --stdio"
+    # The first MCP write records its evidence against this checkout's
+    # installation identity, created here when nothing was deployed before (#4737).
+    identity = ("project:.apm-local*",) if deployed == "unowned" else ()
     act(
         inline,
         "mcp-install",
-        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml"),
+        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml", *identity),
     )
     act("install p-exec-bundle", "bundle-install", ("project:apm_modules*",))
     scenario.run("install p-exec")
@@ -549,6 +659,7 @@ def test_edited_executable_files_are_kept(lifecycle_world) -> None:
     scenario.user_write(_HOOK, _with(_HOOK, "echo p-exec", "echo my-own-hook", world))
     scenario.user_write(_CANVAS, _with(_CANVAS, "'p-canvas'", "'my-canvas'", world))
     scenario.user_write(_LSP, _with(_LSP, '"--stdio"', '"--my-flag"', world))
+    scenario.source_moved()
     step = scenario.run("install", credit=_EDITED_EXEC)
     assert step.result.returncode == 0, step.output
     for subject in (_HOOK, _CANVAS, f"LSP server '{LSP_SERVER}' in {_LSP}"):
@@ -723,8 +834,9 @@ def test_users_own_executable_files_at_package_paths_survive(lifecycle_world) ->
 def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src) -> None:
     """A user's MCP entry of the same name is never taken over.
 
-    An inline server refuses, but writes before it detects the conflict
-    (#4268); a registry server keeps the user's entry and says it skipped.
+    An inline server refuses before any write: apm.yml, .github/ and the
+    user's .mcp.json stay byte-identical (#4759, I7); a registry server keeps
+    the user's entry and says it skipped.
     """
     use_policy(lifecycle_world, "allow")
     scenario = Scenario(lifecycle_world, (), policy="allow")
@@ -733,11 +845,19 @@ def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src
     scenario.user_write(".mcp.json", json.dumps(servers, indent=2) + "\n")
     scenario.source_moved()
     if src == "inline-mcp":
+        manifest = (lifecycle_world.project / "apm.yml").read_bytes()
         step = scenario.run(
             _MCP_SOURCES[src],
             exit=1,
-            known={"I7": Known("#4268", r"failed install changed (the manifest|durable files)")},
+            credit=[_pair("unowned", SRC=src)],
+            keep={"project": (".mcp.json",)},
+            refusal=True,
         )
+        assert "MCP server 'p-inline' conflicts with the existing copilot" in step.output
+        assert "Preserved that connection" in step.output, step.output
+        assert (lifecycle_world.project / "apm.yml").read_bytes() == manifest
+        assert not (lifecycle_world.project / ".github").exists(), step.output
+        assert_changes(step.changed, (), label=step.line)
     else:
         step = scenario.run(
             _MCP_SOURCES[src],
@@ -982,7 +1102,10 @@ def test_a_native_plugins_skill_in_the_users_hands_survives_install(
     lifecycle_world, deployed
 ) -> None:
     use_policy(lifecycle_world, "allow")
-    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow")
+    # cursor splits every plugin into loose skills; claude and copilot install a
+    # Claude plugin whole at project scope (#3921), where the skill is not a loose file.
+    targets = ("cursor",)
+    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow", targets=targets)
     if deployed == "unowned":
         scenario.user_write(_NATIVE_SKILL, _USER_NATIVE_SKILL)
         line = "install --dry-run p-native-claude"
@@ -1000,6 +1123,48 @@ def test_a_native_plugins_skill_in_the_users_hands_survives_install(
     )
     unknown = deployed == "present-provenance-unknown"
     assert_changes(step.changed, ("project:apm.lock.yaml",) if unknown else (), label=line)
+    scenario.finish()
+
+
+def test_a_native_plugin_is_one_gated_cell_at_project_scope(lifecycle_world) -> None:
+    """A Claude plugin at project scope is one gated native cell per target (#4808).
+
+    Its root under .agents/plugins and each target's enabledPlugins declaration
+    are observed after every step: an approved install leaves both whole, and a
+    deny retires both (I4), so no loose copy and no stale declaration remain.
+    """
+    use_policy(lifecycle_world, "allow")
+    targets = ("claude", "copilot")
+    # The carried skill and MCP kinds are observed too, so a loose copy fails the model.
+    kinds = {"p-native-claude": ("native", "skill", "mcp")}
+    scenario = Scenario(
+        lifecycle_world, ("p-native-claude",), kinds=kinds, policy="allow", targets=targets
+    )
+    scenario.run("install p-native-claude")
+    scenario.run("approve p-native-claude")
+    scenario.run("install")
+    scenario.assert_deployed()
+    scenario.run("deny p-native-claude")
+    scenario.run("install")
+    scenario.assert_deployed()
+    scenario.finish()
+
+
+def test_a_native_plugin_with_bin_deploys_whole_only_when_trusted(lifecycle_world) -> None:
+    """At project scope an approved plugin that ships bin/ is parked whole until
+    ``--trust-bin`` (claude_plugins/admission.py); then root and declaration land."""
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(
+        lifecycle_world, ("p-native-claude-bin",), policy="allow", targets=("claude",)
+    )
+    scenario.run("install p-native-claude-bin")
+    scenario.run("approve p-native-claude-bin")
+    step = scenario.run("install")
+    assert not scenario.deployed()[0], sorted(step.changed)
+    # The model carries no bin-trust posture: trusting bin/ is a new input.
+    scenario.source_moved()
+    scenario.run("install --trust-bin")
+    scenario.assert_deployed()
     scenario.finish()
 
 
@@ -1527,12 +1692,12 @@ CREDITS = credits(
             row for rows in _UNOWNED_EXEC.values() for row in rows
         ],
         "test_a_users_lsp_entry_is_never_taken_over": [_pair("unowned", PRIM="lsp")],
-        **{
-            f"test_a_users_mcp_entry_blocks_a_server_of_the_same_name[{src}]": [
-                _pair("unowned", PRIM="mcp", SRC=src)
-            ]
-            for src in ("inline-mcp", "mcp-registry")
-        },
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": [
+            _pair("unowned", SRC="inline-mcp")
+        ],
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[mcp-registry]": [
+            _pair("unowned", PRIM="mcp", SRC="mcp-registry")
+        ],
         "test_deployed_executables_without_a_lock_are_kept": _UNKNOWN_EXEC,
         **{
             f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": [
@@ -1606,8 +1771,5 @@ CREDITS = credits(
             )
             for deployed in _DEPLOYED_STATES
         },
-    },
-    known={
-        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": "#4268",
     },
 )

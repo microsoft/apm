@@ -147,7 +147,7 @@ def test_journey_space_is_one_row_per_index_step_oracle() -> None:
         assert rows == []
         return
     assert len(rows) == len(set(rows))
-    assert all(re.fullmatch(r"J\|[JPE]\d\d\|\d+\|(O\d+|I\d)", row) for row in rows), rows
+    assert all(re.fullmatch(r"J\|[JPE]\d\d\|\d+\|(O\d+[ab]?|I\d)", row) for row in rows), rows
 
 
 def test_generated_file_names_only_known_ids_and_real_witnesses() -> None:

@@ -1315,6 +1315,11 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
                                 from ...compilation.output_writer import CompiledOutputWriter
 
                                 CompiledOutputWriter().write(output_path, final_content)
+                            from ...compilation.claude_agents_md import refresh_compiled_digest
+
+                            refresh_compiled_digest(
+                                compiler.base_dir, compiler.base_dir / output_path
+                            )
                         except (OSError, ValueError) as e:
                             logger.error(f"Failed to write final AGENTS.md: {e}")
                             sys.exit(1)

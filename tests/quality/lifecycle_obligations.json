@@ -13097,8 +13097,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_no_longer_deployed_is_retired_without_the_lockfile"
   },
   "pair|LOCK=absent|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -15848,8 +15849,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_no_longer_deployed_is_retired_without_the_lockfile"
   },
   "pair|OP=install|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -20824,8 +20826,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_no_longer_deployed_is_retired_without_the_lockfile"
   },
   "pair|SCOPE=project|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -21646,9 +21649,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4268",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DRYRUN=on": {

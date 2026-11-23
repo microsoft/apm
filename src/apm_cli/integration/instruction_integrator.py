@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import yaml
 
@@ -84,6 +84,10 @@ class InstructionIntegrator(BaseIntegrator):
         self.agents_md_routed: set[str] = set()
         # Routed sources no compiled AGENTS.md carries yet (new or changed).
         self.agents_md_stale: set[str] = set()
+        # One compiled-coverage snapshot per project root for this install.
+        self._compiled_coverage: dict[Path, Any] = {}
+        # Routing verdicts per root and directory for this install (#4787).
+        self._routing_cache: dict = {}
 
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
@@ -537,9 +541,9 @@ class InstructionIntegrator(BaseIntegrator):
         scratch root, so scope and the blocker come from the live root it replays.
         """
         from apm_cli.compilation.claude_agents_md import (
+            CompiledCoverage,
             claude_agents_md_blocker,
             claude_agents_md_blocker_warning,
-            compiled_agents_md_has,
             routes_to_agents_md,
         )
         from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
@@ -560,11 +564,12 @@ class InstructionIntegrator(BaseIntegrator):
             if routes_to_agents_md(
                 self._parse_frontmatter(prepared_instructions[source].content)[0].get("applyTo"),
                 live_root,
+                cache=self._routing_cache,
             )
         }
         if not routed:
             return instruction_files
-        blocker = claude_agents_md_blocker(live_root)
+        blocker = claude_agents_md_blocker(live_root, cache=self._routing_cache)
         if blocker is not None:
             warned = (diagnostics, live_root)
             if diagnostics is not None and warned not in self._claude_blocker_warned:
@@ -572,14 +577,17 @@ class InstructionIntegrator(BaseIntegrator):
                 diagnostics.warn(claude_agents_md_blocker_warning(blocker))
             return instruction_files
         self.agents_md_routed.update(source.name for source in routed)
+        coverage = self._compiled_coverage.setdefault(live_root, CompiledCoverage(live_root))
         for source in routed:
             prepared = prepared_instructions[source]
             apply_to = self._parse_frontmatter(prepared.content)[0].get("applyTo")
-            if not compiled_agents_md_has(live_root, apply_to, prepared.body):
+            if not coverage.has(apply_to, prepared.body):
                 self.agents_md_stale.add(source.name)
         return [source for source in instruction_files if source not in routed]
 
-    def render_agents_md_routed_rules(self, package_info, project_root: Path) -> dict[str, str]:
+    def render_agents_md_routed_rules(
+        self, package_info, project_root: Path, source_plan
+    ) -> dict[str, str]:
         """Render the ``.claude/rules/`` files Claude routing left undeployed.
 
         ``apm pack --format apm`` ships deployed files, and bundle consumers do
@@ -593,7 +601,8 @@ class InstructionIntegrator(BaseIntegrator):
         target = KNOWN_TARGETS["claude"]
         mapping = target.primitives["instructions"]
         package_path = Path(package_info.install_path)
-        sources = self.find_instruction_files(package_path)
+        # Only the sources install admits (the canonical source plan, #4787).
+        sources = self.find_instruction_files(package_path, source_plan)
         if not sources:
             return {}
         self.init_link_resolver(package_info, project_root)
@@ -988,9 +997,12 @@ def routed_claude_rule_renders(
     records a ``content_hash`` must match it before its manifest or its
     instructions (or their absence) decide routing, so a deleted routed
     instruction fails too. An older row without one renders nothing it
-    does not already record as deployed.
+    does not already record as deployed. A missing cached copy of an
+    attested dependency fails too unless the lock proves it gives Claude
+    nothing (:func:`_lock_proves_claude_excluded`).
     """
     from apm_cli.core.scope import manifest_file
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.target_filter import resolve_effective_package_targets
     from apm_cli.integration.targets import KNOWN_TARGETS
@@ -1004,9 +1016,11 @@ def routed_claude_rule_renders(
             continue
         dep_ref = dep.to_dependency_ref()
         install_path = dep_ref.get_install_path(modules_root)
-        if not install_path.is_dir():
-            continue
         attested = bool(getattr(dep, "content_hash", None))
+        if not install_path.is_dir():
+            if verified and attested and not _lock_proves_claude_excluded(dep_ref):
+                _refuse_missing_source(dep, install_path, project_root)
+            continue
         if verified and attested:
             _require_locked_source(lockfile, dep, install_path, project_root)
         manifest = manifest_file(install_path)
@@ -1015,9 +1029,10 @@ def routed_claude_rule_renders(
             if manifest.is_file()
             else APMPackage(name=dep.name or install_path.name, version=dep.version or "0.0.0")
         )
+        dependency_selection = effective_dependency_selection(dep_ref)
         selection = resolve_effective_package_targets(
             [KNOWN_TARGETS["claude"]],
-            effective_dependency_selection(dep_ref).target_subset,
+            dependency_selection.target_subset,
             package,
             None,
             dep.get_unique_key(),
@@ -1027,7 +1042,17 @@ def routed_claude_rule_renders(
         package_info = PackageInfo(
             package=package, install_path=install_path, dependency_ref=dep_ref
         )
-        rendered = InstructionIntegrator().render_agents_md_routed_rules(package_info, project_root)
+        source_plan = DeployableSourcePlan.create(
+            package_info,
+            [KNOWN_TARGETS["claude"]],
+            skill_subset=dependency_selection.skill_subset,
+            hooks_approved=False,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+        rendered = InstructionIntegrator().render_agents_md_routed_rules(
+            package_info, project_root, source_plan
+        )
         if verified:
             deployed = set(dep.deployed_files)
             rendered = {path: text for path, text in rendered.items() if path not in deployed}
@@ -1036,6 +1061,32 @@ def routed_claude_rule_renders(
         if rendered:
             rules[dep.get_unique_key()] = rendered
     return rules
+
+
+def _lock_proves_claude_excluded(dep_ref) -> bool:
+    """Return True when the lock records that *dep*'s edge excludes Claude.
+
+    Without its cached copy, pack cannot read the dependency's ``targets:``
+    or instructions, so only a recorded edge exclusion is authoritative. A
+    missing Claude deployment proves nothing: a collision can block one
+    target while another deploys, and Claude lacks some primitives.
+    """
+    from apm_cli.install.package_resolution import effective_dependency_selection
+
+    subset = effective_dependency_selection(dep_ref).target_subset
+    return bool(subset) and "claude" not in subset
+
+
+def _refuse_missing_source(dep, install_path: Path, project_root: Path) -> None:
+    """Refuse to pack a Claude dependency whose cached copy is gone (#4755)."""
+    from apm_cli.core.remediation import PACK_INSTALLED_FILES_MISSING
+
+    cached = portable_relpath(install_path, project_root)
+    raise ValueError(
+        f"Cannot pack dependency {dep.repo_url}: its installed copy {cached} is missing, so "
+        "its Claude instructions routed to AGENTS.md cannot be rendered into the bundle. "
+        f"{PACK_INSTALLED_FILES_MISSING.sentence()}"
+    )
 
 
 def _require_locked_source(lockfile, dep, install_path: Path, project_root: Path) -> None:
