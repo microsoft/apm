@@ -191,7 +191,9 @@ def test_prune_keeps_an_edited_file_of_the_orphan_and_names_it(
 
     pruned = _output(world.apm("prune"))
 
-    assert f"Kept user-edited file {_E_SKILL}/SKILL.md" in pruned, pruned
+    assert (
+        f"Skipped removing {_E_SKILL}/SKILL.md: file has been edited since APM deployed it"
+    ) in pruned, pruned
     assert edited.read_bytes() == edited_bytes
     assert "_local/e" not in _rows(world)
     assert (world.project / _F_SKILL / "SKILL.md").is_file()

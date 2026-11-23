@@ -118,7 +118,9 @@ class OrphanRemovalDecision:
     their lock row stays with its content. ``rescued_parents``,
     ``rescued_depths`` and ``rescued_dev`` give the parent, depth and dev
     status every row the walk reaches from those roots takes, as a fresh
-    install records them (#4833).
+    install records them (#4833). ``unverified_keys`` names each lock row
+    prune kept only because the graph could not prove it unreachable, with
+    the reason (#4989).
     """
 
     operation: OrphanOperation
@@ -138,6 +140,7 @@ class OrphanRemovalDecision:
     retained_paths: tuple[str, ...] = ()
     stale_keys: tuple[str, ...] = ()
     expected_paths: frozenset[str] = frozenset()
+    unverified_keys: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     superseded_roots: tuple[tuple[str, frozenset[str]], ...] = ()
     repairs: Mapping[str, tuple[str, str | None, bool]] = field(
         default_factory=lambda: MappingProxyType({})
@@ -474,12 +477,14 @@ def _decide_installed_paths(
     from ..deps.reachability import retained_lock_keys
 
     declared = [entry for entry in intended if not isinstance(entry, str)]
+    unverified: dict[str, str] = {}
     retained = (
         retained_lock_keys(
             lockfile,
             reachability.project_root,
             reachability.apm_modules_dir,
             list(reachability.direct_refs),
+            unverified=unverified,
         )
         if lockfile is not None
         else frozenset()
@@ -530,6 +535,7 @@ def _decide_installed_paths(
         retained_paths=tuple(sorted((installed - orphaned) - expected)),
         stale_keys=stale_keys,
         expected_paths=frozenset(expected),
+        unverified_keys=MappingProxyType(dict(sorted(unverified.items()))),
     )
 
 

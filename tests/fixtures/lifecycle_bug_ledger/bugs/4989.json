@@ -1,0 +1,20 @@
+{
+  "issue": 4989,
+  "fixed_in": "Unreleased",
+  "summary": "apm prune retained every recorded transitive lock row, so a transitive local dependency only a removed package declared kept its row and deployed files; local transitives now go through the forward reachability walk and leave when unreachable, deleting only proven files.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "lockfile.frozen_preserves_bytes"
+  ],
+  "regression_tests": [
+    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_removes_transitive_local_orphan_and_keeps_shared_dependency",
+    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_keeps_an_edited_file_of_the_orphan_and_names_it",
+    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_keeps_an_orphan_file_without_deployment_evidence",
+    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_with_a_partial_graph_keeps_the_orphan_and_reports",
+    "tests/unit/test_deps_reachability.py::test_retained_lock_keys_drops_a_local_transitive_no_survivor_declares"
+  ]
+}

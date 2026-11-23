@@ -217,6 +217,17 @@ def _join_local(anchor: Path, local_path: str) -> Path:
     return raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
 
 
+def _dir_identity(path: Path) -> tuple[int, int] | None:
+    """Return the ``(device, inode)`` of an existing directory, else None."""
+    try:
+        stat = path.stat()
+    except (OSError, ValueError):
+        return None
+    if not stat.st_ino:
+        return None
+    return stat.st_dev, stat.st_ino
+
+
 def _build_local_dir_index(
     lockfile: LockFile,
     project_root: Path,
@@ -353,6 +364,13 @@ def compute_forward_reachable_keys(
     local_dir_index = _build_local_dir_index(
         lockfile, project_root, candidate_orphans, unverifiable
     )
+    # A case-folding or normalizing filesystem opens one directory under
+    # several spellings; its file identity still names one node (#4989).
+    local_dir_ids = {
+        identity: key
+        for path, key in local_dir_index.items()
+        if (identity := _dir_identity(path)) is not None
+    }
 
     reachable: set[str] = set()
     dev_only: set[str] = set()
@@ -412,7 +430,7 @@ def compute_forward_reachable_keys(
             matched_key = (
                 ref.get_unique_key()
                 if ref.replacement is not None and ref.get_unique_key() in lockfile.dependencies
-                else local_dir_index.get(real_dir)
+                else local_dir_index.get(real_dir) or local_dir_ids.get(_dir_identity(real_dir))
             )
             edge_selections.setdefault(matched_key or ref.get_unique_key(), []).append(
                 EdgeSelection.from_dependency(ref, chain)
@@ -565,28 +583,60 @@ def retained_lock_keys(
     project_root: Path,
     apm_modules_dir: Path,
     declared_refs: list[DependencyReference],
+    *,
+    unverified: dict[str, str] | None = None,
 ) -> frozenset[str]:
     """Return the lock keys a project still needs beyond its declarations.
 
     The one answer ``apm prune`` and ``apm deps list`` give for which locked
-    packages are retained: every recorded transitive (``depth > 1``) plus any
-    entry recorded as direct that is no longer declared but is still
+    packages are retained: every recorded remote transitive (``depth > 1``)
+    plus any undeclared direct entry or LOCAL transitive that is still
     forward-reachable from a declared package's own manifest (a direct
-    dependency hand-removed from apm.yml that another package needs, #3668).
-    An incomplete walk fails closed and retains every such entry.
+    dependency hand-removed from apm.yml that another package needs, #3668;
+    a local package only a removed package declared, #4989). Local
+    transitives match by their exact lock keys and resolved directories.
+
+    An incomplete walk, or a local entry whose directory cannot be resolved,
+    fails closed and retains every such entry; each one kept only for that
+    reason is named in *unverified* with the reason, for the caller to report.
     """
     declared = {ref.get_unique_key() for ref in declared_refs}
     retained: set[str] = set()
-    stale_direct: set[str] = set()
+    candidates: set[str] = set()
+    reasons: dict[str, str] = {}
+    parent_index = build_local_parent_index(lockfile)
+    resolved_cache: dict[str, Path] = {}
     for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
-        if dep.depth is not None and dep.depth > 1:
+        if dep.depth is not None and dep.depth > 1 and not dep.is_local_source:
             retained.add(key)
         elif key not in declared:
-            stale_direct.add(key)
-    if stale_direct:
+            candidates.add(key)
+        if key not in candidates or not dep.is_local_source:
+            continue
+        try:
+            resolve_local_dep_dir(
+                dep,
+                lockfile,
+                project_root,
+                parent_index=parent_index,
+                resolved_cache=resolved_cache,
+            )
+        except LocalResolutionError as exc:
+            # Only this entry's own match is unknown; the walk stays usable.
+            candidates.discard(key)
+            retained.add(key)
+            reasons[key] = str(exc)
+    if candidates:
         walk = compute_forward_reachable_keys(
-            lockfile, project_root, apm_modules_dir, declared_refs, frozenset(stale_direct)
+            lockfile, project_root, apm_modules_dir, declared_refs, frozenset(candidates)
         )
-        retained |= stale_direct & walk.reachable if walk.complete else stale_direct
+        if walk.complete:
+            retained |= candidates & walk.reachable
+        else:
+            retained |= candidates
+            detail = "; ".join(f"{name}: {reason}" for name, reason in walk.unverifiable)
+            reasons.update(dict.fromkeys(candidates - walk.reachable, detail))
+    if unverified is not None:
+        unverified.update(reasons)
     return frozenset(retained)

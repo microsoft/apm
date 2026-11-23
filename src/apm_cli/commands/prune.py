@@ -213,6 +213,13 @@ def prune(ctx, dry_run):
         orphaned_packages = list(decision.removed_paths)
         for package in decision.retained_paths:
             logger.progress(f"Retained {package}: required package content.")
+        for dep_key, reason in decision.unverified_keys.items():
+            locked = lockfile.dependencies.get(dep_key) if lockfile is not None else None
+            logger.warning(
+                f"Kept {locked.repo_url if locked is not None else dep_key}: the dependency "
+                "graph could not be read completely, so prune cannot prove no package "
+                f"still needs it ({reason}). Restore the unreadable package, then prune again."
+            )
         missing_orphaned_keys = list(decision.stale_keys)
         deployment_ledger = (
             DeploymentLedgerCodec.from_lockfile(lockfile) if lockfile is not None else None
