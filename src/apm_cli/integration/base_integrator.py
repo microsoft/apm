@@ -893,8 +893,7 @@ class BaseIntegrator:
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
         else:
-            # A proven edit the gate cannot keep (the project's own local content)
-            # still names the true reason (RA-012).
+            # A proven edit no session can keep still names the true reason (RA-012).
             message = kept_edit_message(
                 rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
             )
@@ -1292,6 +1291,9 @@ class BaseIntegrator:
             for root in scan_roots:
                 primitives = discover_primitives(root)
                 self.link_resolver.register_contexts(primitives)
+            # Context and memory links render in live deployment coordinates
+            # for every package, the $HOME user root included (#4832).
+            self.link_resolver.deployment_frame = getattr(package_info, "deployment_frame", None)
 
             # Generalized in-package asset link rewriting (#1147) needs the
             # authoritative source-package root. Use install_path directly:

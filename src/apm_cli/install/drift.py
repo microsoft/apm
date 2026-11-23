@@ -694,13 +694,16 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     if lock_dep.local_path == _SELF_KEY:
                         package_info = build_project_local_package_info(install_path)
                         package_info.root_local_project_root = self_source_root
-                        package_info.deployment_package_root = scratch_root
+                        # The root package deploys from where install read it;
+                        # its links render in the live frame like any dependency
+                        # (#4832: a user-root context link from ~/.apm).
+                        package_info.deployment_package_root = self_source_root
                     else:
                         package_info = _build_package_info(lock_dep, install_path)
                         package_info.deployment_package_root = (
                             lock_dep.to_dependency_ref().get_install_path(deployment_modules_dir)
                         )
-                        package_info.deployment_frame = deployment_frame
+                    package_info.deployment_frame = deployment_frame
                     dep_key = lock_dep.get_unique_key()
 
                     # Replay deploys the locked selection, as uninstall does (#3760).
