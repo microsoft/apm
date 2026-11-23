@@ -249,6 +249,8 @@ class _Aliases:
         while True:
             if innermost or not isinstance(scope, ast.ClassDef):
                 key = (id(scope) if scope is not None else 0, name)
+                if key in self._declared:
+                    return self._names.get((self._declared[key], name), _NONE)
                 if key in self._names:
                     return self._names[key]
             if scope is None:
