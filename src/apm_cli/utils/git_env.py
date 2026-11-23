@@ -374,6 +374,8 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
     the programs they call by name resolve the way :func:`trusted_executable`
     resolves APM's own helpers. ``.``, empty and relative entries and every
     entry inside the project are dropped; user-authored scripts never use this.
+    Raises ``FileNotFoundError`` when no entry remains, rather than launching
+    with an empty PATH.
     """
     exclusion_root = _executable_exclusion_root()
     result = dict(env)
@@ -389,6 +391,12 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
             except (OSError, ValueError):
                 continue
             kept.append(entry)
+        if not kept:
+            # An empty PATH makes POSIX shells search the working directory.
+            raise FileNotFoundError(
+                "No PATH directory outside the project remains for APM's setup scripts. "
+                "Add the directory holding your installed tools to PATH and retry."
+            )
         result[key] = os.pathsep.join(kept)
     return result
 
