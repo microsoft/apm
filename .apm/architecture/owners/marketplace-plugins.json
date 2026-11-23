@@ -30,6 +30,9 @@
         "src/apm_cli/marketplace/catalog_ref_pins.py"
       ],
       "guards": [
+        "marketplace-catalog-origin-fetch-pin",
+        "marketplace-catalog-origin-pin-tips",
+        "marketplace-catalog-origin-registration-pin",
         "marketplace-integrations-catalog-origin"
       ]
     },

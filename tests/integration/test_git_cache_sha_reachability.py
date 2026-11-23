@@ -155,3 +155,148 @@ class TestReachabilityMarker:
 
         with pytest.raises(RuntimeError, match=_UNREACHABLE):
             cache.get_checkout(fork.url, origin.f1)
+
+
+_UPSTREAM = "https://git.example.invalid/acme/repo.git"
+
+
+def _rewrite(origin: _Origin, *, remove: bool = False) -> None:
+    """Route the upstream URL to the local origin, as a user's mirror rewrite does."""
+    action = ["--unset"] if remove else []
+    _REAL_RUN(
+        [
+            "git",
+            "config",
+            "--file",
+            os.environ["GIT_CONFIG_GLOBAL"],
+            *action,
+            f"url.{origin.url}.insteadOf",
+            *([] if remove else [_UPSTREAM]),
+        ],
+        check=True,
+    )
+
+
+class _PlanDownloader:
+    """The clone transport plan: each attempt runs until one completes."""
+
+    def __init__(self, cache_root: Path, attempts: list[str]) -> None:
+        self.persistent_git_cache = type("Cache", (), {"_cache_root": cache_root})()
+        self.attempts = attempts
+        self.contacted: list[str] = []
+
+    def _persistent_cache_remote(self, _dep_ref, url: str) -> str:
+        return url
+
+    def _execute_transport_plan(self, _base, target, *, dep_ref, clone_action, **_kw) -> None:
+        for url in self.attempts:
+            self.contacted.append(url)
+            try:
+                clone_action(url, {}, target)
+                return
+            except subprocess.CalledProcessError:
+                continue
+        raise RuntimeError("every transport attempt failed")
+
+
+class _Dep:
+    repo_url = "acme/repo"
+    artifactory_prefix = None
+
+    @staticmethod
+    def to_github_url() -> str:
+        return _UPSTREAM
+
+
+class TestVerdictScope:
+    def test_a_verdict_through_a_mirror_never_stands_for_the_origin(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        from apm_cli.cache.commit_reachability import (
+            CommitNotReachableError,
+            require_reachable_commit,
+        )
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        root = tmp_path / "cache"
+        _rewrite(origin)
+        require_reachable_commit(root, _UPSTREAM, cache_shard_key(_UPSTREAM), origin.m1)
+        _rewrite(origin, remove=True)
+
+        # The upstream itself is now contacted: the mirror's verdict is not reused.
+        with pytest.raises(CommitNotReachableError, match="network"):
+            require_reachable_commit(root, _UPSTREAM, cache_shard_key(_UPSTREAM), origin.m1)
+
+    def test_a_refusal_stops_the_plan_even_if_a_later_attempt_would_admit(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
+
+        lenient = tmp_path / "lenient.git"
+        _REAL_RUN(["git", "clone", "-q", "--mirror", str(origin.path), str(lenient)], check=True)
+        origin.git("--git-dir", str(lenient), "update-ref", "refs/heads/feature", origin.f1)
+        downloader = _PlanDownloader(tmp_path / "cache", [origin.url, lenient.as_uri()])
+
+        with pytest.raises(CommitNotReachableError, match=_UNREACHABLE):
+            admit_pinned_commit(downloader, _Dep(), origin.f1)
+        assert downloader.contacted == [origin.url]
+
+    def test_a_failed_contact_tries_the_next_attempt(self, tmp_path: Path, origin: _Origin) -> None:
+        from apm_cli.cache.commit_reachability import admit_pinned_commit
+
+        missing = (tmp_path / "missing.git").as_uri()
+        downloader = _PlanDownloader(tmp_path / "cache", [missing, origin.url])
+
+        admit_pinned_commit(downloader, _Dep(), origin.m1)
+        assert downloader.contacted == [missing, origin.url]
+        verified = [p.name for p in (tmp_path / "cache" / "reachability").rglob("verified/*")]
+        assert verified == [origin.m1]
+
+
+class TestCachedBareTrust:
+    """Real trust checks (no ``trust_cached_repos``): repositories here are real clones."""
+
+    def test_a_mirror_rewritten_clone_completes_without_a_discard(
+        self, tmp_path: Path, origin: _Origin, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        origin.bare("tag", "v9", origin.f1)
+        _rewrite(origin)
+        cache = _cache(tmp_path)
+
+        with caplog.at_level("WARNING"):
+            first = cache.get_checkout(_UPSTREAM, origin.f1)
+            second = cache.get_checkout(_UPSTREAM, origin.m1)
+
+        assert (first / "f1.txt").is_file()
+        assert (second / "m1.txt").is_file()
+        assert "Discarding" not in caplog.text
+
+    def test_a_bare_recording_the_effective_contact_url_is_kept(
+        self, tmp_path: Path, origin: _Origin, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _rewrite(origin)
+        cache = _cache(tmp_path)
+        cache.get_checkout(_UPSTREAM, origin.m1)
+        [bare] = [p for p in (tmp_path / "cache" / "git" / "db_v1").iterdir() if p.is_dir()]
+        # Some git transports record the rewritten URL they contacted.
+        origin.git("--git-dir", str(bare), "config", "remote.origin.url", origin.url)
+
+        with caplog.at_level("WARNING"):
+            checkout = cache.get_checkout(_UPSTREAM, origin.m2)
+
+        assert (checkout / "m2.txt").is_file()
+        assert "Discarding" not in caplog.text
+
+    def test_a_bare_recording_another_remote_is_discarded(
+        self, tmp_path: Path, origin: _Origin, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        cache = _cache(tmp_path)
+        cache.get_checkout(origin.url, origin.m2)
+        [bare] = [p for p in (tmp_path / "cache" / "git" / "db_v1").iterdir() if p.is_dir()]
+        origin.git("--git-dir", str(bare), "config", "remote.origin.url", _UPSTREAM)
+
+        with caplog.at_level("WARNING"):
+            checkout = cache.get_checkout(origin.url, origin.m1)
+
+        assert (checkout / "m1.txt").is_file()
+        assert "Discarding cached git repository" in caplog.text

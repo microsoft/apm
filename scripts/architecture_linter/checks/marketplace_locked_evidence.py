@@ -320,7 +320,12 @@ RULES = (
     Rule(
         id=ORIGIN_RULE_ID,
         group="marketplace_integrations",
-        guard_ids=(ORIGIN_RULE_ID,),
+        guard_ids=(
+            ORIGIN_RULE_ID,
+            "marketplace-catalog-origin-fetch-pin",
+            "marketplace-catalog-origin-pin-tips",
+            "marketplace-catalog-origin-registration-pin",
+        ),
         description=(
             "Marketplace lock evidence records the catalog origin, and alias resolution "
             "and registration compare that origin, never the alias (#3912)."

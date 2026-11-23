@@ -1899,7 +1899,8 @@ class TestVirtualFilePackageYamlGeneration:
         dep_ref = Mock(spec=DependencyReference)
         dep_ref.is_virtual = True
         dep_ref.virtual_path = virtual_path
-        dep_ref.reference = "main"
+        # No declared ref: the default branch, so no origin admission.
+        dep_ref.reference = None
         dep_ref.repo_url = "github/awesome-copilot"
         dep_ref.get_virtual_package_name.return_value = "awesome-copilot-swe-subagent"
         dep_ref.to_github_url.return_value = (

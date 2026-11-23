@@ -710,3 +710,29 @@ def test_a_full_commit_ref_is_not_a_commits_api_query() -> None:
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "f" * 40) == "f" * 40
     assert api.queries == []
+
+
+def test_a_branch_literally_named_like_a_pull_ref_resolves_to_its_own_commit() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/heads/pull/1/head"] = "c" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "pull/1/head") == "c" * 40
+    assert api.queries == ["heads/pull/1/head"]
+
+
+def test_a_ref_with_a_space_gets_no_commits_api_query() -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "main pull/1/head") is None
+    assert api.queries == []
+
+
+def test_a_non_ascii_name_is_queried_only_as_a_branch_or_tag() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/v\u00e9"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v\u00e9") == "d" * 40
+    assert api.queries == ["heads/v\u00e9", "tags/v\u00e9"]

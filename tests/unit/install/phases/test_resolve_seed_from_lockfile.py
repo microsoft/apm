@@ -125,7 +125,9 @@ def test_unclassifiable_historical_seed_allows_current_resolution(
     assert len(resolver._lock_seeds) == 1
     assert resolver._cache.size() == 0
     assert resolver.resolve(current).resolved_commit == "b" * 40
-    downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(current, "main")
+    # The commits API is queried by namespace only (heads/ then tags/), never
+    # by the bare name the API could resolve to a review ref.
+    downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(current, "heads/main")
     assert resolver.resolve(valid_locked.to_dependency_ref()).resolved_commit == SHA
     downloader._refs.resolve.assert_not_called()
     assert resolver.remotely_resolved(current, "b" * 40) is False
@@ -135,7 +137,9 @@ def test_unclassifiable_historical_seed_allows_current_resolution(
     invalid_current = DependencyReference.parse_from_dict({**declaration, "type": "gitlab"})
     with pytest.raises(ValueError, match="conflicts with recognized 'ghes'"):
         resolver.resolve(invalid_current)
-    downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(current, "main")
+    # The commits API is queried by namespace only (heads/ then tags/), never
+    # by the bare name the API could resolve to a review ref.
+    downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(current, "heads/main")
 
 
 def test_seeds_branch_and_tag_refs():

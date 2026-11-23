@@ -197,3 +197,25 @@ def test_a_locked_commit_only_a_pull_ref_reaches_is_refused_on_replay(
     assert _UNREACHABLE in " ".join(result.output.split())
     assert _installed(project) == []
     assert lock_path.read_text(encoding="utf-8") == lock
+
+
+_VIRTUAL_FILE = "skills/tool/.apm/instructions/tool.instructions.md"
+
+
+@pytest.mark.parametrize("no_cache", [False, True], ids=["cached", "no-cache"])
+@pytest.mark.parametrize("ref", ["f1", "pull/1/head"], ids=["pull-only-sha", "pull-ref-name"])
+def test_a_single_file_dependency_is_admitted_before_its_bytes_are_fetched(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, ref, no_cache
+) -> None:
+    project = _project(tmp_path, origin.f1 if ref == "f1" else ref, _VIRTUAL_FILE)
+    env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache")}
+
+    result = _install(project, origin, monkeypatch, **env)
+
+    output = " ".join(result.output.split())
+    assert result.exit_code == 1, result.output
+    assert _UNREACHABLE in output or "not a branch or tag of the origin" in output
+    assert not (project / "apm_modules").exists() or not any(
+        (project / "apm_modules").rglob("*.md")
+    )
+    assert not (project / "apm.lock.yaml").exists()

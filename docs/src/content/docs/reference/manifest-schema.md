@@ -551,7 +551,7 @@ When a default registry is configured - via `registries.default` in `apm.yml` or
 | `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory or file within the repo. See Section 4.1.3. |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA | Git reference. Commit SHAs matched by `^[a-f0-9]{7,40}$`. Semver tags matched by `^v?\d+\.\d+\.\d+`. |
 
-A git `ref` names a branch or tag of the source repository exactly (`refs/heads/<ref>` or `refs/tags/<ref>`); a name that is both a branch and a tag needs the full form, and other namespaces such as `refs/pull/` are refused. A commit SHA (including a lockfile commit) must be reachable from a branch or tag; the first install of a commit that is not a tip checks this once over the network, and an offline first install fails closed.
+A git `ref` names a branch or tag of the source repository exactly (`refs/heads/<ref>` or `refs/tags/<ref>`); a name that is both a branch and a tag needs the full form. A tail match (`feature` for `team/feature`) and names that are no branch or tag, such as `head`, `pull/7/head` or `refs/pull/7/head`, are refused. A commit SHA (including a lockfile commit) must be reachable from a branch or tag; the first install of a commit that is not a tip checks this once over the network, and an offline first install fails closed.
 
 **Examples:**
 

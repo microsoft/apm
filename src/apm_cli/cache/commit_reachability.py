@@ -65,20 +65,120 @@ class CommitNotReachableError(RuntimeError):
     """
 
 
-class _Admission:
-    """A ``GitCache`` stand-in whose checkout only admits the pinned commit."""
+class _Unverified(CommitNotReachableError):
+    """The origin could not be contacted; *git_error* is the failed git call."""
 
-    def __init__(self, cache_root: Path) -> None:
-        self._root = cache_root
+    def __init__(self, message: str, git_error: Exception | None = None) -> None:
+        super().__init__(message)
+        self.git_error = git_error
 
-    def get_checkout(self, url, ref, *, locked_sha=None, env=None, sparse_paths=None) -> Path:
-        from .url_normalize import cache_shard_key
 
-        require_reachable_commit(self._root, url, cache_shard_key(url), ref, env=env)
-        return self._root
+def _git_failure(listing, url: str) -> subprocess.CalledProcessError:
+    return subprocess.CalledProcessError(
+        listing.returncode, ["git", "ls-remote", url], listing.stdout, listing.stderr
+    )
 
-    def remember_resolved_ref(self, *_args) -> None:
-        return None
+
+def _origin(downloader, dep_ref) -> tuple[Path, str]:
+    """Return ``(cache_root, origin_url)``: the cache root and the remote the cache keys by."""
+    from .paths import get_cache_root
+
+    cache = getattr(downloader, "persistent_git_cache", None)
+    root = getattr(cache, "_cache_root", None)
+    root = Path(root if isinstance(root, (str, Path)) else get_cache_root())
+    return root, downloader._persistent_cache_remote(dep_ref, dep_ref.to_github_url())
+
+
+def _at_origin(downloader, dep_ref, fn) -> None:
+    """Run *fn(url, env)* over the transports and credentials a clone would use.
+
+    A verdict (admitted or refused) ends the attempts. A failed contact
+    re-raises its git error so the clone plan tries its next transport or
+    credential; when every attempt fails the commit is unverified.
+    """
+    import tempfile
+
+    verdicts: list[CommitNotReachableError] = []
+    contact: list[_Unverified] = []
+
+    def _attempt(url: str, env: dict[str, str], _target: Path) -> None:
+        try:
+            fn(url, env)
+        except _Unverified as exc:
+            contact.append(exc)
+            raise exc.git_error or subprocess.CalledProcessError(
+                1, ["git"], stderr=str(exc)
+            ) from exc
+        except CommitNotReachableError as exc:
+            verdicts.append(exc)
+
+    with tempfile.TemporaryDirectory(prefix="apm-admit-") as scratch:
+        try:
+            downloader._execute_transport_plan(
+                dep_ref.repo_url, Path(scratch) / "unused", dep_ref=dep_ref, clone_action=_attempt
+            )
+        except CommitNotReachableError:
+            raise
+        except Exception as exc:
+            if verdicts:
+                raise verdicts[-1] from None
+            raise (contact[-1] if contact else CommitNotReachableError(str(exc))) from exc
+    if verdicts:
+        raise verdicts[-1]
+
+
+def _require_at_origin(downloader, dep_ref, sha: str) -> None:
+    from .url_normalize import cache_shard_key
+
+    root, origin = _origin(downloader, dep_ref)
+    _at_origin(
+        downloader,
+        dep_ref,
+        lambda url, env: require_reachable_commit(
+            root, url, cache_shard_key(origin), sha, env=env, origin=origin
+        ),
+    )
+
+
+def effective_contact(contact: str, env) -> str:
+    """Return the normalized URL git actually contacts for *contact* under *env*.
+
+    Applies the ``url.<base>.insteadOf`` rewrites git would apply.
+    """
+    from ..utils.git_env import effective_git_url, git_subprocess_env
+    from .url_normalize import normalize_repo_url
+
+    try:
+        effective = effective_git_url(contact, git_subprocess_env(env))
+    except Exception:
+        effective = contact
+    try:
+        return normalize_repo_url(effective)
+    except Exception:
+        return effective
+
+
+def _verdict_key(origin: str, contact: str, env) -> str:
+    """Key a verdict by the origin AND the server actually contacted.
+
+    A ``url.<base>.insteadOf`` rewrite can send the contact to a mirror; a
+    verdict from that mirror never stands for the origin once the rewrite
+    is gone (or vice versa).
+    """
+    from .url_normalize import normalize_repo_url
+
+    return f"{normalize_repo_url(origin)}\n{effective_contact(contact, env)}"
+
+
+def _record_tip(downloader, dep_ref, sha: str) -> None:
+    from ..deps.transport_selection import initial_transport_scheme
+    from .url_normalize import cache_shard_key
+
+    root, origin = _origin(downloader, dep_ref)
+    ssh = not dep_ref.artifactory_prefix and initial_transport_scheme(dep_ref) == "ssh"
+    contact = downloader._build_repo_url(dep_ref.repo_url, use_ssh=ssh, dep_ref=dep_ref)
+    key = _verdict_key(origin, contact, getattr(downloader, "git_env", None))
+    _record(_marker(root, cache_shard_key(origin), sha.lower()), key)
 
 
 def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> None:
@@ -88,41 +188,99 @@ def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> 
     *resolved* (or ``downloader.resolve_git_reference``) names is used: a
     commit this run read from the origin's current branch or tag is a tip, so
     it is recorded as reachable without a check; a commit replayed from the
-    lockfile is checked like any pin. Runs under the downloader's
-    persistent-cache credential fallback, so the verdict uses the
-    credentials the fetch would.
+    lockfile is checked like any pin. Runs under the credentials the fetch
+    would use.
 
     Raises:
         CommitNotReachableError: The commit is not admitted.
     """
-    from .paths import get_cache_root
-    from .url_normalize import cache_shard_key, normalize_repo_url
-
-    cache = getattr(downloader, "persistent_git_cache", None)
-    root = Path(getattr(cache, "_cache_root", None) or get_cache_root())
-    from ..deps.transport_selection import initial_transport_scheme
-
-    ssh = not dep_ref.artifactory_prefix and initial_transport_scheme(dep_ref) == "ssh"
-    url = (
-        downloader._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref)
-        if ssh
-        else downloader._persistent_cache_remote(dep_ref, dep_ref.to_github_url())
-    )
     if not sha or not _COMMIT_RE.match(sha):
         sha, fresh_tip = _resolved_commit(downloader, dep_ref, resolved)
         if sha is None:
             return
         if fresh_tip:
-            _record(_marker(root, cache_shard_key(url), sha.lower()), normalize_repo_url(url))
+            _record_tip(downloader, dep_ref, sha)
             return
-    if ssh:
-        # The clone keeps the declared SSH transport; so does its admission.
-        env = downloader._cache_git_env(dep_ref, remote_url=url)
-        require_reachable_commit(root, url, cache_shard_key(url), sha, env=env)
-        return
-    downloader._persistent_cache_checkout(
-        _Admission(root), dep_ref, dep_ref.to_github_url(), sha, locked_sha=None
-    )
+    _require_at_origin(downloader, dep_ref, sha)
+
+
+def admit_ref_commit(downloader, dep_ref, ref: str) -> tuple[str, str | None]:
+    """Return ``(fetch_ref, resolved_commit)`` for a single-file dependency.
+
+    A declared ref is fetched by its admitted commit, never by name. A full
+    commit is admitted as a pin. A branch or tag name resolves only exactly:
+    through the commits API by ``heads/`` or ``tags/`` namespace, else by
+    ``git ls-remote`` over the dependency's own transport. An abbreviated
+    commit resolves through the API and is then admitted as a pin.
+
+    An undeclared ref (the default branch), an Azure DevOps branch name
+    (resolved exactly by the items API) and an Artifactory route (no Git
+    origin) keep fetching by name.
+
+    Raises:
+        CommitNotReachableError: The ref names no origin branch or tag, its
+            commit is not admitted, or it cannot be resolved.
+    """
+    from ..deps.tiered_ref_resolver import _ABBREVIATED_COMMIT_RE, _exact_ref_queries
+
+    full = len(ref) in (40, 64) and bool(_COMMIT_RE.match(ref))
+    if (
+        not dep_ref.reference
+        or (dep_ref.is_azure_devops() and not full)
+        or dep_ref.is_artifactory()
+        or (
+            downloader._parse_artifactory_base_url()
+            and downloader._should_use_artifactory_proxy(dep_ref)
+        )
+    ):
+        return ref, downloader._resolve_commit_sha_for_ref(dep_ref, ref)
+    if full:
+        _require_at_origin(downloader, dep_ref, ref.lower())
+        return ref.lower(), ref.lower()
+    for query in _exact_ref_queries(ref):
+        try:
+            sha = downloader._resolve_commit_sha_for_ref(dep_ref, query)
+        except Exception:
+            sha = None
+        if sha and len(sha) == 40 and _COMMIT_RE.match(sha):
+            if _ABBREVIATED_COMMIT_RE.match(ref):
+                _require_at_origin(downloader, dep_ref, sha.lower())
+            else:
+                _record_tip(downloader, dep_ref, sha)
+            return sha.lower(), sha.lower()
+    found: list[str] = []
+    _at_origin(downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env)))
+    _record_tip(downloader, dep_ref, found[0])
+    return found[0], found[0]
+
+
+def _exact_tip(url: str, ref: str, env) -> str:
+    """Resolve *ref* to an exact origin branch or tag with ``git ls-remote``."""
+    from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
+    from ..utils.git_env import git_remote_refs
+    from .git_cache import _safe_git_args, _sanitize_url
+
+    where = _sanitize_url(url)
+    try:
+        refuse_non_branch_ref(ref, where)
+    except RuntimeError as exc:
+        raise CommitNotReachableError(str(exc)) from exc
+    try:
+        listing = git_remote_refs(
+            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
+    if listing.returncode != 0:
+        raise _Unverified(f"git ls-remote failed for {where}", _git_failure(listing, url))
+    records = []
+    for line in (listing.stdout or "").splitlines():
+        tip, _, name = line.partition("\t")
+        records.append((tip.strip().lower(), name.strip()))
+    try:
+        return exact_branch_or_tag_sha(records, ref, where)
+    except RuntimeError as exc:
+        raise CommitNotReachableError(str(exc)) from exc
 
 
 def _resolved_commit(downloader, dep_ref, resolved) -> tuple[str | None, bool]:
@@ -157,8 +315,12 @@ def require_reachable_commit(
     sha: str,
     *,
     env: dict[str, str] | None = None,
+    origin: str | None = None,
 ) -> None:
     """Refuse *sha* unless an origin branch or tag reaches it.
+
+    *url* is the remote contacted; *origin* (default *url*) is the remote
+    the verdict is recorded for.
 
     Raises:
         RuntimeError: The commit is not reachable from any origin branch or
@@ -168,10 +330,9 @@ def require_reachable_commit(
     from ..deps.git_remote_ops import tag_commit_shas
     from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args, _sanitize_url
-    from .url_normalize import normalize_repo_url
 
     sha = sha.lower()
-    canonical = normalize_repo_url(url)
+    canonical = _verdict_key(origin or url, url, env)
     marker = _marker(cache_root, shard_key, sha)
     if _recorded(marker, canonical):
         return
@@ -186,9 +347,9 @@ def require_reachable_commit(
             url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
         )
     except (subprocess.SubprocessError, OSError) as exc:
-        raise CommitNotReachableError(unverifiable) from exc
+        raise _Unverified(unverifiable, exc) from exc
     if listing.returncode != 0:
-        raise CommitNotReachableError(unverifiable)
+        raise _Unverified(unverifiable, _git_failure(listing, url))
     records = []
     for line in (listing.stdout or "").splitlines():
         tip, _, name = line.partition("\t")
@@ -248,10 +409,11 @@ def _reached_by_refs(
             stdin=subprocess.DEVNULL,
         )
     except (subprocess.SubprocessError, OSError) as exc:
-        raise CommitNotReachableError(
+        raise _Unverified(
             f"Cannot verify that commit {sha} of {_sanitize_url(url)} is reachable from a "
             "branch or tag: the first install of a pinned commit needs network access once. "
-            "Re-run with network access, or pin a branch or tag instead."
+            "Re-run with network access, or pin a branch or tag instead.",
+            exc,
         ) from exc
     return probe.returncode == 0
 

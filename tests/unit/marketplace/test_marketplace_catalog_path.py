@@ -351,12 +351,12 @@ class TestMarketplaceAddPath:
         assert refused.exit_code == 1, refused.output
         assert "--yes" in refused.output
         [entry] = _registered()
-        assert Path(urlsplit(entry["url"]).path).name == "one"
+        assert Path(MarketplaceSource.from_dict(entry).local_path).name == "one"
 
         replaced = _invoke_add(str(repos[1]), "--name", "acme", "--yes")
         assert replaced.exit_code == 0, replaced.output
         [entry] = _registered()
-        assert Path(urlsplit(entry["url"]).path).name == "two"
+        assert Path(MarketplaceSource.from_dict(entry).local_path).name == "two"
 
     def test_bare_re_add_over_a_path_registration_warns(self, tmp_path: Path) -> None:
         # Losing a catalog chosen with --path is never silent, even when the
@@ -383,7 +383,7 @@ class TestMarketplaceAddPath:
 class TestGithubContentsUrl:
     def test_catalog_path_is_encoded_and_ref_preserved(self) -> None:
         from types import SimpleNamespace
-        from urllib.parse import parse_qs, urlsplit
+        from urllib.parse import parse_qs
 
         source = MarketplaceSource(
             name="acme",
@@ -402,7 +402,7 @@ class TestGithubContentsUrl:
 
     def test_raw_contents_path_is_encoded_and_ref_preserved(self) -> None:
         from types import SimpleNamespace
-        from urllib.parse import parse_qs, urlsplit
+        from urllib.parse import parse_qs
 
         url = mp_client._github_raw_contents_url(
             SimpleNamespace(api_base="https://ghe.example.com/api/v3/"),

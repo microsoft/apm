@@ -10,6 +10,7 @@ Covers:
 
 import json
 import os
+import re
 from unittest.mock import patch
 
 import pytest
@@ -254,7 +255,7 @@ class TestFailOpen:
         """check_ref_pin with a corrupt file refuses the install."""
         path = tmp_path / "version-pins.json"
         path.write_text("CORRUPT!!!")
-        with pytest.raises(RefPinStoreError, match=str(path)):
+        with pytest.raises(RefPinStoreError, match=re.escape(str(path))):
             check_ref_pin("mkt", "plug", "ref", pins_dir=str(tmp_path))
 
     def test_check_with_non_string_plugin_entry(self, tmp_path):
@@ -274,7 +275,7 @@ def test_an_unreadable_pins_file_refuses_a_marketplace_resolution(tmp_path):
     path.write_text("{truncated")
     stage = open_ref_pin_stage()
     try:
-        with pytest.raises(RefPinStoreError, match=str(path)):
+        with pytest.raises(RefPinStoreError, match=re.escape(str(path))):
             enforce_ref_pin("mkt", "plug", "v1", pins_dir=str(tmp_path))
         assert stage.keys() == frozenset()
     finally:

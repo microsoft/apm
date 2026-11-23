@@ -656,11 +656,11 @@ class GitCache:
         # a full network clone (one would lose the atomic_land race
         # later, but only after wasting bandwidth + wall time).
         with lock:
-            if bare_dir.is_dir() and not self._bare_trusted(bare_dir):
+            if bare_dir.is_dir() and not self._bare_trusted(bare_dir, url=url, env=env):
                 self._evict_checkout(bare_dir)
             if bare_dir.is_dir():
                 # Repo exists -- check if we have the required SHA
-                if self._bare_has_sha(bare_dir, sha, env=env):
+                if self._bare_has_sha(bare_dir, sha, env=env, url=url):
                     return bare_dir
                 # Need to fetch the SHA (lock already held; call the
                 # inner helper that does NOT re-acquire).
@@ -766,30 +766,51 @@ class GitCache:
                     robust_rmtree(staged, ignore_errors=True)
                     raise RuntimeError(f"Failed to clone {_sanitize_url(url)}: {exc}") from exc
 
+            # Complete the staged clone before it becomes a cache entry.
+            self._fetch_tag_only_commit(staged, url, sha, env=env, partial=partial)
+
             # Atomic land (lock is already held; pass it through so the
             # rename completes under the same critical section).
             if not atomic_land(staged, bare_dir, lock):
                 # Another process won between our staging and rename
                 # (possible only on lock-acquisition timeout fallthrough);
                 # verify it has our SHA.
-                if not self._bare_has_sha(bare_dir, sha, env=env):
+                if not self._bare_has_sha(bare_dir, sha, env=env, url=url):
                     self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
-            else:
-                self._fetch_tag_only_commit(bare_dir, url, sha, env=env)
 
             return bare_dir
 
     def _fetch_tag_only_commit(
-        self, bare_dir: Path, url: str, sha: str, *, env: dict[str, str] | None = None
+        self,
+        staged: Path,
+        url: str,
+        sha: str,
+        *,
+        env: dict[str, str] | None = None,
+        partial: bool = False,
     ) -> None:
-        """Best effort: fetch a commit only a tag reaches, which ``--no-tags`` skipped.
+        """Best effort: fetch into a staged clone a commit only a tag reaches.
 
-        A failure leaves the bare as cloned; the checkout then reports the
-        missing commit as before.
+        ``--no-tags`` skipped it. *staged* is this call's own clone, not yet
+        a cache entry. A failure leaves it as cloned; the checkout then
+        reports the missing commit as before.
         """
+        from ..utils.git_env import get_git_executable, git_subprocess_env
+
         try:
-            if not self._bare_has_sha(bare_dir, sha, env=env):
-                self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
+            probe = run_git_text(
+                [
+                    get_git_executable(),
+                    *_safe_git_args(),
+                    *("--git-dir", str(staged), "cat-file", "-t", sha),
+                ],
+                capture_output=True,
+                timeout=10,
+                env=cached_repo_env(git_subprocess_env(env)),
+                stdin=subprocess.DEVNULL,
+            )
+            if probe.returncode != 0 or "commit" not in probe.stdout:
+                self._fetch_sha_into(staged, url, sha, env=env, partial=partial)
         except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
             _log.debug("Tag-only commit fetch skipped for %s: %s", _sanitize_url(url), exc)
 
@@ -1074,11 +1095,18 @@ class GitCache:
                 )
             return final_dir
 
-    def _bare_has_sha(self, bare_dir: Path, sha: str, *, env: dict[str, str] | None = None) -> bool:
+    def _bare_has_sha(
+        self,
+        bare_dir: Path,
+        sha: str,
+        *,
+        env: dict[str, str] | None = None,
+        url: str | None = None,
+    ) -> bool:
         """Check if the bare repo contains the specified commit."""
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
-        if not self._bare_trusted(bare_dir):
+        if not self._bare_trusted(bare_dir, url=url, env=env):
             return False
         git_exe = get_git_executable()
         subprocess_env = git_subprocess_env(env)
@@ -1141,7 +1169,7 @@ class GitCache:
         """Fetch a specific SHA into an existing bare repo (acquires lock)."""
         lock = shard_lock(bare_dir)
         with lock:
-            if self._bare_has_sha(bare_dir, sha, env=env):
+            if self._bare_has_sha(bare_dir, sha, env=env, url=url):
                 return
             self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
 
@@ -1154,18 +1182,32 @@ class GitCache:
         env: dict[str, str] | None = None,
     ) -> None:
         """Fetch a specific SHA into a bare repo. Caller MUST hold the shard lock."""
-        from ..utils.git_env import get_git_executable, git_network_env
-
-        if not self._bare_trusted(bare_dir):
+        if not self._bare_trusted(bare_dir, url=url, env=env):
             raise RuntimeError(
                 f"Refusing to fetch into untrusted cache entry for {_sanitize_url(url)}"
             )
+        # A partial-flavor bare keeps its filter on fetch so it does not pull
+        # every blob the new SHA reaches. Detected via the shard-suffix
+        # naming convention (cheap, no git config probe).
+        self._fetch_sha_into(
+            bare_dir, url, sha, env=env, partial=bare_dir.name.endswith(_PARTIAL_BARE_SUFFIX)
+        )
+
+    @staticmethod
+    def _fetch_sha_into(
+        bare_dir: Path,
+        url: str,
+        sha: str,
+        *,
+        env: dict[str, str] | None = None,
+        partial: bool = False,
+    ) -> None:
+        """Fetch *sha* into a bare repository the caller already vetted."""
+        from ..utils.git_env import get_git_executable, git_network_env
+
         git_exe = get_git_executable()
         subprocess_env = cached_repo_env(git_network_env(url, env, git_dir=bare_dir))
-        # If this is a partial-flavor bare, preserve the filter on fetch
-        # so we don't pull all blobs reachable from the new SHA. Detected
-        # via shard-suffix naming convention (cheap, no git config probe).
-        is_partial = bare_dir.name.endswith(_PARTIAL_BARE_SUFFIX)
+        is_partial = partial
         fetch_args = [git_exe, *_safe_git_args(), "--git-dir", str(bare_dir), "fetch"]
         if is_partial:
             fetch_args += ["--filter=blob:none"]
@@ -1201,10 +1243,27 @@ class GitCache:
                 check=True,
             )
 
-    def _bare_trusted(self, bare_dir: Path) -> bool:
-        """Whether a cached bare holds only Git state APM writes (see ``cached_repo``)."""
+    def _bare_trusted(
+        self, bare_dir: Path, *, url: str | None = None, env: dict[str, str] | None = None
+    ) -> bool:
+        """Whether a cached bare holds only Git state APM writes (see ``cached_repo``).
+
+        ``remote.origin.url`` must key to the bare's shard, or (with *url*)
+        be the URL git effectively contacts for *url* under *env*: the
+        canonical origin and the effective contact URL, nothing else.
+        """
         shard = bare_dir.name.removesuffix(_PARTIAL_BARE_SUFFIX)
-        return cached_repo_is_trusted(bare_dir, bare=True, origin_ok=_names_shard(shard))
+        names_shard = _names_shard(shard)
+        if url is None or not names_shard(url):
+            return cached_repo_is_trusted(bare_dir, bare=True, origin_ok=names_shard)
+        from .commit_reachability import effective_contact
+
+        contact = effective_contact(url, env)
+        return cached_repo_is_trusted(
+            bare_dir,
+            bare=True,
+            origin_ok=lambda value: names_shard(value) or effective_contact(value, None) == contact,
+        )
 
     def _checkout_trusted(self, checkout_dir: Path) -> bool:
         """Whether a cached checkout holds only Git state APM writes (see ``cached_repo``)."""
