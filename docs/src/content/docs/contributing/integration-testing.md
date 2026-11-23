@@ -670,10 +670,17 @@ release qualification or change required checks.
 ### Tier 1 and Tier 2 on every push to main
 
 `main-push-gate.yml` runs the whole PR gate suite (`ci.yml`, including every
-Lifecycle Smoke shard) and the full integration suite (`ci-integration.yml`,
-every shard) on each push to `main`. Its `main-push-gate` job fails the run
-when any tier job fails, so a red `main` shows on the commit. It is
-not a required check and never saves caches to the `main` scope.
+Lifecycle Smoke shard), the full integration suite (`ci-integration.yml`,
+every shard) and the lifecycle security cells (`lifecycle-security.yml`) on
+each push to `main`. Its `main-push-gate` job fails the run when any tier job
+fails, so a red `main` shows on the commit. It is not a required check and
+never saves caches to the `main` scope.
+
+`lifecycle-security.yml` runs `tests/lifecycle/security` on Linux and then
+requires a receipt from every security witness. Pull requests run it only when
+they touch `src/apm_cli/{cache,deps,install,policy,marketplace}/`,
+`src/apm_cli/utils/path_security.py` or the security cells; it is not a
+required check. The Windows and macOS legs stay nightly.
 
 ### Merge-train proof
 

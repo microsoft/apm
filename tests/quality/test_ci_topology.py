@@ -4272,14 +4272,21 @@ def test_lint_chain_owner_drift_fails(mutation: str) -> None:
         _assert_lint_chain_single_owner(ci, train)
 
 
-# Main push gate (S28): every push to main runs ci.yml (Tier 1) and
-# ci-integration.yml (Tier 2) through workflow_call, and one aggregate fails the
-# run when any tier job fails. It must add no cache save to the default-branch
-# scope.
+# Main push gate (S28): every push to main runs ci.yml (Tier 1),
+# ci-integration.yml (Tier 2) and lifecycle-security.yml through workflow_call,
+# and one aggregate fails the run when any tier job fails. It must add no cache
+# save to the default-branch scope.
 MAIN_PUSH_GATE_WORKFLOW = "main-push-gate.yml"
 MAIN_PUSH_GATE_JOB = "main-push-gate"
-MAIN_PUSH_GATE_STEP = "Require every Tier 1 and Tier 2 job"
-MAIN_PUSH_CALLEES = {"tier1": "ci.yml", "tier2": "ci-integration.yml"}
+MAIN_PUSH_GATE_STEP = "Require every tier job"
+LIFECYCLE_SECURITY_WORKFLOW = "lifecycle-security.yml"
+MAIN_PUSH_CALLEES = {
+    "tier1": "ci.yml",
+    "tier2": "ci-integration.yml",
+    "security": LIFECYCLE_SECURITY_WORKFLOW,
+}
+# The tiers that diff against the push base; the security cells take no input.
+MAIN_PUSH_BASE_TIERS = ("tier1", "tier2")
 MAIN_PUSH_BASE = "${{ needs.base.outputs.base_sha }}"
 _NO_SAVE_VALUES = (False, "false", UV_SAVE_ON_PR_ONLY)
 # A cache save step that never runs on push (main-push-gate and merge-train).
@@ -4312,7 +4319,8 @@ def _assert_main_push_gate(workflows: dict[str, WorkflowNode]) -> None:
         tier, callee = caller["jobs"][job_id], workflows[name]
         assert "workflow_call" in _workflow_events(callee), name
         assert all(key not in tier for key in ("if", "continue-on-error")), job_id
-        assert tier["needs"] == ["base"] and tier["with"] == {"base_sha": MAIN_PUSH_BASE}
+        expected_with = {"base_sha": MAIN_PUSH_BASE} if job_id in MAIN_PUSH_BASE_TIERS else None
+        assert tier["needs"] == ["base"] and tier.get("with") == expected_with, job_id
         assert tier["permissions"] == _permission_union(callee), job_id
         assert ("secrets." in json.dumps(callee["jobs"])) is ("secrets" in tier), job_id
         # Called jobs see the caller's push: these conditions all run on it.
@@ -4400,6 +4408,8 @@ def test_main_push_gate_runs_every_tier1_job() -> None:
         "gate-tier1",
         "dispatch-input",
         "drop-tier2",
+        "drop-security",
+        "skip-security",
     ],
 )
 def test_main_push_gate_drift_fails(mutation: str) -> None:
@@ -4425,6 +4435,13 @@ def test_main_push_gate_drift_fails(mutation: str) -> None:
     elif mutation == "drop-tier2":
         del caller["jobs"]["tier2"]
         gate["needs"].remove("tier2")
+    elif mutation == "drop-security":
+        del caller["jobs"]["security"]
+        gate["needs"].remove("security")
+    elif mutation == "skip-security":
+        workflows[LIFECYCLE_SECURITY_WORKFLOW]["jobs"]["lifecycle-security"]["if"] = (
+            "github.event_name == 'pull_request'"
+        )
     else:
         caller["on"]["workflow_dispatch"] = {"inputs": {"ref": {"type": "string"}}}
     with pytest.raises(AssertionError):
@@ -4470,6 +4487,96 @@ def test_main_push_cache_save_fails(mutation: str) -> None:
     else:
         del workflow_step(shard, "Set up Node.js")["with"]["package-manager-cache"]
     assert _cache_saving_steps(_main_push_reachable_steps(workflows))
+
+
+# The tests/lifecycle/security cells (#5159 sat red on main for hours because
+# they ran only nightly): every main push through the main push gate, and pull
+# requests whose diff touches a cache, integrity or admission path. Linux only;
+# the nightly keeps the Windows and macOS legs.
+LIFECYCLE_SECURITY_JOB = "lifecycle-security"
+LIFECYCLE_SECURITY_ROOT = "tests/lifecycle/security"
+LIFECYCLE_SECURITY_PATHS = [
+    "src/apm_cli/cache/**",
+    "src/apm_cli/deps/**",
+    "src/apm_cli/install/**",
+    "src/apm_cli/policy/**",
+    "src/apm_cli/marketplace/**",
+    "src/apm_cli/utils/path_security.py",
+    "tests/lifecycle/security/**",
+    ".github/workflows/lifecycle-security.yml",
+]
+LIFECYCLE_SECURITY_RUN_STEP = "Run the lifecycle security cells"
+LIFECYCLE_SECURITY_RECEIPTS_STEP = "Require a receipt from every security witness"
+
+
+def _assert_lifecycle_security_placement(workflows: Mapping[str, WorkflowNode]) -> None:
+    """Security cells run on every main push (fail-closed) and on path-scoped PRs."""
+    workflow = workflows[LIFECYCLE_SECURITY_WORKFLOW]
+    triggers = workflow["on"]
+    assert set(triggers) == {"pull_request", "workflow_call"}, sorted(triggers)
+    assert triggers["pull_request"] == {
+        "branches": ["main"],
+        "paths": LIFECYCLE_SECURITY_PATHS,
+    }, triggers["pull_request"]
+    assert not triggers["workflow_call"], "the main push call takes no input"
+    assert workflow.get("permissions") == {"contents": "read"}, workflow.get("permissions")
+    _assert_pr_runs_cancel_superseded_pushes_only(workflow, LIFECYCLE_SECURITY_WORKFLOW)
+    assert list(workflow["jobs"]) == [LIFECYCLE_SECURITY_JOB], list(workflow["jobs"])
+    job = workflow_job(workflow, LIFECYCLE_SECURITY_JOB)
+    assert all(key not in job for key in ("if", "continue-on-error")), job
+    assert job.get("runs-on") == "ubuntu-24.04", job.get("runs-on")
+    run = workflow_step(job, LIFECYCLE_SECURITY_RUN_STEP)
+    assert all(key not in run for key in ("if", "continue-on-error")), run
+    targets = _pytest_targets({"steps": [run]})
+    assert targets == (LIFECYCLE_SECURITY_ROOT,), targets
+    assert '-m "not live"' in run["run"], run["run"]
+    receipts = workflow_step(job, LIFECYCLE_SECURITY_RECEIPTS_STEP)
+    assert all(key not in receipts for key in ("if", "continue-on-error")), receipts
+    assert receipts["env"]["APM_LIFECYCLE_RECEIPTS_REQUIRED"] == "1", receipts["env"]
+    assert receipts["env"]["APM_LIFECYCLE_RECEIPTS_SCOPE"] == f"{LIFECYCLE_SECURITY_ROOT}/"
+    assert receipts["env"]["APM_LIFECYCLE_RECEIPTS_DIR"] == run["env"]["APM_LIFECYCLE_RECEIPTS_DIR"]
+    # The main push gate calls it as its own tier, so a security red is a main red.
+    caller = workflows[MAIN_PUSH_GATE_WORKFLOW]
+    tier = workflow_job(caller, "security")
+    assert tier["uses"] == f"./.github/workflows/{LIFECYCLE_SECURITY_WORKFLOW}", tier["uses"]
+    assert "security" in workflow_job(caller, MAIN_PUSH_GATE_JOB)["needs"]
+
+
+def test_lifecycle_security_runs_on_main_pushes_and_scoped_prs() -> None:
+    _assert_lifecycle_security_placement(_main_push_workflows())
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["drop-path", "drop-pr", "soft-run", "narrow", "receipts-off", "conditional", "uncalled"],
+)
+def test_lifecycle_security_placement_drift_fails(mutation: str) -> None:
+    workflows = _main_push_workflows()
+    workflow = workflows[LIFECYCLE_SECURITY_WORKFLOW]
+    job = workflow["jobs"][LIFECYCLE_SECURITY_JOB]
+    if mutation == "drop-path":
+        workflow["on"]["pull_request"]["paths"].remove("src/apm_cli/install/**")
+    elif mutation == "drop-pr":
+        workflow["on"].pop("pull_request")
+    elif mutation == "soft-run":
+        workflow_step(job, LIFECYCLE_SECURITY_RUN_STEP)["continue-on-error"] = True
+    elif mutation == "narrow":
+        step = workflow_step(job, LIFECYCLE_SECURITY_RUN_STEP)
+        step["run"] = step["run"].replace(
+            LIFECYCLE_SECURITY_ROOT, f"{LIFECYCLE_SECURITY_ROOT}/test_egress.py"
+        )
+    elif mutation == "receipts-off":
+        workflow_step(job, LIFECYCLE_SECURITY_RECEIPTS_STEP)["env"].pop(
+            "APM_LIFECYCLE_RECEIPTS_REQUIRED"
+        )
+    elif mutation == "conditional":
+        job["if"] = "github.event_name == 'pull_request'"
+    else:
+        workflows[MAIN_PUSH_GATE_WORKFLOW]["jobs"]["security"]["uses"] = (
+            "./.github/workflows/ci.yml"
+        )
+    with pytest.raises((AssertionError, KeyError)):
+        _assert_lifecycle_security_placement(workflows)
 
 
 _EARLY_STOP_FLAGS = ("--maxfail", "-x", "--exitfirst")
