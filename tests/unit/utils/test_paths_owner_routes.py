@@ -39,3 +39,6 @@ def test_owner_containment_checks_take_the_string_route(
     assert path_security.has_symlink_component(root, inner) is False
     assert paths.portable_relpath(inner, root) == "pkg/x.md"
     assert content_hash.compute_package_hash(root / "pkg").startswith("sha256:")
+    # The checks only read: the tree they inspected is left exactly as it was.
+    assert [entry.name for entry in (root / "pkg").iterdir()] == ["x.md"]
+    assert inner.read_text(encoding="utf-8") == "x\n"
