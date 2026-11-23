@@ -514,8 +514,9 @@ def test_two_packages_that_differ_only_by_case_stay_distinct(
     """On a case-sensitive filesystem vendor/f and vendor/F are two packages."""
     if _case_insensitive(tmp_path):
         pytest.skip("needs a case-sensitive filesystem")
+    # Skill names fold case, so the second package ships a distinct one.
     world = _respelled_world(
-        tmp_path, apm_binary_path, lambda vendor: _skill_package(vendor / "f", "f")
+        tmp_path, apm_binary_path, lambda vendor: _skill_package(vendor / "f", "g")
     )
 
     world.apm("uninstall", "./vendor/e")
