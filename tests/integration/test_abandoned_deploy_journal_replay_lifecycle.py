@@ -229,7 +229,7 @@ def _write_journal(store: Path, lines: list[dict]) -> None:
 
 
 def _unit(lines: list[dict], suffix: str) -> dict:
-    found = [line for line in lines[1:] if line["path"].endswith(suffix)]
+    found = [line for line in lines[1:] if line.get("path", "").endswith(suffix)]
     assert len(found) == 1, lines
     return found[0]
 
@@ -324,3 +324,26 @@ def test_journal_bytes_the_ledger_does_not_vouch_for_are_kept_not_restored(
 
     _assert_kept_and_reported(chain, _SCAN, store, agent["path"])
     assert (chain.project / agent["path"]).read_bytes() != forged
+
+
+def test_a_user_file_at_a_journaled_absent_path_survives_replay(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Replay removes only bytes the killed install wrote; a user's file there stays."""
+    chain, before = _killed_world(tmp_path, apm_binary_path, _SCAN)
+    extra = _unit(_journal(_abandoned(chain)), "extra-agent.md")
+    assert extra["kind"] == "absent", extra
+    user_file = chain.project / extra["path"]
+    user_file.write_text("# my own agent, written after the crash\n", encoding="utf-8")
+    _SCAN.cure(chain)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert user_file.read_text(encoding="utf-8") == "# my own agent, written after the crash\n"
+    warning = f"Kept {extra['path']}"
+    assert warning in _text(result), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+    after = _tree_state(chain.project)
+    assert {path for path in after if path not in before} == {extra["path"]}, after
+    assert _stores(chain) == [], _evidence(result)

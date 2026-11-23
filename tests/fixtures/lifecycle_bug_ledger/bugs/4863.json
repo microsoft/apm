@@ -15,6 +15,10 @@
     "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_journal_path_escaping_its_root_is_kept_and_reported_not_applied",
     "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_journal_bytes_the_ledger_does_not_vouch_for_are_kept_not_restored",
     "tests/integration/test_lockfile_commit_point_lifecycle.py::test_the_next_install_replays_a_killed_installs_deploy_snapshot",
-    "tests/unit/install/test_deploy_snapshot.py::test_the_next_install_replays_only_its_own_abandoned_journals"
+    "tests/unit/install/test_deploy_snapshot.py::test_the_next_install_replays_only_its_own_abandoned_journals",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_user_file_at_a_journaled_absent_path_survives_replay",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_receipt_whose_copy_does_not_match_its_hash_is_not_restored",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_receipt_path_leaving_the_receipts_directory_is_refused",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_deploy_root_path_that_is_absolute_or_escapes_is_refused"
   ]
 }

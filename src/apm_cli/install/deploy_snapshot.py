@@ -32,10 +32,11 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 import threading
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
@@ -52,6 +53,8 @@ _FORMAT = "apm-deploy-journal"
 _VERSION = 1
 _KINDS = ("absent", "file", "dir", "symlink")
 _COPY_NAME = re.compile(r"[0-9]+")
+# APM-home metadata the journal may restore: deployment receipts, files only.
+_RECEIPT_KINDS = frozenset(_KINDS[:2])
 
 
 @dataclass(frozen=True)
@@ -194,6 +197,18 @@ class DeployJournal:
             self._units.append(unit)
             self._recorded.add(path)
 
+    def seal(self) -> None:
+        """Record what is at every journaled path now, before a gate can refuse.
+
+        Replay removes or replaces a path only while it still holds what the
+        last seal recorded there, so a file a user writes after a kill is kept.
+        """
+        with self._lock:
+            if self.root is None or self.store is None:
+                return
+            for index, unit in enumerate(self._units):
+                self._append_line({"sealed": index, "state": _state(unit.path)})
+
     def restore(self) -> list[tuple[Path, str]]:
         """Put every recorded path back; return the paths that could not be restored."""
         issues: list[tuple[Path, str]] = []
@@ -269,6 +284,28 @@ def _tree_hashes(directory: Path) -> dict[str, str]:
     return hashes
 
 
+def _state(path: Path) -> dict[str, Any]:
+    """What is at *path* now, in the form a seal records and replay compares."""
+    if path.is_symlink():
+        return {"link": os.readlink(path)}
+    if path.is_file():
+        return {"file": compute_file_hash(path)}
+    if path.is_dir():
+        return {"dir": _tree_hashes(path)}
+    return {"other": True} if os.path.lexists(path) else {"absent": True}
+
+
+_ABSENT: dict[str, Any] = {"absent": True}
+
+
+@dataclass(frozen=True)
+class ReplayOutcome:
+    """Paths an abandoned journal restored, and paths it kept because they changed."""
+
+    restored: int
+    kept: list[tuple[str, str]]
+
+
 class JournalReplayError(Exception):
     """An abandoned journal was kept: replay could not prove or finish it (#4863)."""
 
@@ -289,6 +326,21 @@ class _Replay:
     copy: Path | None
     expected: Mapping[str, str]
     ancestors: tuple[Path, ...]
+    written: dict[str, Any] | None = None
+
+    @property
+    def prior(self) -> dict[str, Any]:
+        """The state replay puts back."""
+        if self.kind == "absent":
+            return _ABSENT
+        if self.kind == "file":
+            return {"file": self.expected[""]}
+        return {"dir": dict(self.expected)}
+
+    def holds_unknown_data(self) -> bool:
+        """Whether something APM did not write (by the last seal) is at the path now."""
+        current = _state(self.path)
+        return current not in (_ABSENT, self.prior, self.written)
 
 
 def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
@@ -323,6 +375,23 @@ def _inside(rel: Any, root: Path) -> Path:
     return path
 
 
+def _under(rel: Any, directory: str) -> str:
+    """*rel* (``<directory>/<rest>``) as ``<rest>``; raise ``PathTraversalError`` otherwise."""
+    parts = PurePosixPath(rel).parts if isinstance(rel, str) else ()
+    prefix = PurePosixPath(directory).parts
+    if len(parts) <= len(prefix) or parts[: len(prefix)] != prefix:
+        raise PathTraversalError(f"journal path {rel!r} is outside {directory}")
+    return PurePosixPath(*parts[len(prefix) :]).as_posix()
+
+
+@dataclass(frozen=True)
+class _Bases:
+    """Where replay may write: the deploy root, and the receipts directory in APM home."""
+
+    root: Path
+    receipts: Path
+
+
 class _Unproven(Exception):
     """One journal unit replay cannot prove; ``(path, reason)`` names it."""
 
@@ -331,7 +400,9 @@ class _Unproven(Exception):
         self.issue = (str(path), reason)
 
 
-def _validate_unit(line: Any, store: Path, root: Path, ledger: Mapping[str, str | None]) -> _Replay:
+def _validate_unit(
+    line: Any, store: Path, bases: _Bases, ledger: Mapping[str, str | None]
+) -> _Replay:
     """Check one manifest line against the store and the ledger, without applying it.
 
     A path under the deploy root (``base: root``) is restored only when the
@@ -347,10 +418,12 @@ def _validate_unit(line: Any, store: Path, root: Path, ledger: Mapping[str, str 
     metadata = line["base"] == "apm_home"
     rel = line.get("path")
     try:
-        path, ancestors = _unit_paths(line, store, root, metadata=metadata)
+        path, ancestors = _unit_paths(line, store, bases, metadata=metadata)
     except PathTraversalError:
         raise _Unproven(rel, "journal path escapes the deploy root") from None
     kind = line["kind"]
+    if metadata:
+        _check_receipt(rel, path, kind)
     if kind == "symlink":
         raise _Unproven(rel, "the deployment ledger cannot vouch for a symbolic link")
     if kind == "absent":
@@ -389,18 +462,45 @@ def _journaled_copy(line: dict[str, Any], store: Path) -> tuple[Path, dict[str, 
     return copy, expected
 
 
+def _check_receipt(rel: str, path: Path, kind: str) -> None:
+    """APM-home units are deployment receipts: regular files, never links (#4863)."""
+    if kind not in _RECEIPT_KINDS:
+        raise _Unproven(rel, "a deployment receipt is a regular file")
+    if path.is_symlink() or (os.path.lexists(path) and not path.is_file()):
+        raise _Unproven(rel, "a deployment receipt is a regular file")
+
+
 def _unit_paths(
-    line: dict[str, Any], store: Path, root: Path, *, metadata: bool
+    line: dict[str, Any], store: Path, bases: _Bases, *, metadata: bool
 ) -> tuple[Path, tuple[Path, ...]]:
-    """The unit's path and absent ancestors, each confined to its base directory."""
+    """The unit's path and absent ancestors, each confined to its base directory.
+
+    APM-home units are confined to the deployment receipts directory, both as
+    written (no ``..``) and as resolved (no symlinked component leaves it).
+    """
     snapshots = store.parent
-    base = snapshots.parent if metadata else root
+    base = bases.receipts if metadata else bases.root
+    if metadata:
+        prefix = bases.receipts.relative_to(snapshots.parent).as_posix()
+        line = dict(line)
+        line["path"] = _under(line.get("path"), prefix)
+        line["ancestors"] = [_under(a, prefix) for a in line.get("ancestors") or ()]
     paths = [_inside(line.get("path"), base)]
     paths += [_inside(a, base) for a in line.get("ancestors") or ()]
     for path in paths:
         if path == snapshots or snapshots in path.parents:
             raise PathTraversalError(f"journal path {path} names the journal stores")
     return paths[0], tuple(paths[1:])
+
+
+def _read_no_follow(path: Path) -> bytes:
+    """The bytes of regular file *path*, refusing a symbolic link."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        return handle.read()
 
 
 def _apply(unit: _Replay) -> None:
@@ -416,7 +516,8 @@ def _apply(unit: _Replay) -> None:
     staged = Path(tempfile.mkdtemp(prefix=".apm-replay-", dir=path.parent)) / "staged"
     try:
         if unit.kind == "file":
-            shutil.copy2(unit.copy, staged)
+            staged.write_bytes(_read_no_follow(unit.copy))
+            shutil.copystat(unit.copy, staged, follow_symlinks=False)
             written = {"": compute_file_hash(staged)}
         else:
             shutil.copytree(unit.copy, staged, symlinks=True)
@@ -445,22 +546,45 @@ def _keep(store: Path) -> Path:
     return retained
 
 
-def _replay_store(store: Path, root: Path, ledger: Mapping[str, str | None]) -> int:
-    """Replay one abandoned store; return its restored paths or raise ``JournalReplayError``."""
+def _seals(lines: list[Any], units: int) -> tuple[list[Any], dict[int, dict[str, Any]]]:
+    """Split manifest lines into unit lines and each unit's last sealed state."""
+    seals: dict[int, dict[str, Any]] = {}
+    unit_lines: list[Any] = []
+    for line in lines:
+        if not (isinstance(line, dict) and "sealed" in line):
+            unit_lines.append(line)
+            continue
+        index, state = line.get("sealed"), line.get("state")
+        if type(index) is not int or not 0 <= index < units or not isinstance(state, dict):
+            raise ValueError("journal manifest holds a malformed seal")
+        seals[index] = state
+    return unit_lines, seals
+
+
+def _replay_store(store: Path, bases: _Bases, ledger: Mapping[str, str | None]) -> ReplayOutcome:
+    """Replay one abandoned store, or raise ``JournalReplayError`` after keeping it."""
     try:
         _header, lines = _read_manifest(store)
+        units_total = sum(1 for line in lines if not (isinstance(line, dict) and "sealed" in line))
+        lines, seals = _seals(lines, units_total)
     except ValueError as exc:
         raise JournalReplayError(_keep(store), [(str(store), str(exc))], applied=False) from None
     units: list[_Replay] = []
     issues: list[tuple[str, str]] = []
-    for line in lines:
+    for index, line in enumerate(lines):
         try:
-            units.append(_validate_unit(line, store, root, ledger))
+            unit = _validate_unit(line, store, bases, ledger)
         except _Unproven as exc:
             issues.append(exc.issue)
+            continue
+        units.append(replace(unit, written=seals.get(index)))
     if issues:
         raise JournalReplayError(_keep(store), issues, applied=False)
+    kept: list[tuple[str, str]] = []
     for unit in reversed(units):
+        if unit.holds_unknown_data():
+            kept.append((unit.rel, "it changed after the interrupted install"))
+            continue
         try:
             _apply(unit)
         except OSError as exc:
@@ -469,7 +593,7 @@ def _replay_store(store: Path, root: Path, ledger: Mapping[str, str | None]) -> 
     if issues:
         raise JournalReplayError(_keep(store), issues, applied=True)
     shutil.rmtree(store, ignore_errors=True)
-    return len(units)
+    return ReplayOutcome(len(units) - len(kept), kept)
 
 
 def _store_root(store: Path) -> str | None:
@@ -483,9 +607,16 @@ def _store_root(store: Path) -> str | None:
 
 
 def replay_abandoned_journals(
-    store_parent: Path, root: Path, ledger: Callable[[], Mapping[str, str | None]]
-) -> int:
-    """Replay the journals a killed install left for *root*; return the restored path count.
+    store_parent: Path,
+    root: Path,
+    ledger: Callable[[], Mapping[str, str | None]],
+    *,
+    receipts: Path,
+) -> ReplayOutcome:
+    """Replay the journals a killed install left for *root*.
+
+    A path holding data the killed install did not write (by its last seal)
+    is kept and listed in the outcome, never removed or replaced.
 
     Call only while holding the lifecycle lock, before the install changes
     anything: every install that could own a live journal is then this
@@ -493,12 +624,14 @@ def replay_abandoned_journals(
     path the lockfile claims (POSIX, relative to *root*) mapped to its
     recorded content hash, or ``None``. A journal
     for another deploy root is left for that root's next install; one whose
-    root cannot be read is kept and reported. Raise ``JournalReplayError`` on
-    the first journal that cannot be replayed, after keeping it.
+    root cannot be read is kept and reported. *receipts* is the deployment
+    receipts directory, the only APM-home location a journal may restore.
+    Raise ``JournalReplayError`` on the first journal that cannot be replayed,
+    after keeping it.
     """
     root = Path(os.path.abspath(root))
     real_root = os.path.realpath(root)
-    restored = 0
+    restored, kept = 0, []
     stores: list[Path] = []
     with contextlib.suppress(OSError):
         stores = sorted(store_parent.glob(f"{_STORE_PREFIX}*"))
@@ -511,5 +644,7 @@ def replay_abandoned_journals(
             continue
         if vouched is None:
             vouched = ledger()
-        restored += _replay_store(store, root, vouched)
-    return restored
+        outcome = _replay_store(store, _Bases(root, Path(os.path.abspath(receipts))), vouched)
+        restored += outcome.restored
+        kept += outcome.kept
+    return ReplayOutcome(restored, kept)

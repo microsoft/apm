@@ -242,7 +242,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   one found at the MCP write keeps the deployed files the lockfile records. A killed process (SIGKILL, power loss)
   cannot restore itself: the next `apm install` in that project restores every
   file first and prints `Restored N deployed path(s) left by an interrupted
-  install.` It restores only bytes that `apm.lock.yaml` records for the path.
+  install.` It restores only bytes that `apm.lock.yaml` records for the path,
+  and never removes or replaces a file that changed after the interrupted
+  install (for example one you wrote there): it keeps that file and names it
+  in a warning.
   If the kept copies do not match the lockfile, it restores nothing; if a file
   cannot be restored, it restores the others. Either way it names each path,
   keeps the copies under `~/.apm/install-snapshots/retained-*` and exits 1.

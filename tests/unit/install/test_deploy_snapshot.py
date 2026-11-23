@@ -41,6 +41,10 @@ def apm_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+def _receipts(apm_home: Path) -> Path:
+    return apm_home / "deployment-receipts"
+
+
 def _transaction(project: Path, *, acquire_lock: bool = False) -> InstallTransaction:
     project.mkdir(parents=True, exist_ok=True)
     return InstallTransaction(
@@ -171,6 +175,7 @@ def test_the_next_install_replays_only_its_own_abandoned_journals(
         journal.record(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"deployed by a killed install\n")
+        journal.seal()
     retained = store_parent / "retained-needed"
     retained.mkdir()
     (retained / "0").write_bytes(b"prior\n")
@@ -205,7 +210,9 @@ def test_receipts_under_apm_home_replay_without_a_ledger_row(
         path.write_bytes(b"killed\n")
 
     with pytest.raises(JournalReplayError, match="kept") as kept:
-        replay_abandoned_journals(apm_home / "install-snapshots", project, dict)
+        replay_abandoned_journals(
+            apm_home / "install-snapshots", project, dict, receipts=_receipts(apm_home)
+        )
 
     assert kept.value.issues == [("a.md", "the deployment ledger does not record these bytes")]
     assert receipt.read_bytes() == deployed.read_bytes() == b"killed\n"
@@ -222,6 +229,7 @@ def _journaled_receipt(apm_home: Path, project: Path) -> tuple[Path, Path]:
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(receipt)
     receipt.write_bytes(b"killed\n")
+    journal.seal()
     assert journal.store is not None
     return receipt, journal.store
 
@@ -231,9 +239,9 @@ def _retarget(store: Path, path: str) -> None:
     import json
 
     manifest = store / "journal.jsonl"
-    header, unit = (json.loads(line) for line in manifest.read_text().splitlines())
-    unit["path"] = path
-    manifest.write_text(f"{json.dumps(header)}\n{json.dumps(unit)}\n", encoding="utf-8")
+    lines = [json.loads(line) for line in manifest.read_text().splitlines()]
+    lines[1]["path"] = path
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
 
 
 def test_a_receipt_is_restored_from_its_journal_copy(tmp_path: Path, apm_home: Path) -> None:
@@ -242,7 +250,11 @@ def test_a_receipt_is_restored_from_its_journal_copy(tmp_path: Path, apm_home: P
     project = tmp_path / "project"
     receipt, _store = _journaled_receipt(apm_home, project)
 
-    assert replay_abandoned_journals(apm_home / "install-snapshots", project, dict) == 1
+    outcome = replay_abandoned_journals(
+        apm_home / "install-snapshots", project, dict, receipts=_receipts(apm_home)
+    )
+
+    assert (outcome.restored, outcome.kept) == (1, [])
     assert receipt.read_bytes() == b"prior\n"
 
 
@@ -256,7 +268,9 @@ def test_a_receipt_whose_copy_does_not_match_its_hash_is_not_restored(
     (store / "0").write_bytes(b"forged\n")
 
     with pytest.raises(JournalReplayError) as kept:
-        replay_abandoned_journals(apm_home / "install-snapshots", project, dict)
+        replay_abandoned_journals(
+            apm_home / "install-snapshots", project, dict, receipts=_receipts(apm_home)
+        )
 
     assert kept.value.issues == [
         ("deployment-receipts/r.json", "journal copy does not match its recorded hash")
@@ -266,7 +280,16 @@ def test_a_receipt_whose_copy_does_not_match_its_hash_is_not_restored(
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
 @pytest.mark.parametrize(
-    "escape", ["dotdot", "symlinked-dir", "outside-receipts", "symlinked-receipt"]
+    "escape",
+    [
+        "dotdot",
+        "symlinked-dir",
+        "outside-receipts",
+        "another-store",
+        "symlinked-receipt",
+        "absolute",
+        "drive",
+    ],
 )
 def test_a_receipt_path_leaving_the_receipts_directory_is_refused(
     tmp_path: Path, apm_home: Path, escape: str
@@ -285,20 +308,60 @@ def test_a_receipt_path_leaving_the_receipts_directory_is_refused(
         "dotdot": "deployment-receipts/../../outside/r.json",
         "symlinked-dir": "deployment-receipts/linked/r.json",
         "outside-receipts": "config.json",
+        "another-store": f"install-snapshots/{store.name}/0",
         "symlinked-receipt": "deployment-receipts/link.json",
+        "absolute": str(victim),
+        "drive": "C:/outside/r.json",
     }[escape]
     (apm_home / "deployment-receipts" / "linked").symlink_to(outside, target_is_directory=True)
     (apm_home / "deployment-receipts" / "link.json").symlink_to(victim)
     _retarget(store, path)
 
     with pytest.raises(JournalReplayError) as kept:
-        replay_abandoned_journals(apm_home / "install-snapshots", project, dict)
+        replay_abandoned_journals(
+            apm_home / "install-snapshots", project, dict, receipts=_receipts(apm_home)
+        )
 
     assert [p for p, _reason in kept.value.issues] == [path]
     assert not kept.value.applied
     assert victim.read_bytes() == b"not apm's\n"
     assert config.read_bytes() == b"user config\n"
     assert receipt.read_bytes() == b"killed\n"
+
+
+@pytest.mark.parametrize(
+    "path", ["../outside.md", "/tmp/outside.md", "C:/outside.md", "C:outside.md", "\\\\host\\share"]
+)
+def test_a_deploy_root_path_that_is_absolute_or_escapes_is_refused(
+    tmp_path: Path, apm_home: Path, path: str
+) -> None:
+    import json
+
+    from apm_cli.install.deploy_snapshot import (
+        DeployJournal,
+        JournalReplayError,
+        replay_abandoned_journals,
+    )
+
+    project = tmp_path / "project"
+    deployed = project / "a.md"
+    project.mkdir()
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.write_bytes(b"killed\n")
+    assert journal.store is not None
+    manifest = journal.store / "journal.jsonl"
+    header, unit = (json.loads(line) for line in manifest.read_text().splitlines())
+    unit["path"] = path
+    manifest.write_text(f"{json.dumps(header)}\n{json.dumps(unit)}\n", encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        replay_abandoned_journals(
+            apm_home / "install-snapshots", project, dict, receipts=_receipts(apm_home)
+        )
+
+    assert kept.value.issues == [(path, "journal path escapes the deploy root")]
+    assert deployed.read_bytes() == b"killed\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
@@ -312,13 +375,17 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
     hook.write_bytes(b"#!/bin/sh\necho prior\n")
     hook.chmod(0o755)
     ledger = {".github/hooks/run.sh": compute_file_hash(hook)}
-    DeployJournal(apm_home / "install-snapshots", root=project).record(hook)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(hook)
     hook.write_bytes(b"#!/bin/sh\necho killed\n")
     hook.chmod(0o644)
+    journal.seal()
 
-    restored = replay_abandoned_journals(apm_home / "install-snapshots", project, lambda: ledger)
+    restored = replay_abandoned_journals(
+        apm_home / "install-snapshots", project, lambda: ledger, receipts=_receipts(apm_home)
+    )
 
-    assert restored == 1
+    assert (restored.restored, restored.kept) == (1, [])
     assert hook.read_bytes() == b"#!/bin/sh\necho prior\n"
     assert hook.stat().st_mode & 0o777 == 0o755
     assert not any((apm_home / "install-snapshots").iterdir())
@@ -360,7 +427,9 @@ def test_a_marked_store_survives_the_reaper_when_its_rename_fails(
     monkeypatch.setattr(Path, "rename", refuse)
     retained = journal._retain()
     monkeypatch.undo()
-    replay_abandoned_journals(apm_home / "install-snapshots", tmp_path, dict)
+    replay_abandoned_journals(
+        apm_home / "install-snapshots", tmp_path, dict, receipts=_receipts(apm_home)
+    )
 
     assert retained.name.startswith("deploy-")
     assert (retained / "0").read_bytes() == b"prior\n"

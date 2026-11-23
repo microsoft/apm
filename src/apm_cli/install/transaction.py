@@ -90,6 +90,14 @@ def _deploy_root_of(apm_modules_dir: Path) -> Path:
     return get_workspace_deploy_root(Path(os.path.abspath(apm_modules_dir)).parent)
 
 
+def _receipts_directory(root: Path) -> Path:
+    """The deployment receipts directory: the parent of every receipt file."""
+    from apm_cli.core.deployment_ledger import materialization_evidence_paths
+    from apm_cli.core.scope import InstallScope
+
+    return materialization_evidence_paths(root, InstallScope.PROJECT)[0].parent
+
+
 def _ledger_hashes(apm_dir: Path) -> dict[str, str | None]:
     """Each deployed path the lockfile in *apm_dir* claims, mapped to its recorded hash."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -269,10 +277,12 @@ class InstallTransaction:
         if not any(store_parent.glob("deploy-*")):
             return
         try:
-            restored = replay_abandoned_journals(
+            root = _deploy_root_of(self.apm_modules_dir)
+            outcome = replay_abandoned_journals(
                 store_parent,
-                _deploy_root_of(self.apm_modules_dir),
+                root,
                 lambda: _ledger_hashes(self.apm_modules_dir.parent),
+                receipts=_receipts_directory(root),
             )
         except JournalReplayError as exc:
             logger = self._logger
@@ -293,9 +303,13 @@ class InstallTransaction:
                     "by hand, then run the command again."
                 )
             raise InstallFailureAlreadyRendered(str(exc)) from None
-        if restored and self._logger is not None:
+        if self._logger is None:
+            return
+        for path, reason in outcome.kept:
+            self._logger.warning(f"Kept {path}: {reason}, so it was not restored. Review it.")
+        if outcome.restored:
             self._logger.progress(
-                f"Restored {restored} deployed path(s) left by an interrupted install."
+                f"Restored {outcome.restored} deployed path(s) left by an interrupted install."
             )
 
     def journal_deploy_writes(self, ctx: Any = None) -> None:
@@ -322,6 +336,12 @@ class InstallTransaction:
             root = getattr(ctx, "project_root", None) or _deploy_root_of(self.apm_modules_dir)
             self._deploy_journal = DeployJournal(store_parent, root=root)
             write_seam.listen(self._record_deploy_write)
+
+    def seal_deploy_writes(self) -> None:
+        """Seal what the journaled paths hold now, before a gate judges deployed bytes (#4863)."""
+        journal = self._deploy_journal
+        if journal is not None:
+            journal.seal()
 
     def _record_deploy_write(self, path: Path, contents: bool) -> None:
         """Keep *path*'s prior state the first time this attempt touches it."""
