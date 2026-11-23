@@ -823,6 +823,7 @@ def _render_locked(
         lockfile_path=snapshot,
         cache_only=cache_only,
         records=records,
+        on_package=on_package,
         scratch_root=scratch,
         modules_root=scratch / "apm_modules",
         user_scope=user_scope,
@@ -836,7 +837,7 @@ def _render_locked(
             (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
         with contextlib.redirect_stdout(io.StringIO()):
             with contextlib.redirect_stderr(io.StringIO()), write_seam.private_scratch():
-                return run_replay(config, CheckLogger(verbose=False), on_package=on_package)
+                return run_replay(config, CheckLogger(verbose=False))
     except Exception as exc:
         if owner is not None:
             diagnostics.warn(

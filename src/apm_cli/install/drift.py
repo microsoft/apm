@@ -55,7 +55,7 @@ from apm_cli.install.audit_target_roots import (
 from apm_cli.install.audit_target_roots import (
     governed_root_dirs as _governed_root_dirs,
 )
-from apm_cli.install.deployment_plan import carry_kept_loose_into_replay
+from apm_cli.install.deployment_plan import finish_replayed_package
 from apm_cli.install.drift_records import ReplayRecords, replay_all_live
 from apm_cli.install.drift_render import (
     _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
@@ -127,6 +127,8 @@ class ReplayConfig:
     records: bool = True
     # Cleanup evidence (#3701) also renders targets the lock recorded.
     include_recorded_targets: bool = False
+    # Gets (package key, deployed paths, scratch root) right after each render (#5048).
+    on_package: Callable[[str, list[str], Path], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -524,17 +526,8 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def run_replay(
-    config: ReplayConfig,
-    logger: CheckLogger,
-    *,
-    on_package: Callable[[str, list[str], Path], None] | None = None,
-) -> Path:
+def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
-
-    *on_package* receives each replayed package's key, deployed paths and the
-    scratch root right after it renders, so a caller can attribute and read
-    each package's own output before a later package overwrites it (#5048).
 
     ``config.records`` lets packages proven by their render record be served
     (``install/drift_records.py``); ``False`` replays every package live.
@@ -762,11 +755,12 @@ def run_replay(
                         )
                     except AgentPluginTargetExcludedError:
                         continue
-                    _after_replayed_package(
+                    finish_replayed_package(
                         result,
                         lock_dep,
-                        (dep_key, deployment_frame[1], scratch_root, config.user_scope),
-                        (converged_targets, on_package),
+                        (dep_key, deployment_frame[1], scratch_root),
+                        config,
+                        converged_targets,
                     )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
@@ -811,17 +805,6 @@ def run_replay(
         # A live package rendered onto a served destination: replay all live.
         return replay_all_live(replace(config, records=False), logger, scratch_root, run_replay)
     return scratch_root
-
-
-def _after_replayed_package(result, lock_dep, frame: tuple, hooks: tuple) -> None:
-    """Carry the package's kept loose files, then report its output to *on_package*."""
-    dep_key, frame_root, scratch_root, user_scope = frame
-    converged_targets, on_package = hooks
-    carry_kept_loose_into_replay(
-        result, lock_dep, frame_root, scratch_root, user_scope, converged_targets
-    )
-    if on_package is not None:
-        on_package(dep_key, list(result.get("deployed_files") or ()), scratch_root)
 
 
 # Diff engine

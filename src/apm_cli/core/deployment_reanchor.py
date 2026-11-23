@@ -119,12 +119,13 @@ class _ReanchorSession(DeploymentMaterializationSession):
         its bytes were proven equal to that writer's render, so history stays.
         """
         carried = carried or {}
-        new_owners = set(renames.values()) | set(carried.values())
+        new_owners = set(renames.values())
         for key, record in list(self._records.items()):
             value = DeploymentLedgerCodec.legacy_value(record.locator)
             # Only receipts the validated owner transition covers move: the
-            # committed claim must name a new owner. A stale receipt is untouched.
-            if not any(
+            # committed claim must name a new owner, or the path is one the
+            # preflight proved for carrying. A stale receipt is untouched.
+            if value not in carried and not any(
                 owner in new_owners
                 for claim in self._claims.get(value, ())
                 for owner in claim.owners

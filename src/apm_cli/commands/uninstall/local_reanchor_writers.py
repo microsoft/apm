@@ -52,26 +52,84 @@ def carried_writers(
         )
     rank = _install_rank(post)
     records = _file_records(post)
+    skill_roots = _skill_roots()
+
+    def refuse(path: str, reason: str) -> LocalReanchorRefused:
+        return LocalReanchorRefused(f"{label(next(iter(plan.renames)))} stays, but {path} {reason}")
+
+    if unproven := _unrendered_skill_claim(records, providers, post, skill_roots):
+        # The bare render did not reproduce a recorded skill (another layout,
+        # a dropped target): its writers cannot be proven.
+        raise refuse(unproven, "was not reproduced by the offline render")
     writers: dict[str, str] = {}
     for path, rendered in sorted(providers.items()):
-        record = records.get(path)
-        if record is None or not reranked.intersection(rendered):
+        claims = records.get(path, ())
+        if not claims or not reranked.intersection(rendered):
             continue
         if any(key not in rank for key in rendered):
-            raise LocalReanchorRefused(_changes(label, plan, path, "has a writer APM cannot order"))
+            raise refuse(path, "has a writer APM cannot order")
         writer = max(rendered, key=rank.__getitem__)
-        if writer == record.active_owner:
+        if len(claims) == 1 and writer == claims[0].active_owner:
             continue
-        if _shared_path_rule(record) != _LAST_WINS or len(record.owners) != 1:
-            raise LocalReanchorRefused(_changes(label, plan, path, "would change its writer"))
-        if rendered[writer] != _digest(project_root / path):
-            raise LocalReanchorRefused(_changes(label, plan, path, "would change its writer"))
+        if not _carriable(claims, path, skill_roots) or rendered[writer] != _digest(
+            project_root / path
+        ):
+            raise refuse(path, "would change its writer")
         writers[path] = writer
+    if loose := _unproven_directory(writers, providers, records, project_root):
+        raise refuse(loose, "would change its writer")
     return writers
 
 
-def _changes(label, plan, path: str, reason: str) -> str:
-    return f"{label(next(iter(plan.renames)))} stays, but {path} {reason}"
+def _carriable(claims: list, path: str, skill_roots: dict[str, set[str]]) -> bool:
+    """One single-owner claim on a skill root one target owns, as the skill owner declares."""
+    from ...integration.skill_integrator import SkillIntegrator
+
+    root = next((root for root in skill_roots if path.startswith(root)), None)
+    return (
+        SkillIntegrator.SHARED_PATH_RULE == _LAST_WINS
+        and root is not None
+        and len(skill_roots[root]) == 1
+        and len(claims) == 1
+        and len(claims[0].owners) == 1
+    )
+
+
+def _unrendered_skill_claim(records, providers, post, skill_roots) -> str | None:
+    """A recorded skill claim the render did not attribute to its writer, if any."""
+    for path, claims in sorted(records.items()):
+        if not any(path.startswith(root) for root in skill_roots):
+            continue
+        for claim in claims:
+            owner = claim.active_owner
+            if owner in post.dependencies and owner not in providers.get(path, {}):
+                return path
+    return None
+
+
+def _unproven_directory(writers, providers, records, project_root: Path) -> str | None:
+    """A carried directory whose files are not all carried to, or owned by, its writer."""
+    for path, writer in sorted(writers.items()):
+        if providers[path][writer] != _DIRECTORY:
+            continue
+        prefix = path.rstrip("/") + "/"
+        rendered = {
+            child
+            for child, by in providers.items()
+            if child.startswith(prefix) and by.get(writer) not in (None, _DIRECTORY)
+        }
+        live = {
+            child.relative_to(project_root).as_posix()
+            for child in (project_root / path).rglob("*")
+            if child.is_file() or child.is_symlink()
+        }
+        if live != rendered or any(
+            writers.get(child) != writer
+            and [claim.active_owner for claim in records.get(child, ())] != [writer]
+            for child in rendered
+        ):
+            return path
+    return None
 
 
 def _reranked(before: Any, after: Any, renames: dict[str, str]) -> set[str]:
@@ -134,27 +192,30 @@ def _install_rank(post: Any) -> dict[str, int]:
     return {node.dependency_ref.get_unique_key(): index for index, node in enumerate(ordered)}
 
 
-def _file_records(post: Any) -> dict[str, Any]:
+def _file_records(post: Any) -> dict[str, list]:
+    """Every non-URI claim by deployed path; a path several targets claim has several."""
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.deployment_state import LocatorKind
 
-    return {
-        DeploymentLedgerCodec.legacy_value(record.locator): record
-        for record in DeploymentLedgerCodec.from_lockfile(post).records.values()
-        if record.locator.kind != LocatorKind.URI
-    }
+    records: dict[str, list] = {}
+    for record in DeploymentLedgerCodec.from_lockfile(post).records.values():
+        if record.locator.kind != LocatorKind.URI:
+            records.setdefault(DeploymentLedgerCodec.legacy_value(record.locator), []).append(
+                record
+            )
+    return records
 
 
-def _shared_path_rule(record: Any) -> str | None:
-    """The rule the owning integrator declares for the record's primitive, if any."""
-    from ...integration.skill_integrator import SkillIntegrator
+def _skill_roots() -> dict[str, set[str]]:
+    """Each skills root in either layout -> the targets that deploy skills there."""
+    from ...integration.skill_layout import with_every_skill_layout
     from ...integration.targets import KNOWN_TARGETS
 
-    target = KNOWN_TARGETS.get(record.locator.target or "")
-    if target is None or "skills" not in target.primitives:
-        return None
-    root = target.skills_rel_root.rstrip("/") + "/"
-    return SkillIntegrator.SHARED_PATH_RULE if record.locator.value.startswith(root) else None
+    roots: dict[str, set[str]] = {}
+    for target in with_every_skill_layout(KNOWN_TARGETS.values()):
+        if "skills" in target.primitives:
+            roots.setdefault(target.skills_rel_root.rstrip("/") + "/", set()).add(target.name)
+    return roots
 
 
 def _digest(path: Path) -> str:
