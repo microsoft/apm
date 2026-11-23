@@ -773,3 +773,69 @@ def test_apm_script_path_drops_an_unlistable_directory(
         tools.chmod(0o755)
 
     assert env["PATH"].split(os.pathsep) == [str(safe)]
+
+
+def _case_variant_of_project(tmp_path: Path) -> tuple[Path, Path]:
+    """Create ``project`` and return it with its ``PROJECT`` spelling, or skip."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    variant = tmp_path / "PROJECT"
+    if not variant.is_dir():
+        pytest.skip("needs a case-insensitive file system")
+    return project, variant
+
+
+def test_helper_owner_skips_a_case_variant_of_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PATH entry naming the project in other letter case never supplies a helper."""
+    from apm_cli.utils.git_env import trusted_executable
+
+    project, variant = _case_variant_of_project(tmp_path)
+    marker = _plant_project_binary(project, "probe")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(variant), *_system_dirs()]))
+    monkeypatch.chdir(project)
+
+    assert trusted_executable("probe") is None
+    assert not marker.exists()
+
+
+def test_apm_script_path_drops_a_case_variant_of_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """APM-authored scripts never search the project through another letter case."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project, variant = _case_variant_of_project(tmp_path)
+    safe = tmp_path / "safe"
+    safe.mkdir()
+    monkeypatch.chdir(project)
+
+    env = trusted_path_environment({"PATH": os.pathsep.join([str(variant), str(safe)])})
+
+    assert env["PATH"].split(os.pathsep) == [str(safe)]
+
+
+def test_helper_owner_skips_an_unverifiable_case_variant_of_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PATH entry spelled like the project up to case that can't be checked never serves."""
+    from apm_cli.utils.git_env import trusted_executable
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    variant = tmp_path / "PROJECT"
+    variant.mkdir(exist_ok=True)
+    marker = _plant_project_binary(variant, "probe")
+
+    def _unverifiable(*_args: object) -> bool:
+        raise PermissionError("cannot stat")
+
+    monkeypatch.setattr(os.path, "samefile", _unverifiable)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(variant), *_system_dirs()]))
+    monkeypatch.chdir(project)
+
+    assert trusted_executable("probe") is None
+    assert not marker.exists()
