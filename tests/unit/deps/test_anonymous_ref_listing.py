@@ -273,3 +273,67 @@ def test_https_not_allowed_in_gits_child_env_falls_back(allowed, monkeypatch):
 def test_incomplete_or_overlong_framing_falls_back(data):
     with pytest.raises(arl._Fallback):
         arl.parse_advertisement(data, ("refs/tags/",))
+
+
+@pytest.mark.parametrize(
+    ("pairs", "eligible"),
+    [
+        (
+            (
+                ("http.https://github.com/.extraheader", "X-A: 1"),
+                ("http.https://*.example.com/.extraheader", ""),
+            ),
+            False,
+        ),
+        (
+            (
+                ("http.https://github.com/owner/repo.extraheader", "X-A: 1"),
+                ("http.https://github.com/.extraheader", ""),
+            ),
+            False,
+        ),
+        (
+            (
+                ("http.https://github.com/.extraheader", "X-A: 1"),
+                ("http.https://github.com/.extraheader", ""),
+            ),
+            True,
+        ),
+    ],
+    ids=["other-scope-reset", "less-specific-reset", "same-scope-reset"],
+)
+def test_helper_and_header_resets_apply_within_one_url_scope(pairs, eligible):
+    assert (arl._classify(_entries(*pairs)) is not None) is eligible
+
+
+class _TrickleRaw:
+    """A body that sends one byte per read, each read taking 9 s of the clock."""
+
+    def __init__(self, clock: list[float]) -> None:
+        self.clock = clock
+        self.reads = 0
+
+    def read1(self, _amt: int, decode_content: bool) -> bytes:
+        self.reads += 1
+        self.clock[0] += 9.0
+        return b"0"
+
+
+def test_a_trickling_body_falls_back_at_the_deadline(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(arl.time, "monotonic", lambda: clock[0])
+    raw = _TrickleRaw(clock)
+    response = type("Response", (), {"headers": {}, "raw": raw})()
+
+    with pytest.raises(arl._Fallback, match="time budget"):
+        arl._read_body(response, deadline=arl._DEADLINE_SECONDS)
+
+    assert raw.reads == 4
+    assert clock[0] <= arl._DEADLINE_SECONDS + 10.0
+
+
+def test_an_encoded_body_falls_back():
+    response = type("Response", (), {"headers": {"Content-Encoding": "gzip"}, "raw": None})()
+
+    with pytest.raises(arl._Fallback):
+        arl._read_body(response, deadline=1e9)

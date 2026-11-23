@@ -25,6 +25,8 @@ import time
 import urllib.parse
 from collections.abc import Mapping
 
+from .git_remote_ops import _is_peeled_ref
+
 _log = logging.getLogger(__name__)
 
 _GITHUB_HOST = "github.com"
@@ -92,25 +94,34 @@ def _repository_path(url: str) -> str:
     return f"/{owner}/{repo}"
 
 
-def _list_key(key: str) -> str:
-    """``credential[.<url>].helper`` / ``http[.<url>].extraheader`` -> the unscoped key."""
-    if key.startswith("credential.") and key.endswith(".helper"):
-        return "credential.helper"
-    if key.startswith("http.") and key.endswith(".extraheader"):
-        return "http.extraheader"
-    return key
+def _list_key(key: str) -> tuple[str, str] | None:
+    """``(list, url scope)`` for ``credential[.<url>].helper`` / ``http[.<url>].extraheader``."""
+    for prefix, suffix in (("credential.", ".helper"), ("http.", ".extraheader")):
+        name = prefix + suffix[1:]
+        if key == name:
+            return name, ""
+        if key.startswith(prefix) and key.endswith(suffix):
+            return name, key[len(prefix) : -len(suffix)]
+    return None
 
 
 def _classify(entries) -> dict[str, str] | None:
-    """CA/backend values when *entries* cannot change git's anonymous request, else ``None``."""
+    """CA/backend values when *entries* cannot change git's anonymous request, else ``None``.
+
+    ``credential.helper`` and ``http.extraHeader`` are multi-valued in git: an
+    empty value resets the list. Resets apply only within one exact URL scope
+    (unscoped is its own scope), and any scope left holding a value falls
+    back, whether or not git would match it for this URL: stricter than git's
+    longest-match, never looser.
+    """
     values: dict[str, str] = {}
-    lists: dict[str, list[str]] = {key: [] for key in _INJECTED_EMPTY}
+    lists: dict[tuple[str, str], list[str]] = {}
     for entry in entries:
-        key = _list_key(entry.key.lower())
-        if key in lists:
-            # Multi-valued in git: an empty value resets the list. URL-scoped
-            # forms (git_network_env's auth fence writes one) share the list.
-            lists[key] = [*lists[key], entry.value] if entry.value else []
+        key = entry.key.lower()
+        list_key = _list_key(key)
+        if list_key is not None:
+            live = lists.get(list_key, [])
+            lists[list_key] = [*live, entry.value] if entry.value else []
         elif key in (_CA_KEY, _BACKEND_KEY):
             values[key] = entry.value
         elif key.startswith(("url.", "http.", "credential.", "protocol.https.")) or key in (
@@ -215,7 +226,7 @@ def _session_for_refs():
                 {
                     "User-Agent": f"apm/{get_version()}",
                     "Accept": "*/*",
-                    "Accept-Encoding": "gzip",
+                    "Accept-Encoding": "identity",
                     "Pragma": "no-cache",
                 }
             )
@@ -225,16 +236,28 @@ def _session_for_refs():
 
 
 def _read_body(response, deadline: float) -> bytes:
+    """The raw body, one socket read per step, within the size cap and *deadline*.
+
+    The deadline is checked before every read, so a trickling server costs at
+    most the deadline plus one socket read timeout.
+    """
+    if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+        raise _Fallback("encoded advertisement")
+    read1 = getattr(response.raw, "read1", None)
+    if not callable(read1):
+        raise _Fallback("no single-read body access")
     chunks = []
     size = 0
-    for chunk in response.iter_content(chunk_size=8192):
+    while True:
+        if time.monotonic() > deadline:
+            raise _Fallback("advertisement exceeds the time budget")
+        chunk = read1(65536, decode_content=False)
+        if not chunk:
+            return b"".join(chunks)
         size += len(chunk)
         if size > MAX_RESPONSE_BYTES:
             raise _Fallback("advertisement exceeds the size cap")
-        if time.monotonic() > deadline:
-            raise _Fallback("advertisement exceeds the time budget")
         chunks.append(chunk)
-    return b"".join(chunks)
 
 
 def _valid_refname(name: str) -> bool:
@@ -303,8 +326,10 @@ def parse_advertisement(data: bytes, prefixes: tuple[str, ...]) -> str:
             raise _Fallback("bad object id")
         if ref == "capabilities^{}":
             continue  # empty repository: no refs
-        peeled = ref.endswith("^{}")
-        name = ref[:-3] if peeled else ref
+        # The peeled-record predicate stays with the tag-to-commit owner;
+        # this parser only checks framing and passes records through.
+        peeled = _is_peeled_ref(ref)
+        name = ref[:-3] if peeled else ref  # drop the 3-char peeled suffix
         if name == "HEAD":
             last_tag = None
             continue
