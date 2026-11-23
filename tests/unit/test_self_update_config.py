@@ -126,6 +126,11 @@ def test_prerelease_channel_uses_releases_endpoint(monkeypatch):
     assert version == "2.0.0rc1"
 
 
+# An absolute directory outside any project on the host running the test; the
+# installer keeps only such PATH entries.
+_SYSTEM_DIR = os.path.abspath(os.sep)
+
+
 @pytest.mark.windows_compat
 def test_windows_installer_env_drops_inherited_psmodulepath(monkeypatch):
     """A PowerShell 7 parent's module path must not leak into the installer host (#3926)."""
@@ -138,7 +143,7 @@ def test_windows_installer_env_drops_inherited_psmodulepath(monkeypatch):
         lambda: {
             "PSMODULEPATH": r"C:\Program Files\PowerShell\7\Modules",
             "PSModulePath": r"C:\Users\me\Documents\PowerShell\Modules",
-            "PATH": r"C:\Windows\System32",
+            "PATH": _SYSTEM_DIR,
         },
     )
 
@@ -147,7 +152,7 @@ def test_windows_installer_env_drops_inherited_psmodulepath(monkeypatch):
     )
 
     assert not [key for key in env if key.upper() == "PSMODULEPATH"]
-    assert env["PATH"] == r"C:\Windows\System32"
+    assert env["PATH"] == _SYSTEM_DIR
 
 
 @pytest.mark.windows_compat
