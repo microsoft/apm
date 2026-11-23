@@ -790,6 +790,33 @@ def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
     assert "tracking" not in entry, entry
 
 
+def test_no_ungoverned_user_scope_step_credits_an_org_deny() -> None:
+    """User scope discovers no org policy (#3703): a bin spine step under the org
+    deny never evaluates it, so only a strict known cell may carry that label, and
+    no required obligation rests on a user-scope denied-dependency receipt."""
+    from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
+
+    credited = {key for key in bin_cells() if key.endswith("|denied-dependency|user")}
+    assert credited == set(KNOWN_DD), sorted(credited ^ set(KNOWN_DD))
+    rows = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    for key in (
+        "pair|OP=compile|GATE=denied-dependency",
+        "pair|OP=lock|GATE=denied-dependency",
+        "pair|OP=mcp-install|GATE=denied-dependency",
+        "pair|OP=uninstall|GATE=denied-dependency",
+        "pair|OP=approve-deny|GATE=denied-dependency",
+        "T1|OP=compile|PRIM=bin|GATE=denied-dependency",
+    ):
+        assert rows[key]["status"] == "required", (key, rows[key])
+        assert rows[key]["witness"].endswith("[project]"), (key, rows[key])
+    for key, row in rows.items():
+        user_only = row.get("credited_by") and all(
+            cell.endswith("|denied-dependency|user") for cell in row["credited_by"]
+        )
+        if user_only:
+            assert row["status"] == "known-failing", (key, row)
+
+
 # -- U-MCPOWN-USER: bound to the live retired-claim reader ---------------------------
 
 

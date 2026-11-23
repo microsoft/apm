@@ -148,6 +148,11 @@ def _assert_deployed(scenario: Scenario, src: str, output: str = "") -> None:
             (d.native_plugin.name, d.native_plugin.root) for d in dependencies if d.native_plugin
         ]
         assert rows == [(_NATIVE, _PLUGIN_ROOT)], f"native_plugin rows {rows}: {where}"
+        settings = scenario.deploy_root / ".claude" / "settings.json"
+        assert settings.is_file(), f"claude settings are missing: {where}"
+        enabled = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins") or {}
+        mine = [on for key, on in enabled.items() if key.split("@")[0] == _NATIVE]
+        assert mine == [True], f"claude does not enable {_NATIVE}: {enabled}\n{where}"
     else:
         mapping = KNOWN_TARGETS["copilot"].primitives["instructions"]
         relative = f"{KNOWN_TARGETS['copilot'].root_dir}/{mapping.subdir}/{_DOC}{mapping.extension}"

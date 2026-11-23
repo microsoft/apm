@@ -18,7 +18,7 @@ from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
 RATCHET_TEST_SCOPE = "repository"
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I5")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I5")]
 
 
 def _observe(project: Path, home: Path) -> oracles.Observation:
@@ -41,9 +41,7 @@ def _i5(tmp_path: Path, args: tuple[str, ...], record: str) -> list[str]:
     path.parent.mkdir(parents=True)
     path.write_text('{"version": 1, "files": {}}\n', encoding="ascii")
     after = _observe(project, home)
-    op = oracles.operation_for(
-        args, forbidden={"home": ("*",)}, read_only="--dry-run" in args, mutating=False
-    )
+    op = oracles.operation_for(args, forbidden={"home": ("*",)}, mutating=False)
     found = oracles._CHECKS["I5"](before, after, None, None, op)
     return [violation.message for violation in found or ()]
 

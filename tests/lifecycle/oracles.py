@@ -651,7 +651,8 @@ def _i5_write_set(
     for root_id, snapshot in before.artifacts.snapshots:
         observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
         allowed = op.allowed.get(root_id, ())
-        if root_id == "home" and op.name == "compile" and not op.read_only:
+        dry_run = op.read_only or "DRYRUN" in op.modifiers
+        if root_id == "home" and op.name == "compile" and not dry_run:
             allowed = (*allowed, compile_home_record(after.deploy_root))
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {

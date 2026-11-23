@@ -80,7 +80,10 @@ def test_audit_replays_each_host_identity(lifecycle_world, hostid) -> None:
     scenario.run("install", credit=first)
     _assert_row(scenario, hostid)
     scenario.assert_deployed()
-    step = scenario.run("audit", credit=[{"OP": "audit", "HOSTID": hostid}])
+    # --ci fails on drift or a failed replay; bare audit only reports them.
+    step = scenario.run(
+        "audit --ci", read_only=True, exit=0, credit=[{"OP": "audit", "HOSTID": hostid}]
+    )
     assert step.result.returncode == 0, step.output
     _assert_row(scenario, hostid)
     scenario.finish()
