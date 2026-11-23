@@ -72,17 +72,18 @@ def test_apply_path_never_deletes_outside_its_own_staging() -> None:
                 assert not removals, f"{name}:{func.name} removes {removals}"
 
 
-def test_the_engine_never_swaps_the_process_umask() -> None:
-    """os.umask is process-wide: the engine reads the memoized mask instead."""
-    root = Path(diff_apply.__file__).parent
-    for name in _ENGINE_MODULES:
-        tree = ast.parse((root / name).read_text(encoding="utf-8"))
-        calls = {
-            c.func.attr if isinstance(c.func, ast.Attribute) else getattr(c.func, "id", "")
-            for c in ast.walk(tree)
-            if isinstance(c, ast.Call)
-        }
-        assert "umask" not in calls, name
+def test_only_the_memoized_read_ever_swaps_the_process_umask() -> None:
+    """os.umask is process-wide: every reader goes through deploy_store.process_umask."""
+    src = Path(diff_apply.__file__).parents[1]
+    callers = set()
+    for path in src.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
+            for call in (c for c in ast.walk(func) if isinstance(c, ast.Call)):
+                name = getattr(call.func, "attr", getattr(call.func, "id", ""))
+                if name == "umask":
+                    callers.add(f"{path.relative_to(src).as_posix()}::{func.name}")
+    assert callers == {"cache/deploy_store.py::process_umask"}
 
 
 @pytest.mark.parametrize("rel", ["../x", "/abs", "a\\b", "a//b", "a/./b", ""])
