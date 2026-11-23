@@ -5,6 +5,7 @@ import contextlib
 import sys
 import traceback
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import click
@@ -163,29 +164,36 @@ def _split_still_needed_packages(
 
 
 def _refuse_unverifiable_local_survivors(lockfile, packages: list, apm_yml_path, logger) -> None:
-    """Refuse a local removal another local package might need while apm_modules/ is gone.
+    """Refuse a local removal a surviving local package still reaches while apm_modules/ is gone.
 
     Without the installed graph the still-needed split cannot run, and dropping
-    a still-needed local row would break the next frozen install (#4889).
+    a still-needed local row would break the next frozen install (#4889). The
+    survivors' local sources are read offline; only a reaching or unreadable
+    chain refuses.
     """
     from ...core.remediation import RESYNC_DEPLOYED
     from .engine import _read_survivor_direct_refs
 
-    local = [
-        package
-        for package in packages
-        if (row := lockfile.get_dependency(_removed_lock_key(package, lockfile))) is not None
-        and row.source == "local"
-    ]
+    project_root = Path(apm_yml_path).parent
+    local = {}
+    for package in packages:
+        row = lockfile.get_dependency(_removed_lock_key(package, lockfile))
+        if row is not None and row.source == "local" and row.local_path:
+            raw = Path(row.local_path).expanduser()
+            with contextlib.suppress(OSError, RuntimeError):
+                directory = raw.resolve() if raw.is_absolute() else (project_root / raw).resolve()
+                local[directory] = package
     if not local:
         return
     direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
-    if not any(ref.is_local for ref in (*direct_refs, *dev_refs)):
+    from ...deps.reachability import local_sources_reach
+
+    if not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local)):
         return
     logger.error(
-        f"{_dependency_public_label(local[0])} was not removed: apm_modules/ is missing, so "
-        "APM cannot tell whether another local package still needs it; apm.yml and "
-        f"apm.lock.yaml were not changed. {RESYNC_DEPLOYED.sentence()}"
+        f"{_dependency_public_label(next(iter(local.values())))} was not removed: apm_modules/ "
+        "is missing, so APM cannot confirm whether another local package still needs it; "
+        f"apm.yml and apm.lock.yaml were not changed. {RESYNC_DEPLOYED.sentence()}"
     )
     sys.exit(1)
 
@@ -217,10 +225,15 @@ def _plan_reanchor_or_exit(
         problems = reanchor_receipt_problems(
             project_root, InstallScope.PROJECT, lockfile, plan.renames
         )
-        if shrunk := sorted(set(plan.renames) & set(shrinks())):
+        if plan.renames and (shrunk := sorted(shrinks())):
             raise LocalReanchorRefused(
-                f"{label(shrunk[0])} stays, but the package that still needs it selects "
-                "fewer of its skills or targets, which would remove deployed files"
+                f"{label(next(iter(plan.renames)))} stays, but the remaining packages select "
+                f"fewer skills or targets of {shrunk[0]}, which would remove deployed files"
+            )
+        if plan.renames and _native_owned(lockfile):
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but native plugin registrations are "
+                "reconciled separately, so it cannot be re-anchored in one transaction"
             )
         if plan.renames and others:
             # Rollback restores apm.yml and the lock, never deleted content, so a
@@ -245,6 +258,39 @@ def _plan_reanchor_or_exit(
         )
         sys.exit(1)
     return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+
+
+def _native_owned(lockfile) -> bool:
+    from ...claude_plugins.registrar import native_ownership
+
+    return bool(native_ownership(lockfile))
+
+
+def _refuse_reanchor_refresh(repair, refreshed_keys, logger) -> None:
+    """Backstop: a re-anchor never runs with a survivor refresh that deletes files (#4889).
+
+    Only apm.yml is written at this point, so the rollback is complete.
+    """
+    plan = repair.reanchor
+    if not plan or not plan.renames or not refreshed_keys:
+        return
+    from .local_reanchor import roll_back
+
+    roll_back(plan)
+    logger.error(
+        "A remaining package must be redeployed, which removes its deployed files, so the "
+        "still-needed local package was not re-anchored; apm.yml and apm.lock.yaml were "
+        "restored and every file is kept."
+    )
+    sys.exit(1)
+
+
+def _cleanup_state_unless_reanchor_refreshes(lockfile, removed_keys, refreshed, repair, logger):
+    """Snapshot the files cleanup may touch; a re-anchor refuses any survivor refresh first."""
+    _refuse_reanchor_refresh(repair, refreshed, logger)
+    if not lockfile:
+        return set(), {}
+    return _collect_deployed_cleanup_state(lockfile, removed_keys | refreshed)
 
 
 def _abort_unsaved_reanchor(repair, logger) -> None:
@@ -1638,13 +1684,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             user_scope=scope is InstallScope.USER,
             logger=logger,
         )
-        if lockfile:
-            all_deployed_files, all_deployed_file_hashes = _collect_deployed_cleanup_state(
-                lockfile,
-                removed_keys | refreshed_survivor_keys,
-            )
-        else:
-            all_deployed_files, all_deployed_file_hashes = set(), {}
+        all_deployed_files, all_deployed_file_hashes = _cleanup_state_unless_reanchor_refreshes(
+            lockfile, removed_keys, refreshed_survivor_keys, still_needed_repairs, logger
+        )
 
         # Step 9: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.

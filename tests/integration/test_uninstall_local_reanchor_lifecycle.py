@@ -524,7 +524,7 @@ def test_a_reanchor_whose_survivor_selects_fewer_skills_refuses(
     world.apm("install")
     assert (world.project / ".claude/skills/extra-skill/SKILL.md").is_file()
 
-    _assert_refused_before_any_write(world, "selects fewer of its skills or targets")
+    _assert_refused_before_any_write(world, "select fewer skills or targets of ./vendor/e")
 
 
 def test_a_reanchor_under_another_alias_refuses(tmp_path: Path, apm_binary_path: Path) -> None:
@@ -544,3 +544,72 @@ def test_a_reanchor_under_another_alias_refuses(tmp_path: Path, apm_binary_path:
     world.apm("install")
 
     _assert_refused_before_any_write(world, "under another name (new-e)")
+
+
+@pytest.mark.parametrize("receipt", ["forged", "missing"])
+def test_a_file_claim_without_a_lock_hash_still_needs_its_receipt(
+    tmp_path: Path, apm_binary_path: Path, receipt: str
+) -> None:
+    """#4889: a null lock hash never exempts a file; a forged or missing receipt refuses."""
+    world = _local_world(tmp_path, apm_binary_path)
+    claim = ".claude/skills/e-skill/SKILL.md"
+    lock_path = world.project / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    for row in lock["dependencies"]:
+        (row.get("deployed_file_hashes") or {}).pop(claim, None)
+    for record in lock.get("deployments") or []:
+        if record["value"] == claim:
+            record["content_hash"] = None
+    dump_yaml(lock, lock_path)
+    directory = world.isolated.home / ".apm" / "deployment-receipts"
+    (path,) = [p for p in directory.glob("*.json") if claim in p.read_text(encoding="utf-8")]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    (key,) = [key for key in data["bindings"] if key.endswith(claim)]
+    if receipt == "forged":
+        data["bindings"][key][0] = "./vendor/x"
+    else:
+        for section in ("bindings", "destinations", "history"):
+            (data.get(section) or {}).pop(key, None)
+        data["records"] = [r for r in data["records"] if r["value"] != claim]
+    path.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    _assert_refused_before_any_write(world, "APM cannot prove it wrote", claim)
+
+
+def test_a_reparented_replacement_request_takes_the_new_dev_status(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: e -> f -> replaced r, dev d -> e; once e is not direct, f's request is dev."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "r", "r")
+    _skill_package(vendor / "f", "f", ("test/r",))
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "$schema": _REPLACEMENTS_SCHEMA,
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+            "replace": [
+                {"for": {"git": "https://github.com/test/r"}, "with": {"path": "./vendor/r"}}
+            ],
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    world.apm("uninstall", "./vendor/e")
+
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    requests = [
+        request
+        for row in lock["dependencies"]
+        for request in (row.get("replacement") or {}).get("requests") or []
+    ]
+    assert [request["dev"] for request in requests] == [True], lock
+    _assert_reanchored_like_a_full_install(world)

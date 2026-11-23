@@ -50,8 +50,11 @@ class _ReanchorSession(DeploymentMaterializationSession):
             value = DeploymentLedgerCodec.legacy_value(claim.locator)
             receipt = self._records.get(claim.locator.key)
             if receipt is None:
-                # A directory claim has no hash and no receipt; a file claim must.
-                if claim.content_hash is not None and claim.active_owner in renames:
+                # Only a genuine directory claim needs no receipt; a null lock
+                # hash never makes a file claim exempt.
+                if claim.active_owner in renames and (
+                    claim.content_hash is not None or not self._is_directory(value)
+                ):
                     problems.append(value)
                 continue
             expected = [receipt.active_owner, self._claim_signature(value)]
@@ -61,17 +64,22 @@ class _ReanchorSession(DeploymentMaterializationSession):
                 problems.append(value)
         return sorted(problems)
 
+    def _is_directory(self, value: str) -> bool:
+        path = Path(value) if Path(value).is_absolute() else self.root / value
+        return path.is_dir() and not path.is_symlink()
+
     def rename_owners(self, renames: Mapping[str, str]) -> None:
         """Move receipts to the committed claims this session reads, writer and history kept."""
         new_owners = set(renames.values())
         for key, record in list(self._records.items()):
             value = DeploymentLedgerCodec.legacy_value(record.locator)
-            shared = any(
+            # Only receipts the validated owner transition covers move: the
+            # committed claim must name a new owner. A stale receipt is untouched.
+            if not any(
                 owner in new_owners
                 for claim in self._claims.get(value, ())
                 for owner in claim.owners
-            )
-            if record.active_owner not in renames and not shared:
+            ):
                 continue
             owners = tuple(renames.get(owner, owner) for owner in record.owners)
             active = renames.get(record.active_owner, record.active_owner)

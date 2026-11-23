@@ -269,9 +269,49 @@ def _build_local_dir_index(
                     resolved_cache=resolved_cache,
                 )
             ] = key
-        except LocalResolutionError as exc:
+        except (LocalResolutionError, OSError, RuntimeError) as exc:
+            # A symlink loop cannot be resolved either: the walk is incomplete.
             unverifiable.append((key, str(exc)))
     return index
+
+
+def local_sources_reach(
+    roots: Sequence[DependencyReference], project_root: Path, targets: set[Path]
+) -> bool:
+    """Whether the local edges of *roots*' own sources reach a directory in *targets*.
+
+    Offline and without ``apm_modules``: a remote package cannot declare the
+    consumer's local directories, so only local edges are followed. An
+    unreadable manifest or unresolvable path counts as reaching, because it
+    cannot prove the target unused (#4889).
+    """
+    queue = [
+        (Path(project_root), ref.local_path) for ref in roots if ref.is_local and ref.local_path
+    ]
+    seen: set[Path] = set()
+    while queue:
+        anchor, local_path = queue.pop()
+        try:
+            directory = _join_local(anchor, local_path)
+        except (OSError, RuntimeError):
+            return True
+        if directory in targets:
+            return True
+        if directory in seen:
+            continue
+        seen.add(directory)
+        try:
+            package = APMPackage.from_apm_yml(manifest_file(directory), source_path=directory)
+        except FileNotFoundError:
+            continue  # a manifest-less leaf declares nothing
+        except (OSError, ValueError):
+            return True
+        queue.extend(
+            (directory, dep.local_path)
+            for dep in package.get_apm_dependencies()
+            if dep.is_local and dep.local_path
+        )
+    return False
 
 
 def _is_manifestless_leaf(package_dir: Path) -> bool:

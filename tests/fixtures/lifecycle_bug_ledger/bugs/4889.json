@@ -32,6 +32,9 @@
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_whitespace_case_and_unicode_local_paths",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_local_removal_without_apm_modules_refuses_when_a_local_survivor_could_need_it",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_whose_survivor_selects_fewer_skills_refuses",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_under_another_alias_refuses"
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_under_another_alias_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_file_claim_without_a_lock_hash_still_needs_its_receipt",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reparented_replacement_request_takes_the_new_dev_status",
+    "tests/unit/test_uninstall_local_reanchor_rollback.py::test_an_unsaved_reanchor_lock_restores_the_manifest_and_exits_nonzero"
   ]
 }
