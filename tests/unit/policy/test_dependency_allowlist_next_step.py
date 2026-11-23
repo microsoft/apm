@@ -373,6 +373,22 @@ def test_a_symlinked_lockfile_uninstall_would_refuse_falls_back_to_the_admin(
     assert check.remediations == ()
 
 
+def test_a_checkout_outside_apm_modules_falls_back_to_the_admin(tmp_path: Path, capsys) -> None:
+    (tmp_path / "project").mkdir()
+    root = _project(tmp_path / "project", ["acme/evil-pkg"], [_locked("acme/evil-pkg")])
+    checkout = root / "apm_modules" / "acme" / "evil-pkg"
+    outside = tmp_path / "elsewhere"
+    checkout.rename(outside)
+    checkout.symlink_to(outside, target_is_directory=True)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
 def test_a_surviving_dev_dependency_that_reaches_the_denied_one_falls_back_to_the_admin(
     tmp_path: Path, capsys
 ) -> None:
