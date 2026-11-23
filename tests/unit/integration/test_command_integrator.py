@@ -1766,15 +1766,18 @@ class TestClaudeNativeCommandFrontmatter:
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
         pkg_info = _make_package(project, prompts)
-        diag = DiagnosticCollector()
+        diag = DiagnosticCollector(verbose=True)
         CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS[target_name],
             pkg_info,
             project,
             diagnostics=diag,
         )
-        warnings = [w.message for w in diag.by_category().get("warning", [])]
-        return warnings
+        by_category = diag.by_category()
+        self.infos = [i.message for i in by_category.get("info", [])]
+        warnings = [w.message for w in by_category.get("warning", [])]
+        # Dropped-key notices are verbose info (#4182); withheld hooks warn.
+        return warnings + self.infos
 
     def test_claude_keeps_documented_command_keys(self, temp_project):
         warnings = self._install(temp_project, {"p.prompt.md": self._NATIVE_PROMPT}, "claude")
@@ -1819,6 +1822,56 @@ class TestClaudeNativeCommandFrontmatter:
         post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
         assert post.metadata["arguments"] == ["feature"]
         assert any("were dropped: arguments" in w for w in warnings), warnings
+
+    @pytest.mark.parametrize(
+        "input_block",
+        ["input: []", "input: '   '", "input: ['1bad']"],
+        ids=["empty", "whitespace", "rejected-only"],
+    )
+    def test_claude_authored_input_without_names_still_wins(self, temp_project, input_block):
+        notes = self._install(
+            temp_project,
+            {"p.prompt.md": f"---\ndescription: d\n{input_block}\narguments: [other]\n---\nRun.\n"},
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert "arguments" not in post.metadata
+        assert any("were dropped: arguments" in n for n in notes), notes
+
+    @pytest.mark.parametrize(
+        "arguments",
+        ["[issue, 7]", "7"],
+        ids=["mixed-list", "scalar"],
+    )
+    def test_claude_authored_arguments_not_reported_as_input_mapping(self, temp_project, arguments):
+        self._install(
+            temp_project,
+            {"p.prompt.md": f"---\ndescription: d\narguments: {arguments}\n---\nRun.\n"},
+            "claude",
+        )
+
+        assert (temp_project / ".claude" / "commands" / "p.md").is_file()
+        assert not any("Mapped input -> command arguments" in i for i in self.infos), self.infos
+
+    def test_claude_reinstall_adopts_rendered_native_command(self, temp_project):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = _make_package(temp_project, {"p.prompt.md": self._NATIVE_PROMPT})
+        claude = KNOWN_TARGETS["claude"]
+        CommandIntegrator().integrate_commands_for_target(claude, pkg_info, temp_project)
+        deployed = temp_project / ".claude" / "commands" / "p.md"
+        before = deployed.read_bytes()
+
+        # Unmanaged file with the rendered bytes: the adopt check must render
+        # with the Claude-native keys, or it reports a user-file collision.
+        result = CommandIntegrator().integrate_commands_for_target(
+            claude, pkg_info, temp_project, managed_files=set()
+        )
+
+        assert result.files_adopted == 1, result
+        assert result.files_skipped == 0, result
+        assert deployed.read_bytes() == before
 
     def test_claude_still_drops_name_and_paths(self, temp_project):
         warnings = self._install(

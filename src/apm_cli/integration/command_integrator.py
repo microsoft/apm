@@ -235,6 +235,22 @@ class CommandIntegrator(BaseIntegrator):
             command transformer does not preserve (e.g. ``author``,
             ``mcp``, ``parameters`` for Cursor-specific frontmatter).
         """
+        command_name, post, warnings, dropped_keys, _mapped = self._render_command_post(
+            source, target_name
+        )
+        return (command_name, post, warnings, dropped_keys)
+
+    def _render_command_post(
+        self,
+        source: Path,
+        target_name: str | None = None,
+    ) -> tuple[str, frontmatter.Post, list[str], list[str], list[str]]:
+        """Render *source* as a command post; see ``_transform_prompt_to_command``.
+
+        The fifth element lists the argument names mapped from ``input:``
+        (empty when no mapping happened, including when an authored Claude
+        ``arguments`` was kept verbatim).
+        """
         is_claude = target_name == "claude"
         warnings: list[str] = []
 
@@ -284,8 +300,9 @@ class CommandIntegrator(BaseIntegrator):
             claude_metadata["arguments"] = input_names
             if "argument-hint" not in claude_metadata:
                 claude_metadata["argument-hint"] = " ".join(f"<{name}>" for name in input_names)
-        elif is_claude and "arguments" in post.metadata:
-            # No 'input' mapping: keep the author's native Claude 'arguments'.
+        elif is_claude and "input" not in post.metadata and "arguments" in post.metadata:
+            # No 'input' at all: keep the author's native Claude 'arguments'.
+            # An authored 'input' (even empty or fully rejected) still wins.
             claude_metadata["arguments"] = post.metadata["arguments"]
 
         # Convert APM input references to Claude $name placeholders
@@ -307,11 +324,11 @@ class CommandIntegrator(BaseIntegrator):
         preserved = _PRESERVED_COMMAND_KEYS
         if is_claude:
             preserved = preserved | _CLAUDE_NATIVE_COMMAND_KEYS
-            if not input_names:
+            if "input" not in post.metadata:
                 preserved = preserved | {"arguments"}
         dropped_keys = sorted(set(post.metadata.keys()) - preserved)
 
-        return (command_name, new_post, warnings, dropped_keys)
+        return (command_name, new_post, warnings, dropped_keys, input_names)
 
     def integrate_command(
         self,
@@ -362,7 +379,7 @@ class CommandIntegrator(BaseIntegrator):
             decide whether to surface the one-shot passthrough notice.
         """
         # Transform to command format
-        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(
+        command_name, post, warnings, dropped_keys, mapped_args = self._render_command_post(
             source, target_name
         )
 
@@ -414,7 +431,6 @@ class CommandIntegrator(BaseIntegrator):
 
         # Surface install-time info when input -> arguments mapping happened so
         # users aren't surprised by content that differs from the source package.
-        mapped_args = post.metadata.get("arguments") if post.metadata else None
         if mapped_args and diagnostics is not None:
             diagnostics.info(
                 message=(
@@ -649,7 +665,9 @@ class CommandIntegrator(BaseIntegrator):
                 force,
                 diagnostics,
                 target_paths,
-                expected_content=self._rendered_command(prompt_file, target_path, mapping),
+                expected_content=self._rendered_command(
+                    prompt_file, target_path, mapping, target.name
+                ),
             )
             if skip:
                 if adopted:
@@ -787,7 +805,9 @@ class CommandIntegrator(BaseIntegrator):
     # Gemini CLI Commands (.toml format)
     # ------------------------------------------------------------------
 
-    def _rendered_command(self, source: Path, target: Path, mapping: Any) -> str | None:
+    def _rendered_command(
+        self, source: Path, target: Path, mapping: Any, target_name: str | None = None
+    ) -> str | None:
         """Return the text this integrator deploys for *source*, for the adopt check.
 
         Commands are format-transformed, so an existing file is compared with
@@ -799,7 +819,9 @@ class CommandIntegrator(BaseIntegrator):
         try:
             if mapping.format_id == "gemini_command":
                 return self._gemini_command_text(source)
-            _name, post, _warnings, _dropped = self._transform_prompt_to_command(source)
+            _name, post, _warnings, _dropped = self._transform_prompt_to_command(
+                source, target_name
+            )
             post.content, _links = self.resolve_links(post.content, source, target)
             return frontmatter.dumps(post)
         except Exception:
