@@ -22,6 +22,9 @@ wrote it) is kept, reported, and marked kept; every later install announces it
 and ``apm audit --ci`` reports it (:func:`kept_mcp_writes`) until the entry is
 removed or declared again. Unusable evidence met there is noted next to the
 evidence file, so audit keeps reporting it once the lockfile is rewritten.
+An entry of a server still declared, for a runtime the manifest's ``targets:``
+no longer select, is never removed: it is kept and reported the same way
+until it is removed or that runtime is targeted again (#4784).
 Only the selected config is ever examined: a record of another profile's
 config waits until that profile is selected.
 """
@@ -70,6 +73,8 @@ class McpWrite:
     key: str | None
     content_hash: str | None
     kept: bool = False
+    # Kept because its server is still declared but its runtime is no longer targeted.
+    untargeted: bool = False
 
     @property
     def usable(self) -> bool:
@@ -82,7 +87,7 @@ class McpWrite:
         )
 
     def row(self) -> dict[str, Any]:
-        return {
+        row = {
             "runtime": self.runtime,
             "name": self.name,
             "config": self.config,
@@ -90,6 +95,9 @@ class McpWrite:
             "hash": self.content_hash,
             "kept": self.kept,
         }
+        if self.untargeted:
+            row["untargeted"] = True
+        return row
 
     @classmethod
     def from_row(cls, row: Any) -> McpWrite:
@@ -112,6 +120,7 @@ class McpWrite:
             text("key"),
             text("hash"),
             row.get("kept") is True,
+            row.get("untargeted") is True,
         )
 
 
@@ -304,10 +313,19 @@ class McpWriteReceipts:
             and self._fingerprint(write.runtime, write.key or "") == write.content_hash
         )
 
-    def mark_kept(self, write: McpWrite) -> None:
-        if not write.kept:
-            self.writes[_ident(write)] = replace(write, kept=True)
+    def mark_kept(self, write: McpWrite, *, untargeted: bool = False) -> McpWrite:
+        kept = replace(write, kept=True, untargeted=untargeted)
+        if kept != write:
+            self.writes[_ident(write)] = kept
             self._dirty = True
+        return kept
+
+    def retarget(self, targeted: set[str]) -> None:
+        """Clear the keep of each record whose runtime the manifest targets again."""
+        for ident, write in list(self.writes.items()):
+            if write.untargeted and write.runtime in targeted:
+                self.writes[ident] = replace(write, kept=False, untargeted=False)
+                self._dirty = True
 
     def forget(self, write: McpWrite) -> None:
         if self.writes.pop(_ident(write), None) is not None:
@@ -320,6 +338,13 @@ class McpWriteReceipts:
         return set(filter_excluded_mcp_runtimes(runtimes, exclude))
 
     def warn_kept(self, write: McpWrite, logger: Any) -> None:
+        if write.untargeted:
+            logger.warning(
+                f"Kept MCP server '{write.name}' in {self.display(write)}: APM no longer "
+                f"targets {write.runtime}. Remove the entry if you no longer use it, or "
+                f"add {write.runtime} to targets: in apm.yml."
+            )
+            return
         logger.warning(
             f"Kept MCP server '{write.name}' in {self.display(write)}: APM no longer "
             "deploys it and cannot confirm the entry is the one it wrote. "
@@ -333,8 +358,13 @@ class McpWriteReceipts:
         exclude: str | None,
         logger: Any,
         declared_configs: dict[str, Any] | None = None,
+        targeted: set[str] | None = None,
     ) -> set[str]:
         """Remove proven entries of undeclared servers; keep and report the rest.
+
+        A declared server's entry for a runtime outside *targeted* (the
+        runtimes the manifest selects; None when it selects none) is kept and
+        reported, never removed (#4784).
 
         Returns the names of the servers whose entries were removed.
         """
@@ -343,11 +373,15 @@ class McpWriteReceipts:
 
         included = self.included_runtimes(exclude)
         removed: set[str] = set()
+        if targeted is not None:
+            self.retarget(targeted)
         for _, write in sorted(self.writes.items()):
-            if write.name in declared or write.runtime not in included:
-                continue
-            if not self._selected(write):
+            if write.runtime not in included or not self._selected(write):
                 # Another profile's config: decided only when that profile is selected.
+                continue
+            if write.name in declared:
+                if self._untargeted(write, targeted, declared, declared_configs or {}):
+                    self.warn_kept(self.mark_kept(write, untargeted=True), logger)
                 continue
             if write.key is not None and write.key in self._declared_keys(
                 write.runtime, declared, declared_configs or {}
@@ -374,6 +408,27 @@ class McpWriteReceipts:
         self.save()
         return removed
 
+    def _untargeted(
+        self,
+        write: McpWrite,
+        targeted: set[str] | None,
+        declared: set[str],
+        configs: dict[str, Any],
+    ) -> bool:
+        """Whether *write* is a declared server's present entry on a runtime no longer targeted.
+
+        An entry a targeted runtime deploys to the same config and native key
+        (a shared destination) is still in use.
+        """
+        if targeted is None or write.runtime in targeted or self._presence(write) is False:
+            return False
+        return not any(
+            write.key is not None
+            and write.config == self._config(runtime)
+            and write.key in self._declared_keys(runtime, declared, configs)
+            for runtime in targeted
+        )
+
     def _declared_keys(self, runtime: str, declared: set[str], configs: dict[str, Any]) -> set[str]:
         """The native keys the declared servers deploy to on *runtime*."""
         from apm_cli.install.mcp.ownership import _native_config_key
@@ -388,21 +443,28 @@ class McpWriteReceipts:
     def kept(
         self, managed: set[str], configs: dict[str, Any] | None = None
     ) -> list[tuple[McpWrite, str]]:
-        """Kept records of unmanaged servers in the selected configs whose entry is still present.
+        """Kept records in the selected configs whose entry is still present.
 
-        A record whose native entry a managed server now deploys to is not kept
-        (#4861): install and audit share this one filter.
+        A record of an unmanaged server is kept unless its native entry a
+        managed server now deploys to (#4861); a record kept for a runtime no
+        longer targeted stays kept until that runtime is targeted again
+        (#4784). Install and audit share this one filter.
         """
         return [
             (write, self.display(write))
             for _, write in sorted(self.writes.items())
             if write.kept
-            and write.name not in managed
             and self._selected(write)
             and self._presence(write) is not False
-            and not (
-                write.key is not None
-                and write.key in self._declared_keys(write.runtime, managed, configs or {})
+            and (
+                write.untargeted
+                or (
+                    write.name not in managed
+                    and not (
+                        write.key is not None
+                        and write.key in self._declared_keys(write.runtime, managed, configs or {})
+                    )
+                )
             )
         ]
 
@@ -441,6 +503,7 @@ def retire_undeclared_mcp_writes(
     exclude: str | None,
     logger: Any,
     retire: bool = True,
+    targeted: set[str] | None = None,
 ) -> None:
     """Without a lockfile, retire the entries APM wrote for servers it no longer deploys.
 
@@ -452,6 +515,10 @@ def retire_undeclared_mcp_writes(
 
     With ``retire=False`` (a lockfile governs cleanup) nothing is removed:
     kept entries and noted unusable evidence are announced again.
+
+    *targeted* is the set of runtimes the manifest's ``targets:`` select (None
+    when it selects none); a declared server's entry outside it is kept and
+    reported (#4784).
     """
     try:
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
@@ -467,13 +534,20 @@ def retire_undeclared_mcp_writes(
         return
     _clear_unusable_note(project_root, user_scope=user_scope)
     if not retire:
+        if targeted is not None:
+            store.retarget(targeted)
+            store.save()
         included = store.included_runtimes(exclude)
         for write, _ in store.kept(set(declared), declared_configs):
             if write.runtime in included:
                 store.warn_kept(write, logger)
         return
     removed = store.retire_undeclared(
-        set(declared), exclude=exclude, logger=logger, declared_configs=declared_configs
+        set(declared),
+        exclude=exclude,
+        logger=logger,
+        declared_configs=declared_configs,
+        targeted=targeted,
     )
     if removed:
         logger.record_mcp_removed(removed)

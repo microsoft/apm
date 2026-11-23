@@ -42,7 +42,7 @@ first failure to skip expensive I/O.
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `native-mcp-ownership` | block | `ci_checks.py` | yes |
-| `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it could not confirm |
+| `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it no longer deploys |
 | `content-integrity` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
@@ -175,9 +175,9 @@ the [policy schema](../policy-schema/).
 
 ### `kept-mcp-entries`
 
-- **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable). It appears only when such an entry exists.
-- **Fails when.** A kept entry is still in the selected config and the lockfile does not manage its server, or this machine's MCP write record cannot be used (without a lockfile, or once an install without a lockfile met it, also after the lockfile is rewritten). The detail names the server, the config file and the runtime, or the unusable record file.
-- **Remediation.** Remove each entry you no longer use, or declare the server again, and remove an unusable record file, then run `apm install`. Audit does not change the native configuration.
+- **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable), or kept for a runtime the manifest's `targets:` no longer select while its server stays declared. It appears only when such an entry exists.
+- **Fails when.** A kept entry is still in the selected config and the lockfile does not manage its server (or, for an entry kept for a runtime no longer targeted, no install has targeted that runtime again), or this machine's MCP write record cannot be used (without a lockfile, or once an install without a lockfile met it, also after the lockfile is rewritten). The detail names the server, the config file and the runtime, or the unusable record file.
+- **Remediation.** Remove each entry you no longer use, or declare the server or target its runtime again, and remove an unusable record file, then run `apm install`. Audit does not change the native configuration.
 
 ### `content-integrity`
 

@@ -122,6 +122,64 @@ def test_a_declared_server_is_never_retired(project: Path) -> None:
     assert _config(project).read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    ("targeted", "reported"),
+    [({"cursor"}, True), ({"claude"}, False), ({"copilot"}, False), (None, False)],
+    ids=["untargeted", "shared-destination", "targeted", "no-manifest-targets"],
+)
+def test_a_declared_entry_for_a_runtime_no_longer_targeted_is_kept_and_reported(
+    project: Path, targeted: set[str] | None, reported: bool
+) -> None:
+    """Never removed; reported until its runtime is targeted again (#4784)."""
+    _install_write(project, _Logger())
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    retire_undeclared_mcp_writes(
+        {SERVER},
+        project_root=project,
+        user_scope=False,
+        exclude=None,
+        logger=logger,
+        targeted=targeted,
+    )
+
+    assert _config(project).read_bytes() == before
+    assert not logger.removed
+    kept = kept_mcp_writes(project, user_scope=False, managed={SERVER})
+    if not reported:
+        assert not logger.warnings and kept == []
+        return
+    assert logger.warnings == [
+        f"Kept MCP server '{SERVER}' in .mcp.json: APM no longer targets copilot. Remove "
+        "the entry if you no longer use it, or add copilot to targets: in apm.yml."
+    ]
+    assert [(write.name, config) for write, config in kept] == [(SERVER, ".mcp.json")]
+    # A later install with a lockfile announces it again; targeting copilot clears it.
+    announced = _Logger()
+    retire_undeclared_mcp_writes(
+        {SERVER},
+        project_root=project,
+        user_scope=False,
+        exclude=None,
+        logger=announced,
+        retire=False,
+        targeted={"cursor"},
+    )
+    assert announced.warnings == logger.warnings
+    retire_undeclared_mcp_writes(
+        {SERVER},
+        project_root=project,
+        user_scope=False,
+        exclude=None,
+        logger=_Logger(),
+        retire=False,
+        targeted={"copilot"},
+    )
+    assert kept_mcp_writes(project, user_scope=False, managed={SERVER}) == []
+    assert _config(project).read_bytes() == before
+
+
 def test_an_unrecorded_identical_entry_is_never_retired(project: Path) -> None:
     _write_entries(project, {SERVER: ENTRY})
     before = _config(project).read_bytes()

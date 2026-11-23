@@ -987,6 +987,12 @@ def run_mcp_integration(  # noqa: PLR0913
             exclude=exclude,
             logger=logger,
             retire=pre_install_lock is None and not frozen,
+            # An explicit --runtime narrows this run, not the project (#4784).
+            targeted=(
+                None
+                if runtime is not None
+                else _declared_manifest_runtimes(apm_package, user_scope=user_scope)
+            ),
         )
 
     if prepared.omission_view is not None and lockfile_exists(lock_path):

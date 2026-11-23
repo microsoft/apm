@@ -864,8 +864,8 @@ def _kept_mcp_entries(
         name="kept-mcp-entries",
         passed=False,
         message=(
-            f"{len(details)} MCP finding(s): APM kept entries it wrote for servers it no "
-            "longer deploys because it cannot confirm them -- "
+            f"{len(details)} MCP finding(s): APM kept entries it wrote and no longer "
+            "deploys -- "
             f"{remediation.KEPT_MCP_ENTRIES.clause()}"
         ),
         remediations=(remediation.KEPT_MCP_ENTRIES,),
