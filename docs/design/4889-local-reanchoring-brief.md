@@ -1,6 +1,6 @@
 # #4889 design brief: keep a still-needed LOCAL dependency on uninstall
 
-Status: STEP 1 outline (P2 lead with QL). Owners: P2 (install/uninstall), QL
+Status: STEP 3 final (P2 lead with QL). Owners: P2 (install/uninstall), QL
 (lifecycle cells, H8). The regent rules on the record from this brief.
 Input: issue #4889, the INT draft record (Intake records/4889.md), and #4882
 (the B-safe ruling for 0.38.0, which refuses today).
@@ -129,19 +129,65 @@ Steps 2 and 3 verify each line against the spec.
   unchanged (out of scope respected). If the in-memory resolution needs
   anything unavailable offline, refuse as today.
 
-## 7. Open questions for step 3
+## 7. Step 3: decisions (QL answers, 10:26)
 
-- Q3: the ruling between spec option (a) and (b) in Section 2 (recommend b).
-- Q4: does the regent accept the "in-memory resolve, then reconcile" design
-  over hand re-keying? It reuses the resolver and the ledger codec, and adds
-  one owner-rename step with a mutation guard.
-- Q5 (QL): add a fifth Done-when cell where the kept local dependency has an
-  edge into a replaced package, covering Q1.
+- Q3 (spec): option (b), no amendment (P2 recommendation; the regent rules).
+- Q4 ACCEPTED: in-memory resolve (the same resolution `--no-frozen` runs),
+  then a one-commit reconcile. Conditions:
+  - strictly offline: any step needing network refuses, never fetches;
+  - one transaction with full rollback;
+  - a byte-identity cell against `--no-frozen` on the same inputs (lock and
+    receipts).
+- Q5 ACCEPTED: Done-when cell 5 below (replacement parent keys).
+- INV-2 ACCEPTED, pinned twice:
+  - (a) an owner-rename mutation case: re-introducing `_history.forget` on a
+    re-anchor binding must fail a test;
+  - (b) a lifecycle cell: a user edit made before re-anchoring is still
+    reported by audit after it.
+
+## 8. Final Done-when cells (red-first; QL owns the cells, H8)
+
+1. Graph local e -> f, dev d -> e, dev a -> f; `apm uninstall ./vendor/e`;
+   then `apm install --frozen` passes and the lock (and receipts) are
+   byte-identical to a following `apm install --no-frozen` on the same
+   inputs.
+2. Later uninstall and prune of the transitive e keep deletion evidence and
+   delete only proven files; an edited file is kept with a diagnostic.
+3. A forged or mismatched receipt binding falls back to refusal before any
+   write (I7).
+4. Offline guarantee: a re-anchor that would need network refuses with a
+   named reason and changes nothing (rollback).
+5. The kept local dependency has an edge into a replaced package
+   (req-rpl-003): its parent keys are re-keyed in the same commit, or the
+   case refuses with a named reason.
+6. Edit evidence survives: a user edit before re-anchoring is reported by
+   `apm audit` after it.
+7. Mutation: re-introducing `_history.forget` on a re-anchor binding fails
+   the owner-rename mutation case.
+8. H16 path inputs (S62 classes, one red-first cell each, on the re-anchored
+   local path): (a) whitespace and encoding; (b) a missing target falling
+   back to a parent directory; (c) a symlinked local dependency directory,
+   pointing outside and in a loop; (d) case and NFC/NFD variants (aligned
+   with #3770's case-variant owners); (e) `..` and absolute paths.
+
+Every cell fails before the fix (today: refusal or crash) and passes after.
+W3b ACCEPT at head; QL H8.
+
+## 9. Ask to the regent
+
+Rule the record from this brief:
+- spec option (b), no amendment;
+- the in-memory resolve plus one-commit reconcile design under the stated
+  offline and rollback conditions;
+- Done-when cells 1-8 above.
+
+Out of scope stays as recorded: no lockfile format change, no resolution
+behaviour change, no remote dependencies (#4749).
 
 ## Steps (rule 22: hourly, each ends in a pushed SHA)
 
 - STEP 1 (6f8417a2): outline.
-- STEP 2 (this commit): spec verified; Q1/Q2 answered with code citations;
+- STEP 2 (46a1d620): spec verified; Q1/Q2 answered with code citations;
   design recommendation.
-- STEP 3: finalize invariants and cells with QL; hand the brief to the
-  regent for ruling.
+- STEP 3 (this commit): QL decisions folded; final Done-when cells; handed
+  to the regent.
