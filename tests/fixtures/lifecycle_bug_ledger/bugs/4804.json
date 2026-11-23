@@ -1,0 +1,19 @@
+{
+  "issue": 4804,
+  "fixed_in": "Unreleased",
+  "summary": "After apm uninstall kept a dependency another package still needed, the repaired lock row could name a different parent than install's nearest-parent tie rule, give chained rescued roots the wrong depth, or leave a production child under a now dev-only parent; the repair now matches what a full apm install writes, byte for byte.",
+  "failure_modes": [
+    "idempotency",
+    "outcome"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_reparents_to_the_nearest_parent_by_lowest_key",
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_of_chained_still_needed_roots_derives_depth_parent_first",
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_under_a_dev_only_parent_moves_the_subtree_to_dev",
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_tie_rule_spans_production_and_dev_parents"
+  ]
+}

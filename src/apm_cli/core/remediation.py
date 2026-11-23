@@ -695,6 +695,12 @@ PRUNE_PARTIAL = _entry(
     "finish the filesystem cleanup",
     then="run 'apm audit'",
 )
+PRUNE_NATIVE_GATE_UNCHECKED = _entry(
+    "prune-native-gate-unchecked",
+    "apm prune",
+    "retire native plugins the current approvals and policy no longer allow",
+    before="fix the reported error",
+)
 LIFECYCLE_SCRIPTS_UNTRUSTED = _entry(
     "lifecycle-scripts-untrusted",
     "apm lifecycle trust",
@@ -1326,6 +1332,12 @@ WITHHELD_HOOK_FILE_UNRECORDED = _entry(
     "apm audit --ci",
     "confirm no unrecorded file remains at a withheld package's hook path",
     before="delete each named file you did not write yourself",
+)
+WITHHELD_HOOK_ENTRY_UNRECORDED = _entry(
+    "withheld-hook-entry-unrecorded",
+    "apm audit --ci",
+    "confirm no unattributed entry matching a withheld package's hook remains",
+    before="remove each named hook entry you did not add yourself",
 )
 WITHHELD_HOOK_PATHS_UNCHECKED = _entry(
     "withheld-hook-paths-unchecked",

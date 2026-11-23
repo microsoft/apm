@@ -47,11 +47,28 @@ def withheld_hook_files(
         for path in destinations:
             # Lexical, never resolved: a symlink is named as the link itself.
             rel = path.relative_to(project_root).as_posix()
-            if rel in recorded or not (path.is_file() or path.is_symlink()):
+            if rel in recorded or not present_hook_path(path, rel):
                 continue
             _require_parent_inside(path, project_root, rel)
             found.add(rel)
     return sorted(found)
+
+
+def present_hook_path(path: Path, rel: str) -> bool:
+    """Whether a file or link sits at *path*; an unreadable location is unchecked.
+
+    ``lstat`` never follows the leaf; any failure other than a missing path
+    raises :class:`HookPathsUnknown` instead of reading as absent.
+    """
+    import stat
+
+    try:
+        mode = path.lstat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        raise HookPathsUnknown(f"{rel} cannot be inspected: {exc}") from exc
+    return stat.S_ISREG(mode) or stat.S_ISLNK(mode)
 
 
 def _require_readable_hook_dirs(package_root: Path) -> None:
@@ -91,6 +108,8 @@ def locked_withheld_hook_files(
     trust_ctx: Callable[[], Any],
     project_root: Path,
     targets: Iterable[Any],
+    *,
+    user_scope: bool = False,
 ) -> list[tuple[str, str, str]]:
     """``(path, lock key, reason)`` per unrecorded file at a withheld package's hook path.
 
@@ -107,6 +126,7 @@ def locked_withheld_hook_files(
     from apm_cli.install.exec_gate import ExecPolicyUnavailable, current_exec_decision
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.target_filter import resolve_effective_package_targets
+    from apm_cli.install.withheld_merged_hooks import ENTRY_REASON, withheld_merged_hook_entries
     from apm_cli.security.executables import (
         EXEC_TYPE_HOOKS,
         TRUST_ABSENT,
@@ -133,7 +153,7 @@ def locked_withheld_hook_files(
         except (ExecPolicyUnavailable, OSError, ValueError) as exc:
             subset = effective_dependency_selection(dep_ref).target_subset
             if any(
-                target.name == "copilot" and (not subset or "copilot" in subset)
+                target.name in _scanned_target_names() and (not subset or target.name in subset)
                 for target in active
             ):
                 found.append(("", key, f"its executables decision cannot be read: {exc}"))
@@ -152,11 +172,28 @@ def locked_withheld_hook_files(
             paths = withheld_hook_files(
                 package_info, project_root, package_targets, recorded=recorded
             )
+            entries = withheld_merged_hook_entries(
+                package_info,
+                project_root,
+                package_targets,
+                user_scope=user_scope,
+                # The lock records the hooks as deployed, as locked_hooks_retired reads it.
+                receipted=dep.exec_status in {None, TRUST_DEPLOYED}
+                or EXEC_TYPE_HOOKS in tuple(dep.exec_allowed_types or ()),
+            )
         except HookPathsUnknown as exc:
             found.append(("", key, f"hooks {reason}; its hook paths cannot be checked: {exc}"))
             continue
         found.extend((path, key, f"hooks {reason}") for path in paths)
+        found.extend((entry, key, f"hooks {reason}; {ENTRY_REASON}") for entry in entries)
     return found
+
+
+def _scanned_target_names() -> frozenset[str]:
+    """Targets whose hook destinations the scan inspects: Copilot files and merged configs."""
+    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+    return frozenset({"copilot", *_MERGE_HOOK_TARGETS})
 
 
 def announce_withheld_hook_files(
@@ -166,6 +203,8 @@ def announce_withheld_hook_files(
     targets: Iterable[Any],
     managed_files: Any,
     logger: Any | None,
+    *,
+    user_scope: bool = False,
 ) -> None:
     """Warn, naming the path, for each unrecorded file at a withheld package's hook path.
 
@@ -174,16 +213,21 @@ def announce_withheld_hook_files(
     if logger is None:
         return
     from apm_cli.core.remediation import (
+        WITHHELD_HOOK_ENTRY_UNRECORDED,
         WITHHELD_HOOK_FILE_UNRECORDED,
         WITHHELD_HOOK_PATHS_UNCHECKED,
         kept_file_message,
     )
+    from apm_cli.install.withheld_merged_hooks import withheld_merged_hook_entries
 
     package = getattr(package_info, "package", None)
     label = getattr(package, "name", None) or package_name or "unknown"
     try:
         paths = withheld_hook_files(
             package_info, project_root, targets, recorded=set(managed_files or ())
+        )
+        entries = withheld_merged_hook_entries(
+            package_info, project_root, targets, user_scope=user_scope
         )
     except HookPathsUnknown as exc:
         logger.warning(
@@ -199,6 +243,16 @@ def announce_withheld_hook_files(
                 f"it sits at {label}'s hook path, the executables gate withholds {label}'s "
                 "hooks, and apm.lock.yaml does not record the file",
                 WITHHELD_HOOK_FILE_UNRECORDED,
+            ),
+            symbol="warning",
+        )
+    for entry in entries:
+        logger.warning(
+            kept_file_message(
+                f"hook entry {entry}",
+                f"it matches {label}'s hook, the executables gate withholds {label}'s "
+                "hooks, and no ownership record attributes it to another source",
+                WITHHELD_HOOK_ENTRY_UNRECORDED,
             ),
             symbol="warning",
         )
