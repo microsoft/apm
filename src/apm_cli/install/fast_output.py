@@ -20,6 +20,7 @@ Every line here comes from the owner the pipeline uses for it:
 from __future__ import annotations
 
 import contextlib
+import io
 import time
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
@@ -43,6 +44,50 @@ def quiet() -> Iterator[None]:
             yield
     finally:
         logging.disable(previous)
+
+
+class _Held(io.TextIOBase):
+    """A stand-in stream that tapes writes, in order, for one real stream."""
+
+    def __init__(self, real: Any, tape: list[tuple[Any, str]]) -> None:
+        self._real, self._tape = real, tape
+
+    def write(self, text: str) -> int:
+        self._tape.append((self._real, text))
+        return len(text)
+
+    def isatty(self) -> bool:
+        return bool(getattr(self._real, "isatty", lambda: False)())
+
+    @property
+    def encoding(self) -> str:  # type: ignore[override]
+        return getattr(self._real, "encoding", None) or "utf-8"
+
+
+class HeldOutput:
+    """What a fast apply printed, kept until the apply is final."""
+
+    def __init__(self) -> None:
+        self.tape: list[tuple[Any, str]] = []
+
+    def release(self) -> None:
+        """Print the held output to the real streams, in the order it was written."""
+        tape, self.tape = self.tape, []
+        for stream, text in tape:
+            stream.write(text)
+        for stream in {id(s): s for s, _t in tape}.values():
+            stream.flush()
+
+
+@contextlib.contextmanager
+def held_output() -> Iterator[HeldOutput]:
+    """Hold stdout and stderr: a fallback to the full run drops them unprinted."""
+    import sys
+
+    held = HeldOutput()
+    out, err = _Held(sys.stdout, held.tape), _Held(sys.stderr, held.tape)
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        yield held
 
 
 def render(
@@ -86,8 +131,10 @@ def render(
     from apm_cli.install.helpers.gitignore import update_gitignore_for_apm_modules
 
     # The full run's point (install/pipeline.py, after integrate, project scope):
-    # it adds apm_modules/ and says so only when the entry is missing.
-    update_gitignore_for_apm_modules(logger=logger)
+    # it adds apm_modules/ and says so only when the entry is missing. With no
+    # APM package the full run returns before integrate and leaves it alone.
+    if locked:
+        update_gitignore_for_apm_modules(logger=logger)
     services = run_services(
         project_root, manifest, lock, logger, policy_fetch, frozen_disposition=frozen_disposition
     )

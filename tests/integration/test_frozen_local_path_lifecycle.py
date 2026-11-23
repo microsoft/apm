@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -141,8 +142,11 @@ def test_frozen_local_path_refuses_changed_snapshot_without_mutation(
     added = {path: data for path, data in after_cache.items() if path not in before_cache}
     assert {path: after_cache[path] for path in before_cache} == before_cache
     # Only the committed accepted install may add cache content: deploy-store
-    # entries named by the digest of the bytes they hold, among them the new deployment.
-    assert all(path == _store_path(data) for path, data in added.items()), sorted(added)
+    # entries named by the digest of the bytes they hold, among them the new
+    # deployment, and the package records that name them.
+    assert all(
+        path == _store_path(data) or _RECORD_PATH.fullmatch(path) for path, data in added.items()
+    ), sorted(added)
     assert _store_path(accepted_deployment) in added
 
 
@@ -201,6 +205,9 @@ def test_frozen_local_declared_deleted_source_is_rejected_without_mutation(
     assert _snapshot(root) == before_files
     assert _snapshot(isolated.cache_root) == before_cache
     assert not list(isolated.temp_root.iterdir())
+
+
+_RECORD_PATH = re.compile(r"deploy_v1/records/([0-9a-f]{2})/\1[0-9a-f]{62}\.json")
 
 
 def _store_path(data: bytes) -> str:

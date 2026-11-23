@@ -422,14 +422,18 @@ def _commit(
 
     The journal records every path this apply creates and, at the write seam,
     every path the receipts, ``.gitignore`` and service owners write while the
-    output renders. Any failure restores all of it, so the tree returns to its
-    pre-run state, and the full pipeline runs.
+    output renders. The output is held until the journal settles. Any failure
+    restores every path and drops the output, so the full pipeline runs from
+    the pre-run tree and prints its own outcome once.
     """
-    from apm_cli.install.fast_output import quiet
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.install.fast_output import held_output, quiet
     from apm_cli.install.transaction import journaled_apply
 
     try:
-        with journaled_apply() as journal:
+        with held_output() as held, journaled_apply() as journal:
+            # The services phase may rewrite the lock outside the write seam.
+            journal.record(get_lockfile_path(project_root))
             for staging, install_path in staged:
                 journal.record(install_path)
                 _commit_package(staging, install_path)
@@ -450,6 +454,7 @@ def _commit(
         raise
     except Exception as exc:  # an interrupt still restores, then propagates
         raise Decline(f"write failed ({type(exc).__name__})") from exc
+    held.release()
 
 
 def try_apply(

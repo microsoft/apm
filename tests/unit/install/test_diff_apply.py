@@ -158,7 +158,7 @@ def test_escape_sequences_in_deployed_bytes_take_the_full_run(tmp_path: Path) ->
 
 
 def test_a_failure_while_rendering_restores_the_pre_run_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Kill-mid-commit: the journal puts back every path the apply touched, then declines."""
     project = tmp_path / "project"
@@ -169,10 +169,15 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     target = project / ".github" / "prompts" / "a.prompt.md"
     session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
 
+    lock = project / "apm.lock.yaml"
+    lock.write_text("locked\n", encoding="utf-8")
+
     def render() -> None:
         from apm_cli.integration import write_seam
 
+        print("[+] rendered before the failure")
         write_seam.write_text(keep, "apm_modules/\n")
+        lock.write_text("rewritten\n", encoding="utf-8")
         raise OSError("disk full")
 
     files = [(target, b"x\n", _digest(b"x\n"), "o/p")]
@@ -181,6 +186,8 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     assert not target.exists()
     assert not (project / ".github").exists()
     assert keep.read_text(encoding="utf-8") == "user\n"
+    assert lock.read_text(encoding="utf-8") == "locked\n"
+    assert "rendered before the failure" not in capsys.readouterr().out, "fallback prints once"
 
 
 def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
