@@ -306,13 +306,20 @@ def _refuse_orphans(project_root: Path, lock: Any, receipts: dict[str, str]) -> 
         raise Decline("orphaned output")
 
 
-def _write(path: Path, data: bytes, scratch: Path) -> None:
+def _write(path: Path, data: bytes, scratch: Path, created: list[_Created] | None = None) -> None:
     """Create *path* with *data*, all or nothing, never replacing an existing file.
 
     The bytes go to a scratch file on the same filesystem first; a hard link
     (a rename on Windows, which never replaces) then makes the whole file
     appear at once, so an interrupted apply leaves no partial file behind.
+    Only once it exists is it noted in *created*, with its identity and the
+    directories made for it, so a rollback removes nothing it did not create.
     """
+    made = []
+    parent = path.parent
+    while parent != parent.parent and not os.path.lexists(parent):
+        made.append(parent)
+        parent = parent.parent
     path.parent.mkdir(parents=True, exist_ok=True)
     mask = os.umask(0)
     os.umask(mask)
@@ -321,10 +328,53 @@ def _write(path: Path, data: bytes, scratch: Path) -> None:
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)
     os.chmod(temp, 0o666 & ~mask)
-    if os.name == "nt":
-        os.rename(temp, path)
-    else:
-        os.link(temp, path)
+    try:
+        if os.name == "nt":
+            os.rename(temp, path)
+        else:
+            os.link(temp, path)
+    except OSError:
+        if created is not None:
+            created.append(_Created(None, None, tuple(made)))
+        raise
+    if created is not None:
+        info = os.lstat(path)
+        created.append(_Created(path, (info.st_dev, info.st_ino), tuple(made)))
+
+
+@dataclass(frozen=True)
+class _Created:
+    """One file this apply created (``path`` None if only its directories were)."""
+
+    path: Path | None
+    identity: tuple[int, int] | None
+    directories: tuple[Path, ...]
+
+
+def _undo_created(created: list[_Created]) -> list[tuple[Path, str]]:
+    """Remove what this apply created, newest first, only while it is still that object.
+
+    A file someone else put at the same path (after a lost no-replace race, or
+    in place of ours) is kept, and so is any directory that is no longer empty.
+    """
+    from apm_cli.install.deploy_snapshot import remove_empty_directories
+
+    issues: list[tuple[Path, str]] = []
+    for entry in reversed(created):
+        if entry.path is None:
+            continue
+        try:
+            info = os.lstat(entry.path)
+        except FileNotFoundError:
+            continue
+        if (info.st_dev, info.st_ino) != entry.identity:
+            continue
+        try:
+            os.unlink(entry.path)
+        except OSError as exc:
+            issues.append((entry.path, f"could not remove: {exc}"))
+    remove_empty_directories(d for entry in created for d in entry.directories)
+    return issues
 
 
 def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) -> bool:
@@ -480,9 +530,9 @@ def _commit(
 ) -> Any:
     """Create the decided state and print it inside one journal.
 
-    The journal records every path this apply creates and, at the write seam,
-    every path the receipts, ``.gitignore`` and service owners write while the
-    output renders. The output is held until the journal settles. Any failure
+    Each file this apply creates is noted only once it exists, with its
+    identity; the journal records, at the write seam, every path the receipts,
+    ``.gitignore`` and service owners write while the output renders. The output is held until the journal settles. Any failure
     restores every path and drops the output, so the full pipeline runs from
     the pre-run tree and prints its own outcome once.
     """
@@ -498,6 +548,7 @@ def _commit(
     # An interrupted run leaves only an inactive staging root the next
     # install removes (install/resolution_staging.py).
     staging = ResolutionStagingSession(modules)
+    created: list[_Created] = []
     try:
         with held_output() as held, journaled_apply() as journal:
             # The services phase may rewrite the lock outside the write seam.
@@ -516,8 +567,7 @@ def _commit(
             for replacement in replacements:
                 _publish(staging, replacement)
             for path, data, _digest, _owner in files:
-                journal.record(path)
-                _write(path, data, scratch)
+                _write(path, data, scratch, created)
             if recheck:
                 with quiet():
                     _audit_passes(project_root, fetch, content_integrity=False)
@@ -531,7 +581,7 @@ def _commit(
     except BaseException as exc:
         # The journal has put every deployed path back; the packages go next.
         prior = exc.issues if isinstance(exc, ApplyRestoreIncomplete) else []
-        issues = [*prior, *staging.rollback()]
+        issues = [*prior, *_undo_created(created), *staging.rollback()]
         if issues:
             raise ApplyRestoreIncomplete(issues) from exc
         if isinstance(exc, Decline) or not isinstance(exc, Exception):

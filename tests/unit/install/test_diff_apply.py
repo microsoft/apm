@@ -62,6 +62,9 @@ def test_apply_path_never_deletes_outside_its_own_staging() -> None:
             removals = calls & _REMOVALS
             if func.name == "_discard_staging":
                 assert removals == {"rmtree"}
+            elif func.name == "_undo_created":
+                # Only a file this apply created, while it is still that object.
+                assert removals <= {"unlink"}
             elif func.name == "_write":
                 # Windows only: a rename there fails on an existing file (never replaces).
                 assert removals == {"rename"}
@@ -373,6 +376,36 @@ def test_an_incomplete_restore_stops_instead_of_falling_back(
     finally:
         target.parent.chmod(0o755)
     assert [p.name for p, _reason in caught.value.issues][:1] == ["a.prompt.md"]
+
+
+def test_a_lost_create_race_keeps_the_file_that_won(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file created at the destination before APPLY's link survives the rollback."""
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    ours = project / ".github" / "prompts" / "a.prompt.md"
+    theirs = project / ".github" / "prompts" / "b.prompt.md"
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+    real_link = os.link
+
+    def racing_link(source, target):
+        if Path(target) == theirs:
+            theirs.write_text("someone else\n", encoding="utf-8")
+        return real_link(source, target)
+
+    monkeypatch.setattr("os.link", racing_link)
+    files = [
+        (ours, b"x\n", _digest(b"x\n"), "o/p"),
+        (theirs, b"y\n", _digest(b"y\n"), "o/p"),
+    ]
+    with pytest.raises(Decline, match="write failed"):
+        diff_apply._commit(project, None, [], files, [], session, False, lambda: None)
+    monkeypatch.undo()
+
+    assert not ours.exists(), "what APPLY created goes"
+    assert theirs.read_text(encoding="utf-8") == "someone else\n", "what it did not create stays"
 
 
 def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
