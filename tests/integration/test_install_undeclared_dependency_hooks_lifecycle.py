@@ -11,6 +11,8 @@ GRAPH=direct-dependency-removed-from-manifest
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -34,12 +36,12 @@ def _hook_package(root: Path, name: str, matcher: str) -> None:
     write(root / ".apm" / "hooks" / f"{name}.json", json.dumps({"hooks": {"PreToolUse": [hook]}}))
 
 
-def _manifest(world: ReplayWorld, names: list[str]) -> None:
+def _manifest(world: ReplayWorld, names: list[str], targets: tuple[str, ...] = ("claude",)) -> None:
     dump_yaml(
         {
             "name": "proj",
             "version": "1.0.0",
-            "targets": ["claude"],
+            "targets": list(targets),
             "dependencies": {"apm": [f"./vendor/{name}" for name in names]},
             "executables": {"allow": {f"./vendor/{name}": {"hooks": True} for name in names}},
         },
@@ -48,7 +50,8 @@ def _manifest(world: ReplayWorld, names: list[str]) -> None:
 
 
 def _entries(world: ReplayWorld) -> dict[str, list[str]]:
-    data = json.loads((world.project / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    path = world.project / ".claude" / "settings.json"
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     return {
         event: [entry.get("matcher") for entry in entries]
         for event, entries in data.get("hooks", {}).items()
@@ -101,7 +104,77 @@ def test_install_keeps_an_edited_entry_of_an_undeclared_dependency(
     settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     _manifest(world, [])
-    world.apm("install")
+    result = world.apm("install")
 
     assert _entries(world) == {"PreToolUse": ["Edit"]}
     assert '"echo h"' in settings.read_text(encoding="utf-8")
+    text = " ".join((result.stdout + result.stderr).split())
+    assert "Kept an edited hook entry in .claude/settings.json" in text, text
+
+
+def test_install_retires_the_hooks_in_a_declared_target_it_skips(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A run narrowed by --target still retires the entry in another declared runtime."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    _hook_package(world.project / "vendor" / "h", "h", "Bash")
+    for root in (".claude", ".gemini"):
+        (world.project / root).mkdir()
+    _manifest(world, ["h"], ("claude", "gemini"))
+    world.apm("install")
+    gemini = world.project / ".gemini" / "apm-hooks.json"
+    assert "_local/h" in gemini.read_text(encoding="utf-8")
+
+    _manifest(world, [], ("claude", "gemini"))
+    world.apm("install", "--target", "claude")
+
+    assert "_local/h" not in gemini.read_text(encoding="utf-8")
+    assert "echo h" not in (world.project / ".gemini" / "settings.json").read_text("utf-8")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_install_never_rewrites_a_linked_hook_config(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A .claude directory replaced by a symlink is not followed; the row stays for a retry."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    _hook_package(world.project / "vendor" / "h", "h", "Bash")
+    (world.project / ".claude").mkdir()
+    _manifest(world, ["h"])
+    world.apm("install")
+    outside = tmp_path / "outside-claude"
+    (world.project / ".claude").rename(outside)
+    os.symlink(outside, world.project / ".claude", target_is_directory=True)
+    external = (outside / "settings.json").read_bytes()
+
+    _manifest(world, [])
+    world.apm("install", expect=None)
+
+    assert (outside / "settings.json").read_bytes() == external
+    assert "_local/h" in (outside / "apm-hooks.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0, reason="needs an unwritable directory"
+)
+def test_install_retries_a_hook_config_it_could_not_rewrite(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A failed rewrite keeps the lock row; the next install retires the entry."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    _hook_package(world.project / "vendor" / "h", "h", "Bash")
+    (world.project / ".claude").mkdir()
+    _manifest(world, ["h"])
+    world.apm("install")
+    claude = world.project / ".claude"
+    _manifest(world, [])
+    claude.chmod(0o555)
+    try:
+        world.apm("install", expect=None)
+    finally:
+        claude.chmod(0o755)
+    assert "_local/h" in (world.project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert _entries(world) == {"PreToolUse": ["Bash"]}
+
+    world.apm("install")
+
+    assert _entries(world).get("PreToolUse", []) == []
+    assert "_local/h" not in (world.project / "apm.lock.yaml").read_text(encoding="utf-8")
