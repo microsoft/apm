@@ -67,8 +67,16 @@ def resolve_base_and_source_dirs(
     return resolved_base, resolved_source
 
 
-def _spelling_key(rel_path: str) -> str:
-    return unicodedata.normalize("NFC", rel_path.replace("\\", "/")).casefold()
+def spelling_key(path: str) -> str:
+    """Case-folded, NFC-normalized, ``/``-separated key of *path*.
+
+    Spellings that differ only in letter case or Unicode normalization share
+    one key; whether they are one entry is a property of the volume.
+    """
+    return unicodedata.normalize("NFC", path.replace("\\", "/")).casefold()
+
+
+_spelling_key = spelling_key
 
 
 def _same_entry(left: Path, right: Path) -> bool:
