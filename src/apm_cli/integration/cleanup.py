@@ -605,7 +605,7 @@ class DeploymentEvidence:
             and self._lockfile_consent
             and self.lockfile_consentable(claim, physical)
         ):
-            self._consented[_claim_key(claim)] = None
+            self._consented[self._key(claim)] = None
             return AUTHORIZED
         return rendered
 
