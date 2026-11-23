@@ -60,3 +60,44 @@ jobs:
       run: |
         uv sync --frozen --extra dev --quiet
         uv run --frozen pytest -p no:cacheprovider -q -n 2 -rA tests/lifecycle/scenarios/test_engine_parity.py 2>&1 | grep -E "^(E   |FAILED|PASSED|_{5,} test)" | cut -c1-300 | head -3000 || true
+  binary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: harness
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: '3.12'
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - name: Checkout CLI under test
+      run: |
+        set -euo pipefail
+        sha=$(cat harness/scripts/perf/l5_target_sha)
+        git -C harness fetch --quiet --no-tags origin "$sha"
+        git -C harness worktree add --quiet --detach ../new FETCH_HEAD
+    - name: Build binary
+      working-directory: new
+      run: |
+        set -euo pipefail
+        uv sync --frozen --extra dev --extra build --quiet
+        chmod +x scripts/build-binary.sh
+        uv run ./scripts/build-binary.sh > build.log 2>&1 || { tail -50 build.log; exit 1; }
+    - name: libyaml in the frozen binary
+      working-directory: new
+      run: |
+        set -euo pipefail
+        bin=$(ls -d dist/apm-*/ | head -1)
+        echo "== binary dir $bin"
+        find "$bin" -path '*yaml*' -name '_yaml*.so' -print
+        proj=$(mktemp -d)
+        printf 'name: smoke\nversion: 1.0.0\n' > "$proj/apm.yml"
+        printf "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00Z'\ndependencies: []\n" > "$proj/apm.lock.yaml"
+        (cd "$proj" && LD_DEBUG=files "$GITHUB_WORKSPACE/new/${bin}apm" install --no-policy > out.txt 2> ld.txt) || true
+        echo "== apm output"; cat "$proj/out.txt" | head -20
+        echo "== dlopen of yaml/_yaml in the frozen process"
+        grep -E "file=.*yaml/_yaml[^ ]*\.so" "$proj/ld.txt" | head -3
+        grep -qE "file=.*yaml/_yaml[^ ]*\.so" "$proj/ld.txt"
