@@ -17,8 +17,22 @@ from apm_cli.marketplace.models import MarketplaceSource
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-catalog-origin")]
 
-_REVIEW_REFS = ("refs/pull/7/head", "refs/pull/7/merge", "refs/merge-requests/7/head")
-_SOURCES = ("contoso/catalog", "https://git.example.com/contoso/catalog.git")
+_REVIEW_REFS = (
+    "refs/pull/7/head",
+    "refs/pull/7/merge",
+    "refs/merge-requests/7/head",
+    "refs/remotes/origin/main",
+)
+_SOURCES = (
+    "contoso/catalog",
+    "https://git.example.com/contoso/catalog.git",
+    "https://gitlab.com/contoso/catalog",
+)
+_URLS = (
+    "https://github.com/contoso/catalog",
+    "https://git.example.com/contoso/catalog.git",
+    "https://gitlab.com/contoso/catalog",
+)
 _TIP = "a" * 40
 _STRAY = "b" * 40
 
@@ -95,12 +109,10 @@ class _AnonymousResolver:
         return fn(None, None)
 
 
-_TIPS = (("refs/heads/main", _TIP), ("refs/tags/v1", _TIP))
+_TIPS = (("refs/heads/main", _TIP), ("refs/tags/v1", _TIP), ("refs/pull/7/head", _STRAY))
 
 
-@pytest.mark.parametrize(
-    "url", ("https://github.com/contoso/catalog", "https://git.example.com/contoso/catalog.git")
-)
+@pytest.mark.parametrize("url", _URLS)
 def test_a_commit_pin_outside_the_origin_refs_is_refused_before_any_fetch(
     url: str, monkeypatch
 ) -> None:
@@ -128,9 +140,7 @@ def test_a_commit_pin_at_an_origin_tip_is_fetched(monkeypatch) -> None:
     assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [[_TIP]]
 
 
-@pytest.mark.parametrize(
-    "url", ("https://github.com/contoso/catalog", "https://git.example.com/contoso/catalog.git")
-)
+@pytest.mark.parametrize("url", _URLS)
 def test_an_unreadable_ref_listing_fails_closed(url: str, monkeypatch) -> None:
     _list_refs(monkeypatch, OSError("ls-remote failed"))
     urls = _record_requests(monkeypatch, _Response(404))
@@ -151,7 +161,9 @@ def test_a_declared_review_ref_never_passes_the_allow_list(source: str) -> None:
     origins = MarketplaceOrigins(
         declared=(DeclaredMarketplace(name="acme", source=source, ref="refs/pull/7/head"),)
     )
-    policy = MarketplacePolicy(allow=("github.com/contoso/*", "git.example.com/contoso/*"))
+    policy = MarketplacePolicy(
+        allow=("github.com/contoso/*", "git.example.com/contoso/*", "gitlab.com/contoso/*")
+    )
 
     assert _check_marketplace_allow(origins, policy).passed is False
 
@@ -213,3 +225,30 @@ def test_install_refuses_a_declared_review_ref_before_any_catalog_request(
     assert urls == []
     after = {p.relative_to(project).as_posix(): p.read_bytes() for p in project.rglob("*")}
     assert after == before
+
+
+@pytest.mark.parametrize("url", _URLS)
+def test_a_short_review_name_that_is_no_branch_or_tag_is_refused_before_any_fetch(
+    url: str, monkeypatch
+) -> None:
+    _list_refs(monkeypatch, _TIPS)
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    with pytest.raises(MarketplaceFetchError, match="branch or tag"):
+        client_mod._fetch_file(
+            _source(url, "pull/7/head"), "marketplace.json", auth_resolver=_AnonymousResolver()
+        )
+    assert urls == []
+
+
+def test_a_real_branch_with_a_review_like_name_is_fetched(monkeypatch) -> None:
+    _list_refs(monkeypatch, (*_TIPS, ("refs/heads/pull/7/head", _TIP)))
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    client_mod._fetch_file(
+        _source("https://github.com/contoso/catalog", "pull/7/head"),
+        "marketplace.json",
+        auth_resolver=_AnonymousResolver(),
+    )
+
+    assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [["pull/7/head"]]
