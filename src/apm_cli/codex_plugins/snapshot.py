@@ -57,7 +57,7 @@ def _git(root: Path, arguments: list[str], *, input_bytes: bytes | None = None) 
                 "The local native transport snapshot holds unexpected Git state; "
                 "remove it and retry."
             ) from error
-    env = cached_repo_env(git_subprocess_env())
+    env = cached_repo_env(git_subprocess_env(), root)
     clear_git_platform_token_env(env, remove=True)
     clear_git_auth_env(env, remove_helpers=True)
     env.update(
@@ -70,8 +70,6 @@ def _git(root: Path, arguments: list[str], *, input_bytes: bytes | None = None) 
             "GIT_AUTHOR_EMAIL": "apm@localhost",
             "GIT_COMMITTER_NAME": "APM",
             "GIT_COMMITTER_EMAIL": "apm@localhost",
-            # Never let Git look past the snapshot for a repository.
-            "GIT_CEILING_DIRECTORIES": os.path.realpath(root.parent),
         }
     )
     try:

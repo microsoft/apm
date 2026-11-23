@@ -238,8 +238,7 @@ def _sparse_checkout_is_complete(
     from ..utils.git_env import get_git_executable, git_subprocess_env
 
     git_exe = get_git_executable()
-    subprocess_env = git_subprocess_env(env)
-    subprocess_env = cached_repo_env(subprocess_env)
+    subprocess_env = cached_repo_env(git_subprocess_env(env), checkout_dir)
     try:
         # Local index scan only; a short bound limits shard-lock hold time.
         missing = _unmaterialized_paths(git_exe, checkout_dir, env=subprocess_env, timeout=10)
@@ -852,8 +851,7 @@ class GitCache:
             os.chmod(str(staged), 0o700)
 
             git_exe = get_git_executable()
-            subprocess_env = git_subprocess_env(env)
-            subprocess_env = cached_repo_env(subprocess_env)
+            subprocess_env = cached_repo_env(git_subprocess_env(env), staged)
 
             try:
                 # Clone from local bare repo (fast, no network).
@@ -920,7 +918,7 @@ class GitCache:
                         check=True,
                     )
                     subprocess_env = cached_repo_env(
-                        git_network_env(promisor_url, subprocess_env, worktree=staged)
+                        git_network_env(promisor_url, subprocess_env, worktree=staged), staged
                     )
                 if sparse_paths:
                     # Sparse-cone setup BEFORE checkout. Failures raise

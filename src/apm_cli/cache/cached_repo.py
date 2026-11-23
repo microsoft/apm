@@ -33,14 +33,23 @@ _BRANCH_MERGE = re.compile(r"refs/heads/(?!.*(?:\.\.|//|@\{))[^\x00-\x20\x7f~^:?
 _APM_VALUE = re.compile(r"[a-z0-9-]+")
 _SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"((?:[^"\\\n]|\\["\\])*)")?\]')
 _SUBSECTION_ESCAPE = re.compile(r'\\(["\\])')
+# A ref name as Git spells one (git check-ref-format): components never start
+# with "." (so no "..") nor end in ".lock", and never hold "/", "\\", ":" or
+# control characters.
+_REF_COMPONENT = r"(?!\.)(?![^/]*\.lock(?:/|$))[^\x00-\x20\x7f~^:?*\[\\/]+"
+_REF_NAME = re.compile(rf"refs/(?:{_REF_COMPONENT}/)*{_REF_COMPONENT}", re.ASCII)
 # Git trims trailing whitespace when it reads HEAD.
-_HEAD = re.compile(r"(?:ref:[ \t]*refs/[^\x00-\x20\x7f]+|[0-9a-f]{40}|[0-9a-f]{64})\s*")
+_HEAD = re.compile(
+    rf"(?:ref:[ \t]*{_REF_NAME.pattern}|[0-9a-f]{{40}}|[0-9a-f]{{64}})[ \t\r\n\v\f]*",
+    re.ASCII,
+)
 _READ_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_NONBLOCK", 0)
     | getattr(os, "O_BINARY", 0)
 )
+_CONFIG_UNSAFE = re.compile("[\x00-\x08\x0a-\x1f\x7f\x85\u2028\u2029\ufeff]")
 _KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
 _ALLOWED_PROTOCOLS = "file:http:https:ssh"
 
@@ -140,8 +149,13 @@ def _config_entries(path: Path) -> Iterator[tuple[str, str | None, str, str]]:
     """Yield ``(section, subsection, key, value)``; refuse anything unusual."""
     text = _regular_text(path)
     section: tuple[str, str | None] | None = None
-    for raw in text.splitlines():
-        line = raw.strip()
+    # Git splits config lines on "\n" only; anything that would split them
+    # differently here is refused rather than interpreted.
+    for raw in text.split("\n"):
+        raw = raw.removesuffix("\r")
+        if _CONFIG_UNSAFE.search(raw):
+            raise UntrustedCachedRepoError("unsupported character in config")
+        line = raw.strip(" \t")
         if not line or line[0] in "#;":
             continue
         if line.startswith("["):
@@ -201,27 +215,28 @@ def _check_alternates(git_dir: Path, alternates_root: Path | None) -> None:
                 raise UntrustedCachedRepoError("object alternates are chained")
 
 
-_OBJECT_PAYLOAD = re.compile(r"[0-9a-f]{2}|pack")
-
-
 def _raise(error: OSError) -> None:
-    raise error
+    # Git's own background maintenance may remove a lock or temp entry while
+    # it is being listed; an entry that no longer exists cannot be used.
+    if not isinstance(error, FileNotFoundError):
+        raise error
 
 
 def _check_plain_tree(git_dir: Path) -> None:
-    """Refuse any link or special file anywhere in the Git directory.
-
-    Only the contents of the object fan-out and pack directories are skipped
-    (they are read through Git's own object checks); the directories are not.
-    """
-    objects = os.path.join(git_dir, "objects")
+    """Refuse any link or special file anywhere in the Git directory, objects included."""
     for directory, subdirs, names in os.walk(git_dir, onerror=_raise):
         for name in (*subdirs, *names):
-            mode = os.lstat(os.path.join(directory, name)).st_mode
+            try:
+                mode = os.lstat(os.path.join(directory, name)).st_mode
+            except FileNotFoundError:
+                continue
             if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
                 raise UntrustedCachedRepoError(f"{name} is not a plain file or directory")
-        if directory == objects:
-            subdirs[:] = [d for d in subdirs if not _OBJECT_PAYLOAD.fullmatch(d)]
+    # Without these Git does not take the directory as a repository and
+    # searches the enclosing directories instead.
+    for name in ("objects", "refs"):
+        if not (git_dir / name).is_dir():
+            raise UntrustedCachedRepoError(f"{name} is missing")
 
 
 def _check_hooks(git_dir: Path) -> None:
@@ -233,6 +248,11 @@ def _check_hooks(git_dir: Path) -> None:
     for entry in hooks.iterdir():
         if not entry.name.endswith(".sample"):
             raise UntrustedCachedRepoError("active hook present")
+
+
+def is_ref_name(name: str) -> bool:
+    """Whether *name* is a ref Git could hold under ``refs/`` (never a path out of it)."""
+    return _REF_NAME.fullmatch(name) is not None
 
 
 def require_trusted_cached_repo(
@@ -300,7 +320,7 @@ def validate_cached_links(repo: Path, paths: list[str] | None, env: dict[str, st
     from ..utils.git_sparse import validate_materialized_symlinks
 
     validate_materialized_symlinks(
-        "git", repo, paths, env=cached_repo_env(env), extra_git_args=inert_git_args()
+        "git", repo, paths, env=cached_repo_env(env, repo), extra_git_args=inert_git_args()
     )
 
 
@@ -311,9 +331,14 @@ def inert_git_args() -> list[str]:
     return [*git_no_hooks_args(), "-c", "core.fsmonitor=false"]
 
 
-def cached_repo_env(env: dict[str, str]) -> dict[str, str]:
-    """Return *env* fenced for a persisted repository: no prompts, fixed askpass, safe transports."""
+def cached_repo_env(env: dict[str, str], repo: Path | None = None) -> dict[str, str]:
+    """Return *env* fenced for a persisted repository: no prompts, fixed askpass, safe transports.
+
+    With *repo*, Git never searches above it for a repository either.
+    """
     fenced = dict(env)
+    if repo is not None:
+        fenced["GIT_CEILING_DIRECTORIES"] = os.path.realpath(Path(repo).parent)
     fenced["GIT_TERMINAL_PROMPT"] = "0"
     if fenced.get("GIT_ASKPASS") not in {"", "echo"}:
         fenced["GIT_ASKPASS"] = "echo"

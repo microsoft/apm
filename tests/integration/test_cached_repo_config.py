@@ -594,3 +594,305 @@ def test_a_snapshot_apm_creates_passes_the_gate_on_every_later_command(tmp_path:
     assert repaired.content_commit == content
     assert repaired.catalog_commit != content
     assert (root / ".git" / "HEAD").read_text(encoding="ascii").startswith("ref: refs/heads/main")
+
+
+def _gate(checkout: Path, tmp_path: Path) -> None:
+    from apm_cli.cache.cached_repo import require_trusted_cached_repo
+
+    require_trusted_cached_repo(
+        checkout,
+        bare=False,
+        origin_ok=lambda _url: True,
+        alternates_root=tmp_path / "cache" / "git" / "db_v1",
+    )
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize("kind", ["symlink", "fifo"])
+@pytest.mark.parametrize("where", ["objects/ab/" + "c" * 38, "objects/pack/pack-x.pack"])
+def test_object_payload_entries_must_be_plain_files(tmp_path: Path, where: str, kind: str) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    planted = checkout / ".git" / where
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "fifo":
+        os.mkfifo(planted)
+    else:
+        outside = tmp_path / "outside-object"
+        outside.write_bytes(b"x")
+        planted.symlink_to(outside)
+    outcome: list[BaseException | None] = []
+
+    def check() -> None:
+        try:
+            _gate(checkout, tmp_path)
+            outcome.append(None)
+        except UntrustedCachedRepoError as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=check, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive(), f"the gate blocked on {where}"
+    assert outcome and isinstance(outcome[0], UntrustedCachedRepoError)
+    assert planted.is_symlink() or planted.is_fifo()
+
+
+@pytest.mark.parametrize("name", ["objects", "refs"])
+def test_a_repository_without_its_object_or_ref_directory_is_refused(
+    tmp_path: Path, name: str
+) -> None:
+    import shutil
+
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    shutil.rmtree(checkout / ".git" / name)
+
+    with pytest.raises(UntrustedCachedRepoError, match=f"{name} is missing"):
+        _gate(checkout, tmp_path)
+    assert not (checkout / ".git" / name).exists()
+
+
+def test_a_symbolic_head_outside_refs_is_refused_and_never_read(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError
+    from apm_cli.cache.integrity import verify_checkout_sha
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    (tmp_path / "outside.txt").write_text("outsidecontent\n", encoding="ascii")
+    head = checkout / ".git" / "HEAD"
+    relative = os.path.relpath(tmp_path / "outside.txt", checkout / ".git" / "refs")
+    head.write_text(f"ref: refs/{relative}\n", encoding="ascii")
+
+    with pytest.raises(UntrustedCachedRepoError):
+        _gate(checkout, tmp_path)
+    with caplog.at_level("WARNING", logger="apm_cli.cache.integrity"):
+        assert verify_checkout_sha(checkout, first) is False
+    assert "outsidecon" not in caplog.text
+    assert head.read_text(encoding="ascii").startswith("ref: refs/..")
+
+
+@pytest.mark.parametrize("name", ["objects", "refs"])
+def test_a_broken_checkout_inside_a_project_never_reaches_the_project(
+    tmp_path: Path, name: str
+) -> None:
+    import shutil
+
+    from apm_cli.cache.cached_repo import cached_repo_env
+    from apm_cli.cache.git_cache import _pin_sparse_completeness
+    from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
+
+    project = tmp_path / "project"
+    _git("init", "-q", "-b", "main", "--template=", str(project))
+    config_before = (project / ".git" / "config").read_bytes()
+    origin, first, _second = _origin(tmp_path)
+    cache_root = project / ".apm-cache"
+    checkout = GitCache(cache_root).get_checkout(str(origin), None, locked_sha=first)
+    shutil.rmtree(checkout / ".git" / name)
+
+    rebuilt = GitCache(cache_root).get_checkout(str(origin), None, locked_sha=first)
+    assert (rebuilt / ".git" / name).is_dir()
+    shutil.rmtree(rebuilt / ".git" / name)
+    _pin_sparse_completeness(
+        get_git_executable(), rebuilt, env=cached_repo_env(git_subprocess_env(None), rebuilt)
+    )
+
+    assert (project / ".git" / "config").read_bytes() == config_before
+    assert not (project / ".git" / "index").exists()
+
+
+@pytest.mark.parametrize(
+    "char", ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\r", "\x00"]
+)
+@pytest.mark.parametrize("key", ["url", "merge"])
+def test_config_lines_are_split_only_where_git_splits_them(
+    tmp_path: Path, char: str, key: str
+) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    config = checkout / ".git" / "config"
+    if key == "url":
+        planted = f'[remote "origin"]\n\turl = {origin}{char}[core]\n'
+    else:
+        planted = f'[branch "main"]\n\tmerge = refs/heads/main{char}[core]\n'
+    with config.open("a", encoding="utf-8", newline="") as handle:
+        handle.write(planted)
+
+    with pytest.raises(UntrustedCachedRepoError):
+        _gate(checkout, tmp_path)
+    assert char.encode("utf-8") in config.read_bytes()
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "../../../../elsewhere/objects",
+        "C:/elsewhere/objects",
+        "//host/share/objects",
+        "\\\\host\\share\\objects",
+        "OTHER_SHARD",
+    ],
+    ids=["relative-up", "drive", "unc-slash", "unc-backslash", "other-shard-chained"],
+)
+def test_alternates_never_reach_outside_the_cache(tmp_path: Path, entry: str) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    db_root = tmp_path / "cache" / "git" / "db_v1"
+    if entry == "OTHER_SHARD":
+        other = db_root / "other-shard" / "objects"
+        (other / "info").mkdir(parents=True)
+        (other / "info" / "alternates").write_text(str(tmp_path / "x") + "\n", encoding="ascii")
+        entry = os.path.relpath(other, checkout / ".git" / "objects")
+    alternates = checkout / ".git" / "objects" / "info" / "alternates"
+    alternates.parent.mkdir(parents=True, exist_ok=True)
+    alternates.write_text(entry + "\n", encoding="ascii")
+
+    with pytest.raises(UntrustedCachedRepoError):
+        _gate(checkout, tmp_path)
+    assert alternates.read_text(encoding="ascii") == entry + "\n"
+
+
+@pytest.mark.parametrize("absolute", [True, False], ids=["absolute", "relative"])
+def test_a_gitfile_checkout_is_refused(tmp_path: Path, absolute: bool) -> None:
+    import shutil
+
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    elsewhere = tmp_path / "elsewhere.git"
+    shutil.move(str(checkout / ".git"), str(elsewhere))
+    target = str(elsewhere) if absolute else os.path.relpath(elsewhere, checkout)
+    (checkout / ".git").write_text(f"gitdir: {target}\n", encoding="ascii")
+
+    with pytest.raises(UntrustedCachedRepoError):
+        _gate(checkout, tmp_path)
+    assert (checkout / ".git").is_file()
+
+
+def _plant_special(git_dir: Path, case: str, tmp_path: Path) -> Path:
+    outside = tmp_path / "outside"
+    outside.mkdir(exist_ok=True)
+    (outside / "file").write_text("x\n", encoding="ascii")
+    plants = {
+        "fifo-in-refs": lambda: (
+            os.mkfifo(git_dir / "refs" / "heads" / "pipe") or (git_dir / "refs" / "heads" / "pipe")
+        ),
+        "fifo-in-logs": lambda: (
+            ((git_dir / "logs").mkdir(exist_ok=True) or os.mkfifo(git_dir / "logs" / "pipe"))
+            or (git_dir / "logs" / "pipe")
+        ),
+        "symlink-loop": lambda: (git_dir / "loop").symlink_to(git_dir / "loop") or git_dir / "loop",
+        "hooks-link": lambda: (
+            (
+                shutil_rmtree(git_dir / "hooks"),
+                (git_dir / "hooks").symlink_to(outside, target_is_directory=True),
+            )
+            and git_dir / "hooks"
+        ),
+        "config-link": lambda: _swap_for_link(git_dir / "config", outside / "file"),
+        "packed-refs-link": lambda: _swap_for_link(git_dir / "packed-refs", outside / "file"),
+        "index-link": lambda: _swap_for_link(git_dir / "index", outside / "file"),
+        "head-fifo": lambda: _swap_for_fifo(git_dir / "HEAD"),
+        "head-empty": lambda: (
+            (git_dir / "HEAD").write_text("", encoding="ascii") or git_dir / "HEAD"
+        ),
+        "head-missing": lambda: (git_dir / "HEAD").unlink() or git_dir / "HEAD",
+        "head-nul": lambda: _write(git_dir / "HEAD", b"ref: refs/heads/main\x00\n"),
+    }
+    return plants[case]()
+
+
+def shutil_rmtree(path: Path) -> None:
+    import shutil
+
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _write(path: Path, data: bytes) -> Path:
+    path.write_bytes(data)
+    return path
+
+
+def _swap_for_link(path: Path, target: Path) -> Path:
+    if path.exists():
+        path.unlink()
+    path.symlink_to(target)
+    return path
+
+
+def _swap_for_fifo(path: Path) -> Path:
+    path.unlink()
+    os.mkfifo(path)
+    return path
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize(
+    "case",
+    [
+        "fifo-in-refs",
+        "fifo-in-logs",
+        "symlink-loop",
+        "hooks-link",
+        "config-link",
+        "packed-refs-link",
+        "index-link",
+        "head-fifo",
+        "head-empty",
+        "head-missing",
+        "head-nul",
+    ],
+)
+def test_special_or_incomplete_git_state_is_refused_without_blocking(
+    tmp_path: Path, case: str
+) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    planted = _plant_special(checkout / ".git", case, tmp_path)
+    outcome: list[BaseException | None] = []
+
+    def check() -> None:
+        try:
+            _gate(checkout, tmp_path)
+            outcome.append(None)
+        except UntrustedCachedRepoError as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=check, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive(), f"the gate blocked on {case}"
+    assert outcome and isinstance(outcome[0], UntrustedCachedRepoError), case
+    assert planted.is_symlink() or planted.exists() or case == "head-missing"
+
+
+def test_an_entry_git_removes_while_it_is_listed_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    lock = checkout / ".git" / "objects" / "maintenance.lock"
+    lock.write_text("", encoding="ascii")
+    real_lstat = os.lstat
+
+    def lstat_after_removal(path, *args, **kwargs):
+        if str(path).endswith("maintenance.lock"):
+            lock.unlink(missing_ok=True)  # Git's background maintenance finished
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", lstat_after_removal)
+    _gate(checkout, tmp_path)
+    assert not lock.exists()

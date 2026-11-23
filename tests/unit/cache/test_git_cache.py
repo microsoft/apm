@@ -202,6 +202,8 @@ class TestGitCacheGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (checkout_dir / ".git" / "objects").mkdir()
+        (checkout_dir / ".git" / "refs").mkdir()
         (checkout_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
@@ -441,6 +443,8 @@ class TestCheckoutWriteDedup:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (final_dir / ".git" / "objects").mkdir()
+        (final_dir / ".git" / "refs").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
@@ -511,6 +515,8 @@ class TestCheckoutWriteDedup:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (final_dir / ".git" / "objects").mkdir()
+        (final_dir / ".git" / "refs").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
