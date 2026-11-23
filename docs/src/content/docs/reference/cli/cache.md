@@ -19,12 +19,18 @@ apm cache prune [--days N]
 ## Description
 
 `apm cache` groups three subcommands that operate on the local cache
-root. The cache holds two independent stores:
+root. The cache holds three independent stores:
 
 - **Git cache** -- bare repository databases plus per-SHA worktree
   checkouts, keyed by resolved commit.
 - **HTTP cache** -- conditional-GET responses for MCP registry
   endpoints.
+- **Deploy store** -- the exact bytes of every file a successful install
+  deployed, keyed by the file's `deployed_file_hashes` digest in
+  `apm.lock.yaml`. Every read re-hashes the entry, and a mismatch counts
+  as a miss. A refused or failed install stores nothing. Entries above
+  4 MiB are not stored, and when the store passes 256 MiB the least
+  recently used entries are evicted down to 80% of that.
 
 A fresh, integrity-verified HTTP cache hit updates only the entry
 directory's `mtime`. This recency marker drives LRU eviction; it does
@@ -76,7 +82,7 @@ Output:
 
 ### `apm cache clean`
 
-Remove every entry from both the git and HTTP caches. Prompts for
+Remove every entry from the git cache, the HTTP cache and the deploy store. Prompts for
 confirmation unless a skip flag is passed.
 
 ```bash
@@ -184,6 +190,7 @@ Inside the cache root:
                      #                                      16 hex of
                      #                                      sha256(paths))
   http_v1/           # conditional-GET response cache
+  deploy_v1/         # deployed file bytes: <hex[:2]>/<hex>
 ```
 
 The `full/` and `sparse-<variant>/` subdirs let two consumers of the

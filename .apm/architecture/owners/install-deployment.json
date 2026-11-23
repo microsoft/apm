@@ -43,12 +43,13 @@
     {
       "id": "legacy-mcp-ownership-key-migration",
       "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption; machine-local per-entry MCP write evidence and its use when apm.lock.yaml is absent",
-      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints) + install/mcp/write_receipts.py (per-entry write evidence bound like the deployment receipts through DeploymentMaterializationSession.binds/binding; without a lockfile it retires only entries it proves unchanged and keeps and reports the rest, read by apm audit --ci kept-mcp-entries)",
+      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints) + install/mcp/write_receipts.py (per-entry write evidence bound like the deployment receipts through DeploymentMaterializationSession.binds/binding; without a lockfile it retires only entries it proves unchanged and keeps and reports the rest, read by apm audit --ci kept-mcp-entries) + integration/config_file_provenance.py (single owner of deleting a native MCP or hook config file APM emptied: delete_emptied_config deletes only a file this machine recorded APM creating, still a bare skeleton, with the record outside any VCS tree; recorded_config_write records creation at each write, #4867)",
       "selectors": [
         "src/apm_cli/install/mcp/ownership.py",
         "src/apm_cli/install/mcp/native_entry.py",
         "src/apm_cli/install/mcp/retirement.py",
-        "src/apm_cli/install/mcp/write_receipts.py"
+        "src/apm_cli/install/mcp/write_receipts.py",
+        "src/apm_cli/integration/config_file_provenance.py"
       ],
       "guards": [
         "install-deployment-mcp-ownership-migration",
@@ -61,6 +62,7 @@
       "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; each receipt key keeps a short history of earlier hashes this installation wrote (core/receipt_history.py, read only by the session's trusted-baseline decision, never deletion evidence; #4428); cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
+        "src/apm_cli/core/_deployment_queries.py",
         "src/apm_cli/core/legacy_lock_evidence.py",
         "src/apm_cli/core/receipt_history.py",
         "src/apm_cli/integration/skill_support.py",
@@ -131,9 +133,15 @@
     },
     {
       "id": "install-entry-routing",
-      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage",
+      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage; the one exception is the locked fast path (install/fast_entry.py then install/diff_apply.py), which serves only a bare 'apm install' or 'apm install --frozen', writes only files the verified lockfile, caches and package-bound records prove, never deletes, and runs the full pipeline on any doubt",
       "owner": "install/pipeline_entry.py (pipeline_preview, PipelinePreview, record_preview_resolution): run_install_pipeline is entered only through install/service.py InstallService, from a closed list of _install_apm_dependencies callers (commands/install.py, update.py, lock.py, deps/cli.py); dry_run=True stops before the first write and the preview projects its plan; install --mcp and apm mcp install hand their server to install/service_integration.py run_service_integrations, whose run_mcp_integration installs and records only that entry (install/mcp/entry_integration.py), so the command keeps no integrator or lockfile writes",
-      "selectors": ["src/apm_cli/install/pipeline_entry.py"],
+      "selectors": [
+        "src/apm_cli/install/diff_apply.py",
+        "src/apm_cli/install/fast_entry.py",
+        "src/apm_cli/install/fast_output.py",
+        "src/apm_cli/install/noop_diff.py",
+        "src/apm_cli/install/pipeline_entry.py"
+      ],
       "guards": ["install-deployment-install-entry-routing"]
     },
     {
@@ -198,12 +206,13 @@
     },
     {
       "id": "bundle-native-layout-lowering",
-      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied",
-      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name) consumed by install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent",
+      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied, which one rendering of a primitive a plugin bundle carries and a target deploys, and which packed instructions convert to a rule format",
+      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name, PLUGIN_RENDERING_PREFERENCE, deployed_rendering_extension, deployed_file_extension, superseded_plugin_renderings) consumed by bundle/plugin_exporter.py and install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id, superseded_bundle_renderings, bundle_rule_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent; packed instructions convert in install/local_bundle_renderings.py through InstructionIntegrator.convert_rule_content",
       "selectors": [
         "src/apm_cli/bundle/plugin_layout.py",
         "src/apm_cli/install/local_bundle_paths.py",
-        "src/apm_cli/install/local_bundle_agents.py"
+        "src/apm_cli/install/local_bundle_agents.py",
+        "src/apm_cli/install/local_bundle_renderings.py"
       ],
       "guards": ["install-deployment-bundle-native-layout"]
     },
@@ -249,6 +258,7 @@
       "guards": [
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
+        "install-deployment-cleanup-spelling-aliases",
         "install-deployment-cleanup-target-roots",
         "install-deployment-cleanup-retains-kept-members",
         "install-deployment-codex-agent-link-resolution",
@@ -481,6 +491,13 @@
       "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
       "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py"],
       "guards": ["install-deployment-claude-agents-md-routing"]
+    },
+    {
+      "id": "mcp-lsp-server-name-rule",
+      "decision": "Which MCP and LSP server names are valid: one character allowlist and the reserved object keys __proto__, constructor and prototype (any case), checked before any config write (#4984)",
+      "owner": "models/dependency/server_names.py (validate_server_name, RESERVED_OBJECT_KEYS); consumers: models/dependency/mcp.py MCPDependency.validate, models/dependency/lsp.py LSPDependency.validate",
+      "selectors": ["src/apm_cli/models/dependency/server_names.py"],
+      "guards": ["install-deployment-server-name-rule"]
     }
   ]
 }

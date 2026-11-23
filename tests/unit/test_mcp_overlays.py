@@ -550,6 +550,36 @@ class TestMCPDependencyHardening:
         dep = MCPDependency.from_string("valid-name")
         assert dep.name == "valid-name"
 
+    @pytest.mark.parametrize(
+        "name", ["__proto__", "constructor", "prototype", "__PROTO__", "Constructor", "PROTOTYPE"]
+    )
+    def test_reserved_object_key_name_rejected(self, name):
+        with pytest.raises(ValueError, match=rf"Invalid MCP dependency name '{name}': reserved"):
+            MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    @pytest.mark.parametrize("name", ["proto", "my-constructor", "prototype-server", "_proto_"])
+    def test_name_containing_reserved_word_accepted(self, name):
+        MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    @pytest.mark.parametrize(
+        "name", ["__proto__\n", "io.github.acme/constructor", "acme/__PROTO__", "x/Prototype"]
+    )
+    def test_reserved_key_variant_rejected(self, name):
+        with pytest.raises(ValueError, match=r"(?s)Invalid MCP dependency name .*: reserved"):
+            MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    def test_trailing_newline_ordinary_name_still_accepted(self):
+        name = "ok-name\n"
+        MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    @pytest.mark.parametrize(
+        ("name", "registry"), [("@scope/constructor", None), ("acme/constructor", False)]
+    )
+    def test_name_whose_config_key_is_not_reserved_accepted(self, name, registry):
+        # A scoped name and a self-defined name keep their full name as the config key.
+        dep = MCPDependency(name=name, registry=registry, url="https://example.com/mcp")
+        dep.validate(strict=False)
+
     def test_from_string_fails_for_invalid_name(self):
         with pytest.raises(ValueError, match="Invalid MCP dependency name"):
             MCPDependency.from_string("bad name with space")

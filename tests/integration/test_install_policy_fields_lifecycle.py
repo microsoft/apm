@@ -220,7 +220,12 @@ _MCP_ENTRY = ("--mcp", "srv", "--url", "https://mcp.example.com/mcp")
 
 
 def _entry(world: World, entry: str) -> tuple[str, ...]:
-    return _MCP_ENTRY if entry == "mcp" else (world.packages["p-skill:git"].spec,)
+    """The install arguments of one entry: ``mcp``, ``bundle`` or a dependency."""
+    if entry == "mcp":
+        return _MCP_ENTRY
+    if entry == "bundle":
+        return (world.packages["p-exec:bundle"].spec,)
+    return (world.packages["p-skill:git"].spec,)
 
 
 @pytest.mark.parametrize("entry", ["mcp", "dependency"])
@@ -541,3 +546,98 @@ def test_max_depth_judges_the_resolved_graph_not_the_old_lockfile(
     _assert_ok(world, "install")
 
     assert "p-child" not in (world.project / "apm.lock.yaml").read_text(encoding="utf-8")
+
+
+# -- #4957: warn and --dry-run parity on every install entry, --root cleanup ---
+#
+# Under enforcement: warn every entry (pipeline, --mcp, local bundle) prints the
+# manifest.scripts and unmanaged_files warnings the pipeline prints and exits 0;
+# --dry-run previews each verdict read-only; a refused --root install leaves no
+# directory it created.
+
+
+def _offend(world: World) -> None:
+    """A scripts: block and a governed file no lock row claims."""
+    _add_scripts(world.project / "apm.yml")
+    path = world.project / _HAND_WRITTEN
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# hand written\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("entry", ["pipeline", "mcp", "bundle"])
+def test_warn_policy_warns_on_every_install_entry(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "fields-warn")
+    _seed(world)
+    _offend(world)
+
+    text = _text(_assert_ok(world, "install", *_entry(world, entry)))
+
+    assert _SCRIPTS[0] in text, text
+    assert _UNMANAGED[0] in text, text
+
+
+@pytest.mark.parametrize(
+    ("entry", "variant", "preview"),
+    [
+        ("mcp", "fields-warn", "Policy warning"),
+        ("bundle", "fields-warn", "Policy warning"),
+        ("bundle", "scripts-deny", "Would be blocked by policy"),
+    ],
+)
+def test_dry_run_previews_every_entry_verdict(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+    variant: str,
+    preview: str,
+) -> None:
+    world = lifecycle_world
+    use_policy(world, variant)
+    _seed(world)
+    _add_scripts(world.project / "apm.yml")
+    before = _state(world, None, keep_git_cache=False)
+
+    text = _text(_assert_ok(world, "install", "--dry-run", *_entry(world, entry)))
+
+    assert f"{preview}:" in text, text
+    assert _SCRIPTS[0] in text, text
+    assert _state(world, None, keep_git_cache=False) == before
+
+
+def test_a_refused_root_install_leaves_no_directory_it_created(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "scripts-deny")
+    _seed(world)
+    _add_scripts(world.project / "apm.yml")
+    target = world.root / "missing" / "deploy"
+
+    _assert_refused(world, _SCRIPTS, "--root", str(target), world.packages["p-skill:git"].spec)
+
+    assert not (world.root / "missing").exists()
+
+
+def test_warn_policy_at_the_root_destination_warns_on_an_mcp_install(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """Only the --root destination carries a warn policy and holds an unmanaged file."""
+    world = lifecycle_world
+    target = world.root / "redirected"
+    target.mkdir()
+    _govern(world, target, "fields-warn")
+    # --mcp records the server in the destination's apm.yml.
+    (target / "apm.yml").write_bytes((world.project / "apm.yml").read_bytes())
+    path = target / _HAND_WRITTEN
+    path.parent.mkdir(parents=True)
+    path.write_text("# hand written\n", encoding="utf-8")
+
+    text = _text(_assert_ok(world, "install", "--root", str(target), *_MCP_ENTRY))
+
+    assert _UNMANAGED[0] in text, text
+    assert _HAND_WRITTEN in text, text
+    assert path.read_text(encoding="utf-8") == "# hand written\n"
+    assert (target / ".mcp.json").is_file()

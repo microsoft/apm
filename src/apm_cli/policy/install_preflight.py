@@ -264,13 +264,25 @@ def prefetch_identity_policy(policy_root: Path, *, no_policy: bool = False):
     Returns ``None`` when policy is disabled, unusable or not blocking;
     the install gate then reports the outcome as before.
     """
+    policy = enforced_entry_policy(policy_root, no_policy=no_policy)
+    if policy is None or policy.enforcement != "block":
+        return None
+    return policy
+
+
+def enforced_entry_policy(policy_root: Path, *, no_policy: bool = False):
+    """The org policy an install entry reports on: ``block`` or ``warn``, else ``None`` (#4957).
+
+    An entry outside the dependency pipeline (``--mcp``, a local bundle)
+    reports the verdicts the pipeline reports with this policy.
+    """
     from .discovery import policy_disabled_by_env
     from .outcome_routing import resolve_trust_policy
 
     if no_policy or policy_disabled_by_env():
         return None
     policy = resolve_trust_policy(policy_root, announce=False, raise_blocking_errors=False)
-    if policy is None or policy.enforcement != "block":
+    if policy is None or policy.enforcement not in ("block", "warn"):
         return None
     return policy
 

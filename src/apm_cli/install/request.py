@@ -93,3 +93,12 @@ class InstallRequest:
     # by ``apm update`` to render the plan and prompt the user.
     plan_callback: Callable[[UpdatePlan], bool] | None = None
     transaction: InstallTransaction | None = None
+
+    def hold_deploy_evidence(self) -> None:
+        """Hand the deploy-store evidence this install staged to its transaction.
+
+        Deployed bytes enter the store only when the transaction commits; it
+        holds them from here, before a post-install script resets the memos.
+        """
+        if self.transaction is not None:
+            self.transaction.hold_deploy_evidence()
