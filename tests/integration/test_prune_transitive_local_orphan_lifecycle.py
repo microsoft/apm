@@ -235,10 +235,33 @@ def test_prune_with_a_partial_graph_keeps_the_orphan_and_reports(
 
     assert "_local/e" in _rows(world)
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
-    assert "Kept _local/e" in pruned, pruned
-    assert "could not be read" in pruned, pruned
+    assert "Retained _local/e: the dependency graph could not be read completely" in pruned, pruned
+    assert pruned.count("Retained _local/e:") == 1, pruned
 
 
+def test_prune_keeps_only_the_local_row_whose_anchor_cannot_resolve(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A lock row whose declaring parent is already gone is kept and named; the rest is pruned."""
+    world = _world(tmp_path, apm_binary_path)
+    lock_path = world.project / "apm.lock.yaml"
+    lock = LockFile.read(lock_path)
+    assert lock is not None
+    (d_key,) = [key for key, dep in lock.dependencies.items() if dep.repo_url == "_local/d"]
+    lock.dependencies.pop(d_key)
+    lock.write(lock_path)
+
+    pruned = _output(world.apm("prune"))
+
+    assert "Retained _local/e: the dependency graph could not be read completely" in pruned, pruned
+    assert "Retained _local/f:" not in pruned, pruned
+    rows = _rows(world)
+    assert {"_local/a", "_local/e", "_local/f"} == set(rows), sorted(rows)
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.windows_compat
 @pytest.mark.parametrize(
     ("e_dir", "f_dir"),
     [
@@ -264,6 +287,7 @@ def test_prune_matches_exact_lock_keys_for_name_variants(
     _assert_frozen_then_no_frozen_converge(world)
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize("linked", ["e", "f"])
 def test_prune_through_a_symlinked_or_junctioned_local_dir(
     tmp_path: Path, apm_binary_path: Path, linked: str
@@ -285,6 +309,7 @@ def test_prune_through_a_symlinked_or_junctioned_local_dir(
     _assert_frozen_then_no_frozen_converge(world)
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize(
     ("e_spells_f", "a_spells_f"),
     [

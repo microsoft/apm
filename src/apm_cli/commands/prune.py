@@ -216,7 +216,7 @@ def prune(ctx, dry_run):
         for dep_key, reason in decision.unverified_keys.items():
             locked = lockfile.dependencies.get(dep_key) if lockfile is not None else None
             logger.warning(
-                f"Kept {locked.repo_url if locked is not None else dep_key}: the dependency "
+                f"Retained {locked.repo_url if locked is not None else dep_key}: the dependency "
                 "graph could not be read completely, so prune cannot prove no package "
                 f"still needs it ({reason}). Restore the unreadable package, then prune again."
             )
