@@ -3353,6 +3353,14 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
+  "T1|OP=audit|PRIM=bin|GATE=allowed": {
+   "family": "T1",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
   "T1|OP=audit|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
     "G1|audit-ci|bin|denied-dependency|project"
@@ -3363,6 +3371,37 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+  },
+  "T1|OP=audit|PRIM=bin|GATE=denied-executable": {
+   "family": "T1",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
+  },
+  "T1|OP=audit|PRIM=bin|GATE=none": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T1|OP=audit|PRIM=bin|GATE=revoked-after-deploy": {
+   "family": "T1",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T1|OP=audit|PRIM=bin|GATE=unapproved-exec": {
+   "family": "T1",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=audit|PRIM=canvas|GATE=allowed": {
    "family": "T1",
@@ -27033,21 +27072,6 @@
   "U-USER-SCOPE-ORG-POLICY": "7839bf8d042c59baa029c1323413078d972eebb0c45edfd8e8b14106957fd513"
  },
  "removed": {
-  "T1|OP=audit|PRIM=bin|GATE=allowed": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=audit|PRIM=bin|GATE=denied-executable": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=audit|PRIM=bin|GATE=none": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=audit|PRIM=bin|GATE=revoked-after-deploy": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=audit|PRIM=bin|GATE=unapproved-exec": [
-   "U-BIN-OPS"
-  ],
   "T1|OP=bundle-install|PRIM=bin|GATE=allowed": [
    "U-BIN-OPS"
   ],
@@ -28289,9 +28313,9 @@
   ]
  },
  "rows": {
-  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "069735b50a32967c7f248d455be4e5d93c73ed83aa9d15ce6c27afd2212cd617",
-  "generated_cover-02-skill-exec-canvas-local-multi-deny-mcp.yaml": "4a6eb824f12c87a2c4f25ce68ee9b9366e9bbbaf52306a1030824037ce359555",
-  "generated_cover-03-skill-exec-git-multi-unapproved-mcp.yaml": "26cef5986ad5c8206c3cc87f8dc3acbb1bb9f8b658e86788145200c1af1be212",
+  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "dc7e358f586deeceee7164c25aee686eb97b53180be631cb70698aa9abbeea81",
+  "generated_cover-02-skill-exec-canvas-local-multi-deny-mcp.yaml": "6ca15634aa28ada382be92cef69b5204cf3d0cd7708aec2874ae8f89f4cd9730",
+  "generated_cover-03-skill-exec-git-multi-unapproved-mcp.yaml": "cc4d992163a35133da14c4f8dad0390908d8898fa43b475586c74000033480fe",
   "generated_cover-04-lsp-canvas-local-multi-unapproved-mcp.yaml": "d1bad85295426b8f97e8520944da9bec38217a569926d51c2388017ed1c6c692",
   "generated_cover-05-exec-lsp-git-single-deny-mcp.yaml": "54a875546bcdfd635e9e5e7096389eb6632891a5d3fd9e0440841b89337f6074",
   "generated_cover-06-exec-git-single-approve-mcp.yaml": "78d18dc8abfaf4e517057d7339de234041dccc2c779c818e507094f23fb12399",
@@ -28337,7 +28361,7 @@
    "evidence": [
     "src/apm_cli/install/exec_gate.py::plugin_bin_deployable"
    ],
-   "text": "a gate level of PRIM=bin under audit, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): a loose bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form and write no plugin root, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). prune is not listed: it retires a trusted project-scope whole plugin's root, bin/ included (#4559, #4808). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. Under marketplace that org-policy level stays baseline (Q&L ruling 2026-11-22): it exits 0 under the deny and bin/ never deploys at project scope (U_BIN_PIN), so any absence witness there is vacuous"
+   "text": "a gate level of PRIM=bin under pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): a loose bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form and write no plugin root, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). prune is not listed: it retires a trusted project-scope whole plugin's root, bin/ included (#4559, #4808); nor is audit: its drift replay fingerprints that root (drift.verify_claude_native_cache). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. Under marketplace that org-policy level stays baseline (Q&L ruling 2026-11-22): it exits 0 under the deny and bin/ never deploys at project scope (U_BIN_PIN), so any absence witness there is vacuous"
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
