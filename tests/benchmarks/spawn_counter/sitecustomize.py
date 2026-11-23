@@ -15,6 +15,18 @@ _LOG = os.environ.get("APM_PERF_SPAWN_LOG")
 
 if _LOG:
     _counts = {}
+    _git_subcommands = {}
+
+    def _git_subcommand(argv):
+        """The subcommand of a git argv list, past global options and their values."""
+        items = iter(argv[1:])
+        for item in items:
+            item = item.decode(errors="replace") if isinstance(item, bytes) else str(item)
+            if item in ("-c", "-C"):
+                next(items, None)
+            elif not item.startswith("-"):
+                return item
+        return "?"
 
     def _program(command_line):
         """The first program of a command line; Windows quotes a path with spaces."""
@@ -57,9 +69,17 @@ if _LOG:
         if os.name == "nt" and name.lower().endswith(".exe"):
             name = name[:-4]
         _counts[name] = _counts.get(name, 0) + 1
+        if name == "git" and event == "subprocess.Popen" and not command_line:
+            sub = _git_subcommand(list(args[1]))
+            _git_subcommands[sub] = _git_subcommands.get(sub, 0) + 1
 
     def _flush():
-        record = {"pid": os.getpid(), "spawns": _counts, "modules": len(sys.modules)}
+        record = {
+            "pid": os.getpid(),
+            "spawns": _counts,
+            "git_subcommands": _git_subcommands,
+            "modules": len(sys.modules),
+        }
         with open(_LOG, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
 

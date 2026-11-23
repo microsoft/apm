@@ -753,21 +753,26 @@ class Sample:
     spawns: dict = field(default_factory=dict)
     modules: int = 0
     routes: dict = field(default_factory=dict)
+    git_subcommands: dict = field(default_factory=dict)
 
 
-def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
-    """Spawns by executable summed over every Python process, plus the max module count."""
+def _read_spawn_log(path: Path | None) -> tuple[dict, int, dict]:
+    """Spawns by executable and git spawns by subcommand, summed over every Python
+    process, plus the max module count."""
     if path is None or not path.is_file():
-        return {}, 0
+        return {}, 0, {}
     spawns: dict[str, int] = {}
+    git_subcommands: dict[str, int] = {}
     modules = 0
     for line in path.read_text(encoding="utf-8").splitlines():
         record = json.loads(line)
         modules = max(modules, record["modules"])
         for name, count in record["spawns"].items():
             spawns[name] = spawns.get(name, 0) + count
+        for name, count in record.get("git_subcommands", {}).items():
+            git_subcommands[name] = git_subcommands.get(name, 0) + count
     path.unlink()
-    return dict(sorted(spawns.items())), modules
+    return dict(sorted(spawns.items())), modules, dict(sorted(git_subcommands.items()))
 
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
@@ -787,9 +792,10 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
             output = f"$ apm {' '.join(argv)}\n{tail}"
             break
     wall = time.perf_counter() - start
-    spawns, modules = _read_spawn_log(ctx.spawn_log)
+    spawns, modules, git_subcommands = _read_spawn_log(ctx.spawn_log)
     sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
+    sample.git_subcommands = git_subcommands
     sample.routes = _routes(_observations(ctx.world)[seen:])
     return sample, output
 
