@@ -739,6 +739,7 @@ def check_target_file_contraction(provider: FactsProvider) -> tuple[Violation, .
 
 
 _DEPLOYMENT_LEDGER = "src/apm_cli/core/deployment_ledger.py"
+_DEPLOYMENT_REANCHOR = "src/apm_cli/core/deployment_reanchor.py"
 
 
 _OWNER_ATTRIBUTES = frozenset({"owners", "active_owner", "deployment_ledger"})
@@ -1478,6 +1479,12 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "integration_cleanup.materialization_session.bind_committed_claims(lockfile)",
         ),
     }
+    # A re-anchored owner keeps its receipts' hash history: same bytes, same writer (#4889).
+    requirements[_DEPLOYMENT_REANCHOR] = (
+        "class _ReanchorSession(DeploymentMaterializationSession):",
+        "or self._bindings.get(claim.locator.key) != expected",
+        "self._bindings[key] = [renamed.active_owner, self._claim_signature(value)]",
+    )
     for path, snippets in requirements.items():
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
@@ -1485,6 +1492,12 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
         if not failures and not all(snippet in text for snippet in snippets):
             findings.append(
                 _summary(rule_id, path, "Local materialization evidence must use the guarded owner")
+            )
+        if not failures and path == _DEPLOYMENT_REANCHOR and "_history.forget" in text:
+            findings.append(
+                _summary(
+                    rule_id, path, "A re-anchor must carry receipt hash history, never forget it"
+                )
             )
     # Every file-primitive writer reports its final-rendered writes, and the
     # install service records them for each integrator call (#3701).

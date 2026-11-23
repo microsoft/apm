@@ -190,12 +190,13 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
     if not plan or not plan.renames:
         return
     from ...core.deployment_reanchor import rename_receipt_owners
+    from ...core.remediation import RESYNC_DEPLOYED
     from ...deps.lockfile import LockFile
     from .local_reanchor import roll_back
 
     committed = LockFile.read(lockfile_path)
     renamed = {new for old, new in plan.renames.items() if old != new}
-    if committed is None or not renamed <= set(committed.dependencies):
+    if committed is None or not renamed <= committed.dependencies.keys():
         return  # the lock was not committed; receipts still match it
     try:
         rename_receipt_owners(deploy_root, scope, committed, plan.renames)
@@ -207,7 +208,7 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
             logger.error(
                 f"Deployment receipts were not moved to the re-anchored package ({exc}), "
                 f"and apm.yml and apm.lock.yaml could not be restored ({restore_exc}); "
-                "every file is kept. Run 'apm install' to rebuild the lockfile."
+                f"every file is kept. {RESYNC_DEPLOYED.sentence()}"
             )
             sys.exit(1)
         logger.error(

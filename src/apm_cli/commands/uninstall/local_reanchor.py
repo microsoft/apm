@@ -57,7 +57,7 @@ def plan_local_reanchor(
     declaration goes; *label* names one for messages. Every local row the
     walk re-parents also gets the ``declaring_parent`` install records.
     """
-    from ...deps.local_identity import portable_anchor_identity
+    from ...deps.local_identity import transitive_local_identity
 
     local_roots = [
         key
@@ -74,8 +74,7 @@ def plan_local_reanchor(
             f"{label(local_roots[0])} stays, but the packages that still need it could not "
             f"all be read offline{detail}; re-anchoring it never fetches"
         )
-    renames: dict[str, str] = {}
-    identities: dict[str, tuple[str, str, str]] = {}
+    identities: dict[str, tuple[str, str, Any]] = {}
     for key in local_roots:
         parent_key = walk.parent_keys.get(key)
         via = walk.reachable_via.get(key)
@@ -84,21 +83,27 @@ def plan_local_reanchor(
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its new declaring parent could not be determined"
             )
-        anchored = portable_anchor_identity(real_dir, project_root)
-        identities[key] = (via[1], parent_key, anchored)
+        identities[key] = (via[1], parent_key, real_dir)
+    # The identity install records, from the one owner of local node identity.
     # A re-anchored parent of another re-anchored root is named by its new key.
-    for key, (local_path, parent_key, anchored) in identities.items():
-        row = lockfile.get_dependency(key)
-        ref = replace(
-            row.to_dependency_ref(),
-            local_path=local_path,
+    nodes = {
+        key: transitive_local_identity(
+            replace(lockfile.get_dependency(key).to_dependency_ref(), local_path=local_path),
             declaring_parent=parent_key,
-            anchored_local_path=anchored,
+            anchored=real_dir,
+            root=project_root,
+            root_local_dirs={},
         )
-        renames[key] = ref.get_unique_key()
+        for key, (local_path, parent_key, real_dir) in identities.items()
+    }
+    renames = {key: node.get_unique_key() for key, node in nodes.items()}
     identities = {
-        key: (local_path, renames.get(parent_key, parent_key), anchored)
-        for key, (local_path, parent_key, anchored) in identities.items()
+        key: (
+            node.local_path,
+            renames.get(node.declaring_parent, node.declaring_parent),
+            node.anchored_local_path,
+        )
+        for key, node in nodes.items()
     }
     collisions = sorted(
         new for old, new in renames.items() if new != old and new in lockfile.dependencies
