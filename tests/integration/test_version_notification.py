@@ -29,7 +29,9 @@ class TestVersionNotificationIntegration(unittest.TestCase):
         self.runner = CliRunner()
         self.home = Path(tempfile.mkdtemp(prefix="apm-notice-home-"))
         self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
-        home_env = patch.dict("os.environ", {"HOME": str(self.home)}, clear=False)
+        # HOME for the pytest Path.home override, USERPROFILE for native Windows resolution.
+        home = {"HOME": str(self.home), "USERPROFILE": str(self.home)}
+        home_env = patch.dict("os.environ", home, clear=False)
         home_env.start()
         self.addCleanup(home_env.stop)
 
