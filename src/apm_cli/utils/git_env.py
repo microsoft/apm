@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -299,22 +300,28 @@ def _within(path: Path, root: Path) -> bool:
 
     ``normcase`` folds case where the platform does (Windows). Elsewhere a
     case-insensitive volume (default macOS) gives one directory several
-    spellings, so the ancestor spelled like *root* up to case is asked whether
-    it is the same directory.
+    spellings, so the ancestor spelled like *root* up to case and Unicode form
+    is asked whether it is the same directory; if that can't be checked, it
+    counts as the same.
     """
     if path == root or path.is_relative_to(root):
         return True
     folded, base = os.path.normcase(path), os.path.normcase(root)
     if folded == base or folded.startswith(os.path.join(base, "")):
         return True
-    spelled = str(root).casefold()
+    spelled = _caseless(root)
     for ancestor in (path, *path.parents):
-        if str(ancestor).casefold() == spelled:
+        if _caseless(ancestor) == spelled:
             try:
                 return os.path.samefile(ancestor, root)
             except OSError:
-                return False
+                return True
     return False
+
+
+def _caseless(path: Path) -> str:
+    """Return *path* folded for a caseless compare (NFC and NFD spellings agree)."""
+    return unicodedata.normalize("NFC", str(path)).casefold()
 
 
 def _resolve_trusted_executable(name: str) -> str:

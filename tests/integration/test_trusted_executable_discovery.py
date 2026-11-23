@@ -747,3 +747,27 @@ def test_apm_script_path_drops_a_case_variant_of_the_project(
     env = trusted_path_environment({"PATH": os.pathsep.join([str(variant), str(safe)])})
 
     assert env["PATH"].split(os.pathsep) == [str(safe)]
+
+
+def test_helper_owner_skips_an_unverifiable_case_variant_of_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PATH entry spelled like the project up to case that can't be checked never serves."""
+    from apm_cli.utils.git_env import trusted_executable
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    variant = tmp_path / "PROJECT"
+    variant.mkdir(exist_ok=True)
+    marker = _plant_project_binary(variant, "probe")
+
+    def _unverifiable(*_args: object) -> bool:
+        raise PermissionError("cannot stat")
+
+    monkeypatch.setattr(os.path, "samefile", _unverifiable)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(variant), *_system_dirs()]))
+    monkeypatch.chdir(project)
+
+    assert trusted_executable("probe") is None
+    assert not marker.exists()
