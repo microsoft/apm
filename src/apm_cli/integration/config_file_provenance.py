@@ -138,7 +138,8 @@ class _UnreadableStore(ValueError):
 def _shard_id(key: str) -> str:
     """The record file of *key*: its directory, every case and Unicode spelling alike."""
     directory = unicodedata.normalize("NFC", key.rpartition("/")[0]).casefold()
-    return hashlib.sha256(directory.encode("utf-8")).hexdigest()[:32]
+    # A POSIX name that is not UTF-8 is surrogate-escaped; its bytes key the file.
+    return hashlib.sha256(directory.encode("utf-8", "surrogateescape")).hexdigest()[:32]
 
 
 def _read_json(path: Path) -> dict[str, Any]:
