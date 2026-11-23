@@ -22,6 +22,7 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.git_env import get_git_executable, git_network_env
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = [
     pytest.mark.component,
@@ -683,6 +684,7 @@ def test_private_github_clone_resolves_one_path_scoped_fallback() -> None:
 
 
 @pytest.mark.windows_compat
+@trust_checkout_contents()
 def test_private_github_subdirectory_cache_retries_with_scoped_credential(
     tmp_path: Path,
 ) -> None:
