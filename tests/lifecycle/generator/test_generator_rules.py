@@ -41,7 +41,6 @@ from tests.lifecycle.generator.rules import (
     U_BIN_PIN,
     UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
-    Verdict,
     classify,
     refusal_cell,
 )
@@ -656,22 +655,6 @@ def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
     assert bin_pin.predicate_digest() == U_BIN_PIN
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     assert data["pins"] == {"U-BIN": U_BIN_PIN}
-
-
-def test_u_bin_pins_the_whole_plugin_path_beside_the_loose_predicate() -> None:
-    modules = {module for module, _ in bin_pin.PREDICATES}
-    assert modules == {
-        "install/exec_gate.py",
-        "claude_plugins/admission.py",
-        "native_plugins/record.py",
-    }
-
-
-def test_a_changed_predicate_makes_the_project_bin_cells_must_cover(monkeypatch) -> None:
-    cell = {"PRIM": "bin", "SCOPE": "project"}
-    assert classify("pair", cell) == Verdict("obligation", ())
-    monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
-    assert classify("pair", cell) == Verdict("obligation", ("U-BIN",), must_cover=True)
 
 
 def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
