@@ -120,21 +120,30 @@ def _imported_program_index(module: str | None, name: str) -> int | None:
     return None
 
 
-class _Aliases:
-    """Launcher aliases per lexical scope, each keeping its launcher's program argument.
+_NONE: frozenset[int] = frozenset()
 
-    Names bind in their function, class or module scope and resolve through
-    enclosing functions to the module, as Python resolves them; attribute
-    targets (``self.run = ...``) bind per owning class. A binding maps to the
-    index of the program argument, or ``None`` when it is not a launcher.
+
+class _Aliases:
+    """Launcher aliases per lexical scope, each keeping its launchers' program arguments.
+
+    Names bind in their function, class or module scope (or the scope a
+    ``global``/``nonlocal`` declaration names) and resolve through enclosing
+    functions to the module, as Python resolves them; comprehension variables
+    never shadow. Attribute targets (``self.run = ...``) bind per owning class.
+    A binding maps to every program argument index its launchers use, empty
+    when it is no launcher, so reassignment never drops one.
     """
 
     def __init__(self, index: TreeIndex | None, nodes: tuple[ast.AST, ...], modules: _Modules):
         self._index = index
         self._modules = modules
-        self._names: dict[tuple[int, str], int | None] = {}
-        self._attributes: dict[tuple[int, str], int | None] = {}
+        self._names: dict[tuple[int, str], frozenset[int]] = {}
+        self._attributes: dict[tuple[int, str], frozenset[int]] = {}
         self._classes: dict[int, int] = {}
+        self._declared: dict[tuple[int, str], int] = {}
+        for node in nodes:
+            if isinstance(node, (ast.Global, ast.Nonlocal)):
+                self._declare(node)
         assignments: list[tuple[ast.AST, list[ast.expr], ast.expr]] = []
         for node in nodes:
             self._bind(node)
@@ -146,14 +155,29 @@ class _Aliases:
         while changed:
             changed = False
             for node, targets, value in assignments:
-                program = self.program_index(value, node)
-                if program is None:
-                    continue
-                for target in targets:
-                    changed = self._set(target, node, program) or changed
+                program = self.program_indices(value, node)
+                if program:
+                    for target in targets:
+                        changed = self._set(target, node, program) or changed
 
     def _anchor(self, node: ast.AST | None) -> ast.AST | None:
         return None if node is None or self._index is None else self._index.definition_anchor(node)
+
+    def _enclosing_function(self, scope: ast.AST | None) -> ast.AST | None:
+        scope = self._anchor(scope)
+        while isinstance(scope, ast.ClassDef):
+            scope = self._anchor(scope)
+        return scope
+
+    def _declare(self, node: ast.Global | ast.Nonlocal) -> None:
+        """Route a declared name's bindings to the module or the enclosing function."""
+        scope = self._anchor(node)
+        target = 0
+        if isinstance(node, ast.Nonlocal):
+            outer = self._enclosing_function(scope)
+            target = id(outer) if outer is not None else 0
+        for name in node.names:
+            self._declared[(id(scope) if scope is not None else 0, name)] = target
 
     def _owning_class(self, node: ast.AST) -> int:
         """Return the id of the nearest class enclosing *node*, or 0 at module level."""
@@ -166,48 +190,59 @@ class _Aliases:
             self._classes[key] = id(scope) if scope is not None else 0
         return self._classes[key]
 
-    def _scope(self, node: ast.AST) -> int:
+    def _name_key(self, node: ast.AST, name: str) -> tuple[int, str]:
+        """Return the binding key for *name* bound at *node*, honouring declarations."""
         anchor = self._anchor(node)
-        return id(anchor) if anchor is not None else 0
+        scope = id(anchor) if anchor is not None else 0
+        return self._declared.get((scope, name), scope), name
+
+    def _in_comprehension_target(self, node: ast.AST) -> bool:
+        if self._index is None:
+            return False
+        parent = self._index.parent(node)
+        while isinstance(parent, (ast.Tuple, ast.List, ast.Starred)):
+            parent = self._index.parent(parent)
+        return isinstance(parent, ast.comprehension)
 
     def _bind(self, node: ast.AST) -> None:
         """Record every name or attribute *node* binds, as not (yet) a launcher."""
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            self._names.setdefault((self._scope(node), node.id), None)
+            if not self._in_comprehension_target(node):
+                self._names.setdefault(self._name_key(node, node.id), _NONE)
         elif isinstance(node, ast.arg):
-            self._names.setdefault((self._scope(node), node.arg), None)
+            self._names.setdefault(self._name_key(node, node.arg), _NONE)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            self._names.setdefault((self._scope(node), node.name), None)
+            self._names.setdefault(self._name_key(node, node.name), _NONE)
         elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
             spelled = _dotted(node)
             if spelled is not None:
-                self._attributes.setdefault((self._owning_class(node), spelled), None)
+                self._attributes.setdefault((self._owning_class(node), spelled), _NONE)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             module = node.module if isinstance(node, ast.ImportFrom) else None
             for alias in node.names:
-                local = (alias.asname or alias.name).split(".")[0]
+                key = self._name_key(node, (alias.asname or alias.name).split(".")[0])
                 program = None
                 if isinstance(node, ast.ImportFrom):
                     program = _imported_program_index(module, alias.name)
-                key = (self._scope(node), local)
-                if program is not None or key not in self._names:
-                    self._names[key] = program
+                indices = frozenset({program}) if program is not None else _NONE
+                self._names[key] = self._names.get(key, _NONE) | indices
 
-    def _set(self, target: ast.AST, at: ast.AST, program: int) -> bool:
-        """Mark *target*, assigned at *at*, as a launcher alias; return whether it is new."""
+    def _set(self, target: ast.AST, at: ast.AST, program: frozenset[int]) -> bool:
+        """Add *program* to *target*'s launcher indices; return whether any is new."""
         if isinstance(target, ast.Name):
-            table, key = self._names, (self._scope(at), target.id)
+            table, key = self._names, self._name_key(at, target.id)
         else:
             spelled = _dotted(target)
             if spelled is None:
                 return False
             table, key = self._attributes, (self._owning_class(at), spelled)
-        if table.get(key) is not None:
+        known = table.get(key, _NONE)
+        if program <= known:
             return False
-        table[key] = program
+        table[key] = known | program
         return True
 
-    def _name_program(self, name: str, at: ast.AST) -> int | None:
+    def _name_program(self, name: str, at: ast.AST) -> frozenset[int]:
         """Resolve *name* used at *at* through its enclosing scopes, skipping class bodies."""
         scope = self._anchor(at)
         innermost = True
@@ -217,30 +252,31 @@ class _Aliases:
                 if key in self._names:
                     return self._names[key]
             if scope is None:
-                return None
+                return _NONE
             scope, innermost = self._anchor(scope), False
 
-    def program_index(self, expr: ast.AST, at: ast.AST) -> int | None:
-        """Return the program argument index if *expr* names a launcher at *at*."""
+    def program_indices(self, expr: ast.AST, at: ast.AST) -> frozenset[int]:
+        """Return the program argument indices if *expr* names a launcher at *at*."""
         if isinstance(expr, ast.Name):
             return self._name_program(expr.id, at)
         if not isinstance(expr, ast.Attribute):
-            return None
+            return _NONE
         spelled = _dotted(expr)
         if spelled is not None:
             for key in ((self._owning_class(at), spelled), (0, spelled)):
                 if key in self._attributes:
-                    if self._attributes[key] is not None:
+                    if self._attributes[key]:
                         return self._attributes[key]
                     break
         owner, attr = _dotted(expr.value), expr.attr
-        if owner in self._modules.subprocess and attr in _LAUNCHERS:
-            return 0
-        if owner in self._modules.asyncio and attr in _ASYNC_LAUNCHERS:
-            return 0
+        if (owner in self._modules.subprocess and attr in _LAUNCHERS) or (
+            owner in self._modules.asyncio and attr in _ASYNC_LAUNCHERS
+        ):
+            return frozenset({0})
         if owner in self._modules.os:
-            return _os_program_index(attr)
-        return None
+            program = _os_program_index(attr)
+            return frozenset({program}) if program is not None else _NONE
+        return _NONE
 
 
 def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
@@ -273,8 +309,8 @@ def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
 
 def _launch_program(
     node: ast.Call, aliases: _Aliases, binders: frozenset[str]
-) -> tuple[bool, ast.AST | None]:
-    """Return whether *node* launches a program, and the argument naming it.
+) -> tuple[bool, list[ast.AST]]:
+    """Return whether *node* launches a program, and every argument that may name it.
 
     A functools ``partial(<launcher>, ...)`` or ``partialmethod(...)`` counts
     as a launch with its bound arguments.
@@ -282,14 +318,13 @@ def _launch_program(
     func, args = node.func, list(node.args)
     if args and _dotted(func) in binders:
         func, args = args[0], args[1:]
-    program = aliases.program_index(func, node)
-    if program is None:
-        return False, None
-    if len(args) > program:
-        return True, args[program]
-    if args:
-        return True, None
-    return True, next((kw.value for kw in node.keywords if kw.arg in _PROGRAM_KEYWORDS), None)
+    indices = aliases.program_indices(func, node)
+    if not indices:
+        return False, []
+    programs = [args[index] for index in sorted(indices) if len(args) > index]
+    if not args:
+        programs.extend(kw.value for kw in node.keywords if kw.arg in _PROGRAM_KEYWORDS)
+    return True, programs
 
 
 def _bare_launch_lines(index: TreeIndex | None, nodes: tuple[ast.AST, ...]) -> list[int]:
@@ -309,17 +344,16 @@ def _bare_launch_lines(index: TreeIndex | None, nodes: tuple[ast.AST, ...]) -> l
             continue
         # A literal ``executable=`` counts on any call: a wrapper, possibly from
         # another module, can forward it to a launcher.
-        launches, program = _launch_program(node, aliases, modules.binders)
+        launches, programs = _launch_program(node, aliases, modules.binders)
         if not launches and not any(keyword.arg == "executable" for keyword in node.keywords):
             continue
-        bare = (
+        bare = any(
             _is_literal_argv(program)
             or _is_literal(program)
             or (isinstance(program, ast.Name) and program.id in literal_names)
-            or any(
-                keyword.arg == "executable" and _is_literal(keyword.value)
-                for keyword in node.keywords
-            )
+            for program in programs
+        ) or any(
+            keyword.arg == "executable" and _is_literal(keyword.value) for keyword in node.keywords
         )
         if bare:
             lines.append(node.lineno)
