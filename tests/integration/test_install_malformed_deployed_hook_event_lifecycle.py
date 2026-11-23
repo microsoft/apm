@@ -40,10 +40,7 @@ def _manifest(world: ReplayWorld, names: list[str]) -> None:
     )
 
 
-@pytest.mark.parametrize("declared", [["h"], []], ids=["still-declared", "removed"])
-def test_install_names_a_malformed_deployed_hook_event(
-    tmp_path: Path, apm_binary_path: Path, declared: list[str]
-) -> None:
+def _world(tmp_path: Path, apm_binary_path: Path) -> tuple[ReplayWorld, Path]:
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     package = world.project / "vendor" / "h"
     write(package / "apm.yml", "name: h\nversion: 1.0.0\n")
@@ -54,11 +51,43 @@ def test_install_names_a_malformed_deployed_hook_event(
     world.apm("install")
     settings = world.project / ".claude" / "settings.json"
     settings.write_text(json.dumps({"hooks": {"PreToolUse": None}}) + "\n", encoding="utf-8")
-    _manifest(world, declared)
+    return world, settings
+
+
+def test_install_names_a_malformed_event_it_must_merge_into(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Merging a hook into a null event fails with the file and event named, then recovers."""
+    world, settings = _world(tmp_path, apm_binary_path)
+    before = settings.read_bytes()
+
+    result = world.apm("install", expect=1)
+
+    text = " ".join((result.stdout + result.stderr).split())
+    assert "NoneType" not in text and "Traceback" not in text, text
+    expected = (
+        ".claude/settings.json: hook event 'PreToolUse' is not a list of hook entries. "
+        "Fix or remove the event, then run 'apm install'"
+    )
+    assert expected in text, text
+    assert settings.read_bytes() == before
+    # The printed remedy: fix the event, then run apm install again.
+    settings.write_text(json.dumps({"hooks": {}}) + "\n", encoding="utf-8")
+    world.apm("install")
+    assert "echo h" in settings.read_text(encoding="utf-8")
+
+
+def test_install_leaves_a_malformed_event_it_does_not_need(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """With the hook package removed, install completes and keeps the user's bytes."""
+    world, settings = _world(tmp_path, apm_binary_path)
+    before = settings.read_bytes()
+    _manifest(world, [])
 
     result = world.apm("install", expect=None)
 
     text = " ".join((result.stdout + result.stderr).split())
     assert "NoneType" not in text and "Traceback" not in text, text
     assert result.returncode == 0, text
-    assert "PreToolUse" in text and ".claude/settings.json" in text, text
+    assert settings.read_bytes() == before

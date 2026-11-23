@@ -73,6 +73,7 @@ from apm_cli.integration.hook_ownership import (
     drop_source_entries,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
+    malformed_hook_event,
     read_hook_object,
     read_merged_hook_config,
     remove_emptied_hook_file,
@@ -1339,8 +1340,8 @@ class HookIntegrator(BaseIntegrator):
                 if not isinstance(entries, list) or not entries:
                     continue
                 event_name = event_map.get(raw_event_name, raw_event_name)
-                if event_name not in json_config[container]:
-                    json_config[container][event_name] = []
+                if not isinstance(json_config[container].setdefault(event_name, []), list):
+                    raise ValueError(malformed_hook_event(json_path, project_root, event_name))
                 legacy_content_keys = {
                     self._hook_entry_content_key(entry)
                     for entry in _legacy_hook_entries(entries, config.target_key)
