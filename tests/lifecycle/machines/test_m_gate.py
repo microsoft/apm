@@ -265,6 +265,20 @@ def test_narrowing_one_surface_keeps_another_approved_surface(
     assert "hook" in machine.world.observe().deployed
 
 
+def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Nightly falsifier (#4919): deny wins, so approving an org-denied hook exits 1,
+    names the org layer, and the hook stays undeployed."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.set_policy("org-deny")
+    machine.declare("hook")
+    machine.update()
+    machine.decide("hook", "approve")
+    machine.install("plain")
+    assert "hook" not in machine.world.observe().deployed
+
+
 @pytest.mark.parametrize("scope", SCOPES)
 def test_verdict_on_an_uninstalled_package_ignores_the_operation_lock(
     tmp_path: Path, lifecycle_entry_point: tuple[str, ...], scope: str

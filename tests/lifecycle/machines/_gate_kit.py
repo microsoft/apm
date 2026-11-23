@@ -625,13 +625,26 @@ class GateMachine(RuleBasedStateMachine):
             return None
         user = ("--user",) if self.scope == "user" else ()
         locked = self._locked(surface)
+        # Deny wins: approving a package an org deny still blocks records the grant but
+        # exits 1 and names the org layer (reference/cli/approve.md, "Approving a
+        # denied package"; #4919). The org deny is never lifted by a local approval.
+        org_denied = (
+            verdict == "approve"
+            and locked
+            and self.gate_state(surface) in {"org-deny", "org-deny-all"}
+        )
 
         def reference(before, after, result) -> list[str]:
             # A verdict on a package that is not installed matches nothing: exit 1
             # and no write (#4154, #4189).
-            expected = 0 if locked else 1
+            expected = 0 if locked and not org_denied else 1
             if result is None or result.returncode != expected:
                 return [f"{verdict} exited {getattr(result, 'returncode', None)}"]
+            if org_denied:
+                output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+                if "is still denied" not in output or "org policy denies it" not in output:
+                    return [f"approve under the org deny did not name the org layer: {output}"]
+                return []
             if expected and (changed := durable_changes(before, after)):
                 return [f"{verdict} of an uninstalled package changed durable state: {changed}"]
             if verdict == "approve" and locked and not _store_grants(self.world.store(), path):
