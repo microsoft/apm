@@ -57,23 +57,30 @@ class _PreparedInstruction:
 
 
 def _scannable_frontmatter(value):
-    """Return *value* with every mapping key as text, for one sorted JSON scan.
+    """Return *value* as JSON-native data, for one sorted JSON scan.
 
-    YAML admits non-string keys (``{1: numeric, note: text}``) that JSON
-    cannot sort or serialize. Keys that render alike are kept as separate
-    entries so no decoded value escapes the scan.
+    YAML admits non-string keys (``{1: numeric, note: text}``), sets and
+    other types JSON cannot sort or serialize. Keys become text, keeping keys
+    that render alike as separate entries, and set members become a list, so
+    no decoded value reaches the scan only as a ``repr`` escape.
     """
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
     if isinstance(value, dict):
         entries: dict[str, object] = {}
         for key, item in value.items():
-            name = str(key)
+            name = (
+                key
+                if isinstance(key, str)
+                else json.dumps(_scannable_frontmatter(key), ensure_ascii=False)
+            )
             while name in entries:
                 name += "'"
             entries[name] = _scannable_frontmatter(item)
         return entries
-    if isinstance(value, list | tuple):
+    if isinstance(value, list | tuple | set | frozenset):
         return [_scannable_frontmatter(item) for item in value]
-    return value
+    return str(value)
 
 
 class InstructionIntegrator(BaseIntegrator):
