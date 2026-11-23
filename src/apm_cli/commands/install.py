@@ -14,7 +14,6 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginError,
     enforce_agent_plugin_deployment_boundary,
 )
-from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 from apm_cli.core.remediation import (
     BUNDLE_REPACK_PLUGIN,
     FROZEN_UPDATE_CONFLICT,
@@ -53,10 +52,10 @@ from apm_cli.install.errors import (
     DirectDependencyError,
     FrozenInstallError,
     InstallFailureAlreadyRendered,
-    PolicyViolationError,
-    RequiredIntegrationError,
     install_failure_message,
+    log_authentication_error,
     log_frozen_install_error,
+    render_apm_dependency_failure,
 )
 from apm_cli.install.finalization import close_install_contexts
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
@@ -797,6 +796,9 @@ def _handle_mcp_install(  # noqa: PLR0913
         target_decision=target_decision,
         registry=(resolved_registry_url, registry_source),
     )
+    from ..install.commit_gate import judge_mcp_install_files
+
+    judge_mcp_install_files(scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run)
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -1249,6 +1251,15 @@ def install(  # noqa: PLR0913
             legacy_skill_paths = should_use_legacy_skill_paths()
 
         create_user_config = not dry_run
+        from apm_cli.install.commit_gate import refuse_denied_install_entry
+
+        # Before any entry (local bundle, --mcp, dependency pipeline) writes.
+        refuse_denied_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT,
+            no_policy=no_policy,
+            dry_run=dry_run,
+            logger=logger,
+        )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
@@ -1657,10 +1668,7 @@ def install(  # noqa: PLR0913
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
     except AuthenticationError as e:
-        logger.error(str(e))
-        if e.diagnostic_context:
-            logger.error_detail(e.diagnostic_context)
-        logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+        log_authentication_error(e, logger)
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1790,6 +1798,7 @@ def _install_apm_packages(ctx, outcome):
                 scope=ctx.scope,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,
+                target=ctx.target or ctx.runtime,
             ),
             allow_pending_mcp=ctx.install_mode != InstallMode.MCP,
         )
@@ -1892,7 +1901,8 @@ def _install_apm_packages(ctx, outcome):
         logger=logger,
         dry_run=bool(getattr(ctx, "dry_run", False)),
     )
-    migrate_lockfile_if_needed(ctx.apm_dir)
+    if migrate_lockfile_if_needed(ctx.apm_dir) and ctx.transaction is not None:
+        ctx.transaction.undo_lockfile_migration_on_rollback(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
     old_mcp_servers: builtins.set = builtins.set()
@@ -1995,46 +2005,10 @@ def _install_apm_packages(ctx, outcome):
             }:
                 ctx.install_result = install_result
                 return apm_count, 0, 0, apm_diagnostics
-        except InsecureDependencyPolicyError:
+        except (InsecureDependencyPolicyError, InstallFailureAlreadyRendered, click.UsageError):
             raise
-        except AuthenticationError as e:
-            # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
-            logger.error(str(e))
-            if e.diagnostic_context:
-                logger.error_detail(e.diagnostic_context)
-            logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
-            raise InstallFailureAlreadyRendered(str(e)) from e
-        except FrozenInstallError as e:
-            log_frozen_install_error(e, logger)
-            raise InstallFailureAlreadyRendered(str(e)) from e
-        except InstallFailureAlreadyRendered:
-            raise
-        except click.UsageError:
-            raise
-        except (CopilotSettingsCollisionError, RequiredIntegrationError) as e:
-            # A Copilot settings merge collision or the LSP capability gate.
-            # Surface the already-actionable message verbatim (no
-            # "Failed to install..." prefix) and keep the raw decoder detail,
-            # when present, behind --verbose.
-            logger.error(str(e))
-            detail = getattr(e, "detail", None)
-            if detail:
-                logger.verbose_detail(detail)
-            raise InstallFailureAlreadyRendered(str(e)) from e
         except Exception as e:
-            # #832: surface PolicyViolationError verbatim (no double-nesting).
-            msg = (
-                str(e)
-                if isinstance(e, PolicyViolationError)
-                else f"Failed to install APM dependencies: {e}"
-            )
-            if isinstance(e, PolicyViolationError):
-                logger.refusal(msg)
-            else:
-                logger.error(msg)
-            if not ctx.verbose:
-                logger.progress("Run with --verbose for detailed diagnostics")
-            raise InstallFailureAlreadyRendered(msg) from e
+            raise render_apm_dependency_failure(e, logger, verbose=ctx.verbose) from e
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.core.scope import is_user_scope
 
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
+from .plan_admission import _is_transitive
 from .target_filter import log_package_target_restriction, resolve_effective_package_targets
 
 if TYPE_CHECKING:
@@ -41,8 +42,28 @@ class PackageDeploymentPlan:
         if self.codex_native is not None:
             return []
         targets = list(self.target_selection.targets)
-        native_target_names = {self.claude_native.target_name} if self.claude_native else set()
+        native_target_names = self.claude_native.harnesses if self.claude_native else set()
         return [target for target in targets if target.name not in native_target_names]
+
+
+def _native_skill_selection(
+    skill_subset: tuple | None, skill_pairing: Any, targets: Any
+) -> tuple | None:
+    """The skill selection a whole-plugin load must honor.
+
+    A per-target pairing (req-rs-018) can restrict one target while the flat
+    subset is ``None`` (all); a native load cannot honor that, so any target
+    restriction counts as a selection.
+    """
+    if skill_pairing is None:
+        return skill_subset
+    restricted = {
+        skill
+        for target in targets
+        if skill_pairing.selects_target(target.name)
+        for skill in skill_pairing.skills_for_target(target.name) or ()
+    }
+    return tuple(sorted(restricted)) or skill_subset
 
 
 def _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx):
@@ -88,6 +109,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
     skill_subset: tuple | None,
+    skill_pairing: Any = None,
     ctx: InstallContext | None = None,
     policy: Any = None,
     is_first_party: bool = False,
@@ -112,6 +134,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     log_package_target_restriction(logger, selection, package_name)
     if not selection.targets:
         return PackageDeploymentPlan(selection)
+    native_subset = _native_skill_selection(skill_subset, skill_pairing, selection.targets)
     approvals = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
     hooks, bin_approved, mcp, canvas, lsp = approvals
     from .exec_gate import bin_deploy_denial, hook_file_admission, native_plugin_verdict
@@ -131,12 +154,20 @@ def prepare_package_deployment(  # noqa: PLR0913
     )
     if skip_bin and bin_skip_reason_override is not None:
         reason = bin_skip_reason_override
+    # The org policy the install gate fetched; callers that pass none
+    # (preflight) defer to it, as effective_allow_map does for trust.
+    org_policy = (
+        policy
+        if policy is not None
+        else getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    )
+    transitive = _is_transitive(package_info, ctx)
     codex_native = plan_native_codex_plugin(
         package_info,
         package_name,
         list(selection.targets),
         scope=scope,
-        skill_subset=skill_subset,
+        skill_subset=native_subset,
         approvals={
             # A native plugin loads every hook file live: per-file pins never
             # admit it; a whole-plugin pin (or a type-level grant) does.
@@ -149,23 +180,19 @@ def prepare_package_deployment(  # noqa: PLR0913
         ctx=ctx,
         read_only=read_only,
         parked_reported=parked_reported,
+        policy=org_policy,
+        transitive=transitive,
     )
-    # The org policy the install gate fetched; callers that pass none
-    # (preflight) defer to it, as effective_allow_map does for trust.
-    org_policy = (
-        policy
-        if policy is not None
-        else getattr(getattr(ctx, "policy_fetch", None), "policy", None)
-    )
+    # The project's own content is never deployed as one of its native plugins.
     native_claude_plugin = (
         None
-        if codex_native is not None
+        if codex_native is not None or is_first_party
         else plan_native_claude_plugin(
             package_info,
             package_name=package_name,
             targets=list(selection.targets),
             scope=InstallScope.USER if native_claude_user_scope else scope,
-            skill_subset=skill_subset,
+            skill_subset=native_subset,
             admit=lambda: native_plugin_verdict(
                 package_name, package_info, allow_executables, ctx=ctx
             ),
@@ -173,6 +200,7 @@ def prepare_package_deployment(  # noqa: PLR0913
             skip_bin=resolve_bin_skip(True, trust_bin, non_interactive=not sys.stdout.isatty())[0],
             policy=org_policy,
             bin_denied=bin_deploy_denial(package_info, org_policy),
+            transitive=transitive,
         )
     )
     projection_targets = PackageDeploymentPlan(

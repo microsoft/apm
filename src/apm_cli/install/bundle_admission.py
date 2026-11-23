@@ -5,7 +5,8 @@ file is written: org policy is discovered and enforced through the shared
 install preflight (outcome routing, dependency allow/deny, MCP and target
 checks), then the bundle's integrity is checked under the policy's
 ``security.integrity.require_hashes`` setting. A local bundle and the
-packages it records meet ``dependencies.deny`` (:func:`bundle_policy_subjects`).
+packages it records meet ``dependencies.deny``; only the packages meet
+``dependencies.allow`` (:func:`bundle_policy_subjects`, #4646).
 
 Each bundle format brings its own integrity check; the policy gate and the
 ``require_hashes`` decision stay here.
@@ -18,11 +19,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from functools import partial
+
     from apm_cli.bundle.unpacker import UnpackCandidate
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.policy.models import LocalBundleSubjects
     from apm_cli.policy.schema import ApmPolicy
 
 IntegrityCheck = Callable[[bool], None]
@@ -41,12 +45,13 @@ def admit_bundle(
     dry_run: bool,
     fetch_result: Any = None,
     registries: dict[str, str] | None = None,
-    bundled_deps: Iterable[DependencyReference] = (),
+    bundled_deps: LocalBundleSubjects | None = None,
 ) -> ApmPolicy | None:
     """Admit a bundle for deployment, or raise before anything is written.
 
     *bundled_deps* (see :func:`bundle_policy_subjects`) meet the org
-    ``dependencies.deny`` list as a declared dependency would.
+    ``dependencies.deny`` list as a declared dependency would; under an allow
+    list the bundle is judged by its recorded packages alone.
 
     Raises :class:`~apm_cli.install.errors.PolicyViolationError` when org
     policy blocks the bundle or cannot be verified under
@@ -67,14 +72,55 @@ def admit_bundle(
         effective_target_source=target_decision.source,
         fetch_result=fetch_result,
         registries=registries,
-        bundled_deps=list(bundled_deps),
+        bundled_deps=() if bundled_deps is None else bundled_deps,
     )
     policy = policy_fetch.policy if policy_fetch is not None else None
     integrity_check(require_hashes_enabled(policy.security.integrity if policy else None))
     return policy
 
 
-def bundle_policy_subjects(bundle_info: Any) -> list[DependencyReference]:
+def refuse_unmanaged_bundle_files(
+    policy: ApmPolicy | None,
+    deploy: partial[Mapping[str, Any]],
+    *,
+    user_scope: bool,
+    logger: Any,
+    dry_run: bool,
+) -> None:
+    """Judge ``unmanaged_files.action: deny`` on the claims a bundle install leaves (#4826).
+
+    *deploy* is the bundle's ``integrate_local_bundle`` call, run here as a
+    dry run, which adopts or skips each file as the deploy does. Its claims
+    join the current lockfile's, so a governed file none of them claims
+    refuses the install before the bundle writes anything.
+    """
+    if policy is None or policy.enforcement == "off":
+        return
+    if policy.unmanaged_files.effective_action != "deny":
+        return
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.scope import InstallScope
+    from ..deps.lockfile import LockFile
+    from .commit_gate import refuse_unmanaged_files
+    from .local_bundle_handler import _bundle_lock_root, _home_relative_claims
+
+    project_root = deploy.args[1]
+    # The dry run applies the deploy's own adopt-or-skip decision to every file.
+    result = deploy(dry_run=True, logger=None, create_config=False)
+    digests = result.get("deployed_file_hashes", {})
+    hashes = {record: digests[record] for record in result.get("deployed_files", [])}
+    files = sorted(hashes)
+    if user_scope:
+        files, hashes = _home_relative_claims(files, hashes, project_root)
+    lockfile = _recorded_lockfile(_bundle_lock_root(user_scope)) or LockFile()
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    DeploymentLedgerCodec.record_local_bundle_files(lockfile, files, hashes, scope=scope)
+    # The project's own entry carries those claims, as it does once read back.
+    lockfile.dependencies["."] = lockfile.project_self_entry()
+    refuse_unmanaged_files(logger, policy, project_root, lockfile, dry_run=dry_run)
+
+
+def bundle_policy_subjects(bundle_info: Any) -> LocalBundleSubjects:
     """The package identities a local bundle presents to org dependency policy.
 
     The bundle itself, named by its ``plugin.json`` id and name as a local
@@ -84,6 +130,7 @@ def bundle_policy_subjects(bundle_info: Any) -> list[DependencyReference]:
     ``ValueError``, never judged as recording nothing.
     """
     from ..models.dependency.reference import DependencyReference
+    from ..policy.models import LocalBundleSubjects
 
     names = {
         str(value).strip()
@@ -103,7 +150,7 @@ def bundle_policy_subjects(bundle_info: Any) -> list[DependencyReference]:
             "cannot check the packages it records. Repack the bundle with 'apm pack' "
             "and retry."
         ) from exc
-    return subjects + locked
+    return LocalBundleSubjects(tuple(subjects), tuple(locked))
 
 
 def locked_package_refs(path: Path | None) -> list[DependencyReference]:

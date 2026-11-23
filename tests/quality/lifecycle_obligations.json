@@ -11764,9 +11764,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|DEPLOYED=edited|GATE=denied-dependency": {
@@ -13098,8 +13097,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_kept_entry_stays_reported_after_the_lockfile_is_rewritten[edited]"
   },
   "pair|LOCK=absent|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -15849,8 +15849,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_kept_entry_stays_reported_after_the_lockfile_is_rewritten[edited]"
   },
   "pair|OP=install|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -19248,9 +19249,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=canvas|DEPLOYED=present-provenance-unknown": {
@@ -19775,9 +19775,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=lsp|DEPLOYED=present-provenance-unknown": {
@@ -20827,8 +20826,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_kept_entry_stays_reported_after_the_lockfile_is_rewritten[edited]"
   },
   "pair|SCOPE=project|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -21155,8 +21155,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_each_copilot_home_profile_keeps_its_own_evidence"
   },
   "pair|SCOPE=user|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -21649,9 +21650,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4268",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DRYRUN=on": {
@@ -24148,8 +24148,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
    "credited_by": [
@@ -24173,8 +24174,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[single-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
    "credited_by": [

@@ -32,24 +32,19 @@ When this command creates `apm.yml`, it records the harnesses under `targets:`; 
 **What you see:** `apm install` reported the plugin, but `/plugin` in Claude Code does not list
 it.
 
-APM unpacks a Claude plugin into project files: commands to `.claude/commands/`, skills to
-`.claude/skills/`, agents to `.claude/agents/`. Claude Code loads them as project files, not as
-an installed plugin. Check that the package is installed, that `claude` is an active target,
-and where a file came from:
+APM deploys a Claude Code plugin whole to `.agents/plugins/<plugin>/` and declares it in
+`.claude/settings.json`, so `/plugin` lists it under `apm-p-<hash>`. Check that the package is
+installed and activated, and that `claude` is an active target:
 
 ```bash frame="terminal"
-apm deps list
+apm deps list    # ends with: N native plugin(s) activated from .agents/plugins
 apm targets
-apm find .claude/commands/commit.md
 ```
 
-If `claude` shows `inactive`, nothing was written to `.claude/`. See
-[Install plugins](../consumer/install-plugins/).
-
-:::note[Planned]
-Installing a plugin as one locked, approved plugin root that each harness registers natively is
-tracked in [#3094](https://github.com/microsoft/apm/issues/3094).
-:::
+If the plugin is not activated, the install printed `Parked native plugin <pkg>` with the next
+step, usually `apm approve <pkg>`. If it is activated, accept Claude Code's folder-trust prompt
+and start a new session. See
+[Install plugins](../consumer/install-plugins/#plugin-installed-but-missing-in-claude-code).
 
 ## 401 or 403 from GitHub Enterprise, Azure DevOps or GitLab
 

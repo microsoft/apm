@@ -15,7 +15,7 @@ import pytest
 import toml
 import yaml
 
-pytestmark = pytest.mark.xdist_group(name="home_env")
+pytestmark = [pytest.mark.xdist_group(name="home_env"), pytest.mark.e2e]
 
 
 def _write_apm_yml(project_dir: Path) -> None:

@@ -32,7 +32,7 @@ from apm_cli.core.deployment_state import (
 from apm_cli.core.remediation import HOOK_PATH_ESCAPES_PACKAGE
 from apm_cli.core.scope import InstallScope, manifest_file
 from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
-from apm_cli.hook_contract import walk_hook_commands
+from apm_cli.hook_contract import summarize_hook_command, walk_hook_commands
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.copilot_hook_paths import copilot_hook_target
@@ -67,6 +67,7 @@ from apm_cli.integration.hook_ownership import (
     dependency_hook_sources,
     drop_dependency_owned_entries,
     drop_source_entries,
+    hook_file_emptied,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
     read_hook_object,
@@ -130,6 +131,7 @@ class HookTargetReconcileStats(TypedDict):
     errors: int
     failed_targets: list[str]
     failed_paths: list[str]
+    deleted_paths: list[str]  # emptied hook files deleted (#4852)
 
 
 @dataclass(frozen=True)
@@ -369,6 +371,7 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
     ),
 }
 
+
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
 
 
@@ -403,6 +406,7 @@ class HookIntegrator(BaseIntegrator):
     #   VS Code:          https://code.visualstudio.com/docs/copilot/customization/hooks
     #   Claude Code:      https://code.claude.com/docs/en/hooks
     HOOK_COMMAND_KEYS: tuple[str, ...] = _HOOK_COMMAND_KEYS
+    replay_command_root: Path | None = None  # live user root, set only by audit replay
 
     @staticmethod
     def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
@@ -412,27 +416,7 @@ class HookIntegrator(BaseIntegrator):
             for declaration in walk_hook_commands(payload)
         ]
 
-    @staticmethod
-    def _summarize_command(entry: dict) -> str:
-        """Return a human-readable summary for a single hook command entry."""
-        command = ""
-        for key in HookIntegrator.HOOK_COMMAND_KEYS:
-            value = entry.get(key)
-            if isinstance(value, str) and value.strip():
-                command = value.strip()
-                break
-        if not command:
-            return "runs hook command"
-        # Collapse any internal whitespace (including embedded newlines) so
-        # the summary is always single-line. A hook command containing a
-        # newline must not break install-log formatting or enable
-        # log-spoofing. Addresses Copilot inline on hook_integrator.py.
-        command = " ".join(command.split())
-        for token in command.split():
-            cleaned = token.strip("\"'")
-            if "/" in cleaned or cleaned.startswith("."):
-                return f"runs {cleaned}"
-        return f"runs {command}"
+    _summarize_command = staticmethod(summarize_hook_command)
 
     def _build_display_payload(
         self,
@@ -979,10 +963,9 @@ class HookIntegrator(BaseIntegrator):
             return False
         return HookIntegrator._hook_entry_content_key(entry) in fresh_content_keys
 
-    @staticmethod
-    def _deploy_root_for_hook_rewrite(project_root: Path, user_scope: bool) -> Path | None:
-        # User scope needs cwd-independent paths; project scope stays portable.
-        return project_root if user_scope else None
+    def _deploy_root_for_hook_rewrite(self, project_root: Path, user_scope: bool) -> Path | None:
+        # User scope needs cwd-independent paths; audit replay renders the live root's.
+        return (self.replay_command_root or project_root) if user_scope else None
 
     @staticmethod
     def _home_reference_for_hook_rewrite(target, user_scope: bool):
@@ -1006,7 +989,7 @@ class HookIntegrator(BaseIntegrator):
         """Integrate hooks from a package into hooks dir (Copilot target).
 
         Deploys hook JSON files with clean filenames and copies referenced
-        script files. Skips user-authored files unless force=True.
+        script files. Keeps user-authored and edited files unless force=True.
 
         Args:
             package_info: PackageInfo with package metadata and install path
@@ -1094,6 +1077,12 @@ class HookIntegrator(BaseIntegrator):
                 contract="copilot-hooks-v1",
                 errors=tuple(errors),
             )
+            locator = DeploymentLedgerCodec.locator_for_path(
+                target_path,
+                project_root=project_root,
+                target=target or KNOWN_TARGETS["copilot"],
+                scope=InstallScope.PROJECT,
+            )
             if not validation.valid:
                 if diagnostics is not None:
                     diagnostics.error(
@@ -1103,12 +1092,7 @@ class HookIntegrator(BaseIntegrator):
                     )
                 materializations.append(
                     MaterializationResult(
-                        locator=DeploymentLedgerCodec.locator_for_path(
-                            target_path,
-                            project_root=project_root,
-                            target=target or KNOWN_TARGETS["copilot"],
-                            scope=InstallScope.PROJECT,
-                        ),
+                        locator=locator,
                         owners=frozenset({package_info.get_canonical_dependency_string()}),
                         status=MaterializationStatus.FAILED,
                         content_hash=None,
@@ -1117,42 +1101,40 @@ class HookIntegrator(BaseIntegrator):
                 )
                 continue
 
-            # Write rewritten JSON; byte-identical output is unchanged (#4184).
-            if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
-                self.note_rendered_write(target_path)
-                hooks_integrated += 1
-            elif not self.receipted_unchanged(target_path):
-                # A managed file already holding the render is APM's bytes (#3701).
-                if managed_files and rel_path in managed_files:
+            # An edited hook file is kept (#4626); its scripts are gated one by one below.
+            if not self.keeps_edited_output(
+                target_path,
+                hook_file,
+                rel_path,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=json.dumps(rewritten, indent=2) + "\n",
+            ):
+                # Write rewritten JSON; byte-identical output is unchanged (#4184).
+                if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
                     self.note_rendered_write(target_path)
-                scripts_adopted += 1
-            target_paths.append(target_path)
-            materializations.append(
-                MaterializationResult(
-                    locator=DeploymentLedgerCodec.locator_for_path(
-                        target_path,
-                        project_root=project_root,
-                        target=target or KNOWN_TARGETS["copilot"],
-                        scope=InstallScope.PROJECT,
-                    ),
-                    owners=frozenset({package_info.get_canonical_dependency_string()}),
-                    status=(
-                        MaterializationStatus.WRITTEN
-                        if validation.valid
-                        else MaterializationStatus.FAILED
-                    ),
-                    content_hash=compute_file_hash(target_path),
-                    validation=validation,
+                    hooks_integrated += 1
+                elif not self.receipted_unchanged(target_path):
+                    # A managed file already holding the render is APM's bytes (#3701).
+                    if managed_files and rel_path in managed_files:
+                        self.note_rendered_write(target_path)
+                    scripts_adopted += 1
+                target_paths.append(target_path)
+                materializations.append(
+                    MaterializationResult(
+                        locator=locator,
+                        owners=frozenset({package_info.get_canonical_dependency_string()}),
+                        status=MaterializationStatus.WRITTEN,
+                        content_hash=compute_file_hash(target_path),
+                        validation=validation,
+                    )
                 )
-            )
-            display_payloads.append(
-                self._build_display_payload(
-                    f"{root_dir}/hooks/",
-                    target_path.name,
-                    hook_file,
-                    rewritten,
+                display_payloads.append(
+                    self._build_display_payload(
+                        f"{root_dir}/hooks/", target_path.name, hook_file, rewritten
+                    )
                 )
-            )
 
             copy_result = copy_deployed_hook_bundle(
                 self,
@@ -1505,6 +1487,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_descriptor_files=set(hook_files),
                 source_plan=source_plan,
                 selected_bundle_files=hook_sources.bundle_for(config.target_key),
+                target=target,
             )
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
@@ -1753,6 +1736,7 @@ class HookIntegrator(BaseIntegrator):
             "errors": 0,
             "failed_targets": [],
             "failed_paths": [],
+            "deleted_paths": [],
         }
         for target in excluded_targets:
             config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -1760,7 +1744,7 @@ class HookIntegrator(BaseIntegrator):
                 continue
             target_dir = project_root / target.root_dir
             json_path = target_dir / config.config_filename
-            errors_before = stats["errors"]
+            errors_before, existed = stats["errors"], json_path.exists()
             self._clean_apm_source_from_json(
                 json_path,
                 source_markers,
@@ -1768,7 +1752,11 @@ class HookIntegrator(BaseIntegrator):
                 container=config.event_container_key,
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                 dry_run=dry_run,
+                defaults=config.top_level_defaults,
+                root=project_root,
             )
+            if existed and not dry_run and not json_path.exists():
+                stats["deleted_paths"].append(portable_relpath(json_path, project_root))
             if stats["errors"] != errors_before:
                 stats["failed_targets"].append(target.name)
                 for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
@@ -1784,6 +1772,8 @@ class HookIntegrator(BaseIntegrator):
         container: str,
         sidecar_path: Path,
         dry_run: bool = False,
+        defaults: dict[str, Any] | None = None,
+        root: Path | None = None,
     ) -> None:
         """Remove one package owner while preserving user and sibling entries."""
         if not json_path.exists() and not sidecar_path.exists():
@@ -1849,7 +1839,10 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
+                if hook_file_emptied(json_path, data, defaults or {}, root):
+                    write_seam.unlink(json_path)  # a fresh deploy writes no file
+                else:
+                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
@@ -1936,6 +1929,8 @@ class HookIntegrator(BaseIntegrator):
                     stats,
                     container=config.event_container_key,
                     sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+                    defaults=config.top_level_defaults,
+                    root=project_root,
                 )
 
         return stats
@@ -2052,6 +2047,8 @@ class HookIntegrator(BaseIntegrator):
         stats: dict[str, Any],
         container: str = "hooks",
         sidecar_path: Path | None = None,
+        defaults: dict[str, Any] | None = None,
+        root: Path | None = None,
     ) -> None:
         """Remove externally-owned entries from a native hooks JSON file.
 
@@ -2084,7 +2081,10 @@ class HookIntegrator(BaseIntegrator):
             if not data[container]:
                 del data[container]
 
-            if modified:
+            if modified and hook_file_emptied(json_path, data, defaults or {}, root):
+                write_seam.unlink(json_path)  # a fresh deploy writes no file
+                stats["files_removed"] += 1
+            elif modified:
                 with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2)
                     f.write("\n")

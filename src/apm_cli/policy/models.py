@@ -6,12 +6,13 @@ baseline checks (``ci_checks``) and policy checks (``policy_checks``).
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.core.remediation import Remediation
+    from apm_cli.models.dependency.reference import DependencyReference
     from apm_cli.security.content_scanner import ScanFinding
     from apm_cli.security.file_scanner import CoverageEntry
 
@@ -36,6 +37,7 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "mcp-denylist": "apm.yml",
     "mcp-transport": "apm.yml",
     "mcp-self-defined": "apm.yml",
+    "mcp-trust-transitive": "apm.yml",
     "compilation-target": "apm.yml",
     "compilation-strategy": "apm.yml",
     "source-attribution": "apm.yml",
@@ -84,6 +86,40 @@ class PolicySubject:
     declared_by: str | None = None
 
 
+@dataclass(frozen=True)
+class LocalBundleSubjects:
+    """What a local bundle presents to org dependency policy (#4646).
+
+    ``names`` are the bundle itself as ``_local/<name>``. The bundle author
+    chooses that name, so it meets ``dependencies.deny`` only and never
+    satisfies ``dependencies.allow``. ``packages`` are the packages the
+    bundle's embedded lockfile records; they meet both lists, matched as a
+    remote dependency is. Under an allow list a bundle with no ``packages``
+    is refused: nothing in it can be matched against the list.
+    """
+
+    names: tuple[DependencyReference, ...]
+    packages: tuple[DependencyReference, ...]
+
+
+# Checks whose violation names an org policy field rather than a dependency
+# (#4826): the field a violation line cites, and the edit that clears it.
+POLICY_FIELD_FIXES: dict[str, tuple[str, str]] = {
+    "scripts-policy": (
+        "manifest.scripts: deny",
+        "Remove the scripts: block from apm.yml, or ask your policy admin to allow scripts.",
+    ),
+    "unmanaged-files": (
+        "unmanaged_files.action: deny",
+        "Move or delete each listed file, or ask your policy admin to exclude it.",
+    ),
+    "transitive-depth": (
+        "dependencies.max_depth",
+        "Reduce the dependency nesting, or ask your policy admin to raise dependencies.max_depth.",
+    ),
+}
+
+
 @dataclass
 class CheckResult:
     """Result of a single CI check."""
@@ -113,12 +149,20 @@ class CheckResult:
         yields one entry keyed by the check name (its category) with no
         apm.yml edit suggested.
         """
+        field_fix = POLICY_FIELD_FIXES.get(self.name)
         if self.subjects:
-            return self.subjects
+            if field_fix is None:
+                return self.subjects
+            return tuple(
+                replace(s, reason=f"{s.reason} ({field_fix[0]}). {field_fix[1]}")
+                for s in self.subjects
+            )
         reason = self.message
         if self.details:
             reason = f"{self.message}: {', '.join(self.details[:5])}"
-        return (PolicySubject(ref=self.name, reason=reason, remedy=None),)
+        if field_fix is None:
+            return (PolicySubject(ref=self.name, reason=reason, remedy=None),)
+        return (PolicySubject(ref=field_fix[0], reason=f"{reason}. {field_fix[1]}", remedy=None),)
 
 
 @dataclass

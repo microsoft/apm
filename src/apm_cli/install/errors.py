@@ -31,7 +31,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.policy.models import CIAuditResult
+    from apm_cli.security.trust import McpAdmission
 
 
 class DirectDependencyError(RuntimeError):
@@ -61,7 +63,8 @@ class MCPNativeConflictError(InstallFailureAlreadyRendered):
 
 
 class LSPUserEntryConflictError(InstallFailureAlreadyRendered):
-    """Same-name LSP entries APM did not write were preserved (#4628).
+    """Same-name LSP entries APM did not write were preserved (#4628), or
+    managed entries a user edited were kept with no collector to count them (#4626).
 
     *preserved* maps each runtime to the server names left as the user wrote
     them; every other server in the install was still configured, and
@@ -164,6 +167,50 @@ def log_frozen_install_error(error: FrozenInstallError, logger: InstallLogger) -
         logger.info(tip)
 
 
+def log_authentication_error(error: AuthenticationError, logger: InstallLogger) -> None:
+    """Render auth diagnostics on the default path, not only under --verbose (#1015)."""
+    logger.error(str(error))
+    if error.diagnostic_context:
+        logger.error_detail(error.diagnostic_context)
+    logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+
+
+def render_apm_dependency_failure(
+    error: Exception, logger: InstallLogger, *, verbose: bool
+) -> InstallFailureAlreadyRendered:
+    """Render a failed APM dependency phase once; the caller raises the returned marker.
+
+    Auth and frozen errors use their own renderers. A native plugin settings refusal
+    or the LSP capability gate is already actionable, so it prints verbatim with any
+    raw decoder detail behind --verbose. A policy violation prints as a refusal
+    without nesting (#832); anything else gets the "Failed to install" prefix.
+    """
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+
+    if isinstance(error, AuthenticationError):
+        log_authentication_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, FrozenInstallError):
+        log_frozen_install_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    verbatim = (CopilotSettingsCollisionError, ClaudeNativePluginError, RequiredIntegrationError)
+    if isinstance(error, verbatim):
+        logger.error(str(error))
+        if detail := getattr(error, "detail", None):
+            logger.verbose_detail(detail)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, PolicyViolationError):
+        message = str(error)
+        logger.refusal(message)
+    else:
+        message = f"Failed to install APM dependencies: {error}"
+        logger.error(message)
+    if not verbose:
+        logger.progress("Run with --verbose for detailed diagnostics")
+    return InstallFailureAlreadyRendered(message)
+
+
 def frozen_install_tip(error: FrozenInstallError) -> str:
     """Return recovery guidance tailored to package or MCP lock drift.
 
@@ -214,3 +261,32 @@ class PolicyViolationError(RuntimeError):
         super().__init__(message)
         self.audit_result = audit_result
         self.policy_source = policy_source
+
+
+def policy_transitive_refusals(view: CurrentMcpConfigView) -> list[str]:
+    """Transitive servers the trust owner withheld under org ``mcp.trust_transitive``."""
+    from apm_cli.security.trust import REASON_POLICY_TRANSITIVE
+
+    return sorted(
+        name
+        for name, evidence in view.omissions.items()
+        if isinstance(evidence, dict) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+    )
+
+
+def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission) -> None:
+    """Fail the install when an org policy that blocks refuses transitive servers.
+
+    Under ``mcp.trust_transitive: false`` the trust owner parks every
+    transitive server ``mcp.allow`` does not list; with ``enforcement: block``
+    the install stops before any write, as the direct mcp-allowlist check does.
+    """
+    refused = policy_transitive_refusals(view)
+    policy = admission.org_policy()
+    if not refused or getattr(policy, "enforcement", None) != "block":
+        return
+    raise PolicyViolationError(
+        "Install blocked by org policy: mcp.trust_transitive is false and mcp.allow does "
+        f"not list transitive MCP server(s) {', '.join(refused)}. Ask the policy owner to "
+        "add them to mcp.allow or set mcp.trust_transitive: true."
+    )

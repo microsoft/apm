@@ -12,11 +12,12 @@ import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from apm_cli.core.scope import manifest_file
 
 from ..core.remediation import (
+    BUNDLE_PACKAGES_UNRECORDED,
     CONTENT_HASHES_MISSING,
     REQUIRED_PACKAGE_UNLOCKED,
     UNMANAGED_FILE_TRACK,
@@ -24,9 +25,13 @@ from ..core.remediation import (
 from .models import (
     CheckResult,
     CIAuditResult,
+    LocalBundleSubjects,
     PolicyRemedy,
     PolicySubject,
 )
+
+if TYPE_CHECKING:
+    from ..integration.mcp_config_view import CurrentMcpConfigView
 
 _logger = logging.getLogger(__name__)
 FAIL_CLOSED_POLICY_CHECKS = frozenset({"dependency-content-hashes"})
@@ -154,11 +159,30 @@ def _required_policy_index(
     return DependencyPolicyIndex.from_dependencies(deps)
 
 
+def _declared_then_bundled(
+    deps: Sequence[DependencyReference], bundled: Sequence[DependencyReference]
+) -> list[tuple[DependencyReference, PolicyRemedy | None]]:
+    """Each declared dependency, then each bundled one not declared, with its remedy.
+
+    A declared dependency's violation suggests removing it from apm.yml; a
+    bundled one has no apm.yml entry, so it suggests no edit.
+    """
+    keys = {dep.get_unique_key() for dep in deps}
+    return [(dep, PolicyRemedy.REMOVE) for dep in deps] + [
+        (dep, None) for dep in bundled if dep.get_unique_key() not in keys
+    ]
+
+
 def _check_dependency_allowlist(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
+    bundle: LocalBundleSubjects | None = None,
 ) -> CheckResult:
-    """Check 1: every dependency matches policy allow list."""
+    """Check 1: every dependency matches policy allow list.
+
+    A local *bundle* is judged by the packages it records, never by its
+    author-chosen name; one that records none is refused (#4646).
+    """
     from .matcher import check_dependency_allowed, dependency_policy_subject
 
     if policy.allow is None:
@@ -169,10 +193,12 @@ def _check_dependency_allowlist(
         )
 
     subjects: list[PolicySubject] = []
-    for dep in deps:
+    for dep, remedy in _declared_then_bundled(deps, bundle.packages if bundle else ()):
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "not in allowed" in reason:
-            subjects.append(PolicySubject(dependency_policy_subject(dep), reason))
+            subjects.append(PolicySubject(dependency_policy_subject(dep), reason, remedy))
+    if bundle is not None and not bundle.packages:
+        subjects.append(_unmatchable_bundle_subject(bundle))
 
     if not subjects:
         return CheckResult(
@@ -184,6 +210,23 @@ def _check_dependency_allowlist(
         "dependency-allowlist",
         f"{len(subjects)} dependency(ies) not in allow list",
         subjects,
+    )
+
+
+def _unmatchable_bundle_subject(bundle: LocalBundleSubjects) -> PolicySubject:
+    """The allow-list refusal of a local bundle that records no packages (#4646).
+
+    Passing it would let any content through an allow list under an
+    author-chosen name, so it fails closed.
+    """
+    from .matcher import dependency_policy_subject
+
+    ref = dependency_policy_subject(bundle.names[0]) if bundle.names else "local bundle"
+    return PolicySubject(
+        ref,
+        "the bundle records no packages for dependencies.allow to match, and a bundle "
+        f"name never satisfies the allow list. {BUNDLE_PACKAGES_UNRECORDED.sentence()}",
+        None,
     )
 
 
@@ -208,9 +251,7 @@ def _check_dependency_denylist(
         )
 
     subjects: list[PolicySubject] = []
-    keys = {dep.get_unique_key() for dep in deps}
-    extra = [(dep, None) for dep in bundled if dep.get_unique_key() not in keys]
-    for dep, remedy in (*((dep, PolicyRemedy.REMOVE) for dep in deps), *extra):
+    for dep, remedy in _declared_then_bundled(deps, bundled):
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "denied by pattern" in reason:
             subjects.append(PolicySubject(dependency_policy_subject(dep), reason, remedy))
@@ -731,8 +772,66 @@ def _check_mcp_self_defined(
     )
 
 
+_TRUST_TRANSITIVE = "mcp-trust-transitive"
+_TRUST_TRANSITIVE_REASON = "transitive server not in mcp.allow (mcp.trust_transitive: false)"
+
+
+def _trust_transitive_result(names: Sequence[str]) -> CheckResult:
+    if not names:
+        return CheckResult(
+            name=_TRUST_TRANSITIVE,
+            passed=True,
+            message="No transitive MCP server outside mcp.allow",
+        )
+    return _subjects_result(
+        _TRUST_TRANSITIVE,
+        f"{len(names)} transitive MCP server(s) not in mcp.allow while "
+        "mcp.trust_transitive is false",
+        [PolicySubject(name, _TRUST_TRANSITIVE_REASON) for name in names],
+    )
+
+
+def _check_mcp_trust_transitive(mcp_deps: list, policy: McpPolicy) -> CheckResult:
+    """Check 10b: with ``mcp.trust_transitive`` false, transitive servers need mcp.allow.
+
+    A transitive server (declared by a package at lock depth > 1, and not
+    re-declared by the root apm.yml) passes only when ``mcp.allow`` lists it
+    (req-sc-016). A direct dependency's server is not transitive.
+    """
+    from ..security.trust import transitive_server_listed
+
+    if policy.trust_transitive:
+        return _trust_transitive_result(())
+    root = {m.name for m in mcp_deps if not getattr(m, "resolved_by", None)}
+    transitive = sorted({m.name for m in mcp_deps if getattr(m, "declared_depth", 0) > 1} - root)
+    return _trust_transitive_result(
+        [name for name in transitive if not transitive_server_listed(name, policy)]
+    )
+
+
+def _parked_trust_transitive(
+    view: CurrentMcpConfigView, native: Sequence[str] = ()
+) -> CheckResult | None:
+    """Audit: transitive servers withheld under ``mcp.trust_transitive``.
+
+    *view* carries the servers the trust owner parked; *native* names those
+    of locked transitive native plugins, which Claude loads itself.
+    """
+    from ..security.trust import REASON_POLICY_TRANSITIVE
+
+    parked = sorted(
+        {
+            name
+            for name, evidence in view.omissions.items()
+            if isinstance(evidence, Mapping) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+        }
+        | set(native)
+    )
+    return _trust_transitive_result(parked) if parked else None
+
+
 def mcp_policy_checks(mcp_list: list, policy: ApmPolicy) -> list[CheckResult]:
-    """Run org MCP checks 7-10 (allow, deny, transport, self-defined) on *mcp_list*.
+    """Run org MCP checks 7-10b (allow, deny, transport, self-defined, trust_transitive).
 
     The one composition of the MCP checks: the install gate and the native
     Claude plugin route (which vets the servers a plugin declares) both use it.
@@ -742,6 +841,7 @@ def mcp_policy_checks(mcp_list: list, policy: ApmPolicy) -> list[CheckResult]:
         _check_mcp_denylist(mcp_list, policy.mcp),
         _check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp),
         _check_mcp_self_defined(mcp_list, policy.mcp),
+        _check_mcp_trust_transitive(mcp_list, policy.mcp),
     ]
 
 
@@ -1598,7 +1698,8 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
     installing: bool = False,
     marketplace_origins: MarketplaceOrigins | None = None,
-    bundled_deps: Iterable[DependencyReference] = (),
+    bundled_deps: Iterable[DependencyReference] | LocalBundleSubjects = (),
+    depth_lockfile: LockFile | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1615,6 +1716,9 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     lockfile:
         An ``ApmLockfile`` / ``LockFile`` instance, or ``None``.  Needed
         for deployed-files and version-pin checks.
+    depth_lockfile:
+        Rows of the graph an install resolved; ``dependencies.max_depth``
+        judges these instead of *lockfile* when given.
     policy:
         The effective :class:`ApmPolicy` to enforce.
     mcp_deps:
@@ -1676,10 +1780,11 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         resolutions), checked against ``marketplace.allow`` when the policy
         sets it, so a lock cannot bypass it.
     bundled_deps:
-        Packages a local bundle or a pack ships without an apm.yml entry in
-        this project (the bundle itself and the packages it carries). They
-        meet ``dependencies.deny`` only: the allow list, require and pin
-        checks judge the project's own declarations.
+        Packages shipped without an apm.yml entry in this project. A plain
+        iterable meets ``dependencies.deny`` only. A local bundle's
+        :class:`LocalBundleSubjects` meets deny with its name and packages,
+        and ``dependencies.allow`` with its packages alone (#4646). Require
+        and pin checks judge the project's own declarations.
 
     Returns
     -------
@@ -1710,9 +1815,11 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         return fail_fast and not check.passed
 
     # -- Dependency checks (1-6) -----------------------------------
-    if _run(_check_dependency_allowlist(source_list, policy.dependencies)):
+    bundle = bundled_deps if isinstance(bundled_deps, LocalBundleSubjects) else None
+    deny_bundled = [*bundle.names, *bundle.packages] if bundle else list(bundled_deps)
+    if _run(_check_dependency_allowlist(source_list, policy.dependencies, bundle)):
         return result
-    if _run(_check_dependency_denylist(source_list, policy.dependencies, list(bundled_deps))):
+    if _run(_check_dependency_denylist(source_list, policy.dependencies, deny_bundled)):
         return result
     dep_names = None
     if policy.dependencies.effective_require or (
@@ -1739,7 +1846,9 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         )
     ):
         return result
-    if _run(_check_transitive_depth(lockfile, policy.dependencies)):
+    # An install judges the graph it resolved, not the lockfile it replaces (#4826).
+    depth_lock = depth_lockfile if depth_lockfile is not None else lockfile
+    if _run(_check_transitive_depth(depth_lock, policy.dependencies)):
         return result
 
     # -- Registry source + pinned-constraint + MCP + tail checks -----
@@ -1863,6 +1972,7 @@ def run_policy_checks(
     # recorded local-bundle servers), so policy judges the audit view's set,
     # as the install preflight judges the merged set.
     mcp_brought_in_by = None
+    trust_check: CheckResult | None = None
     if lock is None:
         mcp_deps = manifest.get_all_mcp_dependencies()
     else:
@@ -1873,6 +1983,15 @@ def run_policy_checks(
         )
         mcp_deps = list(view.kept_dependencies())
         mcp_brought_in_by = view.brought_in_by
+        from ..claude_plugins.admission import locked_transitive_native_refusals
+        from ..codex_plugins.admission import locked_transitive_codex_refusals
+
+        modules = modules_root or project_root / "apm_modules"
+        native = [
+            *locked_transitive_native_refusals(lock, modules, policy),
+            *locked_transitive_codex_refusals(lock, modules, policy),
+        ]
+        trust_check = _parked_trust_transitive(view, native)
 
     try:
         source_deps = _audit_source_dependencies(manifest, lock)
@@ -1914,6 +2033,10 @@ def run_policy_checks(
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:
         return result
+    if trust_check is not None:
+        result.checks.append(trust_check)
+        if fail_fast and not trust_check.passed:
+            return result
 
     hash_check = _check_dependency_content_hashes(
         lock,
@@ -1936,22 +2059,27 @@ def run_policy_checks(
     from ..models.apm_package import package_target_selection
 
     manifest_decision = EffectiveTargetDecision(package_target_selection(manifest), "apm.yml")
-    if _run(
-        _check_compilation_target(
-            manifest_decision.canonical_targets,
-            policy.compilation,
-            source=manifest_decision.source,
+    if (
+        _run(
+            _check_compilation_target(
+                manifest_decision.canonical_targets,
+                policy.compilation,
+                source=manifest_decision.source,
+            )
         )
+        or _run(_check_compilation_strategy(raw_yml, policy.compilation))
+        or _run(_check_source_attribution(raw_yml, policy.compilation))
     ):
-        return result
-    if _run(_check_compilation_strategy(raw_yml, policy.compilation)):
-        return result
-    if _run(_check_source_attribution(raw_yml, policy.compilation)):
         return result
 
     # Manifest checks (14-15)
     if _run(_check_required_manifest_fields(raw_yml, policy.manifest)):
         return result
+    if lock is not None and policy.manifest.content_types is not None:
+        from .content_types_check import audit_content_types
+
+        if _run(audit_content_types(lock, policy.manifest, project_root, modules_root)):
+            return result
     if _run(_check_scripts_policy(raw_yml, policy.manifest)):
         return result
 

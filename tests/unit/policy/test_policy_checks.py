@@ -765,3 +765,128 @@ class TestUnmanagedClassification:
 
 
 # -- Group 2: run_policy_checks malformed-manifest tests -----------
+
+
+class TestContentTypes:
+    """manifest.content_types.allow names primitive kinds a package may ship."""
+
+    @staticmethod
+    def _package(root, *files: str):
+        for relative in files:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n", encoding="utf-8")
+        return root
+
+    def test_kinds_come_from_the_shipped_primitive_files(self, tmp_path):
+        from apm_cli.policy.content_types_check import package_content_kinds
+
+        root = self._package(
+            tmp_path,
+            ".apm/instructions/a.instructions.md",
+            ".apm/prompts/p.md",
+            "skills/s/SKILL.md",
+            "hooks/h.json",
+            "apm_modules/dep/x.agent.md",
+        )
+        assert package_content_kinds(root) == {"instruction", "prompt", "skill", "hook"}
+
+    def test_plugin_root_and_unnamed_apm_dirs_fail_closed(self, tmp_path):
+        from apm_cli.policy.content_types_check import check_content_types, package_content_kinds
+
+        root = self._package(
+            tmp_path, "SKILL.md", "agents/reviewer.md", "commands/c.md", ".apm/rules/r.md"
+        )
+        assert package_content_kinds(root) == {"skill", "agent", "command", "rules"}
+        policy = ManifestPolicy(content_types={"allow": ["skill", "agents", "commands"]})
+        (subject,) = check_content_types({"p": (root,)}, policy).violation_subjects()
+        assert "rules" in subject.reason
+        allowed = ManifestPolicy(content_types={"allow": ["skill", "agent", "command", "Rules"]})
+        assert check_content_types({"p": (root,)}, allowed).passed
+
+    def test_plugin_manifest_components_at_custom_paths_count(self, tmp_path):
+        from apm_cli.policy.content_types_check import package_content_kinds
+
+        root = self._package(tmp_path, "personas/reviewer.md", "SKILL.md")
+        (root / "plugin.json").write_text(
+            '{"name": "p", "agents": "./personas/reviewer.md"}', encoding="utf-8"
+        )
+        assert package_content_kinds(root) == {"skill", "agent"}
+
+    @pytest.mark.parametrize(
+        ("parent", "child", "allowed"),
+        [
+            ({}, None, True),
+            ({"allow": ["instruction", "skill"]}, {"allow": ["instructions", "skills"]}, True),
+            ({"allow": ["skill"]}, {"allow": ["instructions"]}, False),
+        ],
+        ids=["absent-allow-stays-unrestricted", "aliases-intersect-by-kind", "disjoint"],
+    )
+    def test_inherited_allow_lists_merge_by_kind(self, tmp_path, parent, child, allowed):
+        from apm_cli.policy.content_types_check import check_content_types
+        from apm_cli.policy.inheritance import merge_policies
+        from apm_cli.policy.schema import ApmPolicy
+
+        root = self._package(tmp_path / "pkg", "SKILL.md", ".apm/instructions/i.instructions.md")
+        merged = merge_policies(
+            ApmPolicy(manifest=ManifestPolicy(content_types=parent)),
+            ApmPolicy(manifest=ManifestPolicy(content_types=child)),
+        )
+        assert check_content_types({"p": (root,)}, merged.manifest).passed is allowed
+
+    @pytest.mark.parametrize(
+        ("allow", "passed"),
+        [
+            (None, True),
+            (["skill"], False),
+            (["skills", "Instructions"], True),
+            ([], False),
+        ],
+        ids=["unrestricted", "skill-only", "aliases", "empty-allows-nothing"],
+    )
+    def test_a_package_passes_only_when_every_kind_is_allowed(self, tmp_path, allow, passed):
+        from apm_cli.policy.content_types_check import check_content_types
+
+        root = self._package(tmp_path / "pkg", "SKILL.md", ".apm/instructions/i.instructions.md")
+        policy = ManifestPolicy(content_types=None if allow is None else {"allow": allow})
+        check = check_content_types({"acme/pkg": (root,)}, policy)
+        assert check.passed is passed
+        if not passed:
+            (subject,) = check.violation_subjects()
+            assert subject.ref == "acme/pkg"
+            assert "instruction" in subject.reason and "manifest.content_types" in subject.reason
+
+
+@pytest.mark.parametrize(
+    ("allow", "deny", "refused"),
+    [
+        (None, ("other",), True),
+        (("srv",), (), False),
+        (("srv",), ("srv",), False),
+        (("other",), (), True),
+    ],
+    ids=["no-allow", "listed", "listed-and-denied", "unlisted"],
+)
+def test_transitive_eligibility_reads_mcp_allow_alone_on_both_paths(
+    allow: tuple[str, ...] | None, deny: tuple[str, ...], refused: bool
+) -> None:
+    """Admission and the policy check agree; mcp.deny is left to the deny check (req-sc-016)."""
+    from dataclasses import replace
+
+    from apm_cli.models.dependency.mcp import MCPDependency
+    from apm_cli.policy.policy_checks import mcp_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+    from apm_cli.security.trust import McpAdmission
+
+    policy = ApmPolicy(
+        enforcement="block", mcp=McpPolicy(allow=allow, deny=deny, trust_transitive=False)
+    )
+    admission = McpAdmission(None, one_off=True, org_policy=lambda: policy)
+    server = MCPDependency.from_dict(
+        {"name": "srv", "registry": False, "transport": "stdio", "command": "x"}
+    )
+    transitive = replace(server, resolved_by="leaf", declared_depth=2)
+    verdicts = {check.name: check.passed for check in mcp_policy_checks([transitive], policy)}
+    assert admission.refuses_transitive("srv") is refused
+    assert verdicts["mcp-trust-transitive"] is not refused
+    assert verdicts["mcp-denylist"] is ("srv" not in deny)

@@ -22,6 +22,7 @@ from apm_cli.install.plan_admission import (  # noqa: F401 -- re-exported for ca
     _declared_exec_types,
     _is_transitive,
     _recorded_deployed_types,
+    _retired_kinds,
     bin_deploy_denial,
     hook_file_admission,
     native_plugin_verdict,
@@ -419,12 +420,20 @@ class GateRetirements(NamedTuple):
     denied_packages: dict[str, str]
     parked_servers: dict[str, str]
     hook_pins: dict[str, str]
-    # Lock key -> why the hooks it recorded as deployed are no longer allowed.
-    hook_packages: dict[str, str]
+    # Lock key -> (why its recorded hooks are no longer allowed, kinds the rebuild removes).
+    hook_packages: dict[str, tuple[str, tuple[str, ...]]]
+    # Lock key -> why a natively deployed plugin is no longer admitted whole (#3921).
+    native_packages: dict[str, str]
 
 
 def gate_retirements(
-    lockfile: Any, modules_dir: Path, apm_package: Any, project_root: Path, *, user_scope: bool
+    lockfile: Any,
+    modules_dir: Path,
+    apm_package: Any,
+    project_root: Path,
+    *,
+    user_scope: bool,
+    migrate_user_legacy: bool = True,
 ) -> GateRetirements | None:
     """What the current gates no longer allow on a path that skips install's gate.
 
@@ -434,10 +443,12 @@ def gate_retirements(
     (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
     revoked approval or a changed definition -- recorded hook files whose
     pinned approval no longer admits them (:func:`locked_hook_pin_mismatches`,
-    the ``--frozen`` and audit owner), and the packages whose recorded hooks
-    install's executables gate no longer deploys (:func:`locked_hooks_retired`).
+    the ``--frozen`` and audit owner), the packages whose recorded hooks
+    install's executables gate no longer deploys (:func:`locked_hooks_retired`),
+    and the native plugins install would now park (``locked_native_retired``).
     ``None`` when the org policy blocks or is unresolved: install's policy
-    preflight owns that outcome.
+    preflight owns that outcome. A preview passes ``migrate_user_legacy=False``
+    so reading a legacy ``approvals.yml`` does not migrate it.
     """
     from apm_cli.core.scope import manifest_root, scope_manifest_path
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
@@ -446,7 +457,7 @@ def gate_retirements(
     from apm_cli.security.trust import McpAdmission
 
     if lockfile is None:
-        return GateRetirements({}, {}, {}, {})
+        return GateRetirements({}, {}, {}, {}, {})
     route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
     if route.blocks or route.unresolved:
         return None
@@ -457,7 +468,9 @@ def gate_retirements(
         apm_package,
         lockfile,
         modules_dir,
-        admission=McpAdmission.for_project(project_root, user_scope=user_scope),
+        admission=McpAdmission.for_project(
+            project_root, user_scope=user_scope, migrate_user_legacy=migrate_user_legacy
+        ),
         recorded=None,
     )
 
@@ -472,6 +485,7 @@ def gate_retirements(
                     scope_manifest_path(project_root, user_scope=user_scope),
                     policy=route.policy,
                     fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+                    migrate_user_legacy=migrate_user_legacy,
                 )
             )
         return trust[0]
@@ -481,13 +495,16 @@ def gate_retirements(
     retired = locked_hooks_retired(
         lockfile, modules_dir, _trust_ctx, pinned={item.package for item in pins}
     )
-    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired)
+    from apm_cli.claude_plugins.admission import locked_native_retired
+
+    native = locked_native_retired(lockfile, modules_dir, _trust_ctx, route.policy)
+    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired, native)
 
 
 def locked_hooks_retired(
     lockfile: Any, modules_dir: Path, trust_ctx: Callable[[], Any], *, pinned: set[str]
-) -> builtins.dict[str, str]:
-    """Return lock key -> reason for each package whose recorded hooks the gate now refuses.
+) -> builtins.dict[str, tuple[str, tuple[str, ...]]]:
+    """Return lock key -> (reason, retired kinds) for each package whose hooks it refuses.
 
     A row recorded as deploying hooks (ungated, or ``hooks`` among
     ``exec_allowed_types``) is judged with :func:`current_exec_decision`, the
@@ -506,7 +523,7 @@ def locked_hooks_retired(
     )
 
     ungated = {None, TRUST_DEPLOYED}
-    retired: builtins.dict[str, str] = {}
+    retired: builtins.dict[str, tuple[str, tuple[str, ...]]] = {}
     for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
         if key == "." or dep.exec_status == TRUST_ABSENT:
             continue
@@ -522,9 +539,12 @@ def locked_hooks_retired(
         except (ExecPolicyUnavailable, OSError, ValueError):
             continue
         if _strip_version(resolve_package_key(package_info, dep.get_unique_key())) in pinned:
-            retired[key] = "hook definition changed since approval"
+            why, withheld = "hook definition changed since approval", (EXEC_TYPE_HOOKS,)
         elif status not in ungated and EXEC_TYPE_HOOKS not in allowed:
-            retired[key] = "denied" if status == TRUST_DENIED else "not approved"
+            why, withheld = ("denied" if status == TRUST_DENIED else "not approved"), ()
+        else:
+            continue
+        retired[key] = (why, _retired_kinds(dep, package_info, allowed, withheld))
     return retired
 
 
@@ -567,6 +587,24 @@ def exec_policy_from_discovery(discover: Callable[[], Any]) -> Any:
     if route.blocks or route.unresolved:
         raise ExecPolicyUnavailable(route.outcome)
     return getattr(fetch, "policy", None)
+
+
+def trust_context_for_policy(
+    manifest_path: Path, policy: Any, fallback_allow_executables: Any = None
+) -> Any:
+    """The executables trust context under an already-routed org *policy*.
+
+    For a caller that routed one policy discovery itself (``apm audit --ci``)
+    and must judge trust on that same result; never writes.
+    """
+    from apm_cli.security.executables import exec_trust_context_for_project
+
+    return exec_trust_context_for_project(
+        manifest_path,
+        policy=policy,
+        fallback_allow_executables=fallback_allow_executables,
+        migrate_user_legacy=False,
+    )
 
 
 def discovered_exec_policy(deploy_root: Path) -> Any:

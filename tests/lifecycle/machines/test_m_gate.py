@@ -99,6 +99,10 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("decide", "hook", "approve"),
     ("install", "plain"),
     ("set_policy", "org-deny"),
+    # A new approval under the org deny is refused, names the org layer (#4919), and
+    # still writes the grant (strict #4923).
+    ("decide", "hook", "revoke"),
+    ("decide", "hook", "approve"),
     ("install", "frozen"),
     ("install", "plain"),
     ("install", "plain"),
@@ -265,6 +269,44 @@ def test_narrowing_one_surface_keeps_another_approved_surface(
     assert "hook" in machine.world.observe().deployed
 
 
+def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Nightly falsifier (#4919): deny wins, so approving an org-denied hook exits 1,
+    names the org layer, and the hook stays undeployed."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.set_policy("org-deny")
+    machine.declare("hook")
+    machine.update()
+    machine.decide("hook", "approve")
+    machine.install("plain")
+    world = machine.world
+    manifest = (world.workspace / "apm.yml").read_text(encoding="utf-8")
+    # A repeat is not a new grant: decide() checks exit 1, the org layer and I7.
+    machine.decide("hook", "approve")
+    assert (world.workspace / "apm.yml").read_text(encoding="utf-8") == manifest
+    assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
+
+
+def test_approving_a_denied_hook_under_an_org_deny_drops_only_its_own_deny(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Review replay (#4923): approve removes the package's own deny before it saves
+    the grant; the known cell excuses exactly that change, nothing else."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.declare("hook")
+    machine.install("plain")
+    machine.decide("hook", "deny")
+    machine.set_policy("org-deny")
+    world = machine.world
+    machine.decide("hook", "approve")
+    store = world.store()
+    path = str(world.packages["hook"])
+    assert any(k == path or k.startswith(path + "#") for k in store.get("allow") or {}), store
+    assert not any(k == path or k.startswith(path + "#") for k in store.get("deny") or {}), store
+    assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
+
+
 @pytest.mark.parametrize("scope", SCOPES)
 def test_verdict_on_an_uninstalled_package_ignores_the_operation_lock(
     tmp_path: Path, lifecycle_entry_point: tuple[str, ...], scope: str
@@ -362,7 +404,12 @@ def test_home_allowlist_admits_only_exact_ancestors(tmp_path: Path) -> None:
 def _native_after(
     tmp_path: Path, managed: set[str], *, user_scope: bool = True, recorded_name: str = "tool"
 ) -> Observation:
-    """A user deploy root with one native plugin root recorded by its lock (#4225)."""
+    """A deploy root with one native plugin root recorded by its lock (#4225, #3921).
+
+    The record carries the per-machine digest at user scope and the portable
+    path-and-bytes digest at project scope.
+    """
+    from apm_cli.claude_plugins.admission import fingerprint_native_claude_source
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.native_plugins.record import NativePluginRecord
     from apm_cli.utils.content_hash import compute_native_plugin_hash
@@ -375,7 +422,9 @@ def _native_after(
     dependency = LockedDependency(repo_url="fixture/tool")
     dependency.native_plugin = NativePluginRecord(
         recorded_name,
-        compute_native_plugin_hash(root),
+        compute_native_plugin_hash(root)
+        if user_scope
+        else fingerprint_native_claude_source(root, portable=True),
         "apm-fixture",
         str(tmp_path / ".agents/plugins"),
     )
@@ -398,7 +447,7 @@ def test_i1_counts_paths_under_a_verified_native_plugin_root_as_recorded(tmp_pat
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"})
     _expect_i1(after, [])
     project = _native_after(tmp_path / "p", {".agents/plugins/tool/bin/tool"}, user_scope=False)
-    _expect_i1(project, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
+    _expect_i1(project, [])
 
 
 def test_i1_fails_a_native_plugin_root_that_differs_from_its_record(tmp_path: Path) -> None:

@@ -19,6 +19,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="creates OS symlinks"),
+    pytest.mark.e2e,
 ]
 
 _LINKED = ".apm/instructions/linked.instructions.md"

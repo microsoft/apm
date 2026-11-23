@@ -6,13 +6,12 @@ import sys
 import traceback
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import click
 
 from apm_cli.core.remediation import (
     CLAUDE_PLUGIN_REGISTRATION_STALE,
-    COPILOT_PLUGIN_REGISTRATION_STALE,
     INTEGRATIONS_UNSYNCED,
     INTEGRATIONS_UNSYNCED_AFTER,
     LOCKFILE_STATE_UNRECONCILED,
@@ -24,13 +23,13 @@ from apm_cli.core.remediation import (
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...deps.lockfile import lockfile_parent_identity
 from ...deps.lockfile_generator import require_current_cli
 from ...deps.lockfile_write_authority import (
     LockfileWriter,
     flush_lockfile_writes,
     lockfile_writer,
     remove_lockfile,
-    restore_lockfile_bytes,
 )
 from ...hook_contract import HookContractError
 from ...install.errors import PolicyViolationError
@@ -57,6 +56,7 @@ from .engine import (
     _removed_lock_key,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
+    _uninstall_orphan_decision,
     _validate_uninstall_packages,
     gate_retired_hook_survivors,
     manifest_dependency_entries,
@@ -69,7 +69,9 @@ from .selection_shrink import (
 )
 
 
-def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: int) -> str:
+def _uninstall_summary(
+    removed_count: int, retained_count: int, orphan_count: int, still_needed_count: int = 0
+) -> str:
     """Return the final summary, counting each package once."""
     summary = f"removed {_count_noun(removed_count, 'package')}"
     if orphan_count:
@@ -82,6 +84,9 @@ def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: in
     if retained_count:
         retained = _count_noun(retained_count, "package")
         summary += f"; removed {retained} from the selected profile only"
+    if still_needed_count:
+        kept = _count_noun(still_needed_count, "declaration")
+        summary += f"; removed {kept} whose package another dependency still needs"
     return summary
 
 
@@ -89,6 +94,187 @@ def _report_consented_deletions(logger: CommandLogger, claims: Iterable[str]) ->
     """Name each file ``--trust-lockfile`` consent deleted, with its basis (req-lk-024)."""
     for claim in claims:
         logger.progress(f"Deleted {claim} (matched its apm.lock.yaml hash; --trust-lockfile)")
+
+
+def _manifest_declarations_to_drop(declarations: list, packages_to_remove: list) -> list:
+    """Return every apm.yml declaration of *packages_to_remove* (#3693, #4749).
+
+    Still-needed packages are dropped from the manifest too, so the caller
+    passes them alongside the packages that are uninstalled for real.
+    """
+    return list(manifest_declarations_of(declarations, packages_to_remove))
+
+
+class _StillNeededRepair(NamedTuple):
+    """Orphan-owner repair: parent, depth and dev status for every affected row.
+
+    ``roots`` are the still-needed rows whose own declaration goes.
+    """
+
+    parents: dict
+    depths: dict
+    dev: dict
+    roots: frozenset = frozenset()
+
+
+_NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
+
+
+def _split_still_needed_packages(
+    lockfile, packages_to_remove: list, modules_dir, apm_yml_path, logger
+) -> tuple[list, list, _StillNeededRepair]:
+    """Split removals into full removals and declarations a survivor still needs.
+
+    A removed direct dependency that a surviving package still declares keeps
+    its lock row, ``apm_modules`` copy and deployed files; only its manifest
+    declaration goes, and the orphan owner's repair re-parents the row
+    (#4749). Returns ``(removed, still_needed, repair)``.
+    """
+    if not lockfile or not packages_to_remove or not modules_dir.exists():
+        return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
+    decision = _uninstall_orphan_decision(
+        lockfile, packages_to_remove, modules_dir, apm_yml_path, logger, warn_on_incomplete=False
+    )
+    if not decision.rescued_roots:
+        return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
+    still_needed = [
+        package
+        for package in packages_to_remove
+        if _removed_lock_key(package, lockfile) in decision.rescued_roots
+    ]
+    _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
+    removed = [package for package in packages_to_remove if package not in still_needed]
+    repair = _StillNeededRepair(
+        dict(decision.rescued_parents),
+        dict(decision.rescued_depths),
+        dict(decision.rescued_dev),
+        frozenset(decision.rescued_roots),
+    )
+    return removed, still_needed, repair
+
+
+def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
+    """Name a lock parent the way the user declared it (``./vendor/d``)."""
+    for dep in lockfile.get_package_dependencies():
+        if lockfile_parent_identity(dep, lockfile.replacements) == parent_identity:
+            if dep.source == "local" and dep.local_path:
+                # Portable: an absolute or home path prints as _local/<name>.
+                return _dependency_public_label(dep.local_path)
+            return dep.repo_url
+    return parent_identity or "another dependency"
+
+
+def _refuse_still_needed_local(still_needed: list, parents, lockfile, logger) -> None:
+    """Refuse before any write when a still-needed package is a local one (#4882).
+
+    Keeping a local package under its new parent changes its lock identity
+    (the anchored key), which uninstall cannot re-key yet, so it would leave
+    a lockfile ``apm install --frozen`` rejects. Remote packages keep the
+    declaration-only removal (#4749).
+    """
+    local = []
+    for package in still_needed:
+        key = _removed_lock_key(package, lockfile)
+        row = lockfile.get_dependency(key)
+        if row is not None and row.source == "local":
+            parent = _locked_parent_label(lockfile, parents.get(key, (None,))[0])
+            local.append((_dependency_public_label(package), parent))
+    if not local:
+        return
+    for label, parent in local:
+        logger.error(
+            f"{label} stays: {parent} still needs it; apm.yml and apm.lock.yaml were not changed."
+        )
+    logger.progress(
+        "Uninstall the package that still needs it first, or keep the local declaration in apm.yml."
+    )
+    sys.exit(1)
+
+
+def _split_removals(
+    packages_to_remove: list, lockfile, paths: tuple, logger, *, user_scope: bool
+) -> tuple[list, list, list, _StillNeededRepair]:
+    """Split the selection into full, selected-profile and declaration-only removals."""
+    removed, retained = _split_selected_profile_packages(
+        packages_to_remove, lockfile, user_scope=user_scope
+    )
+    modules_dir, apm_yml_path = paths
+    removed, still_needed, repairs = _split_still_needed_packages(
+        lockfile, removed, modules_dir, apm_yml_path, logger
+    )
+    return removed, retained, still_needed, repairs
+
+
+def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
+    """Give every affected row the parent, depth and dev status install records."""
+    updated = False
+    # Dev status comes only from ``repair.dev``: a partial walk proves
+    # production paths, never their absence.
+    for key, (parent, local_path) in repair.parents.items():
+        kept = lockfile.get_dependency(key)
+        if kept is None:
+            continue
+        if kept.resolved_by != parent:
+            kept.resolved_by = parent
+            updated = True
+        if local_path is not None and kept.local_path != local_path:
+            kept.local_path = local_path
+            updated = True
+    for key in repair.roots:
+        kept = lockfile.get_dependency(key)
+        # The removed declaration's own request goes; surviving parents' stay.
+        if kept is not None and kept.replacement is not None:
+            updated |= kept.replacement.drop_root_requests()
+    for field_name, values in (("depth", repair.depths), ("is_dev", repair.dev)):
+        for key, value in values.items():
+            kept = lockfile.get_dependency(key)
+            if kept is not None and getattr(kept, field_name) != value:
+                setattr(kept, field_name, value)
+                updated = True
+    return updated
+
+
+def _surviving_declarations(current_deps: list, packages_to_remove: list) -> list:
+    """Declarations apm.yml keeps once every removed declaration goes."""
+    surviving = list(current_deps)
+    for declaration in manifest_declarations_of(current_deps, packages_to_remove):
+        surviving.remove(declaration)
+    return surviving
+
+
+def _still_needed_summary(
+    selections: tuple[list, list, list],
+    orphan_removed: int,
+    repair: _StillNeededRepair,
+    lockfile,
+    logger,
+) -> str:
+    """Report still-needed packages and return the final uninstall summary."""
+    removed, retained, still_needed = selections
+    _report_still_needed_packages(still_needed, repair, lockfile, logger, dry_run=False)
+    return _uninstall_summary(len(removed), len(retained), orphan_removed, len(still_needed))
+
+
+def _report_still_needed_packages(
+    still_needed: list,
+    repair: _StillNeededRepair,
+    lockfile,
+    logger: CommandLogger,
+    *,
+    dry_run: bool,
+) -> None:
+    """Explain why a removed declaration's package stays installed."""
+    for package in still_needed:
+        label = _dependency_public_label(package)
+        parent = repair.parents.get(_removed_lock_key(package, lockfile), (None,))[0]
+        needed_by = f"{parent} still depends on it" if parent else "another dependency needs it"
+        if dry_run:
+            logger.progress(
+                f"Dry run: Would remove {label} from apm.yml only; it stays installed "
+                f"because {needed_by}"
+            )
+        else:
+            logger.progress(f"{label} stays installed because {needed_by}")
 
 
 def _report_uninstall_outcome(
@@ -531,9 +717,13 @@ def _abort_if_retained_target_cleanup_paths(
     the deletion recheck), and the skill directories holding them, do not stop
     the uninstall (#4295); its deletions are named first, before any exit.
     """
+    from ...integration.cleanup import _claim_key
+
     if evidence is not None:
         _report_consented_deletions(logger, evidence.take_consented_deletions())
         consent_kept = consent_kept | evidence.kept_under_consent()
+    # One spelling per file, as consent records it (#4295).
+    consent_kept = {_claim_key(kept) for kept in consent_kept}
     # Every ancestor directory of a kept file, built once: lookups stay O(1).
     kept_dirs = {
         "/".join(parts[:index])
@@ -541,11 +731,11 @@ def _abort_if_retained_target_cleanup_paths(
         for index in range(1, len(parts))
     }
     # Only evidence-based retention is waived; a path cleanup failed on stays.
-    failed = getattr(outcome, "failed_paths", set())
+    failed = {_claim_key(path) for path in getattr(outcome, "failed_paths", set())}
     outcome.retained_paths -= {
         path
         for path in outcome.retained_paths
-        if path not in failed and (path in consent_kept or path in kept_dirs)
+        if (key := _claim_key(path)) not in failed and (key in consent_kept or key in kept_dirs)
     }
     if not outcome.retained_paths:
         return
@@ -628,7 +818,7 @@ def _refuse_uninstall_without_evidence(
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
-    if not lockfile or not cleanup_keys:
+    if not lockfile or (not cleanup_keys and not shrunk):
         return frozenset()
     # Hash-tracked skill members count too: directory cleanup deletes them.
     selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
@@ -806,8 +996,9 @@ def _dry_run_with_selected_profile(
     *,
     surviving_dependencies: list,
     lockfile=None,
+    still_needed: tuple[list, _StillNeededRepair] = ((), _NO_STILL_NEEDED_REPAIR),
 ) -> None:
-    """Preview full removals and selected-profile-only removals."""
+    """Preview full, selected-profile-only and declaration-only removals."""
     if packages_to_remove:
         _dry_run_uninstall(
             packages_to_remove,
@@ -818,6 +1009,9 @@ def _dry_run_with_selected_profile(
             lockfile=lockfile,
         )
     _report_selected_profile_packages(retained_packages, logger, dry_run=True)
+    _report_still_needed_packages(
+        list(still_needed[0]), still_needed[1], lockfile, logger, dry_run=True
+    )
 
 
 def _retire_selected_profile_packages(
@@ -1044,9 +1238,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
         surviving_deps = list(current_deps)
         for declaration in manifest_declarations_of(current_deps, packages_to_remove):
             surviving_deps.remove(declaration)
-        removed_keys = builtins.set()
-        for package in packages_to_remove:
-            removed_keys.add(_removed_lock_key(package, lockfile))
+        removed_keys = {_removed_lock_key(package, lockfile) for package in packages_to_remove}
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
@@ -1064,6 +1256,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
         )
         if not dry_run:
             _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys)
+        # A still-needed local dependency refuses before scripts run (#4882);
+        # the split repeats after them, since scripts may edit apm.yml.
+        _split_removals(
+            packages_to_remove,
+            lockfile,
+            (modules_dir, apm_yml_path),
+            logger,
+            user_scope=scope is InstallScope.USER,
+        )
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.
@@ -1106,15 +1307,22 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
         selected_package_labels = tuple(
             _dependency_lifecycle_label(package) for package in packages_to_remove
         )
-        packages_to_remove, retained_packages = _split_selected_profile_packages(
-            packages_to_remove, lockfile, user_scope=scope is InstallScope.USER
+        (
+            packages_to_remove,
+            retained_packages,
+            still_needed_packages,
+            still_needed_repairs,
+        ) = _split_removals(
+            packages_to_remove,
+            lockfile,
+            (modules_dir, apm_yml_path),
+            logger,
+            user_scope=scope is InstallScope.USER,
         )
-        surviving_deps = list(current_deps)
-        for declaration in manifest_declarations_of(current_deps, packages_to_remove):
-            surviving_deps.remove(declaration)
-        removed_keys = builtins.set()
-        for package in packages_to_remove:
-            removed_keys.add(_removed_lock_key(package, lockfile))
+        surviving_deps = _surviving_declarations(
+            current_deps, [*packages_to_remove, *still_needed_packages]
+        )
+        removed_keys = {_removed_lock_key(package, lockfile) for package in packages_to_remove}
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
@@ -1168,6 +1376,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
                 apm_yml_path,
                 surviving_dependencies=surviving_deps,
                 lockfile=lockfile,
+                still_needed=(still_needed_packages, still_needed_repairs),
             )
             return
 
@@ -1180,7 +1389,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             removed_keys | builtins.set(projected_orphans) | profile_keys,
             profile_survivors,
             staged_local_refreshes,
-            (packages_to_remove, modules_dir, apm_yml_path),
+            ([*packages_to_remove, *still_needed_packages], modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
             trust_lockfile=trust_lockfile,
@@ -1214,7 +1423,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             )
             # Survivors whose selection shrinks are redeployed in full below.
             refreshed_survivor_keys |= _shrink_surviving_selections(
-                lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
+                lockfile,
+                [*packages_to_remove, *still_needed_packages],
+                modules_dir,
+                apm_yml_path,
+                logger,
             )
         except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:
             _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
@@ -1263,7 +1476,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
         profile_lock_updated = _retire_selected_profile_packages(
             lockfile, profile_keys, profile_survivors, retained_packages, logger
         )
-        if not packages_to_remove:
+        if not packages_to_remove and not still_needed_packages:
             _finish_selected_profile_uninstall(
                 lockfile=lockfile,
                 lockfile_path=lockfile_path,
@@ -1284,7 +1497,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             ("dependencies.apm", prod_deps),
             ("devDependencies.apm", dev_deps),
         ):
-            for declaration in manifest_declarations_of(declarations, packages_to_remove):
+            for declaration in _manifest_declarations_to_drop(
+                declarations, [*packages_to_remove, *still_needed_packages]
+            ):
                 declarations.remove(declaration)
                 package_label = _dependency_public_label(declaration)
                 _progress_once(
@@ -1344,6 +1559,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
                 if orphan_key in lockfile.dependencies:
                     del lockfile.dependencies[orphan_key]
                     lockfile_updated = True
+            lockfile_updated |= _reparent_still_needed(lockfile, still_needed_repairs)
 
         # Step 10: Sync integrations
         cleaned = {
@@ -1491,8 +1707,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
         )
 
         # Final summary: count each package once, whichever stores it left.
-        summary = _uninstall_summary(
-            len(packages_to_remove), len(retained_packages), orphan_removed
+        summary = _still_needed_summary(
+            (packages_to_remove, retained_packages, still_needed_packages),
+            orphan_removed,
+            still_needed_repairs,
+            lockfile,
+            logger,
         )
         if compile_inputs is not None:
             hint_compile_after_removal(compile_inputs, modules_dir, logger)
@@ -1582,48 +1802,19 @@ def _native_ownership_before(lockfile, lockfile_path) -> _NativeBefore:
 def _resync_native_registration_after_uninstall(
     *, deploy_root, modules_dir, scope, lockfile, logger, native_before=None, lockfile_path=None
 ) -> None:
-    """Rebuild native plugin rows from surviving locked state.
+    """Retire removed native plugins from every harness through the shared owner."""
+    from ...native_plugins.uninstall import reconcile_after_uninstall
 
-    Claude removal errors remain fatal; Copilot settings refresh is advisory.
-    """
-    from ...claude_plugins.admission import ClaudeNativePluginError
-    from ...claude_plugins.registrar import reconcile_claude_plugins
-
-    try:
-        reconcile_claude_plugins(
-            modules_dir=modules_dir,
-            scope=scope,
-            previous=native_before.ownership if native_before is not None else None,
-            lockfile=lockfile,
-            deploy_root=deploy_root,
-            logger=logger,
-        )
-    except ClaudeNativePluginError as exc:
-        if native_before is not None and native_before.lock_bytes and lockfile_path is not None:
-            # One rollback unit: keep the removed plugins' ownership for the retry.
-            restore_lockfile_bytes(lockfile_path, native_before.lock_bytes)
-        raise ClaudeNativePluginError(
-            "Package removal may already be complete, but Claude registration did not converge. "
-            f"{exc} Reconcile remaining declarations with 'apm install --global' and the "
-            "original --target selection; do not re-add the removed package."
-        ) from exc
-    try:
-        from ...agent_plugins.errors import AgentPluginError
-        from ...copilot_plugins.registrar import resync_native_plugins
-        from ...copilot_plugins.settings import CopilotSettingsCollisionError
-
-        resync_native_plugins(
-            project_root=deploy_root,
-            modules_dir=modules_dir,
-            scope=scope,
-            lockfile=lockfile,
-            logger=logger,
-        )
-    except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
-        logger.warning(
-            f"GitHub Copilot plugin registration could not be updated: {registration_error} "
-            f"{COPILOT_PLUGIN_REGISTRATION_STALE.sentence()}"
-        )
+    reconcile_after_uninstall(
+        deploy_root=deploy_root,
+        modules_dir=modules_dir,
+        scope=scope,
+        lockfile=lockfile,
+        logger=logger,
+        ownership=native_before.ownership if native_before is not None else None,
+        lock_bytes=native_before.lock_bytes if native_before is not None else None,
+        lockfile_path=lockfile_path,
+    )
 
 
 def _retire_native_registration(token) -> None:

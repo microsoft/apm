@@ -659,12 +659,19 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_an_enclosing_owner_render_never_overrides_the_files_own_offline_owner[False]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_an_enclosing_owner_render_never_overrides_the_files_own_offline_owner[True]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_checks_the_enclosing_directory_owner_too",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_classifies_a_standalone_symlinked_file_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[True]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_finds_an_owner_recorded_under_a_backslash_spelling",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_finds_an_owner_recorded_under_an_absolute_spelling",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_honours_a_receipt_recorded_under_another_spelling_of_the_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_cowork_final_symlink_and_its_target",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_skill_directory_that_gained_a_link_after_the_scan",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_user_file_created_after_the_final_directory_scan",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[differing-receipt]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[edited-after-preview]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[no-recorded-hash]",
@@ -672,6 +679,7 @@
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[symbolic-link]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[two-distinct-hashes]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[unreadable-receipts]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_kept_dot_segment_hook_is_not_a_sync_error",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_kept_hook_is_not_reported_as_a_path_safety_failure",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_deletes_a_member_a_remaining_dependency_still_deploys",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_hides_a_failed_deletion_of_a_hook_it_kept_earlier",
@@ -679,28 +687,42 @@
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_unlinks_a_link_it_classified_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_pools_owners_across_path_spellings",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_a_bare_hex_recorded_hash_as_sha256",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_a_cowork_spelling_of_a_root_file_as_one_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_an_absolute_spelling_under_the_root_as_one_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_case_variant_spellings_as_one_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_dot_segment_spellings_as_one_file",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_recorded_hashes_under_one_spelling",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_rechecks_an_all_matching_skill_directory_before_removing_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_rechecks_each_member_immediately_before_deleting_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_records_a_file_edited_after_the_preview_as_kept",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reports_one_deletion_per_file_across_spellings",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_tries_an_owner_only_the_canonical_rows_name",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
-        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]"
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_uninstall_waives_a_consent_kept_dot_segment_claim"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-024",
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 30,
+      "test_count": 45,
       "tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_an_enclosing_owner_render_never_overrides_the_files_own_offline_owner[False]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_an_enclosing_owner_render_never_overrides_the_files_own_offline_owner[True]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_checks_the_enclosing_directory_owner_too",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_classifies_a_standalone_symlinked_file_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[True]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_finds_an_owner_recorded_under_a_backslash_spelling",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_finds_an_owner_recorded_under_an_absolute_spelling",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_honours_a_receipt_recorded_under_another_spelling_of_the_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_cowork_final_symlink_and_its_target",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_skill_directory_that_gained_a_link_after_the_scan",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_user_file_created_after_the_final_directory_scan",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[differing-receipt]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[edited-after-preview]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[no-recorded-hash]",
@@ -708,6 +730,7 @@
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[symbolic-link]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[two-distinct-hashes]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[unreadable-receipts]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_kept_dot_segment_hook_is_not_a_sync_error",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_kept_hook_is_not_reported_as_a_path_safety_failure",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_deletes_a_member_a_remaining_dependency_still_deploys",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_hides_a_failed_deletion_of_a_hook_it_kept_earlier",
@@ -715,16 +738,23 @@
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_unlinks_a_link_it_classified_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_pools_owners_across_path_spellings",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_a_bare_hex_recorded_hash_as_sha256",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_a_cowork_spelling_of_a_root_file_as_one_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_an_absolute_spelling_under_the_root_as_one_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_case_variant_spellings_as_one_file",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_dot_segment_spellings_as_one_file",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_recorded_hashes_under_one_spelling",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_rechecks_an_all_matching_skill_directory_before_removing_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_rechecks_each_member_immediately_before_deleting_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_records_a_file_edited_after_the_preview_as_kept",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reports_one_deletion_per_file_across_spellings",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_tries_an_owner_only_the_canonical_rows_name",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion",
-        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_the_per_invocation_consent_exception"
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_the_per_invocation_consent_exception",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_uninstall_waives_a_consent_kept_dot_segment_claim"
       ]
     },
     {
@@ -1397,6 +1427,7 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lock_drives_deployment_of_exactly_the_plugin_root",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_root_digest_matches_the_known_answer_vector"
       ],
       "conformance_class": "consumer",
@@ -1404,28 +1435,32 @@
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lock_drives_deployment_of_exactly_the_plugin_root",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_root_digest_matches_the_known_answer_vector"
       ]
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ],
       "conformance_class": "consumer",
       "id": "req-na-003",
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ]
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_cross_target_suppression_is_the_consumers_own_false",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_no_receipt_and_removal_only_of_what_the_previous_lock_produced",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[add-and-remove]",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-conflict]",
@@ -1445,8 +1480,9 @@
       "oracle": "tests/fixtures/spec-conformance/native-activation/req-na-004.json",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 12,
+      "test_count": 13,
       "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_cross_target_suppression_is_the_consumers_own_false",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_no_receipt_and_removal_only_of_what_the_previous_lock_produced",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[add-and-remove]",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-conflict]",
@@ -1494,16 +1530,18 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ],
       "conformance_class": "consumer",
       "id": "req-na-007",
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ]
     },
     {
@@ -2849,20 +2887,30 @@
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
-        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]"
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_canvas_only_with_deployment_evidence[claude-only-no-canvas]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_canvas_only_with_deployment_evidence[copilot-canvas-deployed]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_only_the_kinds_the_lock_recorded_as_deployed",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[listed-kept]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[unlisted-retired-with-its-kind]"
       ],
       "conformance_class": "consumer",
       "id": "req-sc-009",
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 10,
+      "test_count": 15,
       "tests": [
         "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_canvas_only_with_deployment_evidence[claude-only-no-canvas]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_canvas_only_with_deployment_evidence[copilot-canvas-deployed]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_only_the_kinds_the_lock_recorded_as_deployed",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[listed-kept]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[unlisted-retired-with-its-kind]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval",
         "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-install-hooks]",
         "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-mcp-admission]",
@@ -2990,6 +3038,8 @@
       "behavioral_tests": [
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_changed_definition_is_withheld_with_a_named_diagnostic",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_lockfile_state_never_grants_transitive_consent",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_allow[block]",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_allow[warn]",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_organization_denial_still_wins_over_a_pin",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_per_user_pin_admits_and_the_opt_in_never_overrides_a_stale_pin",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_transitive_mcp_consent_comes_from_a_pinned_manifest_grant"
@@ -2999,10 +3049,12 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 5,
+      "test_count": 7,
       "tests": [
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_changed_definition_is_withheld_with_a_named_diagnostic",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_lockfile_state_never_grants_transitive_consent",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_allow[block]",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_allow[warn]",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_organization_denial_still_wins_over_a_pin",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_per_user_pin_admits_and_the_opt_in_never_overrides_a_stale_pin",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_transitive_mcp_consent_comes_from_a_pinned_manifest_grant"
@@ -3274,26 +3326,30 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_invalid_settings_fail_closed_without_overwrite",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_ledger_re_adopts_only_the_exact_reserved_namespace",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_previous_lock_never_adopts_or_retires_existing_entries",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_and_consumer_owned",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_creates_no_native_registration",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_same_plugin_name_claimants_are_refused"
       ],
       "conformance_class": "consumer",
       "id": "req-tg-013",
       "keyword": "MUST",
       "section": "8.5.7",
       "status": "active",
-      "test_count": 7,
+      "test_count": 8,
       "tests": [
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_invalid_settings_fail_closed_without_overwrite",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_ledger_re_adopts_only_the_exact_reserved_namespace",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_previous_lock_never_adopts_or_retires_existing_entries",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_lifecycle_registration_clauses_persist_in_spec",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_and_consumer_owned",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_creates_no_native_registration",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_req_tg_013_clauses_superseded_by_the_native_profile",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_same_plugin_name_claimants_are_refused"
+      ],
+      "waivers": [
+        "#3921 activates an Agent Plugin from an intact copy deployed to .agents/plugins/<name>, verified against the lock fingerprint, instead of referencing apm_modules in place; it refuses every plugin-name collision instead of letting a direct dependency win over a transitive one, and records ownership per lock entry rather than in a ledger, so there is no owner to re-point (see test_same_plugin_name_claimants_are_refused). These req-tg-013 clauses await their spec amendment."
       ]
     },
     {

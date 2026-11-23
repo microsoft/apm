@@ -36,6 +36,7 @@ from ...models.dependency.selection import (
 from ...models.dependency.selection import (
     parse_dependency_entry as _parse_dependency_entry,
 )
+from ...native_plugins.scopes import native_harnesses, native_source_current
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
 from .local_survivors import _surviving_local_refs_at_install_path
@@ -1487,8 +1488,9 @@ def _sync_integrations_after_uninstall(
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     target_survivor_plan = []
     for dep_ref, pkg_info in validated_survivors:
-        if dep_ref.get_unique_key() in excluded_survivor_keys:
+        if (dep_key := dep_ref.get_unique_key()) in excluded_survivor_keys:
             continue
+        native = native_harnesses(lockfile, dep_key, pkg_info)  # route as install did (#3921)
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             effective_dependency_selection(dep_ref).target_subset,
@@ -1498,7 +1500,8 @@ def _sync_integrations_after_uninstall(
         )
         authorized_targets = []
         for target in target_selection.targets:
-            authorized_targets.append(target)
+            if target.name not in native:
+                authorized_targets.append(target)
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
@@ -1786,6 +1789,8 @@ def _restage_changed_local_survivors(
     for key, dep in sorted(lockfile.dependencies.items()):
         if key == "." or key in skip_keys or dep.source != "local" or dep.depth != 1:
             continue
+        if dep.native_plugin is not None and native_source_current(dep, source_root):
+            continue  # an unchanged native plugin is never re-copied (#3921)
         try:
             dep_ref = dep.to_dependency_ref()
             source = (source_root / dep_ref.local_path).resolve()
@@ -1793,8 +1798,7 @@ def _restage_changed_local_survivors(
             current = compute_local_package_hash(source, framed=dep.content_hash_framed)
         except (OSError, ValueError, TypeError, PathTraversalError):
             continue
-        # Judge the source against the materialized copy, not the lock row: a
-        # native plugin's locked hash is recorded from its normalized image.
+        # Judge the source against the materialized copy, not the lock row.
         if not install_path.is_dir() or current == compute_local_package_hash(
             install_path, framed=dep.content_hash_framed
         ):
@@ -1844,6 +1848,8 @@ def gate_retired_hook_survivors(
     """
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
+    from ...native_plugins.uninstall import retire_disallowed_native_survivors
+    from ...security.exec_kinds import retired_kinds_warnings
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
@@ -1870,13 +1876,13 @@ def gate_retired_hook_survivors(
         for k, why in retirements.denied_packages.items()
         if k not in removed_keys and survivor_ships_hooks(lockfile, k, modules_dir)
     }
-    hooks = {k: why for k, why in retirements.hook_packages.items() if k not in removed_keys}
+    hooks = {k: v for k, v in retirements.hook_packages.items() if k not in removed_keys}
     for key, why in sorted(denied.items()):
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
-    for key, why in sorted(hooks.items()):
-        if key not in denied:
-            logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
-    return refreshed | set(denied) | set(hooks), set(denied)
+    for line in retired_kinds_warnings(hooks, skip=denied):
+        logger.warning(line)
+    native = retire_disallowed_native_survivors(lockfile, retirements, removed_keys, hooks, logger)
+    return refreshed | set(denied) | set(hooks) | native, set(denied)
 
 
 def _remove_stale_mcp_from_recorded_targets(
@@ -1959,6 +1965,8 @@ def _cleanup_stale_mcp(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.trust import McpAdmission
 
+    from .mcp_survivors import surviving_package_keys
+
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
     deploy_root = Path(project_root) if project_root is not None else Path.cwd()
     # A survivor the current gates no longer allow loses its servers, as on
@@ -1968,17 +1976,14 @@ def _cleanup_stale_mcp(
         lockfile, apm_modules_path, apm_package, deploy_root, user_scope=user_scope
     )
     denied = retirements.denied_packages if retirements is not None else {}
-    for key, why in sorted(denied.items()):
-        if logger is not None:
-            logger.warning(f"{key} is no longer allowed ({why}); removing its MCP servers")
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
         admission=McpAdmission.for_project(deploy_root, user_scope=user_scope),
         logger=logger,
-        active_package_keys=(
-            frozenset(key for key in lockfile.dependencies if key not in denied) if denied else None
+        active_package_keys=surviving_package_keys(
+            lockfile, apm_package, apm_modules_path, denied, logger
         ),
     )
     # Uninstall never admits a server: only previously managed servers survive.

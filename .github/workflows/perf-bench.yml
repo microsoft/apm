@@ -1,0 +1,233 @@
+name: Perf bench
+
+# Base-vs-new journey benchmarks on hosted runners, so agents never benchmark
+# on a shared host. Agents only push a request and read the summary
+# (scripts/perf/bench_ci.sh); the runners do all the work.
+# Trigger: a push to perf-bench/** carrying bench-request.env (no main change
+# needed), or a manual dispatch once this file is on main.
+# Reported: CPU (user+sys of apm and its children: wait4 on POSIX, a Job
+# Object on Windows) and deterministic counts, plus modeled-RTT wall (evidence
+# for network-bound journeys only: hosted runners are shared VMs). PROFILE=1
+# adds one cProfile run per cell on the new side (shard 1 artifact).
+
+on:
+  push:
+    branches: ['perf-bench/**']
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base commit SHA.
+        required: true
+      new:
+        description: New commit SHA.
+        required: true
+      fixtures:
+        description: Comma list of fixtures.
+        default: tree-10
+      journeys:
+        description: Comma list of journeys.
+        default: install-noop,install-locked-warm,install-warm,install-frozen-warm
+      rtt:
+        description: Injected RTT in ms (comma list of up to 4, e.g. 0,30,100).
+        default: '30'
+      pairs:
+        description: Interleaved base/new pairs per runner.
+        default: '3'
+      os:
+        description: Runner OS (linux, macos or windows).
+        default: linux
+      profile:
+        description: 1 adds one cProfile run per cell on the new side.
+        default: '0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-bench-${{ github.ref }}-${{ github.run_id }}
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  request:
+    name: Validate request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.req.outputs.base }}
+      new: ${{ steps.req.outputs.new }}
+      fixtures: ${{ steps.req.outputs.fixtures }}
+      journeys: ${{ steps.req.outputs.journeys }}
+      rtt: ${{ steps.req.outputs.rtt }}
+      pairs: ${{ steps.req.outputs.pairs }}
+      runner: ${{ steps.req.outputs.runner }}
+      venv_apm: ${{ steps.req.outputs.venv_apm }}
+      profile: ${{ steps.req.outputs.profile }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - id: req
+      env:
+        IN_BASE: ${{ inputs.base }}
+        IN_NEW: ${{ inputs.new }}
+        IN_FIXTURES: ${{ inputs.fixtures }}
+        IN_JOURNEYS: ${{ inputs.journeys }}
+        IN_RTT: ${{ inputs.rtt }}
+        IN_PAIRS: ${{ inputs.pairs }}
+        IN_OS: ${{ inputs.os }}
+        IN_PROFILE: ${{ inputs.profile }}
+      run: |
+        set -euo pipefail
+        BASE="$IN_BASE"; NEW="$IN_NEW"; FIXTURES="${IN_FIXTURES:-tree-10}"
+        JOURNEYS="${IN_JOURNEYS:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
+        RTT="${IN_RTT:-30}"; PAIRS="${IN_PAIRS:-3}"; OS="${IN_OS:-linux}"
+        PROFILE="${IN_PROFILE:-0}"
+        if [ "${GITHUB_EVENT_NAME}" = push ]; then
+          # KEY=VALUE lines only; never sourced, so the file cannot run code.
+          while IFS='=' read -r key value; do
+            case "$key" in
+              BASE) BASE="$value" ;; NEW) NEW="$value" ;; FIXTURES) FIXTURES="$value" ;;
+              JOURNEYS) JOURNEYS="$value" ;; RTT) RTT="$value" ;; PAIRS) PAIRS="$value" ;;
+              OS) OS="$value" ;; PROFILE) PROFILE="$value" ;;
+            esac
+          done < <(grep -E '^[A-Z]+=' bench-request.env)
+        fi
+        [[ "$BASE" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::bad BASE '$BASE'"; exit 1; }
+        [[ "$NEW" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::bad NEW '$NEW'"; exit 1; }
+        [[ "$FIXTURES" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad FIXTURES"; exit 1; }
+        [[ "$JOURNEYS" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad JOURNEYS"; exit 1; }
+        [[ "$RTT" =~ ^[0-9]{1,4}(,[0-9]{1,4}){0,3}$ ]] || { echo "::error::bad RTT (comma list of up to 4)"; exit 1; }
+        # Each RTT is one cell key; a repeated value (30,030) would overwrite pairs.
+        DISTINCT=$(tr ',' '\n' <<< "$RTT" | sed 's/^0*\([0-9]\)/\1/' | sort -u | wc -l)
+        [ "$DISTINCT" -eq "$(tr ',' '\n' <<< "$RTT" | wc -l)" ] || { echo "::error::RTT values must be distinct"; exit 1; }
+        [[ "$PAIRS" =~ ^[1-9]$ ]] || { echo "::error::PAIRS must be 1-9"; exit 1; }
+        [[ "$PROFILE" =~ ^[01]$ ]] || { echo "::error::PROFILE must be 0 or 1"; exit 1; }
+        case "$OS" in
+          linux) RUNNER=ubuntu-24.04 ;;
+          macos) RUNNER=macos-15 ;;
+          windows) RUNNER=windows-2025 ;;
+          *) echo "::error::OS must be linux, macos or windows"; exit 1 ;;
+        esac
+        # cProfile needs the Python console script; the Windows venv has a PE launcher.
+        if [ "$OS" = windows ] && [ "$PROFILE" = 1 ]; then echo "::error::PROFILE=1 is not supported on windows"; exit 1; fi
+        # The venv console script, relative to a side's worktree.
+        if [ "$OS" = windows ]; then VENV_APM=.venv/Scripts/apm.exe; else VENV_APM=.venv/bin/apm; fi
+        {
+          echo "base=$BASE"; echo "new=$NEW"; echo "fixtures=$FIXTURES"
+          echo "journeys=$JOURNEYS"; echo "rtt=$RTT"; echo "pairs=$PAIRS"; echo "runner=$RUNNER"
+          echo "venv_apm=$VENV_APM"
+          echo "profile=$PROFILE"
+        } >> "$GITHUB_OUTPUT"
+
+  bench:
+    name: ABAB shard ${{ matrix.shard }}
+    needs: request
+    runs-on: ${{ needs.request.outputs.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        # Git Bash on Windows; the same scripts run on every OS.
+        shell: bash
+    env:
+      BASE: ${{ needs.request.outputs.base }}
+      NEW: ${{ needs.request.outputs.new }}
+      VENV_APM: ${{ needs.request.outputs.venv_apm }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: harness
+        persist-credentials: false
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - name: Install base and new CLIs
+      run: |
+        set -euo pipefail
+        for side in base new; do
+          sha=$([ "$side" = base ] && echo "$BASE" || echo "$NEW")
+          git -C harness fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$sha"
+          git -C harness worktree add --quiet --detach "../$side" FETCH_HEAD
+          (cd "$side" && uv sync --frozen --no-editable --quiet)
+          echo "$side: $(git -C "$side" rev-parse HEAD) $("$side/$VENV_APM" --version)"
+        done
+    - name: Install harness
+      working-directory: harness
+      run: uv sync --frozen --extra dev --quiet
+    - name: Interleaved runs
+      working-directory: harness
+      env:
+        PAIRS: ${{ needs.request.outputs.pairs }}
+        FIXTURES: ${{ needs.request.outputs.fixtures }}
+        JOURNEYS: ${{ needs.request.outputs.journeys }}
+        RTT: ${{ needs.request.outputs.rtt }}
+        SHARD: ${{ matrix.shard }}
+        PROFILE: ${{ needs.request.outputs.profile }}
+      run: |
+        PROFILE_FLAG=()
+        if [ "$PROFILE" = 1 ] && [ "$SHARD" = 1 ]; then PROFILE_FLAG=(--profile); fi
+        uv run --frozen python -m tests.benchmarks.ci_bench abab "${PROFILE_FLAG[@]}" \
+          --base-apm "$GITHUB_WORKSPACE/base/$VENV_APM" \
+          --new-apm "$GITHUB_WORKSPACE/new/$VENV_APM" \
+          --pairs "$PAIRS" --fixtures "$FIXTURES" --journeys "$JOURNEYS" --rtt "$RTT" \
+          --out "$GITHUB_WORKSPACE/out/shard-$SHARD"
+    - if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: perf-bench-shard-${{ matrix.shard }}
+        path: |
+          out/shard-${{ matrix.shard }}/runs/**/*.json
+          out/shard-${{ matrix.shard }}/runs/**/*.md
+          out/shard-${{ matrix.shard }}/profile/*.md
+          out/shard-${{ matrix.shard }}/profile/profiles/*.txt
+          out/shard-${{ matrix.shard }}/profile/profiles/*.prof
+        if-no-files-found: warn
+
+  report:
+    name: Report
+    needs: [request, bench]
+    if: always() && needs.request.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        pattern: perf-bench-shard-*
+        path: shards
+    - name: Summarize
+      env:
+        BASE: ${{ needs.request.outputs.base }}
+        NEW: ${{ needs.request.outputs.new }}
+        PAIRS: ${{ needs.request.outputs.pairs }}
+      run: |
+        uv sync --frozen --extra dev --quiet
+        set +e
+        uv run --frozen python -m tests.benchmarks.ci_bench report shards --json perf-bench-result.json \
+          --base "$BASE" --new "$NEW" --shards 3 --pairs "$PAIRS" > summary.md
+        status=$?
+        cat summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+        exit $status
+    - if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: perf-bench-result
+        path: |
+          perf-bench-result.json
+          summary.md

@@ -782,6 +782,7 @@ mutation_writes.copilot_cli_mcp_paths
 mutation_writes.drift_hook_membership
 mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
+mutation_writes.hook_containment_root
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
 mutation_writes.mcp_declaration_scope
@@ -842,6 +843,8 @@ transport-platform-artifactory-netrc-isolation
 transport-platform-auth-outcome-owner
 transport-platform-authenticated-egress
 transport-platform-cache-cleanup-outcome
+transport-platform-cached-repo-git
+transport-platform-checkout-verified
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner

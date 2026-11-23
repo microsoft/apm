@@ -105,8 +105,16 @@ POLICY_VARIANTS = (
     "cached_stale",
     "deny-all-deps",
     "mcp-deny-all",
+    "allow-list",
+    "scripts-deny",
+    "unmanaged-deny",
+    "unmanaged-deny-dirs",
+    "max-depth-1",
+    "max-depth-2",
 )
 DENIED_PACKAGE = "p-exec"
+# allow-list: only this package is allowed; ``**/`` also matches a bundle named after it.
+ALLOWED_PACKAGE = "p-skill"
 # exec-gate-on: any org executables signal turns the gate on
 # (security/executables.py org_signal); recommending a package the world never
 # serves denies nothing.
@@ -172,6 +180,24 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
                     f"**/{name}" for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed")
                 ]
             },
+        },
+        "scripts-deny": {"name": "scripts-deny", **base, "manifest": {"scripts": "deny"}},
+        "unmanaged-deny": {
+            "name": "unmanaged-deny",
+            **base,
+            "unmanaged_files": {"action": "deny"},
+        },
+        "unmanaged-deny-dirs": {
+            "name": "unmanaged-deny-dirs",
+            **base,
+            "unmanaged_files": {"action": "deny", "directories": ["governed"]},
+        },
+        "max-depth-1": {"name": "max-depth-1", **base, "dependencies": {"max_depth": 1}},
+        "max-depth-2": {"name": "max-depth-2", **base, "dependencies": {"max_depth": 2}},
+        "allow-list": {
+            "name": "allow-list",
+            **base,
+            "dependencies": {"allow": [f"**/{ALLOWED_PACKAGE}", f"{ORG}/{ALLOWED_PACKAGE}"]},
         },
         "malformed": MALFORMED_POLICY,
         "garbage_response": GARBAGE_POLICY,

@@ -13,7 +13,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_package import LocalPackageFactory
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 
 
 def test_preexisting_hook_event_order_does_not_cause_sidecar_drift(

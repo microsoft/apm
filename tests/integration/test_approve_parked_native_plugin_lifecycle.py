@@ -144,18 +144,18 @@ def _row(world: _World, plugin: Path) -> dict:
 
 
 def _claude_deployed(world: _World, plugin: Path) -> bool:
-    """The plugin's MCP server is live where Claude reads it, and the lock agrees (I1)."""
-    if world.scope == "user":
-        settings = world.home / ".claude" / "settings.json"
-        enabled = settings.is_file() and "p-native-claude" in settings.read_text("utf-8")
-        row = _row(world, plugin)
-        root = row.get("native_plugin") and world.home / row["native_plugin"]["root"]
-        assert bool(enabled) == bool(root and (root / ".mcp.json").is_file()), row
-        return bool(enabled)
-    config = world.project / ".mcp.json"
-    on_disk = config.is_file() and "p-claude-mcp" in config.read_text("utf-8")
-    assert on_disk == ("p-claude-mcp" in (_lock(world).get("mcp_servers") or [])), _lock(world)
-    return on_disk
+    """The plugin is declared where Claude reads it, its deployed root carries its
+    own MCP server, and the lock agrees (I1). Both scopes install it whole (#3921)."""
+    base = world.home if world.scope == "user" else world.project
+    settings = base / ".claude" / "settings.json"
+    enabled = settings.is_file() and "p-native-claude" in settings.read_text("utf-8")
+    row = _row(world, plugin)
+    root = row.get("native_plugin") and base / row["native_plugin"]["root"]
+    assert bool(enabled) == bool(root and (root / ".mcp.json").is_file()), row
+    # Claude loads the server from the plugin; APM never claims it for Claude.
+    claimed = (_lock(world).get("mcp_target_servers") or {}).get("claude") or []
+    assert "p-claude-mcp" not in claimed, _lock(world)
+    return bool(enabled)
 
 
 @pytest.mark.parametrize("scope", ["user", "project"])
@@ -197,6 +197,31 @@ def test_claude_plugin_is_approved_by_the_printed_command(
     retired = world.run_hint(
         denied.stdout, rf"Run '({re.escape(install)})' to remove executables already deployed"
     )
+    assert retired.returncode == 0, _evidence(retired)
+    assert not _claude_deployed(world, plugin), _evidence(retired)
+
+
+def test_a_narrowed_run_refuses_to_carry_a_denied_claude_plugin(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """--target copilot never reaches a user Claude plugin, so it cannot keep it once denied."""
+    world = _World(tmp_path, apm_binary_path, "user", "claude")
+    plugin = _claude_plugin(world.packages)
+    installed = _parked_install(world, plugin)
+    approved = world.run_hint(installed.stdout, r"Approve: (apm approve -g \S+)")
+    assert approved.returncode == 0, _evidence(approved)
+    deployed = world.apm("install", "-g")
+    assert deployed.returncode == 0, _evidence(deployed)
+    assert _claude_deployed(world, plugin), _evidence(deployed)
+    denied = world.apm("deny", "-g", str(plugin))
+    assert denied.returncode == 0, _evidence(denied)
+
+    narrowed = world.apm("install", "-g", "--target", "copilot")
+    assert narrowed.returncode == 1, _evidence(narrowed)
+    assert "is no longer allowed" in narrowed.stdout + narrowed.stderr, _evidence(narrowed)
+    assert _claude_deployed(world, plugin), _evidence(narrowed)
+
+    retired = world.apm("install", "-g")
     assert retired.returncode == 0, _evidence(retired)
     assert not _claude_deployed(world, plugin), _evidence(retired)
 
@@ -317,3 +342,65 @@ def test_approve_exits_1_when_it_approves_nothing(
         with_ref.stdout + with_ref.stderr, r"not a ref: (apm approve (?:-g )?\S+)"
     )
     assert by_identity.returncode == 0, _evidence(by_identity)
+
+
+@pytest.mark.parametrize("listed", [False, True], ids=["unlisted", "listed"])
+def test_audit_rechecks_a_deployed_transitive_codex_plugin_against_current_policy(
+    tmp_path: Path, apm_binary_path: Path, listed: bool
+) -> None:
+    """A policy tightened after deployment fails audit --ci for the plugin's MCP server.
+
+    org mcp.trust_transitive admits a transitive Codex plugin's server only through
+    mcp.allow; the listed control proves the same deployment then passes.
+    """
+    world, plugin = _codex_world(tmp_path, apm_binary_path)
+    parent = world.packages / "p-parent"
+    _skill(parent, "p-parent")
+    (parent / "apm.yml").write_text(
+        yaml.safe_dump(
+            {"name": "p-parent", "version": "1.0.0", "dependencies": {"apm": [str(plugin)]}}
+        ),
+        encoding="utf-8",
+    )
+    installed = world.apm("install", "-g", str(parent))
+    assert installed.returncode == 0, _evidence(installed)
+    approved = world.run_hint(installed.stdout, r"Pin: (apm approve -g \S+)")
+    assert approved.returncode == 0, _evidence(approved)
+    deployed = world.apm("install", "-g")
+    assert deployed.returncode == 0, _evidence(deployed)
+    ledger = json.loads((world.apm_home / ".codex-native" / "ownership.json").read_text("utf-8"))
+    assert [r["name"] for r in ledger["plugins"].values()] == ["p-native-codex"], ledger
+    row = _row(world, plugin)
+    assert row["depth"] == 2 and row["exec_status"] == "deployed", row
+    baseline = world.runner.run(("audit", "--ci"), cwd=world.apm_home, env=world.env)
+    assert baseline.returncode == 0, _evidence(baseline)
+
+    mcp = {"deny": ["unrelated"], "trust_transitive": False}
+    if listed:
+        mcp["allow"] = ["p-codex-mcp"]
+    policy = world.cwd / "apm-policy.yml"
+    policy.write_text(
+        yaml.safe_dump({"name": "org", "version": "1.0", "enforcement": "block", "mcp": mcp}),
+        encoding="utf-8",
+    )
+    before = ArtifactSnapshot.capture(world.apm_home)
+    audit = world.runner.run(
+        ("audit", "--ci", "--policy", str(policy)), cwd=world.apm_home, env=world.env
+    )
+    assert_unchanged(before, ArtifactSnapshot.capture(world.apm_home))
+    text = audit.stdout + audit.stderr
+    assert audit.returncode == (0 if listed else 1), _evidence(audit)
+    assert ("mcp-trust-transitive" in text and "p-codex-mcp" in text) is not listed, _evidence(
+        audit
+    )
+    if listed:
+        # Without the ownership journal APM cannot tell what is deployed: fail closed.
+        (world.apm_home / ".codex-native" / "ownership.json").unlink()
+        blind = world.runner.run(
+            ("audit", "--ci", "--policy", str(policy)), cwd=world.apm_home, env=world.env
+        )
+        blind_text = blind.stdout + blind.stderr
+        assert blind.returncode == 1, _evidence(blind)
+        assert "mcp-trust-transitive" in blind_text, _evidence(blind)
+        assert "cannot be checked" in blind_text, _evidence(blind)
+    _assert_codex_stayed_offline(world)

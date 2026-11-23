@@ -2,7 +2,7 @@
 
 req-lk-024.
 
-Amendment 0.1.69 (issue #3701), adopted 2026-11-20, and the proposed 0.1.76
+Amendment 0.1.69 (issue #3701), adopted 2026-11-20, and the proposed 0.1.77
 consent exception (issue #4295). The oracles drive
 the cleanup owner directly: a forged lockfile row whose hash matches a user
 file keeps the file and names it; a local deployment receipt or byte
@@ -21,6 +21,8 @@ from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deploye
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
 from tests.spec_conformance._helpers import assert_spec_contains
+
+pytestmark = pytest.mark.component
 
 _PATH = ".github/instructions/notes.instructions.md"
 
@@ -122,7 +124,7 @@ def _consent_evidence(
 
 @pytest.mark.req("req-lk-024")
 def test_spec_states_the_per_invocation_consent_exception() -> None:
-    """Proposed amendment 0.1.76 (issue #4295)."""
+    """Proposed amendment 0.1.77 (issue #4295)."""
     assert_spec_contains("One consent exception applies, only to an uninstall the user explicitly")
     assert_spec_contains("MUST NOT infer consent from another option,")
     assert_spec_contains(
@@ -216,7 +218,7 @@ def test_consent_keeps_every_file_the_exception_does_not_cover(tmp_path: Path, c
 
     result, _messages = _cleanup(root, evidence, path)
 
-    assert os.path.lexists(path) and result.deleted == []
+    assert (path.is_symlink() or path.exists()) and result.deleted == []
     assert evidence.consented_deletions() == []
 
 
@@ -505,8 +507,52 @@ def test_consent_keeps_a_skill_directory_that_gained_a_link_after_the_scan(
         receipt_retirements=[],
     )
 
-    assert os.path.lexists(planted)
+    assert planted.is_symlink()
     assert skill not in result.deleted
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_cowork_final_symlink_and_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Cowork claim whose final component is a link is never consented through it."""
+    cowork = tmp_path / "cowork-skills"
+    target = cowork / "untracked.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# Notes\n", encoding="utf-8")
+    link = cowork / "alpha" / "SKILL.md"
+    link.parent.mkdir()
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+    claim = "cowork://skills/alpha/SKILL.md"
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path / "project",
+        receipts={},
+        render=_no_render,
+        owners={claim: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={claim: frozenset({compute_file_hash(target)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    assert evidence.consent_preview([claim]) == frozenset()
+    result = remove_stale_deployed_files(
+        [claim],
+        tmp_path / "project",
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes={claim: compute_file_hash(target)},
+        receipt_retirements=[],
+        allow_final_symlink=True,
+    )
+
+    assert link.is_symlink() and result.deleted == []
+    assert target.read_text(encoding="utf-8") == "# Notes\n"
 
 
 @pytest.mark.req("req-lk-024")
@@ -584,6 +630,306 @@ def test_consent_pools_owners_across_path_spellings(tmp_path: Path) -> None:
     assert path.exists() and result.deleted == []
 
 
+@pytest.mark.req("req-lk-024")
+def test_consent_checks_the_enclosing_directory_owner_too(tmp_path: Path) -> None:
+    """A member claim's offline owner never hides its skill directory owner's render."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    render.mkdir()
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: render if owner == "owner/pkg" else None,
+        owners={_PATH: ("offline/pkg",), _PATH.rpartition("/")[0]: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+
+
+@pytest.mark.req("req-lk-024")
+@pytest.mark.parametrize("consent", [False, True])
+def test_an_enclosing_owner_render_never_overrides_the_files_own_offline_owner(
+    tmp_path: Path, consent: bool
+) -> None:
+    """Without the flag the verdict reads the file's own owner, as before #4295.
+
+    Consent only widens the check for renders that would block it, so an
+    enclosing directory owner's matching render never authorizes the delete.
+    """
+    root = tmp_path / "project"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    (render / _PATH).parent.mkdir(parents=True)
+    (render / _PATH).write_bytes(path.read_bytes())
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: render if owner == "owner/pkg" else None,
+        owners={_PATH: ("offline/pkg",), _PATH.rpartition("/")[0]: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    if consent:
+        evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_user_file_created_after_the_final_directory_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Consent removes only an emptied skill directory: a late user file survives."""
+    skill = ".agents/skills/alpha"
+    first = f"{skill}/SKILL.md"
+    late = tmp_path / skill / "mine.md"
+    hashes, evidence = _skill_world(tmp_path, {first: "skill\n"})
+    real_rglob = Path.rglob
+
+    def scan_then_user_writes(self: Path, pattern: str, *args, **kwargs):
+        yield from real_rglob(self, pattern, *args, **kwargs)
+        if self == tmp_path / skill and not (tmp_path / first).exists() and not late.exists():
+            late.write_text("user\n", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "rglob", scan_then_user_writes)
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert late.read_text(encoding="utf-8") == "user\n"
+    assert not (tmp_path / first).exists()
+    assert skill not in result.deleted
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_an_absolute_spelling_under_the_root_as_one_file(tmp_path: Path) -> None:
+    """A conflicting hash recorded under the absolute user-scope spelling blocks consent."""
+    root = tmp_path / "home"
+    path = _deployed(root)
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={
+            _PATH: frozenset({compute_file_hash(path)}),
+            str(root / _PATH): frozenset({_OTHER}),
+        },
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_finds_an_owner_recorded_under_an_absolute_spelling(tmp_path: Path) -> None:
+    """An owner render lacking the file keeps it, whichever spelling names the owner."""
+    root = tmp_path / "home"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    render.mkdir()
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: None if owner is None else render,
+        owners={str(root / _PATH): ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_a_cowork_spelling_of_a_root_file_as_one_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Cowork root inside the deploy root: a conflicting hash under the URI blocks consent."""
+    root = tmp_path / "project"
+    claim = ".agents/skills/alpha/notes.md"
+    path = root / claim
+    path.parent.mkdir(parents=True)
+    path.write_text("# Notes\n", encoding="utf-8")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(root / ".agents/skills"))
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={
+            claim: frozenset({compute_file_hash(path)}),
+            "cowork://skills/alpha/notes.md": frozenset({_OTHER}),
+        },
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    assert evidence.lockfile_consentable(claim, path) is False
+    assert path.exists()
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_honours_a_receipt_recorded_under_another_spelling_of_the_file(
+    tmp_path: Path,
+) -> None:
+    """A differing receipt under a case-variant spelling of the same file blocks consent."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    variant = root / _PATH.replace("notes.", "NOTES.")
+    if not variant.exists():
+        # A case-sensitive filesystem models the alias with a hard link.
+        os.link(path, variant)
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={variant.resolve().as_posix(): _OTHER},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    assert evidence.lockfile_consentable(_PATH, path) is False
+    assert path.exists()
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_dot_segment_spellings_as_one_file(tmp_path: Path) -> None:
+    """A conflicting hash recorded under a ``./`` alias still blocks consent."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    head, _, name = _PATH.rpartition("/")
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={
+            _PATH: frozenset({compute_file_hash(path)}),
+            f"{head}/./{name}": frozenset({_OTHER}),
+        },
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_tries_an_owner_only_the_canonical_rows_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment row's extra owner is rendered even when its legacy list omits the path."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    path = _deployed(tmp_path)
+    digest = compute_file_hash(path)
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="owner/pkg", deployed_files=[_PATH], deployed_file_hashes={_PATH: digest}
+        )
+    )
+    lock.add_dependency(LockedDependency(repo_url="owner/second"))
+    first, second = lock.dependencies
+    row = {"kind": "project-relative", "target": "copilot", "value": _PATH, "runtime": None}
+    row |= {"scope": "project", "owners": [first, second], "active_owner": first}
+    lock.deployment_ledger = DeploymentLedgerCodec.from_rows([{**row, "content_hash": digest}])
+
+    def replay(config, _logger):
+        rendered = LockFile.read(config.lockfile_path)
+        if rendered is None or set(rendered.dependencies) != {second}:
+            raise OSError("source unreachable")
+        out = config.scratch_root / "second-render"
+        out.mkdir()
+        return out
+
+    monkeypatch.setattr("apm_cli.install.drift.run_replay", replay)
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+    evidence = DeploymentEvidence.collect(
+        tmp_path,
+        user_scope=False,
+        lockfile=lock,
+        lockfile_root=tmp_path,
+        diagnostics=DiagnosticCollector(),
+        kept=(),
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(tmp_path, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_case_variant_spellings_as_one_file(tmp_path: Path) -> None:
+    """On a case-insensitive filesystem a conflicting hash under ``NOTES`` blocks ``notes``."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    variant = _PATH.replace("notes.", "NOTES.")
+    if not (root / variant).exists():
+        pytest.skip("case-sensitive filesystem: the spellings name different files")
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)}), variant: frozenset({_OTHER})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reports_one_deletion_per_file_across_spellings(tmp_path: Path) -> None:
+    """``a`` and ``./a`` consented in one run report one deletion, not two."""
+    path = _deployed(tmp_path)
+    digest = compute_file_hash(path)
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={_PATH: frozenset({digest})},
+    )
+    evidence.consent_to_lockfile_hashes()
+    head, _, name = _PATH.rpartition("/")
+    for claim in (_PATH, f"{head}/./{name}"):
+        evidence.verdict(claim, tmp_path / _PATH)
+    path.unlink()
+
+    assert not path.exists()
+    assert evidence.take_consented_deletions() == [_PATH]
+
+
 _HOOK = ".github/hooks/pkg-apm.json"
 
 
@@ -600,6 +946,43 @@ def _sync_hooks(root: Path, evidence: DeploymentEvidence) -> dict:
     return HookIntegrator().sync_integration(
         None, root, managed_files={_HOOK}, managed_file_hashes={}, evidence=evidence
     )
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_kept_dot_segment_hook_is_not_a_sync_error(tmp_path: Path) -> None:
+    """A hook claim spelled with ``./`` that consent keeps is no failure (#4295)."""
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    path = _hook(tmp_path)
+    dotted = _HOOK.replace("hooks/", "hooks/./")
+    evidence = DeploymentEvidence(deploy_root=tmp_path, receipts={}, render=_no_render, kept=())
+    evidence.consent_to_lockfile_hashes()
+
+    stats = HookIntegrator().sync_integration(
+        None, tmp_path, managed_files={dotted}, managed_file_hashes={}, evidence=evidence
+    )
+
+    assert path.exists()
+    assert stats["errors"] == 0
+
+
+@pytest.mark.req("req-lk-024")
+def test_uninstall_waives_a_consent_kept_dot_segment_claim(tmp_path: Path) -> None:
+    """Retained ``./`` spellings match consent's canonical keys, so uninstall completes."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.cli import _abort_if_retained_target_cleanup_paths
+
+    lock_path = tmp_path / "apm.lock.yaml"
+    outcome = SimpleNamespace(retained_paths={_PATH.replace("/notes", "/./notes")})
+    logger = SimpleNamespace(render_summary=lambda: None, error=lambda *_a, **_k: None)
+
+    _abort_if_retained_target_cleanup_paths(
+        outcome, None, lock_path, logger, consent_kept=frozenset({_PATH})
+    )
+
+    assert outcome.retained_paths == set()
+    assert not lock_path.exists()
 
 
 @pytest.mark.req("req-lk-024")

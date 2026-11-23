@@ -125,6 +125,36 @@ def deployed_path_entry(
         )
 
 
+def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) -> tuple[str, ...]:
+    """Return the skill directory entry a normal lock records beside a member (#3772).
+
+    The receipt's own target is resolved at user scope even when this run did
+    not select it (#4813); its directory is adopted only for a selected target
+    that deploys skills to that same destination (Copilot and Codex share
+    ``~/.agents/skills``), and is attributed to that selected target. An
+    unselected target whose user root cannot resolve adopts nothing.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+    origin = next((t for t in targets if t.name == target_name), None)
+    if origin is None and (static := KNOWN_TARGETS.get(target_name)) is not None:
+        origin = scoped_profile_or_none(static, user_scope=True)
+    if origin is None or not origin.supports("skills"):
+        return ()
+    skills_root = origin.skills_deploy_path(root).resolve()
+    try:
+        parts = physical.relative_to(skills_root).parts
+    except ValueError:
+        return ()
+    if len(parts) < 2:
+        return ()
+    for target in targets:
+        destination = target.skills_deploy_path(root) if target.supports("skills") else None
+        if destination is not None and destination.resolve() == skills_root:
+            return (deployed_path_entry(destination / parts[0], root, [target]),)
+    return ()
+
+
 def skill_bundle_file_entries(
     skill_dir: Path,
     project_root: Path,

@@ -56,6 +56,7 @@ def prepare_mcp_integration(  # noqa: PLR0913
     no_policy: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
     prospective_lock: "LockFile | None" = None,
+    dry_run: bool = False,
 ) -> PreparedMcpIntegration:
     """Collect and admit once, without native writes or ownership adoption.
 
@@ -66,7 +67,7 @@ def prepare_mcp_integration(  # noqa: PLR0913
     """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
-    from apm_cli.security.trust import McpAdmission
+    from apm_cli.security.trust import McpAdmission, warn_one_off_trust
 
     # McpAdmission reads grants from the scope's manifest (APM_HOME/apm.yml
     # under -g, #3954) and discovers policy from the deploy root.
@@ -100,6 +101,10 @@ def prepare_mcp_integration(  # noqa: PLR0913
             claude_native_keys=claude_native_keys,
         )
     if should_install and current_view is not None:
+        if not dry_run:
+            from apm_cli.install.errors import refuse_policy_transitive
+
+            refuse_policy_transitive(current_view, admission)
         root_count = len(apm_package.get_all_mcp_dependencies())
         transitive_count = max(0, len(current_view.dependencies) - root_count)
         if transitive_count:
@@ -110,23 +115,6 @@ def prepare_mcp_integration(  # noqa: PLR0913
         mcp_deps,
         current_view if should_install else None,
         current_view,
-    )
-
-
-def warn_one_off_trust(one_off: tuple[tuple[str, str], ...], logger: "InstallLogger") -> None:
-    """Say that --trust-transitive-mcp consent lasts for this run only."""
-    if not one_off:
-        return
-    noun = "server" if len(one_off) == 1 else "servers"
-    shown = "; ".join(f"{name}, {package}" for name, package in one_off[:3])
-    more = f"; and {len(one_off) - 3} more" if len(one_off) > 3 else ""
-    first_package = one_off[0][1]
-    logger.warning(
-        f"--trust-transitive-mcp deployed {len(one_off)} unapproved MCP {noun} for this run "
-        f"only ({shown}{more})\n"
-        "    It is not saved: the next install without the flag removes it. "
-        f"Keep it: apm approve {first_package}",
-        symbol="warning",
     )
 
 
@@ -532,6 +520,15 @@ def run_mcp_integration(  # noqa: PLR0913
             target_decision=target_decision,
             logger=logger,
         )
+        from apm_cli.install.mcp.write_receipts import announce_kept_mcp_writes
+
+        announce_kept_mcp_writes(
+            lock_path,
+            project_root=project_root,
+            user_scope=user_scope,
+            exclude=exclude,
+            logger=logger,
+        )
         return mcp_count, {"scripts": apm_package.scripts or {}}
 
     previous_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
@@ -578,6 +575,7 @@ def run_mcp_integration(  # noqa: PLR0913
 
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
+    new_mcp_configs: builtins.dict = {}
     mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.models.apm_package import (
@@ -594,16 +592,17 @@ def run_mcp_integration(  # noqa: PLR0913
         raise SystemExit(2) from exc
 
     if should_install and mcp_deps:
-        from apm_cli.install.mcp.collision_preflight import refuse_unrecorded_mcp_collisions
+        from apm_cli.install.mcp.collision_preflight import refuse_projected_mcp_collisions
 
         # A package install refused these before deploying (commit_gate.py);
         # an MCP-only install refuses them here, before its first write (#4268).
-        refuse_unrecorded_mcp_collisions(
+        refuse_projected_mcp_collisions(
             mcp_deps,
             lockfile=pre_install_lock if pre_install_lock is not None else previous_lock,
             project_root=project_root,
             user_scope=user_scope,
             logger=logger,
+            replay_claims=frozen,
             runtime=runtime,
             exclude=exclude,
             apm_config=mcp_apm_config,
@@ -960,6 +959,22 @@ def run_mcp_integration(  # noqa: PLR0913
             mcp_config_provenance=old_mcp_provenance,
             logger=logger,
             fail_on_write_error=True,
+        )
+
+    if should_install:
+        from apm_cli.install.mcp.write_receipts import retire_undeclared_mcp_writes
+
+        # No prior lockfile names APM's servers: this installation's write
+        # evidence retires the entries APM wrote and no longer deploys (#4737).
+        # Otherwise the entries it kept are announced again.
+        retire_undeclared_mcp_writes(
+            new_mcp_servers,
+            declared_configs=new_mcp_configs,
+            project_root=project_root,
+            user_scope=user_scope,
+            exclude=exclude,
+            logger=logger,
+            retire=pre_install_lock is None and not frozen,
         )
 
     if prepared.omission_view is not None and lockfile_exists(lock_path):

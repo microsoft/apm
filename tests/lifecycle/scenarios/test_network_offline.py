@@ -63,7 +63,8 @@ _UNITS = {
     ),
     "p-lsp": (("local-path", "lsp", "allowed"),),
     "p-canvas": (("local-path", "canvas", "allowed"),),
-    "p-native-claude-bin": (("native-plugin", "skill", "allowed"),),
+    # A Claude plugin installs whole at project scope (#3921): one gated native unit.
+    "p-native-claude": (("native-plugin", "native", "allowed"),),
     "p-skill:registry": (("pkg-registry", "skill", "none"),),
 }
 # p-skill:registry resolves through the registry only in the scenario that selects
@@ -226,7 +227,7 @@ def test_parked_then_denied_executables_offline(lifecycle_world) -> None:
 
 # -- a native plugin ---------------------------------------------------------------
 
-_NATIVE = ("p-native-claude-bin",)
+_NATIVE = ("p-native-claude",)
 
 
 def test_native_plugin_works_offline(lifecycle_world) -> None:
@@ -245,6 +246,8 @@ def test_native_plugin_works_offline(lifecycle_world) -> None:
         credit=_assignments("audit", "single-unchanged", _NATIVE),
     )
     scenario.assert_deployed()
+    root = lifecycle_world.project / ".agents/plugins/p-native-claude"
+    assert (root / ".claude-plugin/plugin.json").is_file(), "native root not deployed"
     scenario.finish()
 
 

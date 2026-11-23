@@ -47,6 +47,7 @@ import yaml
 
 from apm_cli.core.remediation import UNINSTALL_EVIDENCE_REMOVE
 from tests.lifecycle import driver, oracles
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.model.expected import expected_exit
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.oracles import ExpectedCell, check_cross_cutting, operation_for
@@ -303,7 +304,7 @@ class Expect:
     policy_fetch: bool | None = None
     # True: the op read the marketplace catalog over the network; False: it did not.
     catalog_fetch: bool | None = None
-    xfail: str | None = None  # "#<open issue> <phrase>" -> strict expected failure
+    xfail: KnownFailure | None = None  # strict expected failure
     smoke: bool = False
 
 
@@ -1309,7 +1310,7 @@ def _rows():
             if expect.smoke:
                 marks.append(pytest.mark.lifecycle_smoke)
             if expect.xfail:
-                marks.append(pytest.mark.xfail(strict=True, reason=expect.xfail))
+                marks.append(expect.xfail.mark())
             yield pytest.param(cell_id, id=cell_id, marks=marks)
 
 

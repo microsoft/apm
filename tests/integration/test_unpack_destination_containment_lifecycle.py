@@ -19,6 +19,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 _LOCK = "lockfile_version: '1'\ndependencies:\n- repo_url: o/r\n  deployed_files:\n{files}"

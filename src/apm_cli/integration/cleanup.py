@@ -41,8 +41,10 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import errno
 import io
 import os
+import posixpath
 import shlex
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -95,6 +97,7 @@ class DeploymentEvidence:
         receipts: Mapping[str, str],
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
+        default_owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
         kept: Iterable[str],
         recorded_hashes: Mapping[str, frozenset[str]] | None = None,
@@ -103,6 +106,7 @@ class DeploymentEvidence:
         owned_receipts: Callable[[str], Mapping[str, str]] | None = None,
     ) -> None:
         self._deploy_root = deploy_root
+        self._roots = tuple(dict.fromkeys((deploy_root, deploy_root.resolve())))
         self._locked = locked
         self._legacy_claude_rules: dict[Path, dict[str, str]] = {}
         self._owned_receipts = owned_receipts
@@ -112,18 +116,26 @@ class DeploymentEvidence:
         self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
+        # The no-flag render lookup stays the first claimed owner up the tree;
+        # only consent eligibility pools every owner (#4295).
+        self._default_owners = dict((owners if default_owners is None else default_owners) or {})
         # One spelling per path, as claims are looked up; spellings of one
         # path pool their owners so none is dropped (#4295).
         self._owners: dict[str, tuple[str, ...]] = {}
         for path, keys in (owners or {}).items():
-            key = path.replace("\\", "/").rstrip("/")
+            key = self._key(path)
             self._owners[key] = tuple(dict.fromkeys((*self._owners.get(key, ()), *keys)))
         self._renders: dict[str | None, Path | None] = {}
         self._rendered_now: dict[str, str] = {}
-        self._recorded_hashes = dict(recorded_hashes or {})
+        self._recorded_hashes: dict[str, frozenset[str]] = {}
+        for path, values in (recorded_hashes or {}).items():
+            key = self._key(path)
+            self._recorded_hashes[key] = self._recorded_hashes.get(key, frozenset()) | values
         self._receipts_readable = receipts_readable
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
+        self._spellings: SpellingAliasIndex | None = None
+        self._receipt_spellings: SpellingAliasIndex | None = None
         self._consent_refused: dict[str, None] = {}
         self._reported: set[str] = set()
 
@@ -150,7 +162,10 @@ class DeploymentEvidence:
         Invalid receipt state authorizes nothing and is reported. *kept* names
         the members this install declared but left on disk; they are retained.
         """
-        from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+        from apm_cli.core.deployment_ledger import (
+            DeploymentLedgerCodec,
+            DeploymentMaterializationSession,
+        )
         from apm_cli.core.scope import InstallScope
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
@@ -182,6 +197,12 @@ class DeploymentEvidence:
         for key, dependency in locked.dependencies.items():
             for path in dependency.deployed_files:
                 owners.setdefault(path.rstrip("/"), []).append(key)
+        default_owners = {path: tuple(keys) for path, keys in owners.items()}
+        # Canonical deployment rows name owners the legacy lists may omit.
+        for record in DeploymentLedgerCodec.from_lockfile(locked).records.values():
+            for key in record.owners:
+                if key in locked.dependencies:
+                    owners.setdefault(record.locator.value, []).append(key)
 
         def render(owner: str | None) -> Path | None:
             return _render_locked(locked, owner, lockfile_root, user_scope, diagnostics)
@@ -191,6 +212,7 @@ class DeploymentEvidence:
             receipts=receipts,
             render=render,
             owners={path: tuple(keys) for path, keys in owners.items()},
+            default_owners=default_owners,
             user_scope=user_scope,
             kept=kept,
             recorded_hashes=_recorded_owner_hashes(locked),
@@ -288,7 +310,7 @@ class DeploymentEvidence:
                 continue
             unproven.append(claim)
         for claim in unproven:
-            self._rendered_roots(claim)
+            self._rendered_roots(claim, pooled=True)
 
     def refusals(self, claims: Iterable[str]) -> list[tuple[str, str]]:
         """Return ``(claim, verdict)`` for each claimed file deletion would keep.
@@ -319,7 +341,7 @@ class DeploymentEvidence:
                 ):
                     refused.append((claim, SYMLINKED))
                     if self._lockfile_consent:
-                        self._consent_refused[claim.replace("\\", "/")] = None
+                        self._consent_refused[_claim_key(claim)] = None
                 continue
             if not physical.is_file():
                 continue
@@ -331,14 +353,15 @@ class DeploymentEvidence:
     def _physical(self, claim: str) -> Path | None:
         from .copilot_cowork_paths import (
             COWORK_URI_SCHEME,
-            from_lockfile_path,
+            cowork_locator,
             resolve_copilot_cowork_skills_dir,
         )
 
         if claim.startswith(COWORK_URI_SCHEME):
             try:
                 root = resolve_copilot_cowork_skills_dir()
-                return from_lockfile_path(claim, root) if root is not None else None
+                # The locator itself: a final symlink is judged as a link.
+                return cowork_locator(claim, root) if root is not None else None
             except Exception:
                 return None
         if "://" in claim:
@@ -351,24 +374,89 @@ class DeploymentEvidence:
             self._renders[owner] = self._render(owner) if self._render is not None else None
         return self._renders[owner]
 
+    def _key(self, path: str) -> str:
+        """The consent lookup key for *path*: one spelling, root-relative (#4295).
+
+        A user-scope lock may spell a file relative to the deploy root or as
+        an absolute path under it; both name one file and share one key.
+        """
+        from .copilot_cowork_paths import COWORK_URI_SCHEME
+
+        key = _claim_key(path)
+        if key.startswith(COWORK_URI_SCHEME):
+            # A Cowork root inside the deploy root names the same files twice.
+            physical = self._physical(key)
+            if physical is None:
+                return key
+            candidate = physical
+        elif "://" in key or not Path(key).is_absolute():
+            return key
+        else:
+            candidate = Path(key)
+        for root in self._roots:
+            try:
+                return _claim_key(candidate.relative_to(root).as_posix())
+            except ValueError:
+                continue
+        return key
+
+    def _equivalent_keys(self, key: str) -> tuple[str, ...]:
+        """*key* and every recorded key naming the same file on this filesystem (#4295).
+
+        Case- or normalization-insensitive filesystems make ``A.md`` and
+        ``a.md`` one file; case-sensitive ones never alias.
+        """
+        if self._spellings is None:
+            self._spellings = SpellingAliasIndex({*self._recorded_hashes, *self._owners})
+        return (key, *self._spellings.aliases(key, self._deploy_root))
+
     def _owners_of(self, claim: str) -> tuple[str, ...]:
-        """Return the locked owners of *claim* or of its claimed skill directory."""
-        path = claim.replace("\\", "/").rstrip("/")
+        """Return the locked owners of *claim* and of every claimed enclosing directory.
+
+        A member claim never hides its skill directory's owners: each render
+        that can show the file is checked before consent falls back (#4295).
+        """
+        owners: dict[str, None] = {}
+        path = self._key(claim)
         while path:
-            if path in self._owners:
-                return self._owners[path]
+            for key in self._equivalent_keys(path):
+                owners.update(dict.fromkeys(self._owners.get(key, ())))
+            path = path.rpartition("/")[0]
+        return tuple(owners)
+
+    def _default_owners_of(self, claim: str) -> tuple[str, ...]:
+        """Return the locked owners of *claim* or of its claimed skill directory."""
+        path = claim.rstrip("/")
+        while path:
+            if path in self._default_owners:
+                return self._default_owners[path]
             path = path.rpartition("/")[0]
         return ()
 
-    def _rendered_roots(self, claim: str) -> list[Path]:
-        """Return the render trees that can show *claim*: the whole lock, else its owners."""
+    def _rendered_roots(self, claim: str, *, pooled: bool = False) -> list[Path]:
+        """Return the render trees that can show *claim*: the whole lock, else its owners.
+
+        The deletion verdict reads the first claimed owner up the tree;
+        *pooled* (consent eligibility) reads every owner of every spelling.
+        """
         if self._render is None:
             return []
         whole = self._render_root(None)
         if whole is not None:
             return [whole]
-        roots = (self._render_root(owner) for owner in self._owners_of(claim))
+        owners = self._owners_of(claim) if pooled else self._default_owners_of(claim)
+        roots = (self._render_root(owner) for owner in owners)
         return [root for root in roots if root is not None]
+
+    def _has_receipt(self, physical: Path) -> bool:
+        """Whether a receipt names *physical* under any spelling of it (#4295)."""
+        key = physical.resolve().as_posix()
+        if key in self._receipts:
+            return True
+        if self._receipt_spellings is None:
+            self._receipt_spellings = SpellingAliasIndex(self._receipts)
+        # Receipt keys are absolute, so the join root is ignored.
+        return bool(self._receipt_spellings.aliases(key, Path("/")))
 
     def _receipt_match(self, physical: Path) -> bool | None:
         from apm_cli.utils.content_hash import compute_file_hash
@@ -426,7 +514,7 @@ class DeploymentEvidence:
         """Whether *physical* is a link this consented uninstall classified as kept (#4295)."""
         return (
             self._lockfile_consent
-            and claim.replace("\\", "/") in self._consent_refused
+            and _claim_key(claim) in self._consent_refused
             and physical.is_symlink()
         )
 
@@ -449,14 +537,15 @@ class DeploymentEvidence:
 
         recorded = {
             _hash_envelope(value)
-            for value in self._recorded_hashes.get(claim.replace("\\", "/"), frozenset())
+            for key in self._equivalent_keys(self._key(claim))
+            for value in self._recorded_hashes.get(key, frozenset())
         }
         if not self._receipts_readable or len(recorded) != 1:
             return False
         try:
             if physical.is_symlink() or not physical.is_file():
                 return False
-            if self._receipt_match(physical) is not None or self._rendered_roots(claim):
+            if self._has_receipt(physical) or self._rendered_roots(claim, pooled=True):
                 return False
             return compute_file_hash(physical) in recorded
         except OSError:
@@ -481,7 +570,7 @@ class DeploymentEvidence:
         """
         verdict = self._verdict(claim, physical, rendered_as=rendered_as)
         if verdict != AUTHORIZED and self._lockfile_consent:
-            self._consent_refused[claim.replace("\\", "/")] = None
+            self._consent_refused[_claim_key(claim)] = None
         return verdict
 
     def _verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
@@ -502,7 +591,7 @@ class DeploymentEvidence:
             and self._lockfile_consent
             and self.lockfile_consentable(claim, physical)
         ):
-            self._consented[claim] = None
+            self._consented[_claim_key(claim)] = None
             return AUTHORIZED
         return rendered
 
@@ -587,7 +676,7 @@ def unconsented(retained: Iterable[str], evidence: DeploymentEvidence | None) ->
     A file consent keeps is not a cleanup failure; every other retained path is.
     """
     kept = evidence.kept_under_consent() if evidence is not None else frozenset()
-    return [path for path in retained if path.replace("\\", "/") not in kept]
+    return [path for path in retained if _claim_key(path) not in kept]
 
 
 def consent_outcome(
@@ -610,6 +699,17 @@ def _hash_envelope(value: str) -> str:
     return value if ":" in value else f"sha256:{value}"
 
 
+def _claim_key(path: str) -> str:
+    """One spelling per claimed file for consent's hash, owner and refusal keys (#4295).
+
+    Backslashes become ``/`` and ``.`` segments and trailing slashes go, so
+    every spelling the cleanup validation accepts for a file shares one key.
+    """
+    scheme, sep, rest = path.replace("\\", "/").rpartition("://")
+    normalized = posixpath.normpath(rest) if rest else rest
+    return f"{scheme}{sep}{'' if normalized == '.' else normalized}"
+
+
 def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
     """Map each owned path to every hash apm.lock.yaml records for it under its owners."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -618,13 +718,12 @@ def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
     hashes: dict[str, set[str]] = {}
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
         if record.content_hash and owners.intersection(record.owners):
-            key = record.locator.value.replace("\\", "/")
-            hashes.setdefault(key, set()).add(record.content_hash)
+            hashes.setdefault(_claim_key(record.locator.value), set()).add(record.content_hash)
     for dependency in lockfile.dependencies.values():
         for path, content_hash in dependency.deployed_file_hashes.items():
             if content_hash:
                 # One spelling per file, as cleanup looks it up (#4295).
-                hashes.setdefault(path.replace("\\", "/"), set()).add(content_hash)
+                hashes.setdefault(_claim_key(path), set()).add(content_hash)
     return {path: frozenset(values) for path, values in hashes.items()}
 
 
@@ -935,17 +1034,15 @@ def _safe_remove_skill_directory(
         return
 
     if evidence.lockfile_consent:
-        # Consent decides per file (#4295): each member is rechecked right before
-        # its unlink, and only a directory left holding no file is removed.
-        if not _remove_proven_members(
-            skill_dir, proven, evidence, result, diagnostics, dep_key
-        ) or any(
-            child.is_symlink()
-            or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
-            for child in skill_dir.rglob("*")
-        ):
-            result.skipped_unmanaged.append(rel_path)
-            return
+        _remove_consented_skill_directory(
+            skill_dir,
+            rel_path,
+            proven,
+            (evidence, result, diagnostics),
+            dep_key=dep_key,
+            failed_path_retained=failed_path_retained,
+        )
+        return
 
     # All remaining files are APM-tracked with matching hashes -- safe
     # to remove the entire directory tree.
@@ -957,6 +1054,74 @@ def _safe_remove_skill_directory(
     except OSError as exc:
         result.failed.append(rel_path)
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+
+
+def _remove_consented_skill_directory(
+    skill_dir: Path,
+    rel_path: str,
+    proven: list[tuple[str, Path]],
+    context: tuple[DeploymentEvidence, CleanupResult, object],
+    *,
+    dep_key: str,
+    failed_path_retained: bool,
+) -> None:
+    """Consent decides per file (#4295).
+
+    Each member is rechecked right before its unlink, and only a directory
+    left holding no file is removed, bottom-up and never recursively, so a
+    file that appears after the scan keeps its directory.
+    """
+    evidence, result, diagnostics = context
+    if not _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key) or any(
+        child.is_symlink()
+        or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
+        for child in skill_dir.rglob("*")
+    ):
+        result.skipped_unmanaged.append(rel_path)
+        return
+    try:
+        emptied = _remove_emptied_tree(skill_dir)
+    except OSError as exc:
+        result.failed.append(rel_path)
+        _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+        return
+    if not emptied:
+        result.skipped_unmanaged.append(rel_path)
+        return
+    result.deleted.append(rel_path)
+    result.deleted_targets.append(skill_dir)
+    result.deleted_directories.append(rel_path)
+
+
+def _remove_emptied_tree(root: Path) -> bool:
+    """Remove *root* bottom-up, deleting only bytecode caches and empty directories.
+
+    Returns False, leaving the rest in place, at the first entry that is a
+    symlink, another file, or a directory that is no longer empty.
+    """
+    for current, directories, files in os.walk(root, topdown=False):
+        base = Path(current)
+        for name in files:
+            path = base / name
+            if path.is_symlink() or not is_python_bytecode_cache_path(path.relative_to(root)):
+                return False
+            write_seam.unlink(path)
+        for name in directories:
+            if not _remove_empty_directory(base / name):
+                return False
+    return _remove_empty_directory(root)
+
+
+def _remove_empty_directory(path: Path) -> bool:
+    if path.is_symlink():
+        return False
+    try:
+        write_seam.rmdir(path)
+    except OSError as exc:
+        if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+            return False
+        raise
+    return True
 
 
 def _remove_proven_members(
@@ -1252,9 +1417,10 @@ def remove_stale_deployed_files(
                     _cowork_orphans_skipped += 1
                     result.failed.append(stale_path)
                     continue
-                from .copilot_cowork_paths import from_lockfile_path
+                from .copilot_cowork_paths import cowork_locator
 
-                stale_target = from_lockfile_path(stale_path, _cowork_root_cached)
+                # Never follow a final symlink to the file it points at.
+                stale_target = cowork_locator(stale_path, _cowork_root_cached)
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.

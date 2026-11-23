@@ -39,13 +39,14 @@ permissions:
 # default-branch scope; setup-node automatic caching is off.
 # tests/quality/test_ci_topology.py pins this.
 jobs:
-  # Fast lint gate -- runs in ~3s using Astral's ruff-action (no Python/uv setup needed).
-  # Fails fast on style, import, and complexity violations before the heavier build-and-test job.
+  # Fast lint gate: fails fast on style, import, and complexity violations
+  # before the heavier build-and-test job, and checks rule H4 on pull requests.
   lint:
     name: Lint
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      pull-requests: read
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,6 +59,24 @@ jobs:
       uses: ./.github/actions/lint-chain
       with:
         base-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base_sha }}
+
+    # Rule H4 (#4565): a PR that closes an issue a strict known cell cites
+    # must flip that cell in the same PR. It reads the PR body and the PR's
+    # own commit messages (merge commits land them on main, where their
+    # closing keywords close issues), the latter from the GitHub API, one
+    # JSON string each; a truncated list (the API stops at 250) fails closed.
+    # The body only reaches the step through env, never inlined in the script.
+    - name: Known cells cite no issue this PR closes
+      if: github.event_name == 'pull_request'
+      env:
+        PR_BODY: ${{ github.event.pull_request.body }}
+        PR_COMMITS_API: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits
+        PR_COMMIT_COUNT: ${{ github.event.pull_request.commits }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+        gh api "$PR_COMMITS_API" --paginate --jq '.[].commit.message | @json' > "$RUNNER_TEMP/pr-commits.jsonl" || { echo "::error::H4: could not read this PR's commit messages from the GitHub API; rerun the job"; exit 1; }
+        uv run --frozen --extra dev python -m tests.quality.known_cell_closing "$RUNNER_TEMP/pr-body.md" --commits "$RUNNER_TEMP/pr-commits.jsonl" --commit-count "$PR_COMMIT_COUNT"
 
   # Windows compatibility gate -- runs at PR time (not just post-merge
   # in build-release.yml) so Windows-only path, encoding, process, and
@@ -374,6 +393,8 @@ jobs:
           tests/quality/test_cli_docs_surface.py \
           tests/quality/test_journey_index.py \
           tests/quality/test_generated_obligations.py \
+          tests/quality/test_known_cells_cite_open_issues.py \
+          tests/quality/test_known_cell_closing.py \
           tests/quality/test_oracle_user_writes.py \
           tests/quality/test_scenario_refusal_credit.py \
           tests/quality/test_cli_command_literals.py
@@ -749,19 +770,19 @@ jobs:
   # GITHUB_APM_PAT/ADO_APM_PAT env, so it is structurally unable to depend on
   # credentials.
   #
-  # Why timeout-minutes: 10
+  # Why timeout-minutes: 20
   # ------------------------
   # Four xdist workers use the public Ubuntu runner's four CPUs without
   # changing the required selection.
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
   # matching the merge-group integration scheduler. The cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
-  # The growing corpus exhausted this cap on run 39737354179. Four shards
-  # retain the full selection and xdist affinity without increasing the cap.
-  # scripts/ci_sharding.py balances them by the measured Linux x86_64
-  # integration seed (weights, not an allowlist) and writes each shard's
-  # disjoint test file list; the drift guard below compares them with a
-  # full collect.
+  # scripts/ci_sharding.py balances the five shards by the measured
+  # lifecycle smoke durations in .github/ci-durations/lifecycle-smoke.json
+  # (weights, not an allowlist; #4943) and writes each shard's disjoint test
+  # file list; the drift guard below compares them with a full collect.
+  # A balanced shard is expected to take about 9-10 minutes; the 20-minute
+  # cap keeps that under 60 percent so a slow runner does not cancel a shard.
   # The required aggregate checks every explicit job result independently.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
@@ -772,7 +793,7 @@ jobs:
   lifecycle-smoke-shard-1:
     name: Lifecycle Smoke Shard 1 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -807,8 +828,8 @@ jobs:
     - name: Select shard test files
       run: |
         uv run --extra dev python -m scripts.ci_sharding files \
-          --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
-          --shard-durations .github/ci-durations/linux-x86_64.json \
+          --shard-count 5 --shard-index "$LIFECYCLE_SHARD" \
+          --shard-durations .github/ci-durations/lifecycle-smoke.json \
           -m 'lifecycle_smoke and not lifecycle_merge_group' --out shard-files.txt \
           tests/integration tests/lifecycle
 
@@ -836,7 +857,7 @@ jobs:
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -846,7 +867,7 @@ jobs:
   lifecycle-smoke-shard-3:
     name: Lifecycle Smoke Shard 3 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -856,18 +877,28 @@ jobs:
   lifecycle-smoke-shard-4:
     name: Lifecycle Smoke Shard 4 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
       LIFECYCLE_SHARD: "4"
     steps: *lifecycle-smoke-steps
 
+  lifecycle-smoke-shard-5:
+    name: Lifecycle Smoke Shard 5 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      LIFECYCLE_SHARD: "5"
+    steps: *lifecycle-smoke-steps
+
   # M-GATE (#4031): the union of every lifecycle shard's visited cells must
   # include both scope spines and cover tests/quality/gate_cell_obligations.json.
   gate-cell-coverage:
     name: GATE Cell Coverage (Linux)
-    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4]
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4, lifecycle-smoke-shard-5]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -905,7 +936,7 @@ jobs:
 
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
-    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4, gate-cell-coverage]
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4, lifecycle-smoke-shard-5, gate-cell-coverage]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -917,10 +948,11 @@ jobs:
         SHARD_2_RESULT: ${{ needs.lifecycle-smoke-shard-2.result }}
         SHARD_3_RESULT: ${{ needs.lifecycle-smoke-shard-3.result }}
         SHARD_4_RESULT: ${{ needs.lifecycle-smoke-shard-4.result }}
+        SHARD_5_RESULT: ${{ needs.lifecycle-smoke-shard-5.result }}
         GATE_COVERAGE_RESULT: ${{ needs.gate-cell-coverage.result }}
       run: |
-        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ] || [ "$SHARD_4_RESULT" != success ]; then
-          echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT', '$SHARD_3_RESULT' and '$SHARD_4_RESULT'."
+        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ] || [ "$SHARD_4_RESULT" != success ] || [ "$SHARD_5_RESULT" != success ]; then
+          echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT', '$SHARD_3_RESULT', '$SHARD_4_RESULT' and '$SHARD_5_RESULT'."
           exit 1
         fi
         if [ "$GATE_COVERAGE_RESULT" != success ]; then
