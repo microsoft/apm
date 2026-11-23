@@ -19,6 +19,7 @@ restores them if the install fails before its lockfile commits.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
@@ -378,6 +379,25 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
     ctx.overwrite_preflight_refused = bool(kept)
 
 
+def _no_file_to_keep(ctx: InstallContext, target: Any, mapping: Any) -> bool:
+    """Whether the primitive's deploy directory holds nothing yet, so no write can keep a file.
+
+    A keep needs an existing file at a planned destination; every gated
+    integrator writes under ``project_root / (deploy_root or root_dir) /
+    subdir``. When that directory does not exist (a fresh project), planning
+    cannot find a keep, so it is skipped. Anything else plans as before.
+    """
+    from apm_cli.core.scope import InstallScope
+
+    subdir = getattr(mapping, "subdir", None)
+    root = getattr(mapping, "deploy_root", None) or getattr(target, "root_dir", None)
+    if ctx.scope is InstallScope.USER or not subdir or not root:
+        return False
+    if getattr(target, "managed_deploy_root", None) is not None:
+        return False
+    return not os.path.lexists(os.path.join(ctx.project_root, root, subdir))
+
+
 def _planned_keeps(
     ctx: InstallContext,
     skill: Any,
@@ -404,7 +424,10 @@ def _planned_keeps(
         if integrator is None:
             continue
         for target in targets:
-            if target.primitives.get(primitive) is None or target.name in _UNGATED_TARGETS:
+            mapping = target.primitives.get(primitive)
+            if mapping is None or target.name in _UNGATED_TARGETS:
+                continue
+            if _no_file_to_keep(ctx, target, mapping):
                 continue
             planned: list[tuple[Path, str | None]] = []
             integrator._overwrite_plan = planned

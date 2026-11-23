@@ -33,11 +33,13 @@ class _Prompts:
         raise self.error
 
 
-def _refuse(found: Path, error: BaseException) -> SimpleNamespace:
+def _refuse(found: Path, error: BaseException, mapping: object = None) -> SimpleNamespace:
     """Run the commit gate's refusal over one package whose plan fails after a find."""
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
-    target = SimpleNamespace(name="copilot", primitives={"prompts": object()})
+    target = SimpleNamespace(
+        name="copilot", root_dir=".github", primitives={"prompts": mapping or object()}
+    )
     ctx = SimpleNamespace(
         integrators={"prompt": _Prompts(found, error), "skill": None},
         project_root=found.parent,
@@ -75,3 +77,19 @@ def test_a_planning_failure_still_refuses_the_unproven_files_already_found(
 def test_a_planned_write_is_never_swallowed(tmp_path: Path) -> None:
     with pytest.raises(write_seam.PlannedWriteError):
         _refuse(tmp_path / "review.prompt.md", write_seam.PlannedWriteError("wrote"))
+
+
+def test_planning_is_skipped_only_when_the_deploy_directory_is_absent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mapping = SimpleNamespace(subdir="prompts", deploy_root=None)
+    fresh = _refuse(tmp_path / "review.prompt.md", RuntimeError("render failed"), mapping)
+    assert fresh.overwrite_preflight_refused is False
+
+    (tmp_path / ".github" / "prompts").mkdir(parents=True)
+    existing = _refuse(tmp_path / "review.prompt.md", RuntimeError("render failed"), mapping)
+    existing.diagnostics.render_summary()
+    captured = capsys.readouterr()
+    output = " ".join((captured.out + captured.err).split())
+    assert existing.overwrite_preflight_refused is True
+    assert "Kept review.prompt.md" in output, output
