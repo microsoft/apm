@@ -47,6 +47,25 @@ if TYPE_CHECKING:
 # ======================================================================
 
 
+def failed_acquisitions(diagnostics: Any, failed_keys: list[str]) -> list[tuple[str, str]]:
+    """Name each package whose acquire failed, with its recorded cause (#4909).
+
+    A failed acquire only records a diagnostic, rendered after the install;
+    a frozen refusal raised before then would otherwise hide the cause.
+    """
+    from apm_cli.utils.diagnostics import CATEGORY_ERROR
+
+    keys = list(dict.fromkeys(failed_keys))
+    errors = diagnostics.by_category().get(CATEGORY_ERROR, []) if keys and diagnostics else []
+    failures: list[tuple[str, str]] = []
+    for key in keys:
+        messages = [d.message for d in errors if d.package == key]
+        failures.extend(
+            (key, message) for message in messages or [f"{key}: package could not be acquired"]
+        )
+    return failures
+
+
 def _announce_held_headers(prepared_integrations) -> None:
     """Emit every held package header (refusal paths before integration)."""
     for _dep_key, _install_path, source, _materialization, _deltas in prepared_integrations:
@@ -815,7 +834,19 @@ def run(ctx: InstallContext) -> None:
             from apm_cli.install.template import effective_allow_map
             from apm_cli.security.trust import McpAdmission
 
-            InstallService.enforce_frozen_restored(ctx.transitive_failures)
+            InstallService.enforce_frozen_restored(
+                [
+                    *ctx.transitive_failures,
+                    *failed_acquisitions(
+                        ctx.diagnostics,
+                        [
+                            dep_key
+                            for dep_key, _, _, materialization, terminal in prepared_integrations
+                            if materialization is None and terminal is None
+                        ],
+                    ),
+                ]
+            )
             InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
             effective_allow_map(ctx)
             InstallService.enforce_hydrated_mcp(
