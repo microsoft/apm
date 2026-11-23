@@ -10,6 +10,7 @@ closed.
 from __future__ import annotations
 
 import re
+import subprocess
 
 from .errors import MarketplaceFetchError
 from .models import MarketplaceSource
@@ -32,6 +33,9 @@ REVIEW_NAMESPACES = frozenset(
 )
 _COMMIT_PIN = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 _FORBIDDEN = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]")
+
+
+_ABBREVIATED = re.compile(r"[0-9a-fA-F]{7,63}")
 
 
 def is_commit_pin(ref: str | None) -> bool:
@@ -74,29 +78,52 @@ def origin_ref_tips(source: MarketplaceSource) -> dict[str, str]:
     Raises:
         RuntimeError: The listing failed.
     """
+    from urllib.parse import urlsplit
+
     from ..core.auth import AuthResolver
-    from ..utils.git_env import git_remote_refs
     from .source_identity import parse_marketplace_source
 
     identity = parse_marketplace_source(source.url)
     host = identity.host or source.host
     resolver = AuthResolver()
     org = source.owner or None
-    context = (
-        resolver.resolve_for_remote(host, source.url, org, port=identity.port)
-        if identity.port is not None
-        else resolver.resolve_for_remote(host, source.url, org)
-    )
-    env = resolver.git_env_for_remote(context, source.url)
-    result = git_remote_refs(source.url, "refs/heads/*", "refs/tags/*", env=env)
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or "git ls-remote failed").strip())
+    host_info = AuthResolver.classify_host(host, port=identity.port) if host else None
+    if getattr(host_info, "kind", "") == "ado":
+        # The same PAT -> bearer -> helper chain the catalog clone uses.
+        result = resolver.try_with_fallback(
+            host_info.host,
+            lambda _token, env: _listed(source.url, env),
+            org=org,
+            path=urlsplit(source.url).path.lstrip("/"),
+            unauth_first=False,
+            base_env=resolver.hardened_git_base_env(),
+            **({"port": identity.port} if identity.port is not None else {}),
+        )
+    else:
+        context = (
+            resolver.resolve_for_remote(host, source.url, org, port=identity.port)
+            if identity.port is not None
+            else resolver.resolve_for_remote(host, source.url, org)
+        )
+        result = _listed(source.url, resolver.git_env_for_remote(context, source.url))
     tips: dict[str, str] = {}
     for line in (result.stdout or "").splitlines():
         sha, _, name = line.partition("\t")
         if name.startswith(("refs/heads/", "refs/tags/")):
             tips[name] = sha.strip()
     return tips
+
+
+def _listed(url: str, env) -> subprocess.CompletedProcess[str]:
+    """List the origin's heads and tags; a failure keeps git's outcome for auth retries."""
+    from ..utils.git_env import git_remote_refs
+
+    result = git_remote_refs(url, "refs/heads/*", "refs/tags/*", env=env)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, ["git", "ls-remote"], result.stdout, result.stderr
+        )
+    return result
 
 
 def _is_ssh(source: MarketplaceSource) -> bool:
@@ -128,8 +155,19 @@ def require_origin_pin(source: MarketplaceSource) -> None:
     except ValueError as exc:
         raise MarketplaceFetchError(source.name, str(exc)) from exc
     commit_pin = is_commit_pin(ref)
-    if not commit_pin and ref.split("/", 1)[0] not in REVIEW_NAMESPACES:
+    # An abbreviated commit could name any object a host resolves; it must be
+    # a published branch or tag name, like a review-namespace short name.
+    abbreviated = not commit_pin and bool(_ABBREVIATED.fullmatch(ref))
+    if not commit_pin and not abbreviated and ref.split("/", 1)[0] not in REVIEW_NAMESPACES:
         return
+    from ..deps.egress_route import EgressSurface, is_refused
+
+    if is_refused(EgressSurface.SOURCE_ENUMERATION):
+        raise MarketplaceFetchError(
+            source.name,
+            f"PROXY_REGISTRY_ONLY is set: catalog ref {ref!r} cannot be verified against "
+            "the origin's branches and tags without contacting it. Pin a branch or tag name.",
+        )
     try:
         tips = origin_ref_tips(source)
     except Exception as exc:

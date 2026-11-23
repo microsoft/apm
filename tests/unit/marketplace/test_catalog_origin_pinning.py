@@ -14,6 +14,7 @@ from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace import registry as registry_mod
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
+from apm_cli.utils.http_credentials import RedirectRefusedError
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-catalog-origin")]
 
@@ -174,7 +175,7 @@ def test_a_catalog_redirect_to_another_origin_is_refused(monkeypatch) -> None:
     )
     host_info = SimpleNamespace(api_base="https://api.github.com")
 
-    with pytest.raises(MarketplaceFetchError):
+    with pytest.raises(MarketplaceFetchError) as excinfo:
         client_mod._fetch_github(
             _source("https://github.com/contoso/catalog", "main"),
             "marketplace.json",
@@ -182,6 +183,11 @@ def test_a_catalog_redirect_to_another_origin_is_refused(monkeypatch) -> None:
             auth_resolver=_AnonymousResolver(),
         )
     assert [urlsplit(url).hostname for url in urls] == ["api.github.com"]
+    # The refusal itself, not an unrelated response-handling failure.
+    cause = excinfo.value
+    while cause is not None and not isinstance(cause, RedirectRefusedError):
+        cause = cause.__cause__ or cause.__context__
+    assert isinstance(cause, RedirectRefusedError)
 
 
 def test_replacing_an_alias_needs_confirmation(monkeypatch) -> None:
@@ -252,3 +258,68 @@ def test_a_real_branch_with_a_review_like_name_is_fetched(monkeypatch) -> None:
     )
 
     assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [["pull/7/head"]]
+
+
+@pytest.mark.parametrize("url", _URLS)
+def test_an_abbreviated_commit_pin_is_refused_unless_it_is_a_branch_or_tag(
+    url: str, monkeypatch
+) -> None:
+    _list_refs(monkeypatch, _TIPS)
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    with pytest.raises(MarketplaceFetchError, match="branch or tag"):
+        client_mod._fetch_file(
+            _source(url, _STRAY[:12]), "marketplace.json", auth_resolver=_AnonymousResolver()
+        )
+    assert urls == []
+
+
+def test_a_branch_named_like_an_abbreviated_commit_is_fetched(monkeypatch) -> None:
+    _list_refs(monkeypatch, (*_TIPS, ("refs/heads/cafe1234", _TIP)))
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    client_mod._fetch_file(
+        _source("https://github.com/contoso/catalog", "cafe1234"),
+        "marketplace.json",
+        auth_resolver=_AnonymousResolver(),
+    )
+
+    assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [["cafe1234"]]
+
+
+def test_registry_only_mode_refuses_a_pin_it_cannot_verify_without_contacting_the_origin(
+    monkeypatch,
+) -> None:
+    listed: list[str] = []
+    monkeypatch.setattr(
+        "apm_cli.utils.git_env.git_remote_refs", lambda url, *_a, **_k: listed.append(url)
+    )
+    monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    with pytest.raises(MarketplaceFetchError, match="PROXY_REGISTRY_ONLY"):
+        client_mod._fetch_file(
+            _source("https://github.com/contoso/catalog", _TIP),
+            "marketplace.json",
+            auth_resolver=_AnonymousResolver(),
+        )
+    assert listed == []
+    assert urls == []
+
+
+def test_an_ado_catalog_pin_is_listed_through_the_ado_auth_chain(monkeypatch) -> None:
+    _list_refs(monkeypatch, _TIPS)
+    chained: list[str] = []
+
+    def try_with_fallback(_self, host, operation, **kwargs):
+        chained.append(kwargs["path"])
+        return operation(None, {})
+
+    monkeypatch.setattr("apm_cli.core.auth.AuthResolver.try_with_fallback", try_with_fallback)
+    source = _source("https://dev.azure.com/contoso/proj/_git/catalog", _STRAY)
+
+    with pytest.raises(MarketplaceFetchError, match="branch or tag"):
+        from apm_cli.marketplace.catalog_ref_pins import require_origin_pin
+
+        require_origin_pin(source)
+    assert chained == ["contoso/proj/_git/catalog"]

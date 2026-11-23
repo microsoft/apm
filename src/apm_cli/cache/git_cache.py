@@ -589,9 +589,10 @@ class GitCache:
         # already pinned the commit; no PAT->bearer fallback applies here
         # (env is sanitized, no embedded creds).
         try:
+            # The peeled pattern lists an annotated tag's commit too.
             result = git_remote_refs(
                 url,
-                *((ref,) if ref else ()),
+                *((ref, f"{ref}^{{}}") if ref else ()),
                 timeout=30,
                 env=env,
                 git_args=_safe_git_args(),

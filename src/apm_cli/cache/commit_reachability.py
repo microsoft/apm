@@ -40,7 +40,7 @@ def _record(marker: Path, canonical: str) -> None:
 
 def _recorded(marker: Path, canonical: str) -> bool:
     """Read a marker without following links; only a regular file counts."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(marker, flags)
     except OSError:
@@ -260,6 +260,24 @@ def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> 
     _require_at_origin(downloader, dep_ref, sha)
 
 
+def admit_and_resolve(downloader, dep_ref):
+    """Resolve *dep_ref*'s ref, admitting its commit before anything can fetch it.
+
+    A declared full commit is admitted before resolution (a legacy resolver
+    may clone to resolve it); any other ref is admitted once resolved.
+
+    Raises:
+        CommitNotReachableError: The commit is not admitted.
+    """
+    ref = dep_ref.reference
+    if ref and len(ref) in (40, 64) and _COMMIT_RE.match(ref):
+        admit_pinned_commit(downloader, dep_ref, ref)
+        return downloader.resolve_git_reference(dep_ref)
+    resolved = downloader.resolve_git_reference(dep_ref)
+    admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
+    return resolved
+
+
 def admit_ref_commit(downloader, dep_ref, ref: str) -> tuple[str, str | None]:
     """Return ``(fetch_ref, resolved_commit)`` for a single-file dependency.
 
@@ -444,46 +462,57 @@ def _reached_in(
 def _reached_by_refs(
     cache_root: Path, url: str, shard_key: str, sha: str, env: dict[str, str] | None
 ) -> bool:
-    """Fetch the origin's heads and tags (commits only) and ask whether *sha* is among them.
+    """Fetch the origin's heads and tags (commits only) and ask whether one contains *sha*.
+
+    Containment, not object presence: objects a since-deleted ref brought in
+    stay in the repository but no current head or tag contains them. The
+    per-origin repository is held under its shard lock for the whole check.
 
     Raises:
         RuntimeError: The fetch failed.
     """
     from ..utils.git_env import get_git_executable, git_network_env, run_git_text
     from .git_cache import _safe_git_args, _sanitize_url
+    from .locking import shard_lock
 
     repo = Path(cache_root) / "reachability" / shard_key / "refs.git"
     git = [get_git_executable(), *_safe_git_args(), "--git-dir", str(repo)]
     try:
-        fresh = not repo.is_dir()
-        if fresh:
-            repo.mkdir(parents=True)
-            os.chmod(repo, 0o700)
-        child_env = git_network_env(url, env, git_dir=repo)
-        if fresh:
+        repo.parent.mkdir(parents=True, exist_ok=True)
+        with shard_lock(repo):
+            fresh = not repo.is_dir()
+            if fresh:
+                repo.mkdir()
+                os.chmod(repo, 0o700)
+            child_env = git_network_env(url, env, git_dir=repo)
+            if fresh:
+                run_git_text(
+                    [*git, "init", "-q", "--bare"],
+                    capture_output=True,
+                    env=child_env,
+                    stdin=subprocess.DEVNULL,
+                    check=True,
+                )
             run_git_text(
-                [*git, "init", "-q", "--bare"],
+                [*git, "fetch", "-q", "--filter=tree:0", "--prune", url, *_REACH_REFSPECS],
                 capture_output=True,
+                timeout=600,
                 env=child_env,
                 stdin=subprocess.DEVNULL,
                 check=True,
             )
-        run_git_text(
-            [*git, "fetch", "-q", "--filter=tree:0", "--prune", url, *_REACH_REFSPECS],
-            capture_output=True,
-            timeout=600,
-            env=child_env,
-            stdin=subprocess.DEVNULL,
-            check=True,
-        )
-        _drop_promisor(git, child_env)
-        # Only objects the heads and tags reach may answer: never lazy-fetch.
-        probe = run_git_text(
-            [*git, "cat-file", "-e", f"{sha}^{{commit}}"],
-            capture_output=True,
-            env={**child_env, "GIT_NO_LAZY_FETCH": "1"},
-            stdin=subprocess.DEVNULL,
-        )
+            _drop_promisor(git, child_env)
+            # Only the current heads and tags may answer: never lazy-fetch.
+            probe = run_git_text(
+                [
+                    *git,
+                    *("for-each-ref", "--count=1", "--format=%(refname)"),
+                    *("--contains", sha, "refs/heads/", "refs/tags/"),
+                ],
+                capture_output=True,
+                env={**child_env, "GIT_NO_LAZY_FETCH": "1"},
+                stdin=subprocess.DEVNULL,
+            )
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(
             f"Cannot verify that commit {sha} of {_sanitize_url(url)} is reachable from a "
@@ -491,7 +520,7 @@ def _reached_by_refs(
             "Re-run with network access, or pin a branch or tag instead.",
             exc,
         ) from exc
-    return probe.returncode == 0
+    return probe.returncode == 0 and bool((probe.stdout or "").strip())
 
 
 def _drop_promisor(git: list[str], env: dict[str, str]) -> None:

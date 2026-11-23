@@ -104,6 +104,32 @@ class TestPinnedCommitReachability:
         with pytest.raises(RuntimeError, match=_UNREACHABLE):
             _cache(tmp_path).get_checkout(origin.url, origin.d1)
 
+    def test_objects_left_by_a_deleted_branch_never_admit_a_commit(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        origin.git("checkout", "-qb", "feature", origin.m2)
+        x1 = origin.commit("x1")
+        x2 = origin.commit("x2")
+        origin.git("checkout", "-q", "main")
+        origin.git("push", "-q", str(origin.path), "feature")
+        cache = _cache(tmp_path)
+        cache.get_checkout(origin.url, x1)
+        origin.bare("branch", "-D", "feature")
+
+        # x2's objects are still in the reachability repository; no ref holds them.
+        with pytest.raises(RuntimeError, match=_UNREACHABLE):
+            cache.get_checkout(origin.url, x2)
+
+    def test_an_annotated_tag_name_resolves_to_its_commit(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        origin.bare("tag", "-a", "-m", "v9", "v9", origin.m1)
+
+        checkout = _cache(tmp_path).get_checkout(origin.url, "v9")
+
+        assert (checkout / "m1.txt").is_file()
+        assert not (checkout / "m2.txt").exists()
+
     def test_a_pull_commit_installs_once_merged(self, tmp_path: Path, origin: _Origin) -> None:
         origin.git("merge", "-q", "--no-ff", "-m", "merge", origin.f1)
         origin.git("push", "-q", "--force", str(origin.path), "main")
@@ -267,6 +293,21 @@ class TestVerdictScope:
         admit_pinned_commit(downloader, _Dep(), origin.m1)
         assert downloader.contacted == [origin.url]
         assert not (tmp_path / "cache").exists()
+
+    def test_a_declared_commit_is_refused_before_resolution_can_fetch_it(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_and_resolve
+
+        downloader = _PlanDownloader(tmp_path / "cache", [origin.url])
+        resolved: list[str] = []
+        downloader.resolve_git_reference = lambda dep: resolved.append(dep.reference)
+        dep = _Dep()
+        dep.reference = origin.f1
+
+        with pytest.raises(CommitNotReachableError, match=_UNREACHABLE):
+            admit_and_resolve(downloader, dep)
+        assert resolved == []
 
     def test_a_failed_contact_tries_the_next_attempt(self, tmp_path: Path, origin: _Origin) -> None:
         from apm_cli.cache.commit_reachability import admit_pinned_commit
