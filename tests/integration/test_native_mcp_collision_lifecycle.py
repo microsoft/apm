@@ -193,7 +193,9 @@ class _Scenario:
             )
 
     def servers(self, target: str) -> dict:
-        """Read actual native entries, retaining empty-file post-prune evidence."""
+        """Read actual native entries; an emptied .mcp.json APM created is gone (#4852)."""
+        if target == "claude" and not self.path(target).exists():
+            return {}
         text = self.path(target).read_text(encoding="utf-8")
         if target == "claude":
             return json.loads(text).get("mcpServers", {})

@@ -33,7 +33,7 @@ def _mock_git_object_links():
     """Mocked clones carry no Git objects; real-git tests cover link materialization."""
     with (
         patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
-        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_cached_links"),
     ):
         yield
 
@@ -1153,7 +1153,7 @@ class TestSubdirectoryPackageCommitSHA:
     @pytest.fixture(autouse=True)
     def _mock_materialized_symlink_validation(self):
         """Keep clone-option tests isolated from real repository inspection."""
-        with patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"):
+        with patch("apm_cli.deps.github_downloader.validate_cached_links"):
             yield
 
     def setup_method(self):
@@ -1195,7 +1195,7 @@ class TestSubdirectoryPackageCommitSHA:
         with (
             patch.object(downloader, "_clone_with_fallback") as mock_clone,
             patch("apm_cli.deps.github_downloader.checkout_git_worktree") as mock_checkout,
-            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_cached_links"),
         ):
             mock_clone.return_value = mock_repo
 
@@ -1390,7 +1390,7 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
     @pytest.fixture(autouse=True)
     def _mock_materialized_symlink_validation(self):
         """Keep cleanup tests isolated from real repository inspection."""
-        with patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"):
+        with patch("apm_cli.deps.github_downloader.validate_cached_links"):
             yield
 
     def _make_dep_ref(self):
