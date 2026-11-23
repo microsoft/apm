@@ -312,3 +312,70 @@ class TestDeclaredRefAdmission:
 
         assert mock_dl.call_count == 0
         assert not (tmp_path / "vpkg").exists()
+
+
+# ---------------------------------------------------------------------------
+# Accepted residual: proxy (Artifactory) routes have no Git origin to admit
+# against; the proxy's upstream configuration is the trust boundary. Pinned
+# here so a change is deliberate.
+# ---------------------------------------------------------------------------
+
+
+class TestProxyRouteResidual:
+    SHA = "0123456789abcdef0123456789abcdef01234567"
+
+    @pytest.fixture(autouse=True)
+    def _origin_contacts(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        # Every admission contacts the origin through the clone transport plan.
+        calls: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.deps.clone_engine.CloneEngine.execute",
+            lambda _engine, base, *_args, **_kwargs: calls.append(base),
+        )
+        self.calls = calls
+        return calls
+
+    def test_a_commit_pinned_file_through_artifactory_installs_without_admission(
+        self, tmp_path: Path, downloader: GitHubPackageDownloader
+    ) -> None:
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="artifactory.example.com",
+            artifactory_prefix="api/vcs/git",
+            reference=self.SHA,
+            virtual_path="prompts/p.prompt.md",
+            is_virtual=True,
+        )
+
+        with patch.object(downloader, "download_raw_file", return_value=_file_content()) as raw:
+            downloader.download_virtual_file_package(dep, tmp_path / "vpkg")
+
+        assert raw.call_args.args[2] == self.SHA
+        assert any((tmp_path / "vpkg").rglob("*.prompt.md"))
+        assert self.calls == []
+
+    def test_a_commit_pinned_package_through_artifactory_installs_without_admission(
+        self, tmp_path: Path, downloader: GitHubPackageDownloader
+    ) -> None:
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="artifactory.example.com",
+            artifactory_prefix="api/vcs/git",
+            reference=self.SHA,
+        )
+        target = tmp_path / "pkg"
+
+        def _download(_orchestrator, _dep, path, **_kwargs):
+            path.mkdir(parents=True)
+            (path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n", encoding="utf-8")
+            return MagicMock()
+
+        with patch(
+            "apm_cli.deps.artifactory_orchestrator.ArtifactoryOrchestrator.download_package",
+            autospec=True,
+            side_effect=_download,
+        ):
+            downloader.download_package(dep, target)
+
+        assert (target / "apm.yml").is_file()
+        assert self.calls == []

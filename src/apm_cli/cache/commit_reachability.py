@@ -79,6 +79,13 @@ def _git_failure(listing, url: str) -> subprocess.CalledProcessError:
     )
 
 
+def _persists(downloader) -> bool:
+    """A read-only cache (``apm audit`` replay) reads verdicts but never writes them."""
+    if getattr(downloader, "cache_read_only", False) is True:
+        return False
+    return not getattr(getattr(downloader, "persistent_git_cache", None), "_read_only", False)
+
+
 def _origin(downloader, dep_ref) -> tuple[Path, str]:
     """Return ``(cache_root, origin_url)``: the cache root and the remote the cache keys by."""
     from .paths import get_cache_root
@@ -135,30 +142,76 @@ def _require_at_origin(downloader, dep_ref, sha: str) -> None:
         downloader,
         dep_ref,
         lambda url, env: require_reachable_commit(
-            root, url, cache_shard_key(origin), sha, env=env, origin=origin
+            root,
+            url,
+            cache_shard_key(origin),
+            sha,
+            env=env,
+            origin=origin,
+            persist=_persists(downloader),
         ),
     )
 
 
-def effective_contact(contact: str, env) -> str:
+_CONTACTS: dict[tuple, str] = {}
+
+
+def effective_contact(contact: str, env) -> str | None:
     """Return the normalized URL git actually contacts for *contact* under *env*.
 
-    Applies the ``url.<base>.insteadOf`` rewrites git would apply.
+    Applies the ``url.<base>.insteadOf`` rewrites git would apply. Memoized
+    per run by the config-bearing environment, so keying a verdict costs no
+    extra git process per package.
     """
-    from ..utils.git_env import effective_git_url, git_subprocess_env
+    merged = {**os.environ, **(env or {})}
+    config = tuple(
+        sorted(
+            (k, v)
+            for k, v in merged.items()
+            if k.startswith("GIT_CONFIG") or k in ("HOME", "XDG_CONFIG_HOME")
+        )
+    )
+    key = (contact, config, _config_files_state(merged))
+    if key not in _CONTACTS:
+        _CONTACTS[key] = _effective_contact(contact, env)
+    return _CONTACTS[key]
+
+
+def _config_files_state(env: dict[str, str]) -> tuple:
+    """Stat the git config files that can carry rewrites (an edit invalidates the memo)."""
+    home = env.get("HOME") or os.path.expanduser("~")
+    xdg = env.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    paths = (
+        env.get("GIT_CONFIG_GLOBAL") or os.path.join(home, ".gitconfig"),
+        os.path.join(xdg, "git", "config"),
+        env.get("GIT_CONFIG_SYSTEM") or "/etc/gitconfig",
+    )
+    state = []
+    for path in paths:
+        try:
+            info = os.stat(path)
+            state.append((path, info.st_mtime_ns, info.st_size))
+        except OSError:
+            state.append((path, None, None))
+    return tuple(state)
+
+
+def _effective_contact(contact: str, env) -> str | None:
+    from ..utils.git_env import effective_git_url
     from .url_normalize import normalize_repo_url
 
     try:
-        effective = effective_git_url(contact, git_subprocess_env(env))
+        effective = effective_git_url(contact, env)
     except Exception:
-        effective = contact
+        # Unknown contact: callers neither trust nor record a verdict for it.
+        return None
     try:
         return normalize_repo_url(effective)
     except Exception:
         return effective
 
 
-def _verdict_key(origin: str, contact: str, env) -> str:
+def _verdict_key(origin: str, contact: str, env) -> str | None:
     """Key a verdict by the origin AND the server actually contacted.
 
     A ``url.<base>.insteadOf`` rewrite can send the contact to a mirror; a
@@ -167,7 +220,8 @@ def _verdict_key(origin: str, contact: str, env) -> str:
     """
     from .url_normalize import normalize_repo_url
 
-    return f"{normalize_repo_url(origin)}\n{effective_contact(contact, env)}"
+    effective = effective_contact(contact, env)
+    return None if effective is None else f"{normalize_repo_url(origin)}\n{effective}"
 
 
 def _record_tip(downloader, dep_ref, sha: str) -> None:
@@ -178,6 +232,8 @@ def _record_tip(downloader, dep_ref, sha: str) -> None:
     ssh = not dep_ref.artifactory_prefix and initial_transport_scheme(dep_ref) == "ssh"
     contact = downloader._build_repo_url(dep_ref.repo_url, use_ssh=ssh, dep_ref=dep_ref)
     key = _verdict_key(origin, contact, getattr(downloader, "git_env", None))
+    if key is None or not _persists(downloader):
+        return
     _record(_marker(root, cache_shard_key(origin), sha.lower()), key)
 
 
@@ -316,11 +372,14 @@ def require_reachable_commit(
     *,
     env: dict[str, str] | None = None,
     origin: str | None = None,
+    persist: bool = True,
 ) -> None:
     """Refuse *sha* unless an origin branch or tag reaches it.
 
     *url* is the remote contacted; *origin* (default *url*) is the remote
-    the verdict is recorded for.
+    the verdict is recorded for. With *persist* false (a read-only cache)
+    an existing verdict is reused, but verification state lives in scratch
+    storage and no verdict is written.
 
     Raises:
         RuntimeError: The commit is not reachable from any origin branch or
@@ -334,7 +393,7 @@ def require_reachable_commit(
     sha = sha.lower()
     canonical = _verdict_key(origin or url, url, env)
     marker = _marker(cache_root, shard_key, sha)
-    if _recorded(marker, canonical):
+    if canonical is not None and _recorded(marker, canonical):
         return
     where = _sanitize_url(url)
     unverifiable = (
@@ -356,13 +415,30 @@ def require_reachable_commit(
         records.append((tip.strip().lower(), name.strip()))
     tips = {tip for tip, name in records if name.startswith("refs/heads/")}
     tips.update(tag_commit_shas(records)[0].values())
-    if sha in tips or (records and _reached_by_refs(cache_root, url, shard_key, sha, env)):
-        _record(marker, canonical)
+    if sha in tips or (records and _reached_in(cache_root, url, shard_key, sha, env, persist)):
+        if canonical is not None and persist:
+            _record(marker, canonical)
         return
     raise CommitNotReachableError(
         f"Commit {sha} of {where} is not reachable from any branch or tag of the origin. "
         "Pin a commit on a branch or tag of the source repository, or the branch or tag itself."
     )
+
+
+def _reached_in(
+    cache_root: Path,
+    url: str,
+    shard_key: str,
+    sha: str,
+    env: dict[str, str] | None,
+    persist: bool,
+) -> bool:
+    if persist:
+        return _reached_by_refs(cache_root, url, shard_key, sha, env)
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="apm-reach-") as scratch:
+        return _reached_by_refs(Path(scratch), url, shard_key, sha, env)
 
 
 def _reached_by_refs(

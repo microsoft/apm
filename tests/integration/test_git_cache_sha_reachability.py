@@ -227,6 +227,21 @@ class TestVerdictScope:
         with pytest.raises(CommitNotReachableError, match="network"):
             require_reachable_commit(root, _UPSTREAM, cache_shard_key(_UPSTREAM), origin.m1)
 
+    def test_an_unknown_contact_url_records_no_verdict(
+        self, tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.cache.commit_reachability import require_reachable_commit
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        def _unreadable(*_args, **_kwargs):
+            raise ValueError("git config could not be read")
+
+        monkeypatch.setattr("apm_cli.utils.git_env.effective_git_url", _unreadable)
+        root = tmp_path / "cache"
+        require_reachable_commit(root, origin.url, cache_shard_key(origin.url), origin.m1)
+
+        assert not list((root / "reachability").rglob("verified/*"))
+
     def test_a_refusal_stops_the_plan_even_if_a_later_attempt_would_admit(
         self, tmp_path: Path, origin: _Origin
     ) -> None:
@@ -240,6 +255,18 @@ class TestVerdictScope:
         with pytest.raises(CommitNotReachableError, match=_UNREACHABLE):
             admit_pinned_commit(downloader, _Dep(), origin.f1)
         assert downloader.contacted == [origin.url]
+
+    def test_a_read_only_reader_admits_without_persisting(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        from apm_cli.cache.commit_reachability import admit_pinned_commit
+
+        downloader = _PlanDownloader(tmp_path / "cache", [origin.url])
+        downloader.cache_read_only = True
+
+        admit_pinned_commit(downloader, _Dep(), origin.m1)
+        assert downloader.contacted == [origin.url]
+        assert not (tmp_path / "cache").exists()
 
     def test_a_failed_contact_tries_the_next_attempt(self, tmp_path: Path, origin: _Origin) -> None:
         from apm_cli.cache.commit_reachability import admit_pinned_commit

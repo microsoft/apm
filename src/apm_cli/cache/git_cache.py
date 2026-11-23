@@ -1262,7 +1262,10 @@ class GitCache:
         return cached_repo_is_trusted(
             bare_dir,
             bare=True,
-            origin_ok=lambda value: names_shard(value) or effective_contact(value, None) == contact,
+            origin_ok=lambda value: (
+                names_shard(value)
+                or (contact is not None and effective_contact(value, None) == contact)
+            ),
         )
 
     def _checkout_trusted(self, checkout_dir: Path) -> bool:
@@ -1450,6 +1453,10 @@ def attach_persistent_git_cache(
     A *read_only* reader (``apm audit --ci``) uses existing checkouts and never
     writes the cache; any miss falls back to a fresh clone.
     """
+    if read_only:
+        # Commit admission reads verdicts but writes none for this reader,
+        # even when no cache attaches.
+        downloader.cache_read_only = True  # type: ignore[attr-defined]
     if os.environ.get("APM_NO_CACHE"):
         return None
     from .paths import get_cache_root

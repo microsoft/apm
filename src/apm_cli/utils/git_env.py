@@ -1100,14 +1100,17 @@ def validate_git_url_rewrite_safety(
     return effective_url
 
 
-def effective_git_url(remote_url: str, env: dict[str, str]) -> str:
+def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
     """Return the URL git contacts for *remote_url* after ``insteadOf`` rewrites.
 
     Identification only (for example keying a cached verdict to the server
     contacted); it never authorizes a contact. Use
     :func:`validate_git_url_rewrite_safety` before contacting a remote.
     """
-    snapshot = _read_effective_git_config(env)
+    child = git_subprocess_env(env)
+    # Merge the parent process config exactly as git_network_env does.
+    _append_parent_git_config(child)
+    snapshot = _read_effective_git_config(child)
     return resolve_git_url_rewrite(remote_url, snapshot.rewrites) or remote_url
 
 
