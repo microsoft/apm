@@ -37,6 +37,13 @@ from tests.lifecycle.machines._gate_kit import (
     GateWorld,
 )
 from tests.lifecycle.machines._gate_matrix import GateMatrix, matrix_cells, replay_matrix
+from tests.lifecycle.machines._gate_plugin_bin import ROOT as PLUGIN_ROOT
+from tests.lifecycle.machines._gate_plugin_bin import (
+    GatePluginBin,
+    PluginBinBench,
+    plugin_bin_cells,
+    replay_plugin_bin,
+)
 from tests.lifecycle.machines._kit import Bench, WorldPool, earned_cells
 from tests.lifecycle.oracles import ExpectedCell, Observation, Operation, check_cross_cutting
 from tests.lifecycle.receipts import current_node
@@ -252,6 +259,19 @@ def test_gate_bin_spine_credits_user_scope_bin_cells(lifecycle_template, tmp_pat
     assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
     # The spine ends with the plugin uninstalled: no bin/ is left in HOME.
     assert not (machine.bench.deploy_root / BIN_PATH).exists()
+
+
+def test_gate_plugin_bin_spine_credits_project_scope_prune_cells(
+    lifecycle_template, tmp_path: Path
+) -> None:
+    """A whole plugin's bin/ at project scope: prune retires the root at every gate level."""
+    world = WorldPool(lifecycle_template, tmp_path).fresh()
+    machine = GatePluginBin(PluginBinBench(world, "project"))
+    replay_plugin_bin(machine)
+    missing = plugin_bin_cells() - earned_cells(current_node(), "G1|")
+    assert not missing, f"plugin bin ids without an oracle receipt: {sorted(missing)}"
+    # The spine ends with the denied plugin retired: its root is gone.
+    assert not (machine.bench.deploy_root / PLUGIN_ROOT).exists()
 
 
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:

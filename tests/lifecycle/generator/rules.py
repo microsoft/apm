@@ -275,13 +275,17 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         ),
     ),
     "U-BIN": (
-        "bin/ deploys only for a marketplace plugin installed at user scope with a Claude "
-        "target that supports skills (plugin_bin_deployable), so bin/ at project scope is "
-        "unreachable and removed. The package type, not SRC, makes a marketplace plugin, so "
-        "SRC cells stay. Self-reinstating: the generator hashes the predicate "
-        "(generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as "
-        "must-cover and --check fails until a reviewed change updates the pin. The "
-        "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
+        "bin/ reaches project scope only inside a trusted whole Claude plugin: loose bin/ "
+        "deploys only for a marketplace plugin at user scope with a Claude target that "
+        "supports skills (plugin_bin_deployable), but a plugin that ships bin/ deploys whole "
+        "to .agents/plugins/<plugin>/ under its whole-plugin approval and --trust-bin "
+        "(claude_plugins/admission.py), and prune retires that root, bin/ included "
+        "(native_plugins/uninstall.py). So every project-scope bin cell is reachable and "
+        "U-BIN removes none; the M-GATE plugin bin spine witnesses them. Self-reinstating: "
+        "the generator hashes the pinned elements (generator/bin_pin.py); when the hash "
+        "differs from U_BIN_PIN the project-scope bin cells become must-cover and --check "
+        "fails until a reviewed change updates the pin. The closed-world pins of the bin/ "
+        "writer and unpack live with the gate tables (T3)",
         (
             Ev(
                 "src/apm_cli/install/exec_gate.py",
@@ -290,9 +294,20 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
             Ev("src/apm_cli/install/exec_gate.py", "plugin_bin_deployable", "InstallScope.USER"),
             Ev(
-                "src/apm_cli/install/exec_gate.py",
-                "plugin_bin_deployable",
-                'target.name == "claude"',
+                "src/apm_cli/claude_plugins/admission.py",
+                "plan_native_claude_plugin",
+                "elif ships_bin and skip_bin:",
+            ),
+            Ev("src/apm_cli/native_plugins/record.py", "PLUGINS_RELATIVE", ".agents/plugins"),
+            Ev(
+                "src/apm_cli/native_plugins/uninstall.py",
+                "retire_gated_native_plugins",
+                "gate_retirements(",
+            ),
+            Ev(
+                "docs/src/content/docs/reference/cli/prune.md",
+                "",
+                "is retired as one unit: prune removes its root and its declarations",
             ),
         ),
     ),
@@ -601,8 +616,6 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         or (src == "native-plugin" and prim == "canvas")
     ):
         return "U8"
-    if u_bin_applies(cell) and u_bin_pinned():
-        return "U-BIN"
     if u_bin_ops_applies(cell) and u_bin_pinned():
         return "U-BIN-OPS"
     if cell.get("SCOPE") == "user" and cell.get("MCPOWN") in RETIRED_MCP_OWNERS:
@@ -739,16 +752,17 @@ def classify(family: str, cell: Mapping[str, str]) -> Verdict:
     return Verdict("obligation", rules, must_cover=bool(rules))
 
 
-# -- U-BIN: bin/ deploys only at user scope (steward ruling) -------------------
+# -- U-BIN: bin/ at project scope only inside a whole plugin (#4894) ----------
 
-# The approved digest of plugin_bin_deployable (generator/bin_pin.py). While the
-# live digest equals it, U-BIN removes the bin cells of project scope; when it
-# differs they are must-cover again and --check fails until a reviewed change.
-U_BIN_PIN = "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
+# The approved digest of the U-BIN elements (generator/bin_pin.py). While the
+# live digest equals it, the project-scope bin cells are plain obligations the
+# plugin bin spine witnesses; when it differs they are must-cover and --check
+# fails until a reviewed change updates it.
+U_BIN_PIN = "9ac0d749836e552b423fe94cf20970c0ed1277c8a7871af859745c477d2a78bd"
 
 
 def u_bin_applies(cell: Mapping[str, str]) -> bool:
-    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py::plugin_bin_deployable)."""
+    """bin/ at project scope: reachable only through a trusted whole plugin (U-BIN)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 
