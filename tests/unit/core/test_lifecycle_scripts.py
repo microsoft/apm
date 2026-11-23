@@ -523,9 +523,7 @@ class TestBuildRunnerFromContext:
             {
                 "name": "p",
                 "policy": {"fetch_failure_default": "warn"},
-                "lifecycle": {
-                    "post-install": [{"type": "command", "bash": "echo from-project"}]
-                },
+                "lifecycle": {"post-install": [{"type": "command", "bash": "echo from-project"}]},
             },
         )
         failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
@@ -540,9 +538,7 @@ class TestBuildRunnerFromContext:
         logger = _Logger()
         with (
             patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed),
-            patch(
-                "apm_cli.core.script_trust.is_fingerprint_trusted", return_value=False
-            ),
+            patch("apm_cli.core.script_trust.is_fingerprint_trusted", return_value=False),
         ):
             runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
         # No scripts survive the trust filter.

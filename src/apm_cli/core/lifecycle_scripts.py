@@ -759,9 +759,7 @@ def build_runner_from_context(
                     fetch_result, fetch_failure_default=fetch_failure_default
                 )
                 unresolved_warn = (
-                    fetch_failure_default != "block"
-                    and route.unresolved
-                    and route.policy is None
+                    fetch_failure_default != "block" and route.unresolved and route.policy is None
                 )
     except Exception:
         _logger.debug("Lifecycle org-policy check failed", exc_info=True)
