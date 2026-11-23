@@ -298,7 +298,8 @@ class TestConsoleSingletonScaling:
             built = 0
 
             def __init__(self, *args, **kwargs):
-                type(self).built += 1
+                # The singleton builds an ASCII subclass of this class; count on the base.
+                _CountingConsole.built += 1
                 super().__init__(*args, **kwargs)
 
         results: list[int] = []
@@ -307,7 +308,7 @@ class TestConsoleSingletonScaling:
             results.extend(id(console._get_console()) for _ in range(10_000))
 
         with patch.object(console, "Console", _CountingConsole):
-            # Autouse fixtures may build the console after setup_method; start empty.
+            # Start from an empty singleton whatever earlier fixtures built.
             console._reset_console()
             first = console._get_console()
             # Held by this thread: a call that takes the lock would block the worker.
