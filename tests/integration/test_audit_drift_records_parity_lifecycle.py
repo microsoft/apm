@@ -60,8 +60,18 @@ def _same_verdict(world: ReplayWorld, *args: str) -> tuple[CommandResult, Comman
     evidence = f"served={served.stdout!r} {served.stderr!r}\nlive={live.stdout!r} {live.stderr!r}"
     assert served.returncode == live.returncode, evidence
     assert served.stdout == live.stdout, evidence
+    # Default output is unchanged by records: the served/live line is --verbose only.
+    assert _SUMMARY.search(served.stderr) is None, evidence
     assert _SUMMARY.sub("", served.stderr).strip() == _SUMMARY.sub("", live.stderr).strip()
     return served, live
+
+
+def _replay_counts(world: ReplayWorld, *, records: bool) -> tuple[str, str]:
+    """(served, live) package counts from the --verbose drift replay summary."""
+    result = _audit(world, "--ci", "--no-fail-fast", "--verbose", records=records)
+    found = _SUMMARY.search(result.stderr)
+    assert found is not None, result.stdout + result.stderr
+    return found.groups()
 
 
 def test_record_served_replay_gives_the_live_verdict(tmp_path: Path, apm_binary_path: Path) -> None:
@@ -81,8 +91,8 @@ def test_record_served_replay_gives_the_live_verdict(tmp_path: Path, apm_binary_
 
     served, live = _same_verdict(world, "--ci", "--no-fail-fast")
     assert served.returncode == 0, served.stdout + served.stderr
-    assert _SUMMARY.search(served.stderr).groups() == ("1", "2")
-    assert _SUMMARY.search(live.stderr).groups() == ("0", "3")
+    assert _replay_counts(world, records=True) == ("1", "2")
+    assert _replay_counts(world, records=False) == ("0", "3")
     _same_verdict(world)
 
     edited = world.project / ".github" / "instructions" / "style.instructions.md"
@@ -118,6 +128,6 @@ def test_a_live_package_rendering_onto_a_served_file_replays_all_live(
 
     served, live = _same_verdict(world, "--ci", "--no-fail-fast")
     # The clash sent the whole replay live: nothing is reported as served.
-    assert _SUMMARY.search(served.stderr).groups() == ("0", "2")
-    assert _SUMMARY.search(live.stderr).groups() == ("0", "2")
+    assert _replay_counts(world, records=True) == ("0", "2")
+    assert _replay_counts(world, records=False) == ("0", "2")
     _same_verdict(world)

@@ -739,11 +739,11 @@ def _route_ci_policy_outcome(cfg: _AuditConfig, fetch_result, *, auto_discovered
     return fetch_result
 
 
-def _echo_replay_summary() -> None:
-    """One line: how many packages the drift replay served from records (#4940)."""
+def _echo_replay_summary(verbose: bool) -> None:
+    """Under --verbose, one line: how many packages the drift replay served from records (#4940)."""
     from ..install.drift_records import last_replay_summary
 
-    summary = last_replay_summary()
+    summary = last_replay_summary() if verbose else None
     if summary is not None:
         served, live = summary
         click.echo(
@@ -934,7 +934,7 @@ def _audit_ci_gate(
                         policy_provider=replay_policy,
                         policy_fetch=replay_fetch,
                     )
-                    _echo_replay_summary()
+                    _echo_replay_summary(cfg.verbose)
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":
         # In structured output (json/sarif), --no-drift is implicit from
