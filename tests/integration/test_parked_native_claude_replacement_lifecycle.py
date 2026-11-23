@@ -153,6 +153,17 @@ def test_a_parked_native_replacement_keeps_the_loose_claude_skill(
     assert "~/.claude/skills/demo/" not in text.split("Cleaned", 1)[-1].split("[", 1)[0]
     assert "is not part of this install" not in text, _evidence(upgraded)
 
+    # I3: frozen replay and audit agree on the kept state.
+    frozen = world.install("--frozen")
+    assert frozen.returncode == 0, _evidence(frozen)
+    audit = world.runner.run(
+        ("audit", "--ci", "--no-policy"),
+        scenario_id="parked-native-replacement-audit",
+        cwd=world.manifest.parent,
+        env=world.env,
+    )
+    assert audit.returncode == 0, _evidence(audit)
+
     # I2: the converged state repeats with no change.
     lock_before = (world.manifest.parent / "apm.lock.yaml").read_bytes()
     again = world.install("--no-frozen")

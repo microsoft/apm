@@ -532,6 +532,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
+    from apm_cli.install.deployment_plan import carry_kept_loose_into_replay
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import (
@@ -742,6 +743,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     except AgentPluginTargetExcludedError:
                         continue
+                    carry_kept_loose_into_replay(
+                        result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
+                    )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
                             lock_dep,

@@ -401,6 +401,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+    from apm_cli.install.deployment_plan import keep_loose_for_parked_native
+
+    keep_loose_for_parked_native(
+        deployment_plan, ctx, package_name, diagnostics=diagnostics, logger=logger
+    )
+    # Drift replay asks the same plan which locked loose values it keeps (#5036).
+    result["deployment_plan"] = deployment_plan
     if native_claude_plugin is not None:
         result["native_plugin"] = True
         result["native_claude_plugin"] = True
@@ -619,6 +626,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
+    integrators.skill.serve_natively(frozenset(native_target_names))
     with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
         skill_result = integrators.skill.integrate_package_skill(
             package_info,

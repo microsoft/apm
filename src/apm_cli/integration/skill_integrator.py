@@ -361,6 +361,9 @@ class SkillIntegrator(BaseIntegrator):
         # Only successful writes establish same-run ownership, keyed by the
         # actual destination rather than a basename shared by several targets.
         self._native_skill_session_owners: dict[Path, str | None] = {}
+        # Harnesses a native plugin route serves for the package being integrated.
+        self._skill_native_harnesses: frozenset[str] = frozenset()
+        self._pending_native_harnesses: frozenset[str] = frozenset()
         self._ownership_snapshots: (
             dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
         ) = None
@@ -1567,6 +1570,15 @@ class SkillIntegrator(BaseIntegrator):
             complete=self._skill_materialization_complete(project_root),
         )
 
+    def serve_natively(self, harnesses: frozenset[str]) -> None:
+        """Name the harnesses a native plugin route serves for the next package (#5036).
+
+        Their skill roots are not "outside this install": the native route
+        owns them, so no kept-copy line is reported there. The next
+        :meth:`integrate_package_skill` call consumes it.
+        """
+        self._pending_native_harnesses = frozenset(harnesses)
+
     def integrate_package_skill(
         self,
         package_info,
@@ -1594,6 +1606,8 @@ class SkillIntegrator(BaseIntegrator):
         never become a package's ownership proof.
         """
         enforce_agent_plugin_deployment_boundary(package_info)
+        self._skill_native_harnesses = self._pending_native_harnesses
+        self._pending_native_harnesses = frozenset()
         from apm_cli.core.scope import InstallScope, get_apm_dir
 
         lockfile_root = (
