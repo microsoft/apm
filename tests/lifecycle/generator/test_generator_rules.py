@@ -34,6 +34,7 @@ from tests.lifecycle.generator.rules import (
     FIRST_PARTY_MCP_CELL,
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
+    ORG_DENY_OPS,
     REFUSAL_EVIDENCE,
     RETIRED_MCP_OWNERS,
     RULE_CELL_REFUSALS,
@@ -742,10 +743,9 @@ def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
 def _u_user_org_policy(cell) -> bool:
     """An org dependency deny under install/lock/update/mcp-install at user scope."""
     op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
-    user = cell.get("SCOPE") == "user" or (cell.get("PRIM") == "bin" and "SCOPE" not in cell)
     return (
         cell.get("GATE") == "denied-dependency"
-        and user
+        and cell.get("SCOPE") == "user"
         and op in ("install", "lock", "update", "mcp-install")
     )
 
@@ -764,15 +764,14 @@ def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
     assert policy_discovery_uses_git_remote(get_apm_home()) is False
     assert policy_discovery_uses_git_remote(tmp_path) is True
     removed = _removed_by("U-USER-SCOPE-ORG-POLICY")
-    assert removed == {
-        "T1|OP=install|PRIM=bin|GATE=denied-dependency",
-        "T1|OP=lock|PRIM=bin|GATE=denied-dependency",
-        "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency",
-        "T1|OP=update|PRIM=bin|GATE=denied-dependency",
-        "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on",
-    }
+    assert removed == {"T2|SCOPE=user|GATE=denied-dependency|FROZEN=on"}
     kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
     assert kept["pair|OP=install|GATE=denied-dependency"]["status"] == "required"
+    # A scope-free bin cell is reachable at project scope: the matrix refusal witnesses it.
+    for op in sorted(ORG_DENY_OPS):
+        entry = kept[f"T1|OP={op}|PRIM=bin|GATE=denied-dependency"]
+        assert entry["status"] == "required", (op, entry)
+        assert entry["witness"].endswith("test_gate_matrix_credits_op_prim_gate_cells[project]")
 
 
 def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:

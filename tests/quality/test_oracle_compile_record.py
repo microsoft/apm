@@ -98,3 +98,53 @@ def test_a_compile_may_not_write_below_its_record_path(tmp_path: Path) -> None:
     assert _written(tmp_path, below).exists(), below
     assert len(messages) == 1 and messages[0].startswith("compile wrote home:"), messages
     assert below in messages[0], messages
+
+
+def _i5_compile(tmp_path: Path, prepare, write) -> list[str]:
+    """I5 messages of a compile: *prepare* shapes HOME first, then *write* runs."""
+    project, home = tmp_path / "project", tmp_path / "home"
+    project.mkdir()
+    home.mkdir()
+    prepare(home)
+    before = _observe(project, home)
+    write(home)
+    after = _observe(project, home)
+    op = oracles.operation_for(("compile",), forbidden={"home": ("*",)}, mutating=False)
+    found = oracles._CHECKS["I5"](before, after, None, None, op)
+    return [violation.message for violation in found or ()]
+
+
+def test_a_compile_may_not_write_its_record_as_a_symlink(tmp_path: Path) -> None:
+    record = oracles.compile_home_record(tmp_path / "project")
+    target = tmp_path / "elsewhere.json"
+    target.write_text("{}\n", encoding="ascii")
+
+    def write(home: Path) -> None:
+        path = home / record
+        path.parent.mkdir(parents=True)
+        path.symlink_to(target)
+
+    messages = _i5_compile(tmp_path, lambda home: None, write)
+
+    assert _written(tmp_path, record).exists() and _written(tmp_path, record).is_symlink(), record
+    assert len(messages) == 1 and record in messages[0], messages
+
+
+def test_a_compile_may_not_replace_an_ancestor_file_of_its_record(tmp_path: Path) -> None:
+    record = oracles.compile_home_record(tmp_path / "project")
+    ancestor = record.rsplit("/", 1)[0]
+
+    def prepare(home: Path) -> None:
+        (home / ancestor).parent.mkdir(parents=True)
+        (home / ancestor).write_text("the user's file\n", encoding="ascii")
+
+    def write(home: Path) -> None:
+        (home / ancestor).unlink()
+        (home / ancestor).mkdir()
+        (home / record).write_text('{"version": 1, "files": {}}\n', encoding="ascii")
+
+    messages = _i5_compile(tmp_path, prepare, write)
+
+    assert _written(tmp_path, record).exists(), record
+    assert len(messages) == 1 and f"'{ancestor}'" in messages[0], messages
+    assert f"'{record}'" not in messages[0], messages

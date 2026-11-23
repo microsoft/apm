@@ -131,7 +131,7 @@ from apm_cli.install.services import (
     _integrate_package_primitives,  # noqa: F401 -- re-exported; tests import/patch from apm_cli.commands.install
 )
 from apm_cli.install.summary import render_post_install_summary as _post_install_summary
-from apm_cli.install.transaction import InstallTransaction
+from apm_cli.install.transaction import InstallTransaction, replay_before_install_entry
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
@@ -1261,6 +1261,10 @@ def install(  # noqa: PLR0913
             no_policy=no_policy,
             dry_run=dry_run,
             logger=logger,
+        )
+        # Every entry, before it writes: replay what a killed install left (#4863).
+        replay_before_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT, dry_run=dry_run, logger=logger
         )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():

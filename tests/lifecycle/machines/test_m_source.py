@@ -682,14 +682,16 @@ class SourceMachine(MachineBase):
             found.add("SELECT=on")  # ``apm marketplace update NAME`` names one catalog
         # GATE=none is "no executables gate configured" (factors.py GateLevel "none");
         # with the gate on, only the executable kinds of a package have a gate level.
+        # A local bundle is modeled (approved, deployed) under its package's name.
+        name = _MODELED_BUNDLES.get(choice.package, choice.package)
         if "executables" not in self.bench.manifest():
             found.add("GATE=none")
         elif choice.form not in _MCP_FORMS:
             # The project's own MCP servers are first-party: the gate never parks them.
             gated = choice.kinds - UNGATED_KINDS
-            levels = {self.model.gate(choice.package, kind) for kind in gated}
+            levels = {self.model.gate(name, kind) for kind in gated}
             found |= {f"GATE={_GATE_LEVEL.get(level, level)}" for level in levels}
-        if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
+        if any(cell.startswith(f"{name}/") for cell in step.before.deployed):
             found.add("DEPLOYED=clean")
         hostid = None
         if any(c.startswith("HOSTID=") for c in X_CONTEXT.get((op, choice.form), ())):
