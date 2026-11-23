@@ -95,6 +95,57 @@ class TestLifecycleTest:
         assert result.exit_code == 0
         assert "fired" in result.output.lower()
 
+    @pytest.mark.parametrize(
+        ("outcome", "noticed"),
+        [
+            ("cache_miss_fetch_fail", True),
+            ("malformed", True),
+            ("garbage_response", True),
+            ("found", False),
+            ("absent", False),
+            ("no_git_remote", False),
+        ],
+    )
+    def test_execute_notices_unapplied_org_ceiling_under_warn(
+        self, cli_runner, tmp_path, monkeypatch, outcome, noticed
+    ):
+        """Under fetch_failure_default=warn an unavailable org policy still runs
+        the script, and the output says the org ceiling was not applied (#4913).
+        A fetched policy or no published policy gives no such notice."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo ceiling-ok"}]}},
+        )
+        assert cli_runner.invoke(lifecycle, ["trust"]).exit_code == 0
+        policy = None
+        if outcome == "found":
+            policy = MagicMock()
+            policy.executables.deny_all = False
+        fetched = MagicMock(
+            policy=policy,
+            outcome=outcome,
+            source="org:acme/.github",
+            error="offline",
+            cached=False,
+            unavailable_sources=[],
+        )
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=fetched):
+            result = cli_runner.invoke(lifecycle, ["test", "post-install", "--execute"])
+        assert result.exit_code == 0
+        notice = (
+            "[!] Org policy not applied to lifecycle scripts (policy unavailable: "
+            f"outcome={outcome}; fetch_failure_default=warn)."
+        )
+        assert result.output.count(notice) == (1 if noticed else 0)
+        assert result.output.count("Org policy not applied") == (1 if noticed else 0)
+        assert "(1 script(s))" in result.output
+        assert "fired" in result.output.lower()
+        log = (tmp_path / "home" / "logs" / "scripts.log").read_text(encoding="utf-8")
+        assert "ceiling-ok" in log
+
 
 class TestLifecycleInit:
     def test_requires_existing_apm_yml(self, cli_runner, tmp_path, monkeypatch):

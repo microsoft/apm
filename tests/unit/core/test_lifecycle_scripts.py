@@ -19,6 +19,7 @@ from apm_cli.core.lifecycle_scripts import (
     ScriptEntry,
     _entries_from_lifecycle_map,
     _get_policy_scripts_dir,
+    _note_unapplied_ceiling,
     build_runner_from_context,
     discover_scripts,
     event_for_dependencies,
@@ -420,6 +421,16 @@ class TestBuildRunnerFromContext:
         ):
             runner = build_runner_from_context(project_root=str(tmp_path))
         assert (runner._scripts == []) is suppressed
+
+    def test_unapplied_ceiling_notice_prints_once_per_logger(self) -> None:
+        """update builds a runner, then its install pipeline builds another (#4913)."""
+        logger = MagicMock()
+        cause = "policy unavailable: outcome=malformed; fetch_failure_default=warn"
+        _note_unapplied_ceiling(logger, cause)
+        _note_unapplied_ceiling(logger, cause)
+        assert [c.args for c in logger.warning.call_args_list] == [
+            (f"Org policy not applied to lifecycle scripts ({cause}).",)
+        ]
 
     def test_untrusted_project_scripts_are_skipped(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)

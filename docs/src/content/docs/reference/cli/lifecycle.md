@@ -153,7 +153,9 @@ apm lifecycle untrust
 - Project scripts are skipped until explicitly trusted (`apm lifecycle trust`).
 - Org policy `executables.deny_all: true` suppresses all lifecycle scripts, as
   does an org policy outcome that would stop `apm install` or a policy that
-  cannot be resolved.
+  cannot be resolved. When org policy is unavailable under
+  `policy.fetch_failure_default: warn`, scripts still run and APM prints a
+  `[!]` warning that the org policy was not applied to them.
 - Set `APM_NO_SCRIPTS=1` for a per-run disable without touching policy.
 - HTTP script URLs must use `https://`.
 - Credential-pattern environment variables (TOKEN, SECRET, PAT, KEY, etc.) are

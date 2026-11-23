@@ -626,6 +626,41 @@ class LifecycleScriptRunner:
 
 # Attribute a command logger carries once it printed the suppression notice.
 _SUPPRESSION_NOTED = "_apm_lifecycle_suppression_noted"
+# Attribute a command logger carries once it printed the unapplied-ceiling notice.
+_UNAPPLIED_CEILING_NOTED = "_apm_lifecycle_unapplied_ceiling_noted"
+
+
+def _unapplied_ceiling_cause(fetch_result, fetch_failure_default: str) -> str | None:
+    """Why the org ceiling is not applied to scripts that will still run.
+
+    Set only when org policy exists or was asserted but could not be read
+    and ``fetch_failure_default`` let the command proceed (``warn``). A
+    project with no published policy has no ceiling to miss.
+    """
+    from apm_cli.policy.outcome_routing import classify_discovery_outcome
+
+    route = classify_discovery_outcome(fetch_result, fetch_failure_default=fetch_failure_default)
+    if route.blocks or route.policy is not None or not route.unresolved:
+        return None
+    return (
+        f"policy unavailable: outcome={route.outcome}; "
+        f"fetch_failure_default={fetch_failure_default}"
+    )
+
+
+def _note_unapplied_ceiling(logger: CommandLogger | None, cause: str) -> None:
+    """Print the unapplied-ceiling ``[!]`` notice once per command logger (#4913)."""
+    message = f"Org policy not applied to lifecycle scripts ({cause})."
+    if logger is None:
+        from apm_cli.utils.console import _rich_warning
+
+        _rich_warning(message, symbol="warning")
+        return
+    if getattr(logger, _UNAPPLIED_CEILING_NOTED, None) == cause:
+        return
+    logger.warning(message)
+    with contextlib.suppress(AttributeError):
+        setattr(logger, _UNAPPLIED_CEILING_NOTED, cause)
 
 
 def build_runner_from_context(
@@ -648,10 +683,14 @@ def build_runner_from_context(
     - APM_NO_SCRIPTS (env, any non-empty value) disables ALL scripts
       for the current invocation -- a blanket escape hatch for CI and
       untrusted clones.
-    - Org executables.deny_all (org policy kill-switch): when set,
-      suppresses all lifecycle scripts as a one-directional safety
-      ceiling. Best-effort: any discovery error is silently ignored so
-      the install flow is never blocked.
+    - Org policy ceiling: executables.deny_all suppresses all lifecycle
+      scripts. A discovery outcome the install gate would block on
+      (hash mismatch, fetch_failure_default=block, cached
+      fetch_failure=block, incomplete chain) or a discovery error also
+      suppresses every script, failing closed with a "could not be
+      enforced" notice; nothing raises into the command. When org policy
+      is unavailable under fetch_failure_default=warn the scripts still
+      run, with a [!] notice that the org ceiling was not applied.
     - Project-source scripts (apm.yml lifecycle:) are dropped unless
       their exact lifecycle: subtree has been explicitly trusted via
       apm lifecycle trust (see apm_cli.core.script_trust). Policy and
@@ -701,6 +740,7 @@ def build_runner_from_context(
     # (for example an inheritance chain error). Errors never raise into the
     # command.
     suppressed_reason = None
+    unapplied_cause = None
     try:
         from apm_cli.install.errors import PolicyViolationError
         from apm_cli.policy.discovery import discover_policy_with_chain
@@ -715,14 +755,17 @@ def build_runner_from_context(
         if resolved is not None and resolved.executables.deny_all:
             suppressed_reason = "org policy (executables.deny_all)"
         elif fetch_result is not None:
+            fetch_failure_default = read_project_fetch_failure_default(root)
             try:
                 route_discovery_outcome(
                     fetch_result,
                     logger=None,
-                    fetch_failure_default=read_project_fetch_failure_default(root),
+                    fetch_failure_default=fetch_failure_default,
                 )
             except PolicyViolationError:
                 suppressed_reason = "org policy could not be enforced"
+            else:
+                unapplied_cause = _unapplied_ceiling_cause(fetch_result, fetch_failure_default)
     except Exception:
         _logger.debug("Lifecycle org-policy check failed", exc_info=True)
         suppressed_reason = "org policy could not be enforced"
@@ -749,6 +792,9 @@ def build_runner_from_context(
             skipped += 1
             continue
         kept.append(script)
+
+    if kept and unapplied_cause is not None:
+        _note_unapplied_ceiling(logger, unapplied_cause)
 
     return LifecycleScriptRunner(
         scripts=kept,
