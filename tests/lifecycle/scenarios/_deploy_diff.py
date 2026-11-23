@@ -179,7 +179,7 @@ CHANGES: dict[str, Change] = {
 # -- the state oracle ------------------------------------------------------------
 
 # Caches (git objects, policy, deploy store) are not deployed state.
-HOME_CACHES = (".cache", "Library/Caches", ".apm/logs")
+HOME_CACHES = (".cache", "Library/Caches", ".apm/cache", ".apm/logs")
 # Per-checkout identity: a random installation id and receipts keyed by the project path.
 IDENTITY = (".apm-local", ".apm/deployment-receipts")
 _IDENTITY_KEY = re.compile(r"install(ation)?_?id|receipt|generated_at")

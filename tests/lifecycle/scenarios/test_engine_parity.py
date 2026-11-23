@@ -21,8 +21,8 @@ the state oracle are shared with W4's incremental-vs-fresh suite.
 DECISIONS (engine contract agreed with the no-op and diff-apply owners):
 ``no-op (...)``, ``applied a verified diff (<n> files)`` or ``full run
 (<reason>)``. A cell names the decision it requires, so it is red while the
-engine owning that decision is absent: ``xfail(strict=True,
-raises=MissingDecision)`` until the engine module exists, then required. Only
+engine owning that decision is absent: a ``KnownFailure`` (tracking #4770,
+signature: the missing decision) until the engine module exists, then required. Only
 the missing decision is the expected failure: a parity break or a failed
 command fails the cell even at main.
 """
@@ -42,6 +42,7 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.scenarios._deploy_diff import CHANGES, comparable, converge, diff, digest
 from tests.lifecycle.world import World
 from tests.lifecycle.world.clone import clone
@@ -62,6 +63,9 @@ DIFF = "diff"
 FULL = "full"
 _DECISION = re.compile(r"^\[i\] install fast path: (.*)$", re.MULTILINE)
 _ELAPSED = re.compile(r"\b\d+(?:\.\d+)?m?s\b")
+_PARALLEL = re.compile(r"^\s*\[>\] Resolving ")
+# Policy freshness depends on when each world last fetched it (as #4775 normalized).
+_POLICY_AGE = re.compile(r" \(cached, fetched \d+s ago\)")
 BOTH = ("p-skill:git", "p-exec:git")
 # The deploy store (#4846): <APM_CACHE_DIR>/deploy_v1/<key[:2]>/<key>.
 DEPLOY_BUCKET = "deploy_v1"
@@ -80,19 +84,39 @@ class MissingDecision(AssertionError):
     """The fast world did not take the decision the cell requires."""
 
 
-def _owned_by(present: bool, engine: str) -> pytest.MarkDecorator:
-    """Red-first: strict xfail while *engine* is absent; required once it lands."""
-    return pytest.mark.xfail(
-        not present,
-        strict=True,
+# Lane C engines (S0 no-op, S2 diff-apply) are tracked by one open issue.
+_ENGINE_ISSUE = "#4770"
+_MISSING = r"expected a [a-z/-]+ decision, got"
+
+
+@dataclass(frozen=True)
+class Needs:
+    """Red-first marks of a cell owned by an engine: known-failing while it is absent."""
+
+    marks: tuple[pytest.MarkDecorator, ...]
+
+    def __call__(self, test: Callable) -> Callable:
+        for mark in self.marks:
+            test = mark(test)
+        return test
+
+
+def _needs(present: bool, engine: str) -> Needs:
+    if present:
+        return Needs(())
+    known = KnownFailure(
+        _ENGINE_ISSUE,
+        f"the {engine} install engine is not on this branch yet",
+        _MISSING,
+        kind="deferred-design",
         raises=MissingDecision,
-        reason=f"{engine} engine absent (red-first cell)",
     )
+    return Needs((known.mark(),))
 
 
-NEEDS_NOOP = _owned_by(NOOP_ENGINE, "no-op")
-NEEDS_DIFF = _owned_by(DIFF_ENGINE, "diff-apply")
-NEEDS_ANY = _owned_by(ANY_ENGINE, "fast")
+NEEDS_NOOP = _needs(NOOP_ENGINE, "no-op")
+NEEDS_DIFF = _needs(DIFF_ENGINE, "diff-apply")
+NEEDS_ANY = _needs(ANY_ENGINE, "fast")
 
 
 def _kind(decision: str) -> str:
@@ -111,8 +135,22 @@ def _assert_decision(decision: str, *kinds: str) -> None:
 
 
 def _normalized(world: World, text: str) -> list[str]:
-    text = _ELAPSED.sub("<T>", _DECISION.sub("", text).replace(str(world.root), "<ROOT>"))
-    return [line for line in text.splitlines() if line.strip()]
+    """Output without the decision line, the world root and timings.
+
+    Dependencies resolve in parallel, so each run of consecutive progress lines
+    ("[>] Resolving ...") is compared as a sorted block; all other order counts.
+    """
+    text = _POLICY_AGE.sub("", _DECISION.sub("", text)).replace(str(world.root), "<ROOT>")
+    text = _ELAPSED.sub("<T>", text)
+    lines: list[str] = []
+    block: list[str] = []
+    for line in [line for line in text.splitlines() if line.strip()] + [""]:
+        if _PARALLEL.match(line):
+            block.append(line)
+            continue
+        lines += sorted(block) + ([line] if line else [])
+        block = []
+    return lines
 
 
 # -- the twin -------------------------------------------------------------------
@@ -123,6 +161,7 @@ class Twin:
     fast: World
     full: World
     codes: list[int] = field(default_factory=list)
+    evidence: str = ""
 
     @property
     def worlds(self) -> tuple[World, World]:
@@ -162,11 +201,12 @@ class Twin:
             problems
         )
         self.codes.append(fast.returncode)
+        self.evidence = evidence
         return decisions[0] if decisions else ""
 
     def ok(self, *argv: str) -> str:
         decision = self.run(*argv)
-        assert self.codes[-1] == 0, f"{' '.join(argv)} failed in both worlds"
+        assert self.codes[-1] == 0, f"{' '.join(argv)} failed in both worlds{self.evidence}"
         return decision
 
 
@@ -363,7 +403,9 @@ def test_cleanup_on_a_doubt_prunes_like_the_full_pipeline(twin: Twin) -> None:
 # -- W4's change table: change -> install, fast == full -----------------------------
 
 
-@pytest.mark.parametrize("change", [pytest.param(c, marks=NEEDS_ANY) for c in sorted(CHANGES)])
+@pytest.mark.parametrize(
+    "change", [pytest.param(c, marks=NEEDS_ANY.marks) for c in sorted(CHANGES)]
+)
 def test_install_after_a_change_matches_the_full_pipeline(twin: Twin, change: str) -> None:
     spec = CHANGES[change]
     twin.each(lambda w: converge(w, spec.start, run=twin.invoke))
@@ -437,7 +479,9 @@ DOUBTS: dict[str, tuple[Callable[[World], None], tuple[str, ...]]] = {
 }
 
 
-@pytest.mark.parametrize("trigger", [pytest.param(t, marks=NEEDS_ANY) for t in sorted(DOUBTS)])
+@pytest.mark.parametrize(
+    "trigger", [pytest.param(t, marks=NEEDS_ANY.marks) for t in sorted(DOUBTS)]
+)
 def test_doubt_trigger_declines_to_the_full_pipeline(twin: Twin, trigger: str) -> None:
     change, argv = DOUBTS[trigger]
     _converge(twin, *BOTH)
@@ -455,9 +499,9 @@ def test_external_scanners_flag_declines_to_the_full_pipeline(twin: Twin) -> Non
 @pytest.mark.parametrize(
     "char",
     [
-        pytest.param("\u200b", id="zero-width-space", marks=NEEDS_ANY),
-        pytest.param("\ufeff", id="mid-file-bom", marks=NEEDS_ANY),
-        pytest.param("\u202e", id="bidi-override", marks=NEEDS_ANY),
+        pytest.param("\u200b", id="zero-width-space", marks=NEEDS_ANY.marks),
+        pytest.param("\ufeff", id="mid-file-bom", marks=NEEDS_ANY.marks),
+        pytest.param("\u202e", id="bidi-override", marks=NEEDS_ANY.marks),
     ],
 )
 def test_hidden_unicode_in_a_deployed_file_takes_the_full_scan(twin: Twin, char: str) -> None:
@@ -468,21 +512,33 @@ def test_hidden_unicode_in_a_deployed_file_takes_the_full_scan(twin: Twin, char:
     _assert_decision(twin.run("install"), FULL)
 
 
-def _registry_source(twin: Twin) -> str:
+def _local_path_source(twin: Twin) -> None:
+    _converge(twin, "p-skill")
+
+
+def _marketplace_source(twin: Twin) -> None:
+    """Marketplace specs go through ``apm install <spec>``, which records the resolved form."""
+    twin.ok("marketplace", "add", twin.fast.services.marketplace_url)
+    twin.ok("install", twin.fast.packages["p-skill:marketplace"].spec)
+
+
+def _registry_source(twin: Twin) -> None:
     twin.each(use_registry)
-    return "p-skill:registry"
+    _converge(twin, "p-skill:registry")
 
 
-SOURCES: dict[str, Callable[[Twin], str]] = {
-    "local-path": lambda twin: "p-skill",
-    "marketplace": lambda twin: "p-skill:marketplace",
+SOURCES: dict[str, Callable[[Twin], None]] = {
+    "local-path": _local_path_source,
+    "marketplace": _marketplace_source,
     "registry": _registry_source,
 }
 
 
-@pytest.mark.parametrize("source", [pytest.param(s, marks=NEEDS_ANY) for s in sorted(SOURCES)])
+@pytest.mark.parametrize(
+    "source", [pytest.param(s, marks=NEEDS_ANY.marks) for s in sorted(SOURCES)]
+)
 def test_source_without_an_immutable_pin_declines_to_the_full_pipeline(
     twin: Twin, source: str
 ) -> None:
-    _converge(twin, SOURCES[source](twin))
+    SOURCES[source](twin)
     _assert_decision(twin.ok("install"), FULL)
