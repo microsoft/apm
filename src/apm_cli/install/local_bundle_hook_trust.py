@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import contextlib
 import os
+import posixpath
+import re
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -525,6 +527,52 @@ def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str
     return tails
 
 
+# A command token that may name a path: shell punctuation, quotes and "="
+# (``--script=path``) separate tokens.
+_COMMAND_TOKEN = re.compile(r"[^\s'\"`;&|()<>=]+")
+
+
+def _script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozenset, frozenset]:
+    """The file names and normalized absolute paths of a bundle's script rows (#5106)."""
+    paths = {
+        Path(value) if Path(value).is_absolute() else project_root / value for value in scripts
+    }
+    return (
+        frozenset(path.name for path in paths),
+        frozenset(posixpath.normpath(path.as_posix()) for path in paths),
+    )
+
+
+def _runs_script(command: str, refs: tuple[frozenset, frozenset], bases: Collection[Path]) -> bool:
+    """Whether *command* may run a bundle script under any spelling, in any target (#5106).
+
+    A path word runs the script when it normalizes to it (``/./``, ``..``):
+    an absolute one as written, a relative one from any of *bases* (the
+    project root, the hook's target root) or a ``cd <dir>`` in the command.
+    A bare file name (``x.sh``, ``./x.sh``) or a variable path whose name
+    matches may run it from a working directory that is not certain, so it
+    counts (fail closed).
+    """
+    names, paths = refs
+    words = _COMMAND_TOKEN.findall(command)
+    roots = [posixpath.normpath(base.as_posix()) for base in bases]
+    for index, word in enumerate(words[:-1]):
+        if word == "cd":
+            target = words[index + 1]
+            if "$" in target or target.startswith("~"):
+                return any(name in command for name in names)
+            roots += [posixpath.normpath(posixpath.join(root, target)) for root in list(roots)]
+    for word in words:
+        if word.rstrip("/").rsplit("/", 1)[-1] not in names:
+            continue
+        if "$" in word or word.startswith("~") or "/" not in word.removeprefix("./"):
+            return True
+        candidates = [word] if word.startswith("/") else [f"{root}/{word}" for root in roots]
+        if any(posixpath.normpath(candidate) in paths for candidate in candidates):
+            return True
+    return False
+
+
 def _hook_commands(node: Any) -> Iterator[str]:
     """Yield every hook command field anywhere in a per-file hook document."""
     from apm_cli.hook_contract import HOOK_COMMAND_KEYS
@@ -553,11 +601,13 @@ def _per_file_configs_running(
     from apm_cli.integration.hook_ownership import read_hook_object
 
     found: set[str] = set()
+    refs = _script_refs(project_root, scripts)
     for target in _per_file_targets(targets):
         target_root = project_root / target.root_dir
         tails = _script_tails(project_root, target_root, scripts)
         hooks_dir = target_root / "hooks"
-        if not tails or not hooks_dir.is_dir():
+        # A hook in any target may run a script by any spelling (#5106).
+        if not refs[0] or not hooks_dir.is_dir():
             continue
         for path in sorted(hooks_dir.glob("*.json")):
             value = _record_value(path, project_root)
@@ -568,7 +618,10 @@ def _per_file_configs_running(
             except (OSError, ValueError, TypeError):
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
-            if any(tail in text for text in _hook_commands(document) for tail in tails):
+            texts = list(_hook_commands(document))
+            if any(tail in text for text in texts for tail in tails) or any(
+                _runs_script(text, refs, (project_root, target_root)) for text in texts
+            ):
                 found.add(value)
     return found
 
@@ -607,6 +660,7 @@ def _configs_still_running(
 
     markers = LocalBundleMarkers(slug)
     found: set[str] = set()
+    refs = _script_refs(project_root, scripts)
     for target in targets or ():
         config = _MERGE_HOOK_TARGETS.get(getattr(target, "name", None))
         if config is None:
@@ -614,7 +668,8 @@ def _configs_still_running(
         target_root = project_root / target.root_dir
         tails = _script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
-        if not tails or not json_path.is_file():
+        # A hook in any target may run a script by any spelling (#5106).
+        if not refs[0] or not json_path.is_file():
             continue
         try:
             hooks = read_hook_object(json_path).get(config.event_container_key)
@@ -632,7 +687,10 @@ def _configs_still_running(
             for entry in entries
             if not (isinstance(entry, dict) and entry.get("_apm_source") in markers)
         ]
-        if any(tail in text for entry in foreign for text in commands(entry) for tail in tails):
+        texts = [text for entry in foreign for text in commands(entry)]
+        if any(tail in text for text in texts for tail in tails) or any(
+            _runs_script(text, refs, (project_root, target_root)) for text in texts
+        ):
             found.add(_record_value(json_path, project_root))
     return found
 
