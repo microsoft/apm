@@ -109,6 +109,16 @@ def apply_optional_dependency_fields(dep: Any, entry: dict) -> None:
         dep.target_subset = parse_target_subset(targets_raw)
 
 
+def add_selection_fields(entry: dict, dep: Any) -> None:
+    """Write a dependency's skills, targets and native choices into its apm.yml entry."""
+    if dep.skill_subset:
+        entry["skills"] = sorted(dep.skill_subset)
+    if dep.target_subset:
+        entry["targets"] = sorted(dep.target_subset)
+    if dep.native is not None:
+        entry["native"] = dep.native
+
+
 def local_path_apm_yml_entry(
     local_path: str,
     alias: str | None,

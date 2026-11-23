@@ -57,6 +57,7 @@ from .identity import (
 from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
 from .materialization import build_materialization_path
 from .object_fields import (
+    add_selection_fields,
     apply_optional_dependency_fields,
     local_path_apm_yml_entry,
     parse_alias_override,
@@ -113,9 +114,7 @@ class DependencyReference(ProviderCoordinateMixin):
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
     target_subset: list[str] | None = None  # Sorted lowercase target names, or None = all
-    # ``native:`` route choice (#4995): False keeps the dependency loose, True or
-    # None (absent) leaves the native plugin route automatic.
-    native: bool | None = None
+    native: bool | None = None  # ``native:`` route choice (#4995); None = automatic
 
     # SSH username for SCP-shorthand or ``ssh://`` dependencies. ``None`` for
     # non-SSH inputs. Defaults to ``"git"`` whenever an SSH form was parsed
@@ -2000,12 +1999,7 @@ class DependencyReference(ProviderCoordinateMixin):
             entry["version"] = self.reference
             if self.alias:
                 entry["alias"] = self.alias
-            if self.skill_subset:
-                entry["skills"] = sorted(self.skill_subset)
-            if self.target_subset:
-                entry["targets"] = sorted(self.target_subset)
-            if self.native is not None:
-                entry["native"] = self.native
+            add_selection_fields(entry, self)
             return entry
         if self.is_local and self.local_path:
             if self.skill_subset or self.target_subset or self.alias or self.native is not None:
@@ -2026,12 +2020,7 @@ class DependencyReference(ProviderCoordinateMixin):
             if self.alias:
                 entry["alias"] = self.alias
             entry["allow_insecure"] = self.allow_insecure
-            if self.skill_subset:
-                entry["skills"] = sorted(self.skill_subset)
-            if self.target_subset:
-                entry["targets"] = sorted(self.target_subset)
-            if self.native is not None:
-                entry["native"] = self.native
+            add_selection_fields(entry, self)
             return entry
         if self.skill_subset or self.target_subset or self.native is not None:
             entry = {"git": self._format_reference(self.repo_url).split("#", 1)[0]}
@@ -2039,12 +2028,7 @@ class DependencyReference(ProviderCoordinateMixin):
                 entry["ref"] = self.reference
             if self.alias:
                 entry["alias"] = self.alias
-            if self.skill_subset:
-                entry["skills"] = sorted(self.skill_subset)
-            if self.target_subset:
-                entry["targets"] = sorted(self.target_subset)
-            if self.native is not None:
-                entry["native"] = self.native
+            add_selection_fields(entry, self)
             return entry
         return self.to_display_reference()
 
