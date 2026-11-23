@@ -625,6 +625,21 @@ def test_apm_script_path_with_no_directory_outside_the_project_is_refused(tmp_pa
     assert not marker.exists()
 
 
+def test_apm_script_env_without_path_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no PATH at all, an APM-authored script is refused, not left to a shell default."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    with pytest.raises(FileNotFoundError, match="No PATH directory outside the project"):
+        trusted_path_environment({"HOME": str(tmp_path)})
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
 def test_apm_script_path_drops_a_directory_linking_into_the_project(tmp_path: Path) -> None:
     """A PATH directory whose helper links into the project never serves an APM script."""

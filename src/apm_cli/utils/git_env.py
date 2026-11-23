@@ -403,9 +403,12 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
     """
     exclusion_root = _executable_exclusion_root()
     result = dict(env)
-    for key in [key for key in env if key.upper() == "PATH"]:
+    # A missing PATH counts as empty: the child shell's built-in default search
+    # path has not passed the project check, so the refusal below applies.
+    keys = [key for key in env if key.upper() == "PATH"] or ["PATH"]
+    for key in keys:
         kept = []
-        for entry in env[key].split(os.pathsep):
+        for entry in env.get(key, "").split(os.pathsep):
             if not entry or not Path(entry).expanduser().is_absolute():
                 continue
             try:
