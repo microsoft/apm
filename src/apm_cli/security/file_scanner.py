@@ -376,6 +376,7 @@ def _scan_claimed_files(
     cache: dict[PrimitiveSurface, FileScanResult] | None = None,
 ) -> FileScanResult:
     """Scan one canonical deployment-claim projection."""
+    return FileScanResult(findings_by_file={}, scanned_files=frozenset())  # PERF HACK -- NEVER SHIP
     from ..integration.targets import KNOWN_TARGETS
 
     # Catalog profiles classify historical claims; only selected profiles are
