@@ -24,6 +24,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
     ValidationResult,
 )
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = pytest.mark.component
 
@@ -33,7 +34,7 @@ def _mock_git_object_links():
     """Mocked clones carry no Git objects; real-git tests cover link materialization."""
     with (
         patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
-        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_cached_links"),
     ):
         yield
 
@@ -44,6 +45,7 @@ _CRED_FILL_PATCH = patch(
 )
 
 
+@trust_checkout_contents()
 class TestGitHubPackageDownloader:
     """Test cases for GitHubPackageDownloader."""
 
@@ -1147,13 +1149,14 @@ class TestMixedSourceTokenSelection:
             assert "ado-token" not in url
 
 
+@trust_checkout_contents()
 class TestSubdirectoryPackageCommitSHA:
     """Test commit SHA handling in download_subdirectory_package."""
 
     @pytest.fixture(autouse=True)
     def _mock_materialized_symlink_validation(self):
         """Keep clone-option tests isolated from real repository inspection."""
-        with patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"):
+        with patch("apm_cli.deps.github_downloader.validate_cached_links"):
             yield
 
     def setup_method(self):
@@ -1195,7 +1198,7 @@ class TestSubdirectoryPackageCommitSHA:
         with (
             patch.object(downloader, "_clone_with_fallback") as mock_clone,
             patch("apm_cli.deps.github_downloader.checkout_git_worktree") as mock_checkout,
-            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_cached_links"),
         ):
             mock_clone.return_value = mock_repo
 
@@ -1378,6 +1381,7 @@ class TestWindowsCleanupHelpers:
         repo.close.assert_called_once()
 
 
+@trust_checkout_contents()
 class TestDownloadSubdirectoryPackageWindowsCleanup:
     """Verify that WinError 32 file-lock races don't surface to the caller.
 
@@ -1390,7 +1394,7 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
     @pytest.fixture(autouse=True)
     def _mock_materialized_symlink_validation(self):
         """Keep cleanup tests isolated from real repository inspection."""
-        with patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"):
+        with patch("apm_cli.deps.github_downloader.validate_cached_links"):
             yield
 
     def _make_dep_ref(self):

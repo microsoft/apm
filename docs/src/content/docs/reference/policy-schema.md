@@ -19,7 +19,7 @@ For the workflow (where to put the file, how to roll it out), see [Govern with a
 - **Which versions install** -- whether refs must be pinned to bounded constraints, and how version conflicts on required packages resolve.
 - **What the lockfile records and verifies** -- which artifacts the lockfile records, and what the install-time audit pass checks over them once written.
 
-`apm install` enforces the dependency and MCP source rules during install; `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
+`apm install` enforces the dependency and MCP source rules, `dependencies.max_depth`, `manifest.scripts` and `unmanaged_files.action: deny` during install; `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
 
 ## What apm-policy.yml does NOT govern
 
@@ -61,7 +61,7 @@ possible.
 | `extends`          | string or null      | `null`           | no       | Parent policy reference. See [Inheritance](#inheritance).                         |
 | `enforcement`      | enum                | `warn`           | no       | `off` / `warn` / `block`. See [Enforcement modes](#enforcement-modes).            |
 | `fetch_failure`    | enum                | `warn`           | no       | `warn` / `block`. Behavior when a remote policy cannot be fetched or parsed.      |
-| `cache`            | object              | `{ttl: 3600}`    | no       | Cache settings for remote policy fetches.                                         |
+| `cache`            | object              | `{ttl: 3600}`    | no       | Cache settings for remote policy fetches. `ttl` is capped at 86400 (24 hours).    |
 | `dependencies`     | object              | see section      | no       | Rules over APM dependencies.                                                       |
 | `mcp`              | object              | see section      | no       | Rules over MCP servers (direct and transitive).                                   |
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |
@@ -112,7 +112,7 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 | `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Always wins over `allow`. |
 | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. Exact and host-bound; see below. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
-| `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
+| `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`. Under `enforcement: block`, `apm install` stops resolving at the limit and refuses the deeper chain before fetching past it; under `warn` it warns. |
 | `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, exact package release tag such as `name@1.2.3` or `@scope/name@1.2.3`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
 
 ### `require_pinned_constraint` reference
@@ -199,7 +199,7 @@ Rules over MCP server references, including transitive ones declared by deep dep
 | Field                       | Type                    | Default | Notes                                                                  |
 |-----------------------------|-------------------------|---------|------------------------------------------------------------------------|
 | `required_fields`           | list of strings         | `[]`    | Top-level keys every `apm.yml` must declare (e.g. `description`, `license`). |
-| `scripts`                   | enum                    | `allow` | `allow` / `deny` -- whether `scripts:` blocks are permitted.            |
+| `scripts`                   | enum                    | `allow` | `allow` / `deny` -- whether `scripts:` blocks are permitted. `apm install` refuses (`block`) a `scripts:` block in the manifest it installs (`--root`, `-g`, `--mcp` and local bundles included) before fetching or writing anything, or warns (`warn`); `apm audit --ci` fails it too. `apm run` does not consult it. |
 | `content_types`             | object or null          | `null`  | `{allow: [...]}`. Restricts primitive content types (e.g. `skill`, `prompt`). |
 | `require_explicit_includes` | boolean                 | `false` | When `true`, manifests must declare an explicit `includes:` list rather than rely on directory globs. |
 
@@ -209,7 +209,7 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 
 | Field         | Type           | Default  | Notes                                                                            |
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
-| `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
+| `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift: under `enforcement: block`, `apm install` refuses when a governed directory would hold a file no lockfile row claims. `--mcp` and a local bundle refuse before writing anything; an install that deploys packages or local `.apm/` content restores every file it deployed and its lockfile; `--dry-run` previews it; `apm audit --ci` fails the same state. Known limit: this verdict needs the deployed files, so an install killed between deploy and restore leaves them unrecorded. |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
 | `exclude`     | list of globs  | `null`   | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. `null` = no opinion (transparent in the `extends:` merge); merges as a union down the chain. |
 

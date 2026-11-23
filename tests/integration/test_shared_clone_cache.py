@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = [
     pytest.mark.component,
@@ -266,6 +267,7 @@ class TestSharedCloneCache:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestDownloaderSharedCloneIntegration:
     """Test that the downloader uses shared_clone_cache when set."""
 
@@ -329,7 +331,7 @@ class TestDownloaderSharedCloneIntegration:
             patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone),
             patch.object(downloader, "_materialize_from_bare", side_effect=fake_materialize),
             patch.object(downloader, "_git_env_dict", return_value={}),
-            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_cached_links"),
             patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
         ):
             mock_result = MagicMock()
@@ -402,7 +404,7 @@ class TestDownloaderSharedCloneIntegration:
             patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone),
             patch.object(downloader, "_materialize_from_bare", side_effect=fake_materialize),
             patch.object(downloader, "_git_env_dict", return_value={}),
-            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_cached_links"),
             patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
         ):
             # Configure validate mock

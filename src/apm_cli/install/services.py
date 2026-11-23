@@ -33,6 +33,7 @@ from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_err
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .project_package import build_project_local_package_info
+from .target_filter import announced_reconcile
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
 from .target_warnings import warn_unsupported_primitives
@@ -262,11 +263,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)
     dep_targets_active = target_selection.consumer_restriction_active
 
-    reconcile_package_targets = getattr(
-        integrators.hook,
-        "reconcile_package_target_restriction",
-        None,
-    )
+    reconcile_package_targets = announced_reconcile(integrators.hook, logger, package_name, scope)
 
     def _reconcile_excluded_targets() -> None:
         if target_selection.excluded_targets and callable(reconcile_package_targets):
@@ -1113,8 +1110,8 @@ def integrate_local_bundle(
             else:
                 desired_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
 
-            # Skip an existing file with different content unless --force.
-            if not dry_run and dest.exists() and not force:
+            # Skip an existing file with different content unless --force (a dry run too).
+            if dest.exists() and not force:
                 try:
                     existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
                 except OSError:
