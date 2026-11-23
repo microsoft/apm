@@ -390,7 +390,14 @@ class GitCache:
                     "against its commit; rebuilding it from a fresh fetch.",
                     symbol="warning",
                 )
-            self._discard_shard(checkout, url, partial=bool(sparse_paths))
+            self._discard_shard(
+                checkout,
+                url,
+                partial=bool(sparse_paths),
+                healed=lambda c=checkout, s=sha, n=cone, e=verify_env: verify_checkout(
+                    c, s, paths=sparse_paths, cone=n, env=e
+                ),
+            )
         raise RuntimeError(
             f"Cached checkout for {_sanitize_url(url)} @ {sha[:12]} does not match its commit "
             "even after a fresh fetch; refusing it"
@@ -1200,14 +1207,21 @@ class GitCache:
             alternates_root=self._db_root,
         )
 
-    def _discard_shard(self, checkout_dir: Path, url: str, *, partial: bool) -> None:
-        """Remove a checkout that failed verification and the bare it was cloned from."""
+    def _discard_shard(self, checkout_dir: Path, url: str, *, partial: bool, healed) -> None:
+        """Remove a checkout that failed verification and the bare it was cloned from.
+
+        Under the shard lock the checkout is checked again: another install may
+        have rebuilt it in the meantime, and a healthy rebuild is kept.
+        """
         bare_dir = self._db_root / (
             cache_shard_key(url) + (_PARTIAL_BARE_SUFFIX if partial else "")
         )
-        for directory in (checkout_dir, bare_dir):
-            with shard_lock(directory):
-                self._evict_checkout(directory)
+        with shard_lock(checkout_dir):
+            if checkout_dir.is_dir() and healed():
+                return
+            self._evict_checkout(checkout_dir)
+        with shard_lock(bare_dir):
+            self._evict_checkout(bare_dir)
 
     def _checkout_trusted_or_evicted(self, checkout_dir: Path) -> bool:
         """Return True for a trusted checkout; evict an untrusted one and return False."""

@@ -24,12 +24,13 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
     ),
     "src/apm_cli/cache/git_cache.py": (
         "if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):",
-        "self._discard_shard(checkout, url, partial=bool(sparse_paths))",
+        "if checkout_dir.is_dir() and healed():",
     ),
     "src/apm_cli/deps/github_downloader.py": (
         "target_path, temp_clone_path, _ws2_resolved_commit, subdir_path, _env",
         "require_verified_copy(target_path, _cached, _cached.parent.name)",
         "require_verified_checkout(target_path, resolved_ref.resolved_commit)",
+        "repository_license = checked_license(temp_clone_path, subdir_path, _ws2_resolved_commit)",
     ),
     "src/apm_cli/marketplace/client.py": (
         "return json.loads(read_verified_file(Path(checkout_dir), file_path))",

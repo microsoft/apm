@@ -339,3 +339,31 @@ def test_a_truncated_copy_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(CheckoutVerificationError, match="missing from the copy"):
         require_verified_copy(dest, repo, sha, "pkg")
+
+
+@_POSIX_ONLY
+def test_an_untracked_directory_link_never_verifies(tmp_path: Path) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_bytes(b"not from the commit\n")
+    (repo / "pkg" / "linked").symlink_to(outside, target_is_directory=True)
+
+    assert not verify_checkout(repo, sha, env=neutral_git_env())
+    assert not verify_checkout(repo, sha, paths=["pkg"], env=neutral_git_env())
+
+
+def test_an_inherited_licence_must_hold_its_verified_bytes(tmp_path: Path) -> None:
+    from apm_cli.deps.carried_license import checked_license
+
+    repo, _sha = _plain_repo(tmp_path)
+    (repo / "LICENSE").write_bytes(b"MIT\n")
+    git("-C", str(repo), "add", "-A")
+    git("-C", str(repo), "commit", "-q", "-m", "licence")
+    sha = git("-C", str(repo), "rev-parse", "HEAD")
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    assert checked_license(repo, "pkg", sha).data == b"MIT\n"
+
+    (repo / "LICENSE").write_bytes(b"Something else\n")  # after verification
+    with pytest.raises(CheckoutVerificationError, match="verified bytes"):
+        checked_license(repo, "pkg", sha)

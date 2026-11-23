@@ -55,7 +55,7 @@ from .bare_cache import (
     fetch_sha_into_bare,
     materialize_from_bare,
 )
-from .carried_license import carry_licenses, read_repository_license
+from .carried_license import carry_licenses, checked_license
 from .download_strategies import DownloadDelegate
 from .git_lazy import bind_git_name, git_command_error
 from .git_remote_ops import (
@@ -1678,7 +1678,7 @@ class GitHubPackageDownloader:
             )
             # Sparse cones keep ancestor-directory files, so read the repository
             # licence before cleanup; it is written after validation (#3556).
-            repository_license = read_repository_license(temp_clone_path, subdir_path)
+            repository_license = checked_license(temp_clone_path, subdir_path, _ws2_resolved_commit)
 
             # Capture commit SHA; close the Repo object immediately so its file
             # handles are released before _rmtree() runs in the finally block.

@@ -347,12 +347,15 @@ def _expected(
 
 
 def _worktree_files(repo: Path) -> Iterator[tuple[str, Path]]:
+    """Every entry to check: files, and directory links (never followed; they never verify)."""
     for directory, subdirs, names in os.walk(repo):
         here = Path(directory)
         if here == repo:
             subdirs[:] = [d for d in subdirs if d != ".git"]
             names = [n for n in names if n != ".git"]
-        for name in names:
+        links = [d for d in subdirs if (here / d).is_symlink()]
+        subdirs[:] = [d for d in subdirs if d not in links]
+        for name in (*names, *links):
             path = here / name
             yield path.relative_to(repo).as_posix(), path
 
@@ -544,6 +547,16 @@ def read_verified_file(
     data = path.read_bytes()
     _check_bytes(manifest, rel.strip("/"), data, info)
     return data
+
+
+def require_verified_bytes(
+    repo: Path, sha: str | None, rel: str, data: bytes, scope: str = ""
+) -> None:
+    """Raise unless *data*, read from *rel* in checkout *repo*, are the bytes verification accepted."""
+    manifest = _manifest(repo, sha, [scope.strip("/")] if scope.strip("/") else None, None)
+    want = manifest.files.get(rel.strip("/"))
+    if want is None or _object_id(manifest.algorithm, "blob", data) != want[0]:
+        raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
 
 
 def forget_verdicts() -> None:
