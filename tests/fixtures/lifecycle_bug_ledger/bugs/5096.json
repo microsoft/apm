@@ -1,0 +1,18 @@
+{
+  "issue": 5096,
+  "fixed_in": "Unreleased",
+  "summary": "With CLAUDE_CONFIG_DIR set to HOME the Claude root scoped to '.', its allow-list prefix was './', and install -g refused every skill as an unsafe destination; the root now contributes its primitive directories, and the deploy-path gate admits only canonical paths (no '.' or '..' segment) for every target.",
+  "failure_modes": [
+    "routing",
+    "outcome"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_config_dir_home_skill_lifecycle.py::test_install_g_deploys_a_skill_when_claude_config_dir_is_home",
+    "tests/integration/test_claude_config_dir_home_skill_lifecycle.py::test_a_symlinked_skills_dir_under_a_home_claude_root_is_refused",
+    "tests/unit/integration/test_deploy_path_canonical_segments.py::test_every_target_refuses_a_dot_segment_in_any_position"
+  ]
+}

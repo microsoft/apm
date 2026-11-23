@@ -18,6 +18,8 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
   relative) finished, before its post-write seal.
 * ``unsealed+kill``: exit once the ``APM_TEST_DEPLOY_KILL_AFTER``-th journaled
   path is written, before its post-write seal.
+* ``retire+kill``: exit right after the first journaled delete is sealed
+  (a retire killed partway, #5130).
 
 Python runs only the first ``sitecustomize`` on its path, so this one runs
 the next one (the isolated environment's network guard) before anything else.
@@ -69,6 +71,16 @@ if _FAULT:
             return _seal(self, path)
 
         deploy_snapshot.DeployJournal.after_write = _seal_path_or_kill
+    elif "retire" in faults:
+        _sealed = deploy_snapshot.DeployJournal.after_write
+
+        def _seal_then_kill(self, path):
+            _sealed(self, path)
+            # A persisted journal just sealed a path that is gone: a delete finished.
+            if self.root is not None and not os.path.lexists(path):
+                os._exit(_KILLED_EXIT)
+
+        deploy_snapshot.DeployJournal.after_write = _seal_then_kill
     elif "unsealed" in faults:
         _after = int(os.environ["APM_TEST_DEPLOY_KILL_AFTER"])
         _seal = deploy_snapshot.DeployJournal.after_write

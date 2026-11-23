@@ -1228,6 +1228,43 @@ class TestSubdirectoryPackageCommitSHA:
             assert checkout_call.args[1] == sha
             assert checkout_call.kwargs["env"] is downloader.git_env
 
+    @pytest.mark.parametrize("ref", ["refs/heads/main", "refs/tags/v1"])
+    @patch("apm_cli.deps.github_downloader.Repo")
+    @patch("apm_cli.deps.github_downloader.validate_apm_package")
+    def test_a_fully_qualified_ref_is_fetched_by_its_exact_commit(
+        self, mock_validate, mock_repo_class, ref
+    ):
+        """``clone --branch`` takes only a short name, so a full ref is fetched by its commit."""
+        sha = "c" * 40
+        dep_ref = self._make_dep_ref(ref=ref)
+        mock_validation = ValidationResult()
+        mock_validation.is_valid = True
+        mock_validation.package = APMPackage(name="my-skill", version="1.0.0")
+        mock_validate.return_value = mock_validation
+        with patch.dict(os.environ, {}, clear=True):
+            downloader = GitHubPackageDownloader()
+        resolved = ResolvedReference(
+            original_ref=ref, ref_type=GitReferenceType.BRANCH, resolved_commit=sha, ref_name=ref
+        )
+
+        def setup_subdir(*args, **kwargs):
+            subdir = args[1] / "packages" / "my-skill"
+            subdir.mkdir(parents=True)
+            (subdir / "apm.yml").write_text("name: my-skill\nversion: 1.0.0\n")
+
+        with (
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=setup_subdir) as clone,
+            patch("apm_cli.deps.github_downloader.checkout_git_worktree") as checkout,
+        ):
+            info = downloader.download_subdirectory_package(dep_ref, self.temp_dir / "my-skill")
+
+        assert "branch" not in clone.call_args.kwargs
+        assert clone.call_args.kwargs.get("no_checkout") is True
+        assert checkout.call_args.args[1] == sha
+        assert info.resolved_reference.ref_name == ref
+        assert (self.temp_dir / "my-skill" / "apm.yml").is_file()
+
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("apm_cli.deps.github_downloader.validate_apm_package")
     def test_branch_ref_uses_shallow_clone(self, mock_validate, mock_repo_class):
@@ -1899,7 +1936,8 @@ class TestVirtualFilePackageYamlGeneration:
         dep_ref = Mock(spec=DependencyReference)
         dep_ref.is_virtual = True
         dep_ref.virtual_path = virtual_path
-        dep_ref.reference = "main"
+        # No declared ref: the default branch, so no origin admission.
+        dep_ref.reference = None
         dep_ref.repo_url = "github/awesome-copilot"
         dep_ref.get_virtual_package_name.return_value = "awesome-copilot-swe-subagent"
         dep_ref.to_github_url.return_value = (
