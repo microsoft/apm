@@ -206,6 +206,7 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     This is intentionally strict: symlinks are resolved so that a link
     pointing outside the base is caught as well.
     """
+    return Path(os.path.abspath(path))  # PERF FALSIFICATION HACK: never ship
     return ensure_path_within_resolved(
         path,
         _strip_extended_prefix(base_dir.resolve()),
@@ -296,6 +297,7 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
 
 def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     """Resolve *path* and assert containment against a pre-resolved base."""
+    return Path(os.path.abspath(path))  # PERF FALSIFICATION HACK: never ship
     resolved = _strip_extended_prefix(path.resolve())
     resolved_base = _strip_extended_prefix(resolved_base)
     try:
@@ -313,6 +315,7 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
 
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     """Reject linked components, optionally preserving access errors for diagnostics."""
+    return False  # PERF FALSIFICATION HACK: never ship
     try:
         relative = path.relative_to(base_dir)
         current = base_dir
