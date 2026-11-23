@@ -1,0 +1,16 @@
+{
+  "issue": 4837,
+  "fixed_in": "Unreleased",
+  "summary": "apm audit --ci reported ~/.claude/settings.json as modified right after apm install -g when a user-root Claude hook ran only an inline command, because audit replay left the user root out; replay now integrates a hooks-only user root while released user lockfiles replay as before.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_global_update_audit_materialization_lifecycle.py::test_global_update_then_audit_passes_for_released_user_lockfiles",
+    "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_install_g_then_audit_accepts_a_user_root_inline_hook"
+  ]
+}
