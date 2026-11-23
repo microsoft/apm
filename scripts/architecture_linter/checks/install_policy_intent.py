@@ -133,8 +133,7 @@ EXTRA_RULES: tuple[Rule, ...] = (
         group=GROUP,
         guard_ids=(RULE_REMOTE_READ_REUSE,),
         description=(
-            "Only the verified-state record's no-op render reuses a remote read, "
-            "dropped once user code ran."
+            "Only the verified-state record reuses a remote read, dropped once user code ran."
         ),
         check=check_remote_read_reuse,
     ),

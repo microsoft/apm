@@ -61,7 +61,6 @@ ENV_ALLOWLIST = (
     "APM_NO_CACHE",
     "APM_NO_REFLINK",
     "APM_NO_SCRIPTS",
-    "APM_POLICY_DISABLE",
     "APM_PROGRESS",
     "APM_REPO",
     "APM_RESOLVE_PARALLEL",
@@ -151,7 +150,6 @@ _NO_HIT_ENV = (
     "ARTIFACTORY_BASE_URL",
     "ARTIFACTORY_ONLY",
     "APM_NO_CACHE",
-    "APM_POLICY_DISABLE",
 )
 
 # Project target roots: every file in them (listing and bytes) is a verdict input,
@@ -200,11 +198,6 @@ _KILL_VALUES = frozenset({"0", "false", "no", "off"})
 # token (a cache age, a countdown) means the output is not recorded at all.
 _ELAPSED = "\x00elapsed\x00"
 _ELAPSED_RE = re.compile(r"(up to date in )\d+\.\d(s\.)")
-# O1: a cached policy's age (CommandLogger.policy_resolved) is templated to its
-# cache entry and rendered from that entry's live cached_at at replay.
-_AGE_RE = re.compile(r"(fetched )(\d+[smh])( ago)")
-_AGE_TOKEN_RE = re.compile("\x00age:([^\x00]+)\x00")
-_AGE_LAG = 900  # the policy line prints at discovery; the writer runs up to this much later
 _CLOCK_RE = re.compile(
     r"\b\d+(?:\.\d+)?\s?(?:ms|s|m|h|d|min|sec|seconds|minutes|hours|days) (?:ago|left|remaining)\b|expires in"
 )
@@ -298,6 +291,16 @@ def _env_log() -> Iterator[None]:
 
 
 _PROVEN_LOCK: list[bytes | None] = []
+# apm.yml and the lock as the run found them: an edit while the run was proving
+# its verdict (an editor saving apm.yml) means its verdict is not the record's (W3d R4).
+_ENTRY_FILES: list[bytes | None] = []
+
+
+def _entry_bytes(name: str) -> bytes | None:
+    try:
+        return _read_nofollow(Path.cwd() / name)
+    except OSError:
+        return None
 
 
 def _note_proven_lock() -> None:
@@ -443,174 +446,6 @@ def _walk_files(base: Path, skip: tuple[str, ...] = ()) -> Iterator[Path]:
             yield Path(entry.path)
 
 
-_GIT_TRUE = frozenset({"1", "true", "yes", "on"})
-
-
-def _git_files(root: Path, system: str) -> list[Path]:
-    """The config files a child ``git`` reads for this checkout, at every scope.
-
-    The no-op runs ``git remote`` for policy discovery and it honors
-    ``url.insteadOf``; a hit runs no git, so it keys what git would read: the
-    repository config (``GIT_DIR``/``GIT_COMMON_DIR``, else found upward with a
-    ``.git`` file followed to its gitdir and common dir), the global config
-    (``GIT_CONFIG_GLOBAL``, else ``~/.gitconfig`` and the XDG file) and *system*,
-    the path git itself reported (``git var GIT_CONFIG_SYSTEM``) for the binary
-    keyed beside it, each followed through its includes. ``GIT_*`` and PATH are
-    keyed as values too.
-    """
-    env = dict(_env_prefixed("GIT_"))
-    cwd = Path.cwd()
-    files: list[Path] = []
-    if env.get("GIT_DIR"):
-        gitdir = cwd / env["GIT_DIR"]
-        common = cwd / env["GIT_COMMON_DIR"] if env.get("GIT_COMMON_DIR") else gitdir
-        files += [gitdir / "config", gitdir / "config.worktree", common / "config"]
-    else:
-        for base in (root, *root.parents):
-            dot = base / ".git"
-            if dot.is_dir():
-                files += [dot / "config", dot / "config.worktree"]
-                break
-            if dot.is_file():
-                text = dot.read_text(encoding="utf-8", errors="replace").strip()
-                if not text.startswith("gitdir:"):
-                    break
-                gitdir = (base / text[len("gitdir:") :].strip()).resolve()
-                files += [dot, gitdir / "config", gitdir / "config.worktree"]
-                common = gitdir / "commondir"
-                if common.is_file():
-                    files.append(common)
-                    files.append((gitdir / common.read_text(encoding="utf-8").strip()) / "config")
-                break
-    if env.get("GIT_CONFIG_GLOBAL"):
-        files.append(cwd / env["GIT_CONFIG_GLOBAL"])
-    else:
-        home = Path(os.path.expanduser("~"))
-        xdg = _env("XDG_CONFIG_HOME") or str(home / ".config")
-        files += [home / ".gitconfig", Path(xdg) / "git" / "config"]
-    if system:
-        files.append(Path(system))
-    if os.name == "nt":
-        files.append(Path(_env("PROGRAMDATA") or "C:/ProgramData") / "Git" / "config")
-    return files
-
-
-def _git() -> str | None:
-    """The git the no-op runs: APM's trusted resolver (never the working tree)."""
-    from apm_cli.utils.git_env import get_git_executable
-
-    try:
-        return get_git_executable()
-    except FileNotFoundError:
-        return None
-
-
-def _git_identity() -> str:
-    """That git as path, size and mtime: an upgrade or a swapped binary misses."""
-    git = _git()
-    if git is None:
-        return "none"
-    exe = Path(git).resolve()
-    info = exe.stat()
-    return f"{exe}|{info.st_size}|{info.st_mtime_ns}"
-
-
-def _git_system() -> str:
-    """The system config path git reads, asked of git once per record (W3d R7)."""
-    env = dict(_env_prefixed("GIT_"))
-    if (env.get("GIT_CONFIG_NOSYSTEM") or "").strip().lower() in _GIT_TRUE:
-        return ""
-    if env.get("GIT_CONFIG_SYSTEM"):
-        return str(Path.cwd() / env["GIT_CONFIG_SYSTEM"])
-    import subprocess
-
-    git = _git()
-    if git is None:
-        return ""
-    try:
-        result = subprocess.run(
-            [git, "var", "GIT_CONFIG_SYSTEM"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ValueError("git cannot name its system config") from exc
-    path = result.stdout.strip()
-    if result.returncode != 0 or not path:
-        raise ValueError("git cannot name its system config")
-    return path
-
-
-def _git_env_include() -> bool:
-    """An include injected through the environment (``GIT_CONFIG_KEY_n``,
-    ``GIT_CONFIG_PARAMETERS``) is refused like an ``[include]`` section."""
-    for name, value in _env_prefixed("GIT_CONFIG_"):
-        if (name.startswith("GIT_CONFIG_KEY_") or name == "GIT_CONFIG_PARAMETERS") and (
-            "include" in value.lower()
-        ):
-            return True
-    return False
-
-
-_SECTION_RE = re.compile(rb"^\s*\[\s*([A-Za-z][A-Za-z0-9.-]*)", re.MULTILINE)
-_INCLUDE_PATH_RE = re.compile(rb"^\s*path\s*=\s*(.*?)\s*$", re.IGNORECASE)
-_GIT_INCLUDE_LIMIT = 64
-_INCLUDE_UNPARSED = re.compile(rb"[;#\\]|%\(")
-
-
-def _git_includes(config: Path, data: bytes) -> list[Path]:
-    """Files an ``[include]`` or ``[includeIf]`` section of *config* names.
-
-    Every condition counts as met, a superset of what git reads, so a change in
-    any file git might include misses.
-    """
-    found: list[Path] = []
-    section = b""
-    for line in data.splitlines():
-        header = _SECTION_RE.match(line)
-        if header is not None:
-            section = header.group(1).lower()
-            if section.startswith(b"include") and line[line.rindex(b"]") + 1 :].strip():
-                raise ValueError("git include: a key on the section line")
-            continue
-        if not section.startswith(b"include"):
-            continue
-        match = _INCLUDE_PATH_RE.match(line)
-        if match is None:
-            continue
-        raw = match.group(1)
-        if _INCLUDE_UNPARSED.search(raw) or (os.name == "nt" and raw.lstrip(b'"').startswith(b"~")):
-            # Comments, escapes, continuations, %(prefix)/ and Windows ~ are git syntax
-            # this reader does not parse: fail closed rather than under-key (W3d R3).
-            raise ValueError("git include: unparsed value syntax")
-        value = raw.strip(b'"').decode("utf-8", "surrogateescape")
-        target = Path(os.path.expanduser(value))
-        found.append(target if target.is_absolute() else config.parent / target)
-    return found
-
-
-def _git_config_bytes(digest: _Digest, root: Path, git_system: str) -> None:
-    """Every git config file a child git may read, followed through its includes."""
-    queue, seen = list(_git_files(root, git_system)), set()
-    while queue:
-        path = queue.pop(0)
-        if str(path) in seen:
-            continue
-        seen.add(str(path))
-        if len(seen) > _GIT_INCLUDE_LIMIT:
-            raise ValueError("git config includes")
-        # Keyed bytes only, never trusted content: a dotfile symlink is followed.
-        try:
-            data: bytes | None = path.read_bytes()
-        except (FileNotFoundError, NotADirectoryError):
-            data = None
-        digest.put(f"git:{path}", b"\x00absent" if data is None else b"\x01" + data)
-        if data is not None:
-            queue.extend(_git_includes(path, data))
-
-
 def _owner_surfaces(root: Path) -> list[str]:
     """MCP config files outside the project, named by their adapters (W3d R4)."""
     from apm_cli.factory import ClientFactory
@@ -664,11 +499,13 @@ def _inputs(
         digest.put(f"env:{name}", b"\x00unset" if value is None else b"\x01" + value.encode())
     for name, value in _env_prefixed("GIT_"):
         digest.put(f"git-env:{name}", value.encode("utf-8", "surrogateescape"))
-    if _git_env_include():
+    from apm_cli.install import verdict_git
+
+    if verdict_git._git_env_include():
         raise ValueError("git config include")
-    digest.put("git-binary", _git_identity().encode("utf-8", "surrogateescape"))
+    digest.put("git-binary", verdict_git._git_identity().encode("utf-8", "surrogateescape"))
     digest.put("git-system", git_system.encode("utf-8", "surrogateescape"))
-    _git_config_bytes(digest, root, git_system)
+    verdict_git._git_config_bytes(digest, root, git_system)
     digest.put("surfaces", "\x00".join(surfaces).encode("utf-8", "surrogateescape"))
     for surface in surfaces:
         if not surface.startswith("\x00"):
@@ -718,100 +555,18 @@ def _inputs(
                     digest.file(f"governed:{here}/{entry.name}", entry.path)
 
 
-# A record expires within a day, and when its earliest cached policy goes stale
-# for discovery (cached_at + capped_ttl(cache.ttl)), so a refetch is never
-# replayed past (W3d R2).
-_RECORD_MAX_AGE = 24 * 3600
 # deps/lockfile.FRAMED_CONTENT_HASH_VERSION (asserted equal in the cells): importing
 # the lockfile owner costs a hit more than the whole replay.
 _FRAMED_LOCKFILE_VERSION = "4"
 _CLOCK_SKEW = 300
 
 
-def _policy_fresh_until(meta_path: Path) -> float:
-    """When discovery stops trusting one cached policy (policy/discovery.py)."""
-    from apm_cli.policy._cache_verify import capped_ttl
-    from apm_cli.policy.parser import load_policy
-
-    meta = json.loads(_read_nofollow(meta_path) or b"{}")
-    document = meta_path.with_name(meta_path.name[: -len(".meta.json")] + ".yml")
-    try:
-        policy, _warnings = load_policy(document.read_text(encoding="utf-8"))
-        ttl = capped_ttl(int(policy.cache.ttl))
-    except Exception:  # an unreadable policy is never fresh: the record is born expired
-        return 0.0
-    governed = policy.unmanaged_files.directories or ()
-    if any(str(d).strip("/").split("/")[0] not in _GOVERNED_DIRS for d in governed):
-        # The commit gate scans these directories; the record keys only target roots.
-        raise ValueError("policy governs unmanaged files outside the target roots")
-    return float(meta.get("cached_at", 0)) + ttl
-
-
-def _policy_metas() -> list[tuple[str, float]]:
-    cache = _cache_root()
-    if cache is None:
-        return []
-    policy = cache / "policy_v1"
-    metas = []
-    for path in _walk_files(policy):
-        if path.name.endswith(".meta.json"):
-            meta = json.loads(_read_nofollow(path) or b"{}")
-            metas.append((path.relative_to(policy).as_posix(), float(meta.get("cached_at", 0))))
-    return metas
-
-
-def _template_ages(text: str) -> str | None:
-    """Each printed policy age becomes a token naming its cache entry; None if unsure."""
-    if not _AGE_RE.search(text):
-        return text
-    from apm_cli.core.command_logger import format_policy_age
-
-    now, metas = time.time(), _policy_metas()
-
-    def token(match: re.Match[str]) -> str:
-        found = {
-            rel
-            for rel, cached_at in metas
-            for lag in range(_AGE_LAG)
-            if format_policy_age(int(now - cached_at) - lag) == match.group(2)
-        }
-        if len(found) != 1:
-            raise ValueError("policy age")
-        return f"{match.group(1)}\x00age:{found.pop()}\x00{match.group(3)}"
-
-    try:
-        return _AGE_RE.sub(token, text)
-    except ValueError:
-        return None
-
-
-def _render_ages(text: str) -> str:
-    """The policy line's age now, from the live cache entry the record names."""
-    if "\x00age:" not in text:
-        return text
-    from apm_cli.core.command_logger import format_policy_age
-
-    cache = _cache_root()
-    if cache is None:
-        raise ValueError("no cache")
-
-    def age(match: re.Match[str]) -> str:
-        rel = match.group(1)
-        if ".." in rel.split("/"):
-            raise ValueError("policy age path")
-        meta = json.loads(_read_nofollow(cache / "policy_v1" / rel) or b"{}")
-        seconds = int(time.time() - float(meta["cached_at"]))
-        if seconds < 0:
-            raise ValueError("policy age")
-        return format_policy_age(seconds)
-
-    return _AGE_TOKEN_RE.sub(age, text)
-
-
 def _policy_absence_unproven(root: Path) -> bool:
     """Discovery re-checks an org without a cached policy on every run (it caches no
     absence), so a record cannot stand in for that check."""
-    if _policy_metas():
+    from apm_cli.install import verdict_policy
+
+    if verdict_policy._policy_metas():
         return False
     from apm_cli.policy._remote import (
         _extract_org_host_port_from_git_remote,
@@ -820,16 +575,6 @@ def _policy_absence_unproven(root: Path) -> bool:
 
     with reuse_remote_reads():  # this run already read the remote
         return _extract_org_host_port_from_git_remote(root) is not None
-
-
-def _expiry(issued: float) -> float:
-    expiry = issued + _RECORD_MAX_AGE
-    cache = _cache_root()
-    if cache is not None:
-        for path in _walk_files(cache / "policy_v1"):
-            if path.name.endswith(".meta.json"):
-                expiry = min(expiry, _policy_fresh_until(path))
-    return expiry
 
 
 def _names(value: Any) -> bool:
@@ -967,7 +712,9 @@ def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
         raise _Miss(f"inputs changed: {', '.join(changed[:6])}")
     if not _deployed_intact(root, lock):
         raise _Miss("deployed bytes")
-    return record, _render_ages(str(record.get("stdout", "")))
+    from apm_cli.install import verdict_policy
+
+    return record, verdict_policy._render_ages(str(record.get("stdout", "")))
 
 
 def replay(argv: list[str]) -> bool:
@@ -1015,105 +762,45 @@ def _print_hit(started: float, stdout_text: str, stderr_text: str) -> bool:
 
 
 class _Tee:
-    """Shown stream plus the no-op view: what this run would print had it been a no-op.
-
-    Owners whose output differs between a change and a no-op print their change-only
-    lines inside :func:`change_only` (shown, not recorded) and the no-op form inside
-    :func:`noop_only` (recorded, not shown); everything else is both.
-    """
+    """The shown stream, plus what was shown: a verified no-op's exact output."""
 
     def __init__(self, stream: Any) -> None:
         self.stream = stream
         self.parts: list[str] = []
-        self.mode = "both"
 
     def write(self, text: str) -> int:
-        if self.mode != "shown":
-            self.parts.append(text)
-        if self.mode == "recorded":
-            return len(text)
+        self.parts.append(text)
         return self.stream.write(text)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.stream, name)
 
 
-class _Capture(_Tee):
-    """Records only (the write-time render); isatty and encoding stay the real stream's."""
-
-    def __init__(self, stream: Any) -> None:
-        super().__init__(stream)
-        self.mode = "recorded"
-
-
 _ACTIVE: list[_Tee] = []
-_SEGMENTS: dict[str, tuple[int, int]] = {}
 _UNKNOWN: list[str] = []
-_FULL_SUCCESS: list[bool] = []
-
-
-def recording_active() -> bool:
-    return bool(_ACTIVE)
-
-
-@contextmanager
-def _mode(mode: str) -> Iterator[None]:
-    tee = _ACTIVE[-1] if _ACTIVE else None
-    if tee is None:
-        yield
-        return
-    previous, tee.mode = tee.mode, mode
-    try:
-        yield
-    finally:
-        tee.mode = previous
-
-
-def change_only() -> Any:
-    """Lines printed only because something changed: shown, never in the no-op view."""
-    return _mode("shown")
-
-
-def noop_only() -> Any:
-    """The no-op form of a changed line: in the no-op view, never shown."""
-    return _mode("recorded")
-
-
-@contextmanager
-def segment(name: str) -> Iterator[None]:
-    """Mark the no-op view of one owner phase (the services block)."""
-    tee = _ACTIVE[-1] if _ACTIVE else None
-    start = len(tee.parts) if tee is not None else 0
-    try:
-        yield
-    finally:
-        if tee is not None:
-            _SEGMENTS[name] = (start, len(tee.parts))
 
 
 def unknown(reason: str) -> None:
-    """An owner printed something whose no-op form it does not know: record nothing."""
+    """An owner printed something a no-op replay must not repeat: record nothing."""
     if _ACTIVE:
         _UNKNOWN.append(reason)
 
 
-def note_full_success() -> None:
-    """A full install finished (under its lifecycle lock): its no-op form may be recorded."""
-    _FULL_SUCCESS.append(True)
-    _note_proven_lock()
-
-
 @contextmanager
 def recording(argv: list[str]) -> Iterator[None]:
-    """Run the CLI; after a verified no-op or install with exit 0, record the no-op form."""
+    """Run the CLI; after a verified engine no-op with exit 0, record its output.
+
+    Only a verified no-op records (VP ruling A): a full install never pays for a
+    record, and the next unchanged run, a verified no-op, writes it.
+    """
     if not _served(argv) or not _hits_allowed():
         yield
         return
-    for state in (_VERIFIED_NOOP, _UNKNOWN, _FULL_SUCCESS, _PROVEN_LOCK):
+    for state in (_VERIFIED_NOOP, _UNKNOWN, _PROVEN_LOCK):
         state.clear()
-    _SEGMENTS.clear()
     _ENV_READS.clear()
     entry = (_env_snapshot(), _presentation())
+    _ENTRY_FILES[:] = [_entry_bytes("apm.yml"), _entry_bytes("apm.lock.yaml")]
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
     _ACTIVE.append(out)
@@ -1128,18 +815,21 @@ def recording(argv: list[str]) -> Iterator[None]:
     finally:
         _ACTIVE.remove(out)
         sys.stdout, sys.stderr = out.stream, err.stream
-        if code == 0 and not _UNKNOWN:
-            _record_locked(argv, entry, out, err)
-        elif _UNKNOWN:
+        if _UNKNOWN:
             _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
+        elif code == 0 and _VERIFIED_NOOP:
+            _record_locked(argv, entry, out, err)
+        else:
+            _trace("no record (not a verified no-op)")
 
 
 def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
-    """Record under the lifecycle lock, only if the lock is still what the run proved.
+    """Record under the lifecycle lock, only over the state the run proved.
 
-    The CLI released its lock when it returned: a concurrent install may have
-    changed the state since, so the record is written only while no one else
-    can, and only over the lock bytes the proving install held its lock over.
+    The CLI released its lock when it returned: the record is written only while
+    no one else can write, and only when apm.yml and the lock are byte-identical
+    to the run's entry and to what the engine held its lock over when it proved
+    the no-op (W3d R4).
     """
     try:
         from apm_cli.install.locking import acquire_lifecycle_lock
@@ -1150,8 +840,15 @@ def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
         return
     try:
         current = _read_nofollow(Path.cwd() / "apm.lock.yaml")
-        if not _PROVEN_LOCK or _PROVEN_LOCK[-1] is None or current != _PROVEN_LOCK[-1]:
-            _trace("no record (the lock changed after the run proved it)")
+        manifest_at_entry, lock_at_entry = _ENTRY_FILES or (None, None)
+        if (
+            current is None
+            or not _PROVEN_LOCK
+            or _PROVEN_LOCK[-1] != current
+            or lock_at_entry != current
+            or _entry_bytes("apm.yml") != manifest_at_entry
+        ):
+            _trace("no record (apm.yml or the lock changed while the run proved its verdict)")
             return
         _record_after(argv, entry, out, err)
     except OSError as exc:
@@ -1161,17 +858,13 @@ def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
 
 
 def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
-    """After a successful run: record its no-op form when the run proved one."""
+    """Record a verified no-op's output, when every input it rests on is provable."""
     from apm_cli.core.lifecycle_scripts import discover_scripts
 
     if discover_scripts(str(Path.cwd())):
         # Scripts fire on every install (and may change any input after it was read);
         # a replay fires none, so a run with scripts is never recorded (W3d R1).
         _trace("no record (lifecycle scripts)")
-        return
-    noop = bool(_VERIFIED_NOOP) and not _FULL_SUCCESS
-    if not noop and not (_FULL_SUCCESS and "services" in _SEGMENTS):
-        _trace("no record (no verified no-op or full success)")
         return
     lock = _committed_lock()
     if lock is None:
@@ -1182,17 +875,7 @@ def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
         if key != "."
         for rel in getattr(dep, "deployed_file_hashes", None) or {}
     )
-    if noop:
-        _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts), deployed)
-        return
-    start, end = _SEGMENTS["services"]
-    try:
-        text = _noop_form(argv, "".join(out.parts[start:end]), lock)
-    except Exception as exc:  # the install succeeded; only the record is lost
-        _trace(f"no record (no-op form: {type(exc).__name__})")
-        return
-    if text is not None:
-        _write_at_entry(entry, argv, text, "", deployed)
+    _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts), deployed)
 
 
 def _committed_lock() -> Any:
@@ -1233,47 +916,6 @@ def _write_at_entry(
         _ENTRY_ENV, _ENTRY_PRESENTATION = None, None
 
 
-def _noop_form(argv: list[str], services_text: str, lock: Any) -> str | None:
-    """Today's no-op text, rendered by the engine's own renderer with the services block's
-    no-op view (fast_output.render), in this process after the install committed."""
-    import time as _time
-
-    from apm_cli.core.scope import manifest_file
-    from apm_cli.install import fast_output
-    from apm_cli.install.service import InstallService
-    from apm_cli.models.apm_package import APMPackage
-
-    root = Path.cwd()
-    if lock is None:
-        return None
-    manifest = APMPackage.from_apm_yml(manifest_file(root))
-    from types import SimpleNamespace
-
-    disposition = InstallService.frozen_disposition(SimpleNamespace(frozen="--frozen" in argv))
-    capture = _Capture(sys.stdout)
-    real = sys.stdout
-    sys.stdout = capture  # type: ignore[assignment]
-    _ACTIVE.append(capture)
-    from apm_cli.policy._remote import reuse_remote_reads
-
-    try:
-        with reuse_remote_reads():
-            fast_output.render(
-                root,
-                lock,
-                manifest,
-                started=_time.perf_counter(),
-                bodies=None,
-                installed=0,
-                frozen_disposition=disposition,
-                services_text=services_text,
-            )
-    finally:
-        _ACTIVE.remove(capture)
-        sys.stdout = real
-    return "".join(capture.parts)
-
-
 def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozenset[str]) -> None:
     root = Path.cwd()
     try:
@@ -1285,7 +927,9 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
             _trace("no record (no lockfile)")
             return
         stdout_text, stamps = _ELAPSED_RE.subn(rf"\g<1>{_ELAPSED}\g<2>", stdout_text)
-        templated = _template_ages(stdout_text)
+        from apm_cli.install import verdict_policy
+
+        templated = verdict_policy._template_ages(stdout_text)
         if templated is None:
             _trace("no record (a policy age without one cache entry)")
             return
@@ -1306,7 +950,9 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
             if isinstance(name, str) and name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT
         )
         surfaces = _owner_surfaces(root)
-        git_system = _git_system()
+        from apm_cli.install import verdict_git, verdict_policy
+
+        git_system = verdict_git._git_system()
         digest = _Digest(key)
         _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, deployed)
         stderr_kept = "".join(
@@ -1321,7 +967,7 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
             "stderr": stderr_kept,
             "exit": 0,
             "issued_at": issued,
-            "expires_at": _expiry(issued),
+            "expires_at": verdict_policy._expiry(issued),
             "run_env": run_env,
             "surfaces": surfaces,
             "git_system": git_system,

@@ -138,7 +138,7 @@ _REMOTE_MODULE = "src/apm_cli/policy/_remote.py"
 
 
 # The process-scoped remote reuse is a closed seam: only the verified-state
-# record's write-time render enters it, and the owner drops answers read before
+# record's writer enters it, and the owner drops answers read before
 # user code ran (#4977).
 _REUSE_CALL = re.compile(r"\breuse_remote_reads\(")
 _REUSE_CALLER = "src/apm_cli/install/verdict_record.py"
@@ -389,8 +389,8 @@ def check_dependency_winner_selection(provider: FactsProvider) -> tuple[Violatio
 def check_remote_read_reuse(provider: FactsProvider) -> tuple[Violation, ...]:
     """The process-scoped remote-read reuse is a closed seam (#4977).
 
-    Only the verified-state record's write-time render (install/verdict_record.py)
-    may enter ``reuse_remote_reads``, and the owner must drop an answer read
+    Only the verified-state record's writer (install/verdict_record.py) may
+    enter ``reuse_remote_reads``, and the owner must drop an answer read
     before user code ran (``core/invocation_memo.forget_epoch``).
     """
     rule_id = RULE_REMOTE_READ_REUSE
@@ -415,7 +415,7 @@ def check_remote_read_reuse(provider: FactsProvider) -> tuple[Violation, ...]:
                 provider, "src/apm_cli/", excluded=(_REMOTE_MODULE, _REUSE_CALLER)
             ),
             pattern=_REUSE_CALL,
-            message="Only install/verdict_record.py's no-op render may reuse a remote read",
+            message="Only install/verdict_record.py may reuse a remote read",
             configured=False,
             respect_exempt=False,
         )

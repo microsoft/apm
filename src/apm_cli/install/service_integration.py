@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,27 +44,6 @@ class ServiceIntegrationResult:
     target_decision: EffectiveTargetDecision | None
 
 
-def _services_segment(
-    reconcile: Callable[..., ServiceIntegrationResult],
-) -> Callable[..., ServiceIntegrationResult]:
-    """The services block is the services segment of the no-op view (#4977)."""
-
-    @functools.wraps(reconcile)
-    def run(ctx: ServiceCommandContext, **kwargs: Any) -> ServiceIntegrationResult:
-        from apm_cli.install import verdict_record
-
-        package, existing = kwargs.get("apm_package"), kwargs.get("existing_lock")
-        if (package is not None and package.get_lsp_dependencies()) or (
-            existing is not None and existing.lsp_servers
-        ):
-            verdict_record.unknown("lsp")  # its no-op form is not known: record nothing
-        with verdict_record.segment("services"):
-            return reconcile(ctx, **kwargs)
-
-    return run
-
-
-@_services_segment
 def run_service_integrations(  # noqa: PLR0913
     ctx: ServiceCommandContext,
     *,

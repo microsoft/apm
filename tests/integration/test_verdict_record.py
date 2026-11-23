@@ -168,9 +168,7 @@ def test_an_unrelated_environment_variable_still_hits(
     assert "up to date in " in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(
-    "name", ["CI", "GITHUB_ACTIONS", "PROXY_REGISTRY_URL", "APM_POLICY_DISABLE"]
-)
+@pytest.mark.parametrize("name", ["CI", "GITHUB_ACTIONS", "PROXY_REGISTRY_URL"])
 def test_ci_proxy_or_no_policy_never_hits_or_records(
     project: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
@@ -245,7 +243,7 @@ def test_every_environment_variable_the_cli_reads_is_classified() -> None:
     # Named only by their owners (architecture guards), and keyed by a run that reads
     # them (_env_log). get_apm_home: the key and records live there, so another home
     # holds no valid record. registry_proxy: a configured proxy never hits.
-    classified |= {"APM_HOME", "PROXY_REGISTRY_ALLOW_HTTP"}
+    classified |= {"APM_HOME", "APM_POLICY_DISABLE", "PROXY_REGISTRY_ALLOW_HTTP"}
     assert sorted(read - classified) == []
 
 
@@ -309,34 +307,16 @@ def test_a_home_inside_the_project_never_records_or_hits(
 
 
 def test_an_owner_without_a_known_no_op_form_records_nothing(project: Path, capsys) -> None:
-    """Registry MCP, MCP updates, LSP...: a safe miss, never a guessed no-op text."""
+    """Registry MCP, MCP updates, configured servers: a safe miss, never a guessed text."""
     with verdict_record.recording(["install"]):
         sys.stdout.write(_OUTPUT)
-        verdict_record.note_full_success()
-        verdict_record.unknown("lsp")
+        verdict_record.note_verified_noop()
+        verdict_record.unknown("registry mcp")
     capsys.readouterr()
 
     assert verdict_record.replay(["install"]) is False
     assert capsys.readouterr().out == ""
     assert not (_home(project) / "verdicts").exists()
-
-
-def test_change_only_lines_are_shown_and_never_in_the_no_op_view(project: Path, capsys) -> None:
-    """An owner's change-only line prints; its no-op form records without printing."""
-    with verdict_record.recording(["install"]):
-        sys.stdout.write("[>] Installing dependencies from apm.yml...\n")
-        with verdict_record.change_only():
-            sys.stdout.write("[*] Configured 1 server\n")
-        with verdict_record.noop_only():
-            sys.stdout.write("[*] All servers up to date\n")
-        sys.stdout.write("[i] No changes -- install state already up to date in 0.4s.\n")
-        verdict_record.note_verified_noop()
-    shown = capsys.readouterr().out
-
-    assert "Configured 1 server" in shown and "All servers up to date" not in shown
-    assert verdict_record.replay(["install"]) is True
-    replayed = capsys.readouterr().out
-    assert "All servers up to date" in replayed and "Configured 1 server" not in replayed
 
 
 def test_every_target_root_and_mcp_config_path_is_a_verdict_input(
@@ -688,10 +668,37 @@ def test_an_org_without_a_cached_policy_is_never_recorded(project: Path) -> None
 
 def test_configuring_a_client_without_native_comparison_records_nothing(project: Path) -> None:
     """IntelliJ lists the server as already configured next time: an unknown no-op form."""
-    from apm_cli.integration.mcp_install_summary import _mark_unknown_noop_forms
+    from apm_cli.integration.mcp_install_summary import mark_unknown_noop_forms
 
     with verdict_record.recording(["install"]):
         sys.stdout.write(_OUTPUT)
-        _mark_unknown_noop_forms((), (), configuring=["srv"], uncompared=["intellij"])
+        mark_unknown_noop_forms((), (), configuring=["srv"], uncompared=["intellij"])
         verdict_record.note_verified_noop()
     assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_manifest_edited_while_the_run_proved_it_is_never_recorded(project: Path) -> None:
+    """W3d R4: an editor saving apm.yml mid-install: the next run installs, it never hits."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+        (project / "apm.yml").write_text(
+            "name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - o/q\n", encoding="utf-8"
+        )
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_disabling_policy_after_the_record_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Every install reads the policy switch through its owner, so the run keys it."""
+    from apm_cli.policy.discovery import policy_disabled_by_env
+
+    with verdict_record.recording(["install"]):
+        assert policy_disabled_by_env() is False
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+    monkeypatch.setenv("APM_POLICY_DISABLE", "1")
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""

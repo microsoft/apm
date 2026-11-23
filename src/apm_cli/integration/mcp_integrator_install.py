@@ -31,10 +31,7 @@ from apm_cli.install.errors import (
     MCPNativeConflictError,
     RequiredIntegrationError,
 )
-from apm_cli.integration.mcp_install_summary import (
-    _mark_unknown_noop_forms,
-    _print_mcp_summary,
-)
+from apm_cli.integration.mcp_install_summary import mark_unknown_noop_forms
 from apm_cli.integration.mcp_registry_hints import (
     CHOOSING_MCP_REGISTRY_DOCS_URL,  # noqa: F401 -- re-exported for tests
     _emit_registry_choice_hint,
@@ -1498,13 +1495,13 @@ def _install_self_defined_deps(
     already_configured_self_defined = [
         name for name in already_configured_candidates_sd if name not in servers_to_update
     ]
-
-    _mark_unknown_noop_forms(
+    mark_unknown_noop_forms(
         servers_to_update,
         already_configured_self_defined,
         configuring=self_defined_to_install,
         uncompared=[rt for rt in target_runtimes if rt not in protected_clients],
     )
+
     if already_configured_self_defined:
         if console:
             for name in already_configured_self_defined:
@@ -1689,14 +1686,13 @@ def _install_self_defined_deps(
         if successful_runtimes:
             if console:
                 label = "updated" if is_update else "configured"
-                with verdict_record.change_only():  # a no-op writes nothing to report
-                    console.print(
-                        f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
-                        f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
-                        f" [dim]({label})[/dim]"
-                    )
-                    if not user_scope:
-                        _print_user_wide_configs(console, successful_runtimes)
+                console.print(
+                    f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
+                    f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
+                    f" [dim]({label})[/dim]"
+                )
+                if not user_scope:
+                    _print_user_wide_configs(console, successful_runtimes)
             configured_count += 1
             if is_update:
                 successful_updates.add(dep.name)
@@ -1723,6 +1719,31 @@ def _install_self_defined_deps(
         raise MCPNativeConflictError(message, wrote_connections=bool(written_connections))
     _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
+
+
+def _print_mcp_summary(
+    console,
+    configured_count: int,
+    successful_updates: builtins.set,
+) -> None:
+    """Print the MCP install summary footer panel."""
+    if not console:
+        return
+    if configured_count > 0:
+        verdict_record.unknown("mcp configured servers")  # a write is never a no-op
+        # Use successful_updates (not servers_to_update) for accurate counts.
+        # servers_to_update = all drift-detected servers (some may have failed).
+        # successful_updates = servers that were re-applied AND succeeded.
+        update_count = builtins.len(successful_updates)
+        new_count = configured_count - update_count
+        parts = []
+        if new_count > 0:
+            parts.append(f"configured {new_count} server{'s' if new_count != 1 else ''}")
+        if update_count > 0:
+            parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
+        console.print(f"[green]{STATUS_SYMBOLS['success']} {', '.join(parts).capitalize()}[/green]")
+    else:
+        console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
 def run_mcp_install(  # noqa: PLR0913

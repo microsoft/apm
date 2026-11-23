@@ -70,9 +70,10 @@ _REUSING: list[bool] = []
 def reuse_remote_reads() -> Iterator[None]:
     """Answer from this process's earlier read of the same root.
 
-    Only the verified-state record's render of the no-op it just proved enters
-    this (install/verdict_record.py): the install never changes git remotes,
-    and the record keys the git config bytes, so its git spawns add nothing.
+    Only the verified-state record's writer enters this
+    (install/verdict_record.py), right after the no-op it proved: the install
+    never changes git remotes, and the record keys the git config bytes, so its
+    git spawns add nothing.
     An answer read before user code ran (core/invocation_memo.forget_epoch)
     is never reused.
     """

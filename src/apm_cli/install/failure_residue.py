@@ -116,16 +116,6 @@ def record_install_outcome(
     from apm_cli.models.results import InstallDisposition
 
     ctx.install_finished = result is None or result.disposition is not InstallDisposition.FAILED
-    if (
-        ctx.install_finished
-        and not ctx.dry_run
-        and not ctx.lockfile_only
-        and not getattr(ctx, "no_policy", False)
-        and getattr(ctx, "service_failure", None) is None
-    ):
-        from apm_cli.install import verdict_record
-
-        verdict_record.note_full_success()  # its no-op form may be recorded (#4977)
     return result
 
 
