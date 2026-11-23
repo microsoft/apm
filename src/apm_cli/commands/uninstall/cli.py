@@ -124,6 +124,7 @@ def _split_still_needed_packages(
     *,
     user_scope=False,
     dry_run=False,
+    quiet=False,
 ) -> tuple[list, list, _StillNeededRepair]:
     """Split removals into full removals and declarations a survivor still needs.
 
@@ -133,9 +134,10 @@ def _split_still_needed_packages(
     (#4749). Returns ``(removed, still_needed, repair)``.
     """
     if lockfile and packages_to_remove and not modules_dir.exists():
-        _refuse_unverifiable_local_survivors(
-            lockfile, packages_to_remove, apm_yml_path, logger, dry_run=dry_run
+        kept = _refuse_unverifiable_local_survivors(
+            lockfile, packages_to_remove, apm_yml_path, logger, dry_run=dry_run, quiet=quiet
         )
+        packages_to_remove = [package for package in packages_to_remove if package not in kept]
     if not lockfile or not packages_to_remove or not modules_dir.exists():
         return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
     decision = _uninstall_orphan_decision(
@@ -173,8 +175,8 @@ def _split_still_needed_packages(
 
 
 def _refuse_unverifiable_local_survivors(
-    lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False
-) -> None:
+    lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False, quiet: bool = False
+) -> list:
     """Refuse a local removal a surviving local package still reaches while apm_modules/ is gone.
 
     Without the installed graph the still-needed split cannot run, and dropping
@@ -195,19 +197,21 @@ def _refuse_unverifiable_local_survivors(
                 directory = raw.resolve() if raw.is_absolute() else (project_root / raw).resolve()
                 local[directory] = package
     if not local:
-        return
+        return []
     direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
     from ...deps.reachability import local_sources_reach
 
     if not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local)):
-        return
+        return []
     if dry_run:
-        # A preview writes nothing; the real uninstall refuses.
-        logger.warning(
-            f"Dry run: {_dependency_public_label(next(iter(local.values())))} cannot be "
-            "confirmed unused while apm_modules/ is missing; the uninstall itself would refuse."
-        )
-        return
+        # A preview writes nothing: it shows the package kept, as the real run would.
+        for package in () if quiet else local.values():
+            logger.warning(
+                f"Dry run: Would keep {_dependency_public_label(package)}: apm_modules/ is "
+                "missing, so APM cannot confirm that no other local package still needs it; "
+                "the uninstall itself refuses."
+            )
+        return list(local.values())
     logger.error(
         f"{_dependency_public_label(next(iter(local.values())))} was not removed: apm_modules/ "
         "is missing, so APM cannot confirm whether another local package still needs it; "
@@ -410,7 +414,14 @@ def _refuse_still_needed_local(still_needed: list, parents, lockfile, logger) ->
 
 
 def _split_removals(
-    packages_to_remove: list, lockfile, paths: tuple, logger, *, user_scope: bool, dry_run=False
+    packages_to_remove: list,
+    lockfile,
+    paths: tuple,
+    logger,
+    *,
+    user_scope: bool,
+    dry_run=False,
+    quiet=False,
 ) -> tuple[list, list, list, _StillNeededRepair]:
     """Split the selection into full, selected-profile and declaration-only removals."""
     removed, retained = _split_selected_profile_packages(
@@ -418,7 +429,14 @@ def _split_removals(
     )
     modules_dir, apm_yml_path = paths
     removed, still_needed, repairs = _split_still_needed_packages(
-        lockfile, removed, modules_dir, apm_yml_path, logger, user_scope=user_scope, dry_run=dry_run
+        lockfile,
+        removed,
+        modules_dir,
+        apm_yml_path,
+        logger,
+        user_scope=user_scope,
+        dry_run=dry_run,
+        quiet=quiet,
     )
     return removed, retained, still_needed, repairs
 
@@ -1436,6 +1454,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger,
             user_scope=scope is InstallScope.USER,
             dry_run=dry_run,
+            quiet=True,
         )
 
         # Fire scripts only after every requested identifier has selected one

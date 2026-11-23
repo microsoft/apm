@@ -45,6 +45,10 @@
     "tests/unit/test_uninstall_local_reanchor_rollback.py::test_a_survivor_refresh_during_a_reanchor_rolls_back",
     "tests/unit/test_uninstall_local_reanchor_rollback.py::test_a_failed_rollback_names_what_it_kept_and_exits_nonzero",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_refuses_when_a_local_source_changed_since_install",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_missing_survivor_source_refuses"
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_missing_survivor_source_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_dry_run_previews_the_offline_refusal_as_kept",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_symlinked_survivor_directory_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_survivor_outside_the_project_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_plugin_format_survivor_refuses"
   ]
 }

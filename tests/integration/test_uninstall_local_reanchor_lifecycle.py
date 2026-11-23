@@ -737,3 +737,79 @@ def test_without_apm_modules_a_missing_survivor_source_refuses(
     shutil.rmtree(world.project / "vendor" / "d")
 
     _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+def _without_modules(world: ReplayWorld) -> None:
+    shutil.rmtree(world.project / "apm_modules")
+
+
+def test_a_dry_run_previews_the_offline_refusal_as_kept(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: same reaching shape -- the preview keeps the package; the real run refuses."""
+    world = _local_world(tmp_path, apm_binary_path)
+    _without_modules(world)
+    before, receipts = tree_digest(world.project), _receipts(world)
+
+    preview = world.apm("uninstall", "./vendor/e", "--dry-run")
+
+    output = " ".join((preview.stdout + preview.stderr).split())
+    assert "Dry run: Would keep ./vendor/e: apm_modules/ is missing" in output, output
+    assert output.count("Would keep ./vendor/e") == 1, output
+    assert "Would remove ./vendor/e" not in output, output
+    assert "./vendor/e from apm.yml" not in output, output
+    assert tree_digest(world.project) == before
+    assert _receipts(world) == receipts
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_without_apm_modules_a_symlinked_survivor_directory_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a survivor reached through a symlinked directory still reaches e by identity."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    outside = world.isolated.work_root / "outside-d"
+    _skill_package(outside, "d", (str(vendor / "e"),))
+    vendor.mkdir(exist_ok=True)
+    os.symlink(outside, vendor / "d", target_is_directory=True)
+    _manifest(world, ["./vendor/e"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _without_modules(world)
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+def test_without_apm_modules_a_survivor_outside_the_project_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a ``..`` survivor that declares ../proj/vendor/e reaches it."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    _skill_package(world.project / "vendor" / "e", "e")
+    shared = world.isolated.work_root / "shared"
+    _skill_package(shared / "d", "d", (f"../../{world.project.name}/vendor/e",))
+    _manifest(world, ["./vendor/e"], ["../shared/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _without_modules(world)
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+def test_without_apm_modules_a_plugin_format_survivor_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a Claude plugin survivor is read as install normalizes it, never as a leaf."""
+    world = _local_world(tmp_path, apm_binary_path)
+    _without_modules(world)
+    survivor = world.project / "vendor" / "d"
+    (survivor / "apm.yml").unlink()
+    write(
+        survivor / ".claude-plugin" / "plugin.json",
+        json.dumps({"name": "d", "version": "1.0.0", "dependencies": ["../e"]}),
+    )
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
