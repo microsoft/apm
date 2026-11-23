@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 _LAST_WINS = "last-installed-wins"
@@ -63,12 +63,17 @@ def carried_writers(
         raise refuse(unproven, "was not reproduced by the offline render")
     writers: dict[str, str] = {}
     for path, rendered in sorted(providers.items()):
-        claims = records.get(path, ())
-        if not claims or not reranked.intersection(rendered):
+        if not reranked.intersection(rendered):
             continue
         if any(key not in rank for key in rendered):
             raise refuse(path, "has a writer APM cannot order")
         writer = max(rendered, key=rank.__getitem__)
+        claims = records.get(path, ())
+        if not claims:
+            # A member only a directory claim covers: its bytes must not change.
+            if _changes_unclaimed(path, rendered[writer], skill_roots, project_root):
+                raise refuse(path, "has no claim that proves its writer")
+            continue
         if len(claims) == 1 and writer == claims[0].active_owner:
             continue
         if not _carriable(claims, path, skill_roots) or rendered[writer] != _digest(
@@ -95,6 +100,17 @@ def _carriable(claims: list, path: str, skill_roots: dict[str, set[str]]) -> boo
     )
 
 
+def _changes_unclaimed(path, rendered: str, skill_roots, project_root: Path) -> bool:
+    """Whether a fresh install would change an unclaimed skill member's bytes.
+
+    Skill members merge into the directory, so the member's last provider
+    writes it: its *rendered* bytes must equal the deployed bytes.
+    """
+    return any(path.startswith(root) for root in skill_roots) and rendered != _digest(
+        project_root / path
+    )
+
+
 def _unrendered_skill_claim(records, providers, post, skill_roots) -> str | None:
     """A recorded skill claim the render did not attribute to its writer, if any."""
     for path, claims in sorted(records.items()):
@@ -109,15 +125,19 @@ def _unrendered_skill_claim(records, providers, post, skill_roots) -> str | None
 
 def _unproven_directory(writers, providers, records, project_root: Path) -> str | None:
     """A carried directory whose files are not all carried to, or owned by, its writer."""
-    for path, writer in sorted(writers.items()):
-        if providers[path][writer] != _DIRECTORY:
-            continue
-        prefix = path.rstrip("/") + "/"
-        rendered = {
-            child
-            for child, by in providers.items()
-            if child.startswith(prefix) and by.get(writer) not in (None, _DIRECTORY)
-        }
+    members = {
+        path: set() for path, writer in writers.items() if providers[path][writer] == _DIRECTORY
+    }
+    if not members:
+        return None
+    # One pass over the render: each file joins every carried ancestor directory.
+    for child, by in providers.items():
+        for parent in PurePosixPath(child).parents:
+            directory = parent.as_posix()
+            if directory in members and by.get(writers[directory]) not in (None, _DIRECTORY):
+                members[directory].add(child)
+    for path, rendered in sorted(members.items()):
+        writer = writers[path]
         live = {
             child.relative_to(project_root).as_posix()
             for child in (project_root / path).rglob("*")

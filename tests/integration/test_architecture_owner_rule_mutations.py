@@ -3122,6 +3122,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A re-anchored owner's receipts lose their hash history (#4889).",
     ),
     MutationCase(
+        guard_id="install-deployment-reanchor-writer-prediction",
+        rule_id="install-deployment-reanchor-writer-prediction",
+        path="src/apm_cli/commands/uninstall/local_reanchor_writers.py",
+        old="    ordered, _winners = _select_dependency_winners(nodes)\n",
+        new=(
+            "    ordered = sorted(nodes, key=lambda node: "
+            "(node.depth, node.dependency_ref.repo_url))\n"
+        ),
+        intent="A re-anchor orders shared-path writers by replay order, not install's (#5048).",
+    ),
+    MutationCase(
         guard_id="install-deployment-receipt-collection",
         rule_id="install-deployment-receipt-collection",
         path="src/apm_cli/install/pipeline.py",
