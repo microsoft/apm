@@ -1024,3 +1024,156 @@ def test_consent_never_hides_a_failed_deletion_of_a_hook_it_kept_earlier(tmp_pat
     assert path.exists()
     assert stats["errors"] >= 1
     assert _HOOK in stats.get("failed_paths", [])
+
+
+def _kept_then_relinked(tmp_path: Path) -> tuple[Path, Path, DeploymentEvidence]:
+    """Keep a hook at preflight, then swap its parent for a symlink before cleanup."""
+    root = tmp_path / "project"
+    path = _hook(root)
+    receipts = {path.resolve().as_posix(): compute_file_hash(path)}
+    evidence = DeploymentEvidence(deploy_root=root, receipts=receipts, render=_no_render, kept=())
+    evidence.consent_to_lockfile_hashes()
+    path.write_text("edited\n", encoding="utf-8")
+    assert [claim for claim, _ in evidence.refusals([_HOOK])] == [_HOOK]
+    outside = tmp_path / "outside"
+    path.parent.rename(outside)
+    try:
+        os.symlink(outside, path.parent, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    return root, outside / path.name, evidence
+
+
+def _remove_one(root: Path, claim: str, evidence: DeploymentEvidence, **kwargs):
+    return remove_stale_deployed_files(
+        [claim],
+        root,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes={},
+        receipt_retirements=[],
+        **kwargs,
+    )
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reports_a_safety_rejection_after_preflight_as_a_failure(tmp_path: Path) -> None:
+    root, outside, evidence = _kept_then_relinked(tmp_path)
+
+    stats = _sync_hooks(root, evidence)
+
+    assert outside.read_text(encoding="utf-8") == "edited\n"
+    assert stats["errors"] >= 1
+    assert _HOOK in stats.get("failed_paths", [])
+
+
+@pytest.mark.req("req-lk-024")
+def test_selected_cleanup_never_releases_a_path_a_safety_gate_rejected(tmp_path: Path) -> None:
+    """The rejection stops the uninstall; the lock still records the file (#4815)."""
+    from apm_cli.commands.uninstall.cli import _abort_if_retained_target_cleanup_paths
+    from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.selected_cleanup import SelectedCleanupOutcome
+
+    root, outside, evidence = _kept_then_relinked(tmp_path)
+    dependency = LockedDependency(repo_url="owner/pkg", deployed_files=[_HOOK])
+    lock = LockFile()
+    lock.add_dependency(dependency)
+    cleanup = _remove_one(root, _HOOK, evidence)
+    outcome = SelectedCleanupOutcome()
+    SelectedCleanupOutcome.observer(outcome, InstallLogger(), "owner/pkg")(cleanup)
+    outcome.record("owner/pkg", dependency, cleanup.retained, {}, survivors=set(), preserved=set())
+
+    assert _HOOK in outcome.rejected_paths
+    with pytest.raises(SystemExit) as stopped:
+        _abort_if_retained_target_cleanup_paths(
+            outcome, lock, root / "apm.lock.yaml", InstallLogger(), evidence=evidence
+        )
+
+    assert stopped.value.code == 1
+    assert outside.read_text(encoding="utf-8") == "edited\n"
+    written = LockFile.read(root / "apm.lock.yaml")
+    assert written is not None
+    assert _HOOK in written.dependencies["owner/pkg"].deployed_files
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_file_replaced_by_a_link_after_preflight(tmp_path: Path) -> None:
+    """A file authorized at preflight, then swapped for a link, is kept as a link (#4815)."""
+    path = _deployed(tmp_path)
+    receipts = {path.resolve().as_posix(): compute_file_hash(path)}
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path, receipts=receipts, render=_no_render, kept=()
+    )
+    evidence.consent_to_lockfile_hashes()
+    assert evidence.refusals([_PATH]) == []
+    target = tmp_path / "elsewhere.md"
+    target.write_text("outside\n", encoding="utf-8")
+    path.unlink()
+    try:
+        os.symlink(target, path)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    result = _remove_one(tmp_path, _PATH, evidence, allow_final_symlink=True)
+
+    assert path.is_symlink() and result.deleted == []
+    assert target.read_text(encoding="utf-8") == "outside\n"
+    assert _PATH in evidence.kept_under_consent()
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_names_every_kept_member_of_a_skill_directory(tmp_path: Path) -> None:
+    skill = ".agents/skills/alpha"
+    members = {f"{skill}/m{index}.md": f"member {index}\n" for index in range(7)}
+    hashes, evidence = _skill_world(tmp_path, members)
+    for member in members:
+        (tmp_path / member).write_text("my edit\n", encoding="utf-8")
+    diagnostics = DiagnosticCollector()
+
+    remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    text = " ".join(d.message for d in diagnostics._diagnostics)
+    assert all(member in text for member in members), text
+    assert "more)" not in text, text
+
+
+@pytest.mark.req("req-lk-024")
+def test_selected_cleanup_keeps_an_unchanged_consent_kept_link_without_failing(
+    tmp_path: Path,
+) -> None:
+    """A final link kept at preflight is retention, not a safety failure (#4815)."""
+    from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.install.selected_cleanup import SelectedCleanupOutcome
+
+    root = tmp_path / "project"
+    target = tmp_path / "elsewhere.md"
+    target.write_text("outside\n", encoding="utf-8")
+    link = root / _PATH
+    link.parent.mkdir(parents=True)
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    evidence = DeploymentEvidence(deploy_root=root, receipts={}, render=_no_render, kept=())
+    evidence.consent_to_lockfile_hashes()
+    assert [claim for claim, _ in evidence.refusals([_PATH])] == [_PATH]
+    cleanup = _remove_one(root, _PATH, evidence)
+    outcome = SelectedCleanupOutcome()
+
+    SelectedCleanupOutcome.observer(outcome, InstallLogger(), "owner/pkg")(cleanup)
+
+    assert link.is_symlink() and target.read_text(encoding="utf-8") == "outside\n"
+    assert outcome.failed_paths == set() and outcome.rejected_paths == {}
+    assert cleanup.rejected == {}
