@@ -28,6 +28,7 @@ so a checkout that changes after verification is never trusted.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
@@ -111,9 +112,16 @@ class _Objects:
         return data
 
     def close(self) -> None:
-        if self._process.stdin is not None:
-            self._process.stdin.close()
-        self._process.wait()
+        """Stop the reader even if it is blocked writing an object nobody read."""
+        process = self._process
+        if process.stdin is not None:
+            with contextlib.suppress(OSError):
+                process.stdin.close()
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        if process.stdout is not None:
+            process.stdout.close()
 
 
 def _join(directory: str, name: str) -> str:
@@ -259,6 +267,9 @@ def _unquote(line: str) -> tuple[str, str] | None:
     return None
 
 
+_MACRO_DEPTH = 16
+
+
 class _Attributes:
     """Attributes from the commit's own ``.gitattributes`` files only."""
 
@@ -301,11 +312,12 @@ class _Attributes:
                 )
         self._rules[directory] = rules
 
-    def _apply(self, state: dict[str, object], name: str, value: object) -> None:
+    def _apply(self, state: dict[str, object], name: str, value: object, depth: int = 0) -> None:
         state[name] = value
-        if value is True and name in self._macros:
+        # Macros may name other macros; Git expands them in turn (bounded here).
+        if value is True and name in self._macros and depth < _MACRO_DEPTH:
             for macro_name, macro_value in self._macros[name]:
-                state[macro_name] = macro_value
+                self._apply(state, macro_name, macro_value, depth + 1)
 
     def state(self, path: str) -> dict[str, object] | None:
         """The attributes of *path*, or None when a ``.gitattributes`` cannot be read here."""
@@ -591,6 +603,10 @@ def require_verified_copy(
     """
     prefix = subdir.strip("/")
     manifest = _manifest(repo, sha, [prefix] if prefix else None, env)
+    # A commit never holds a .git entry; one in a copy would make it a repository.
+    for _directory, subdirs, names in os.walk(dest):
+        if any(entry.lower() == ".git" for entry in (*subdirs, *names)):
+            raise CheckoutVerificationError("the copy holds a .git entry")
     copied: set[str] = set()
     for rel, path in _worktree_files(Path(dest)):
         source = _join(prefix, rel)

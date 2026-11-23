@@ -474,3 +474,56 @@ def test_a_checkout_without_its_own_repository_never_reads_an_enclosing_one(
 
     assert not verify_checkout(checkout, sha, env=neutral_git_env())
     assert (project / ".git" / "objects").is_dir()
+
+
+def test_a_wrong_kind_object_larger_than_a_pipe_never_hangs_the_reader(tmp_path: Path) -> None:
+    import threading
+
+    from apm_cli.cache.checkout_verify import _Objects
+    from apm_cli.utils.git_env import get_git_executable
+
+    repo, _sha = _plain_repo(tmp_path)
+    big = repo / "big.bin"
+    big.write_bytes(b"x" * (4 << 20))
+    oid = git("-C", str(repo), "hash-object", "-w", str(big))
+    algorithm = "sha256" if len(oid) == 64 else "sha1"
+    outcome: list[BaseException] = []
+
+    def read_as_tree() -> None:
+        objects = _Objects(get_git_executable(), repo, neutral_git_env(), algorithm)
+        try:
+            objects.read(oid, "tree")
+        except CheckoutVerificationError as error:
+            outcome.append(error)
+        finally:
+            objects.close()
+
+    worker = threading.Thread(target=read_as_tree, daemon=True)
+    worker.start()
+    worker.join(timeout=30)
+    assert not worker.is_alive(), "the object reader hung on cleanup"
+    assert outcome and "not a tree" in str(outcome[0])
+    assert big.stat().st_size == 4 << 20
+
+
+@pytest.mark.parametrize("where", [".git", "pkg/.git"])
+def test_a_copy_holding_a_git_entry_is_refused(tmp_path: Path, where: str) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    target = tmp_path / "target"
+    shutil.copytree(repo, target, ignore=shutil.ignore_patterns(".git"))
+    (target / where).mkdir(parents=True)
+    (target / where / "config").write_text("[core]\n", encoding="ascii")
+
+    with pytest.raises(CheckoutVerificationError, match=r"\.git entry"):
+        require_verified_copy(target, repo, sha)
+    assert (target / where / "config").is_file()
+
+
+def test_nested_attribute_macros_expand_as_git_expands_them(tmp_path: Path) -> None:
+    repo, sha = _attributes_repo(
+        tmp_path, b"[attr]dos text eol=crlf\n[attr]docs dos\npkg/*.md docs\n"
+    )
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\r\n")
+
+    assert verify_checkout(repo, sha, env=neutral_git_env())
