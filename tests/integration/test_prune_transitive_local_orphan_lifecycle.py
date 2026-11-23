@@ -704,3 +704,64 @@ def test_prune_keeps_the_parent_chain_when_the_new_parent_is_unlocked(
     lock_bytes = (world.project / "apm.lock.yaml").read_bytes()
     world.apm("prune")
     assert (world.project / "apm.lock.yaml").read_bytes() == lock_bytes
+
+
+def test_prune_keeps_children_of_an_anchor_chain_below_a_declared_parent(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two anchor chains: one under removed d, one under still-declared p. q's child k stays."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("e", ("../f",)),
+        ("d", ("../e",)),
+        ("a", ()),
+        ("h", ()),
+        ("k", ()),
+        ("r", ("../h",)),
+        ("q", ("../r", "../k")),
+        ("p", ("../q",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a", "./vendor/p"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _skill_package(vendor / "z", "z", ("../f",))
+    _skill_package(vendor / "a", "a", ("../z",))
+    _skill_package(vendor / "y", "y", ("../r",))
+    _skill_package(vendor / "p", "p", ("../y",))
+    _manifest(world, ["./vendor/a", "./vendor/p"])
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/q:" in pruned, pruned
+    assert {"_local/q", "_local/k", "_local/r"} <= set(rows), sorted(rows)
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
+    assert (world.project / ".claude/skills/k-skill/SKILL.md").is_file()
+
+
+def test_prune_keeps_the_parent_chain_of_a_survivor_now_declared_directly(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """d -> e -> f, then apm.yml declares ./vendor/f instead of d: f keeps a locked parent."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ("../f",)), ("d", ("../e",))):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/f"])
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert {"_local/e", "_local/f"} <= set(rows), sorted(rows)
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    lock_bytes = (world.project / "apm.lock.yaml").read_bytes()
+    world.apm("prune")
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock_bytes
