@@ -11,6 +11,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands.uninstall.cli import _HANDLE_WALK
 
 pytestmark = [
     pytest.mark.component,
@@ -463,3 +464,41 @@ def test_a_backslash_claim_through_a_symlinked_parent_is_not_proven_absent(
     assert not _absence_proven(tmp_path, ".github\\hooks\\h.json")
     assert not _absence_proven(tmp_path, ".github/hooks/h.json")
     assert (moved / "h.json").is_file()
+
+
+@pytest.mark.skipif(
+    not _HANDLE_WALK,
+    reason="no-follow directory handles are unavailable on this platform",
+)
+def test_a_parent_swapped_while_it_is_inspected_is_not_proven_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hooks directory becomes a symlink to an empty one right after its check."""
+    from apm_cli.commands.uninstall.cli import _absence_proven
+
+    hooks = tmp_path / ".github" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "h.json").write_text("{}", encoding="ascii")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    swapped: list[bool] = []
+
+    def swap_after(real):
+        def inspect(path, *args, **kwargs):
+            result = real(path, *args, **kwargs)
+            if not swapped and str(path).endswith("hooks"):
+                swapped.append(True)
+                hooks.rename(hooks.with_name("hooks-moved"))
+                hooks.symlink_to(empty, target_is_directory=True)
+            return result
+
+        return inspect
+
+    monkeypatch.setattr(os, "lstat", swap_after(os.lstat))
+    monkeypatch.setattr(os, "open", swap_after(os.open))
+    proven = _absence_proven(tmp_path, ".github/hooks/h.json")
+    monkeypatch.undo()
+
+    assert swapped
+    assert not proven
+    assert (tmp_path / ".github" / "hooks-moved" / "h.json").is_file()

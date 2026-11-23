@@ -651,15 +651,29 @@ def _pop_lock_rows(lockfile, keys, removed_rows: dict) -> bool:
     return popped
 
 
+# Directory handles that never follow a symlink, where the platform has them.
+_HANDLE_WALK = (
+    os.open in os.supports_dir_fd
+    and os.stat in os.supports_dir_fd
+    and hasattr(os, "O_NOFOLLOW")
+    and hasattr(os, "O_DIRECTORY")
+)
+
+
 def _absence_proven(deploy_root: Path, relative: str) -> bool:
     """Return whether *relative* is provably gone under *deploy_root* (#4851).
 
     Absence counts only through real directories: a symlinked or
     non-directory parent, or one that cannot be inspected, leaves the file's
-    fate unknown, so its claim stays.
+    fate unknown, so its claim stays. Where the platform supports it, each
+    parent is opened as a no-follow directory handle and the next lookup goes
+    through that handle, so a parent swapped for a symlink mid-walk cannot
+    redirect it.
     """
-    current = deploy_root
     parts = PurePosixPath(str(relative).replace("\\", "/")).parts
+    if _HANDLE_WALK:
+        return _absence_proven_by_handle(deploy_root, parts)
+    current = deploy_root
     try:
         for part in parts[:-1]:
             current = current / part
@@ -671,6 +685,28 @@ def _absence_proven(deploy_root: Path, relative: str) -> bool:
         return True
     except OSError:
         return False
+    return False
+
+
+def _absence_proven_by_handle(deploy_root: Path, parts: tuple[str, ...]) -> bool:
+    """:func:`_absence_proven` through no-follow directory handles."""
+    try:
+        handle = os.open(deploy_root, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return False
+    try:
+        for part in parts[:-1]:
+            # A symlinked (ELOOP) or non-directory (ENOTDIR) parent raises OSError.
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)
+            os.close(handle)
+            handle = child
+        os.stat(parts[-1], dir_fd=handle, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(handle)
     return False
 
 
