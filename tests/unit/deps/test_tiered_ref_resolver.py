@@ -689,3 +689,24 @@ def test_the_commits_api_tier_resolves_exact_branches_and_tags(ref: str, want: s
     tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) == want
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["main..pull/1/head", "pull%2F1%2Fhead", "refs/pull/1/head", "main^{}", "main~1", "main@{1}"],
+    ids=["range", "percent-encoded", "refs-namespace", "peel", "ancestor", "reflog"],
+)
+def test_a_revision_expression_never_reaches_the_commits_api(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+    assert api.queries == []
+
+
+def test_a_full_commit_ref_is_not_a_commits_api_query() -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "f" * 40) == "f" * 40
+    assert api.queries == []

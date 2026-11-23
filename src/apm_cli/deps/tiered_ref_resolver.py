@@ -213,8 +213,17 @@ class L0PerRunCache:
 _ABBREVIATED_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,39}$")
 
 
+_UNSAFE_REF_RE = re.compile(r"\.\.|@\{|[\x00-\x20\x7f%~^:?*\[\\]")
+
+
 def _exact_ref_queries(ref: str) -> tuple[str, ...]:
-    """Commits-API names that match only an origin branch or tag named *ref*."""
+    """Commits-API names that match only an origin branch or tag named *ref*.
+
+    A name the API could read as a revision expression or an encoded path
+    (``..``, ``@{``, ``^``, ``~``, ``%``) gets no query at all.
+    """
+    if _UNSAFE_REF_RE.search(ref):
+        return ()
     for namespace in ("heads", "tags"):
         if ref.startswith(f"refs/{namespace}/"):
             return (ref.removeprefix("refs/"),)
