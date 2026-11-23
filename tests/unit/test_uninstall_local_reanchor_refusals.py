@@ -53,3 +53,25 @@ def test_a_reanchor_that_cannot_be_one_transaction_refuses(
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert expected in message, message
     assert "apm.yml and apm.lock.yaml were not changed" in message
+
+
+def test_a_local_row_without_a_path_is_unverified_offline(tmp_path: Path) -> None:
+    """An empty local_path names no target to check, so the removal refuses."""
+    from apm_cli.commands.uninstall.cli import _refuse_unverifiable_local_survivors
+
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(
+        "name: proj\nversion: 1.0.0\ndependencies:\n  apm:\n    - ./vendor/e\n    - ./vendor/d\n",
+        encoding="utf-8",
+    )
+    lockfile = MagicMock()
+    lockfile.get_dependency.return_value = SimpleNamespace(source="local", local_path="")
+    lockfile.replacements = None
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _refuse_unverifiable_local_survivors(lockfile, ["./vendor/e"], manifest, logger)
+
+    assert exc.value.code == 1
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "apm_modules/ is missing" in message, message

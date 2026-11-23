@@ -10,6 +10,7 @@ import pytest
 from apm_cli.commands.uninstall.cli import (
     _persist_lock_then_resync_native,
     _refuse_reanchor_refresh,
+    _rename_reanchored_receipts,
     _StillNeededRepair,
 )
 from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
@@ -137,3 +138,39 @@ def test_a_failed_postcommit_binding_rolls_the_reanchor_back(tmp_path: Path) -> 
     assert lock.read_text(encoding="utf-8") == "lockfile_version: '4'\n"
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert "were restored" in message, message
+
+
+def test_any_failed_receipt_rename_rolls_the_reanchor_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    manifest, lock, repair = _planned(tmp_path)
+    row = LockedDependency(
+        repo_url="_local/e",
+        source="local",
+        local_path="../e",
+        declaring_parent="./vendor/d",
+        anchored_local_path="vendor/e",
+    )
+    LockFile(dependencies={row.get_unique_key(): row}).write(lock)
+    repair = repair._replace(
+        reanchor=repair.reanchor.__class__(
+            renames={"./vendor/e": row.get_unique_key()}, snapshot=repair.reanchor.snapshot
+        )
+    )
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("unexpected receipt failure")
+
+    monkeypatch.setattr("apm_cli.core.deployment_reanchor.rename_receipt_owners", broken)
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _rename_reanchored_receipts(repair, lock, tmp_path, None, logger)
+
+    assert exc.value.code == 1
+    assert "./vendor/e" in manifest.read_text(encoding="utf-8")
+    assert lock.read_text(encoding="utf-8") == "lockfile_version: '4'\n"
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "unexpected receipt failure" in message and "were restored" in message, message

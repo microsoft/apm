@@ -352,7 +352,10 @@ def _refuse_unverifiable_local_survivors(
     unresolved = []
     for package in packages:
         row = lockfile.get_dependency(_removed_lock_key(package, lockfile))
-        if row is not None and row.source == "local" and row.local_path:
+        if row is not None and row.source == "local":
+            if not row.local_path:
+                unresolved.append(package)  # no target to check: unverifiable
+                continue
             raw = Path(row.local_path).expanduser()
             try:
                 directory = raw.resolve() if raw.is_absolute() else (project_root / raw).resolve()
@@ -529,7 +532,7 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
         return  # the lock was not committed; receipts still match it
     try:
         rename_receipt_owners(deploy_root, scope, committed, plan.renames)
-    except (OSError, ValueError) as exc:
+    except Exception as exc:
         # One transaction: without its receipts the re-anchor does not stand.
         _roll_back_and_exit(
             plan,
