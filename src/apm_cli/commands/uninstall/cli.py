@@ -1431,7 +1431,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Rows removed here, so a file sync cannot remove keeps its claim (#4851).
         removed_rows = {}
         if lockfile:
-            for key in [_removed_lock_key(pkg, lockfile) for pkg in packages_to_remove]:
+            for pkg in packages_to_remove:
+                key = _removed_lock_key(pkg, lockfile)
                 if key in lockfile.dependencies:
                     removed_rows[key] = lockfile.dependencies.pop(key)
                     lockfile_updated = True
