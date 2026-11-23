@@ -706,3 +706,70 @@ def test_apm_script_env_without_path_is_refused(
 
     with pytest.raises(FileNotFoundError, match="No PATH directory outside the project"):
         trusted_path_environment({"HOME": str(tmp_path)})
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+def test_apm_script_path_drops_a_directory_linking_into_the_project(tmp_path: Path) -> None:
+    """A PATH directory whose helper links into the project never serves an APM script."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    marker = _plant_project_binary(project, "probe")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "probe").symlink_to(project / "probe")
+    original = os.getcwd()
+    os.chdir(project)
+    try:
+        try:
+            env = trusted_path_environment({"PATH": str(tools)})
+        except FileNotFoundError:
+            env = None
+        if env is not None:
+            subprocess.run(
+                ("/bin/sh", "-c", "probe"), cwd=tmp_path, env=env, capture_output=True, check=False
+            )
+    finally:
+        os.chdir(original)
+
+    assert env is None or str(tools) not in env["PATH"].split(os.pathsep)
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory permissions")
+def test_apm_script_path_drops_an_unlistable_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A searchable PATH directory APM cannot list is dropped, since its links can't be checked."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    _plant_project_binary(project, "probe")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "probe").symlink_to(project / "probe")
+    safe = tmp_path / "safe"
+    safe.mkdir()
+    if os.geteuid() == 0:
+        # Root lists any directory, so make the listing itself fail.
+        real_iterdir = Path.iterdir
+
+        def _iterdir(self: Path):
+            if self == tools:
+                raise PermissionError("not listable")
+            return real_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", _iterdir)
+    else:
+        tools.chmod(0o311)
+    monkeypatch.chdir(project)
+    try:
+        env = trusted_path_environment({"PATH": os.pathsep.join([str(tools), str(safe)])})
+    finally:
+        tools.chmod(0o755)
+
+    assert env["PATH"].split(os.pathsep) == [str(safe)]
