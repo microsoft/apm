@@ -370,9 +370,9 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS)",
         "if None in keys:",
         "HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)",
-        '_retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))',
+        "kept, unwritten = _retire_per_file(project_root, targets, item)",
         "_drop_lock_rows(lock_dir, rows)",
-        "            retire_bundle_hooks(",
+        "            retired = retire_bundle_hooks(",
         # The scope re-check retires bundle canvas through the same pass.
         "    retire_unadmitted_bundle_canvas(",
         # Committed records and rows are acted on only inside a target root.
@@ -635,7 +635,7 @@ def check_local_bundle_hook_retirement(provider: FactsProvider) -> tuple[Violati
     findings: list[Violation] = []
     facts, failures = _facts_for(provider, _BUNDLE_HOOKS, GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT)
     findings.extend(failures)
-    if not failures and not _present(facts, "return retire_bundle_hooks("):
+    if not failures and not _present(facts, "retired = retire_bundle_hooks("):
         findings.append(
             _summary(
                 GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,

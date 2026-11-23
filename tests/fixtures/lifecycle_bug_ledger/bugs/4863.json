@@ -1,0 +1,33 @@
+{
+  "issue": 4863,
+  "fixed_in": "Unreleased",
+  "summary": "An install killed between deploy and a gate refusal's restore left deployed files no lockfile row claimed, and the next install deleted the journal; the next install now replays it under the lifecycle lock, restoring only bytes the deployment ledger vouches for and keeping and reporting any journal it cannot prove.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_the_next_install_replays_a_journal_killed_before_a_gate_refusal",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_an_unrestorable_path_keeps_the_journal_and_names_the_path",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_malformed_journal_is_kept_and_reported_not_applied",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_journal_path_escaping_its_root_is_kept_and_reported_not_applied",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_journal_bytes_the_ledger_does_not_vouch_for_are_kept_not_restored",
+    "tests/integration/test_lockfile_commit_point_lifecycle.py::test_the_next_install_replays_a_killed_installs_deploy_snapshot",
+    "tests/unit/install/test_deploy_snapshot.py::test_the_next_install_replays_only_its_own_abandoned_journals",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_user_file_at_a_journaled_absent_path_survives_replay",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_receipt_whose_copy_does_not_match_its_hash_is_not_restored",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_receipt_path_leaving_the_receipts_directory_is_refused",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_deploy_root_path_that_is_absolute_or_escapes_is_refused",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_after_the_lockfile_commit_settles_the_journal",
+    "tests/unit/install/test_deploy_snapshot.py::test_shared_config_the_ledger_does_not_claim_keeps_the_journal",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_malformed_unit_keeps_the_journal",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_mid_deploy_restores_every_journaled_path",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_tampered_root_copy_is_kept_and_reported_not_restored",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_settling_a_repair_keeps_the_repaired_file",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_an_mcp_install_replays_a_killed_install_first",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_file_a_user_edits_after_a_mid_deploy_kill_is_kept",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_write_killed_before_its_seal_is_restored"
+  ]
+}
