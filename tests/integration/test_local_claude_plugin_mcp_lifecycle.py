@@ -158,8 +158,8 @@ def test_local_plugin_mcp_is_replayed_audited_and_uninstalled(
 
     removed = CliRunner().invoke(cli, ["uninstall", "../plug"])
     assert removed.exit_code == 0, removed.output
-    claude = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
-    assert "demo" not in claude.get("mcpServers", {})
+    # APM's last entry left the .mcp.json it created: the file goes (#4852).
+    assert not (project / ".mcp.json").exists()
     codex = tomlkit.parse((project / ".codex" / "config.toml").read_text(encoding="utf-8")).unwrap()
     assert "demo" not in codex.get("mcp_servers", {})
 
