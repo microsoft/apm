@@ -330,6 +330,43 @@ class CommandIntegrator(BaseIntegrator):
 
         return (command_name, new_post, warnings, dropped_keys, input_names)
 
+    @staticmethod
+    def _warn_withheld_command_keys(
+        command_name: str,
+        withheld_keys: list[str],
+        diagnostics: DiagnosticCollector | None,
+        pkg_name: str,
+    ) -> None:
+        """Warn that Claude-native keys were withheld on purpose (inline ``hooks``)."""
+        if not withheld_keys or diagnostics is None:
+            return
+        diagnostics.warn(
+            message=(
+                f"Claude command {command_name}: frontmatter "
+                f"{', '.join(withheld_keys)} withheld. Claude Code supports "
+                f"inline hooks on commands, but APM does not yet run them "
+                f"through executable consent, so the command was deployed "
+                f"without them and may not behave as authored."
+            ),
+            package=pkg_name,
+        )
+
+    def _warn_adopted_withheld_keys(
+        self, source: Path, target_name: str, diagnostics: Any, pkg_name: str
+    ) -> None:
+        """Repeat the withheld-keys warning when an existing command is adopted.
+
+        Adoption skips ``integrate_command()``, so without this the deployed
+        hook-free command would be kept silently.
+        """
+        if target_name != "claude" or diagnostics is None:
+            return
+        command_name, _post, _warnings, dropped_keys = self._transform_prompt_to_command(
+            source, target_name
+        )
+        withheld = [k for k in dropped_keys if k in _CLAUDE_WITHHELD_COMMAND_KEYS]
+        self._warn_withheld_command_keys(command_name, withheld, diagnostics, pkg_name)
+
     def integrate_command(
         self,
         source: Path,
@@ -417,17 +454,7 @@ class CommandIntegrator(BaseIntegrator):
                 ),
                 package=pkg_name,
             )
-        if withheld_keys and diagnostics is not None:
-            diagnostics.warn(
-                message=(
-                    f"Claude command {command_name}: frontmatter "
-                    f"{', '.join(withheld_keys)} withheld. Claude Code supports "
-                    f"inline hooks on commands, but APM does not yet run them "
-                    f"through executable consent, so the command was deployed "
-                    f"without them and may not behave as authored."
-                ),
-                package=pkg_name,
-            )
+        self._warn_withheld_command_keys(command_name, withheld_keys, diagnostics, pkg_name)
 
         # Surface install-time info when input -> arguments mapping happened so
         # users aren't surprised by content that differs from the source package.
@@ -672,6 +699,10 @@ class CommandIntegrator(BaseIntegrator):
             if skip:
                 if adopted:
                     files_adopted += 1
+                    if mapping.format_id != "gemini_command":
+                        self._warn_adopted_withheld_keys(
+                            prompt_file, target.name, diagnostics, pkg_name
+                        )
                 else:
                     files_skipped += 1
                 continue

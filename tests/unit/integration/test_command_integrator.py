@@ -1873,6 +1873,29 @@ class TestClaudeNativeCommandFrontmatter:
         assert result.files_skipped == 0, result
         assert deployed.read_bytes() == before
 
+    def test_claude_adopt_still_warns_withheld_hooks(self, temp_project):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        prompt = (
+            "---\ndescription: d\nhooks:\n  PreToolUse:\n"
+            "    - matcher: Bash\n      hooks:\n"
+            "        - type: command\n          command: ./check.sh\n"
+            "---\nRun.\n"
+        )
+        pkg_info = _make_package(temp_project, {"p.prompt.md": prompt})
+        claude = KNOWN_TARGETS["claude"]
+        CommandIntegrator().integrate_commands_for_target(claude, pkg_info, temp_project)
+
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            claude, pkg_info, temp_project, managed_files=set(), diagnostics=diag
+        )
+
+        assert result.files_adopted == 1, result
+        warnings = [w.message for w in diag.by_category().get("warning", [])]
+        assert any("hooks withheld" in w for w in warnings), warnings
+
     def test_claude_still_drops_name_and_paths(self, temp_project):
         warnings = self._install(
             temp_project,
