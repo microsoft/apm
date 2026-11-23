@@ -26,6 +26,8 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 from __future__ import annotations
 
 import contextlib
+import os
+import re
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -762,8 +764,6 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     leave them dangling until the next install rewrites them. Only paths the
     deploy-path gate accepts are read; any other claim refuses too.
     """
-    import re
-
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...utils.paths import portable_relpath
 
@@ -774,9 +774,15 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     if not spellings:
         return None
     # The copy's own path, not a longer sibling name such as ``_local/e2``.
-    names = re.compile(
+    literal = re.compile(
         b"(?:" + b"|".join(re.escape(s.encode()) for s in sorted(spellings)) + b")(?![\\w.-])"
     )
+    dirs = _moving_dirs(plan.moves)
+
+    def names(member: Path) -> bool:
+        data = member.read_bytes()
+        return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
+
     for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
         if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
@@ -803,11 +809,65 @@ def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
             else [(deployed, path)]
         )
         return any(
-            not gated(claim) or (member.is_file() and names.search(member.read_bytes()))
-            for claim, member in members
+            not gated(claim) or (member.is_file() and names(member)) for claim, member in members
         )
     except OSError:
         return True  # an unreadable file cannot be cleared
+
+
+# A path-like token: anything between whitespace, brackets, quotes and separators.
+_PATH_TOKEN = re.compile(r"[^\s()<>\[\]\"'`|,;*]+")
+# A whole Markdown link destination: ``<...>`` may hold spaces; a bare one may
+# hold punctuation such as commas and balanced parentheses, so neither is split
+# like prose. One level of nesting keeps the match linear.
+_MARKDOWN_DESTINATION = re.compile(r"\]\(\s*(?:<([^<>\n]+)>|((?:[^\s()<>]|\([^\s()<>]*\))+))")
+
+
+def _moving_dirs(moves) -> tuple[str, ...]:
+    """Each moving copy as written and as resolved (a symlinked apm_modules root)."""
+    dirs = set()
+    for current, _target in moves:
+        dirs.add(os.path.normcase(os.path.normpath(os.fspath(current))))
+        dirs.add(os.path.normcase(os.path.realpath(current)))
+    return tuple(sorted(dirs))
+
+
+def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bool:
+    """Whether a path token in *data* names a moving copy once normalized (#5133).
+
+    Whole Markdown link destinations are checked first, then prose tokens. Each
+    token resolves against the file's directory and the project root:
+    ``.`` and ``..`` segments are folded, and the result is compared both as
+    written and through symlinks, so ``_local/./e`` or a link through a
+    symlinked apm_modules root counts as the copy itself.
+    """
+
+    def under(candidate: str) -> bool:
+        candidate = os.path.normcase(candidate)
+        return any(candidate == d or candidate.startswith(d + os.sep) for d in dirs)
+
+    text = data.decode("utf-8", "replace")
+    destinations = [bracketed or bare for bracketed, bare in _MARKDOWN_DESTINATION.findall(text)]
+    seen: set[str] = set()
+    for token in (*destinations, *_PATH_TOKEN.findall(text)):
+        path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
+        # A bare destination is also a prose token: resolve each spelling once.
+        if path in seen:
+            continue
+        seen.add(path)
+        # A binary asset can hold a NUL, which no filesystem path accepts.
+        if "/" not in path or "://" in path or "\x00" in path:
+            continue
+        # Sentence punctuation after a link ("see _local/./e.") is not part of it.
+        while path.endswith((".", ":")) and not path.endswith(".."):
+            path = path[:-1]
+        for base in (member.parent, project_root):
+            joined = os.path.join(base, path)
+            # Lexical folding and symlink resolution are separate views: folding
+            # ``..`` first would skip a symlinked apm_modules root.
+            if under(os.path.normpath(joined)) or under(os.path.realpath(joined)):
+                return True
+    return False
 
 
 def _native_owned(lockfile) -> bool:
