@@ -5584,7 +5584,42 @@
    "status": "baseline",
    "strength": "e2e-evidence"
   },
+  "T1|OP=prune|PRIM=bin|GATE=allowed": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "T1|OP=prune|PRIM=bin|GATE=denied-dependency": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=denied-executable": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=none": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=unapproved-exec": {
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -27008,21 +27043,6 @@
   "T1|OP=pack|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
   ],
-  "T1|OP=prune|PRIM=bin|GATE=allowed": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=denied-executable": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=none": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=unapproved-exec": [
-   "U-BIN-OPS"
-  ],
   "T3|OP=approve-deny|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -28252,7 +28272,7 @@
    "evidence": [
     "src/apm_cli/install/exec_gate.py::plugin_bin_deployable"
    ],
-   "text": "a gate level of PRIM=bin under audit, prune, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses"
+   "text": "a gate level of PRIM=bin under audit, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): a loose bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form and write no plugin root, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). prune is not listed: it retires a trusted project-scope whole plugin's root, bin/ included (#4559, #4808). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses"
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
