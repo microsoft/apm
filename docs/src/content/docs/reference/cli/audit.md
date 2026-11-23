@@ -343,8 +343,11 @@ could not run) promotes the audit to exit `1` and drift renders as `[x]`. An adv
 (see [Exit codes](#exit-codes)).
 When drift fails and the org policy cannot be resolved, the audit says so:
 `[x] Org policy could not be resolved; fail_on_drift could not be applied: <cause>`
-with exit `1` when the project requires the policy (`policy.fetch_failure_default: block`),
-otherwise a `[!]` notice with drift left advisory.
+with exit `1` when the project requires the policy (`policy.fetch_failure_default: block`).
+Some outcomes always exit `1`, even under `warn`: a rejected inheritance chain
+(cycle, cross-host `extends`, or too deep), a policy hash mismatch, and an
+ambiguous git remote. Any other unresolved policy prints a `[!]` notice and
+drift stays advisory.
 
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
 informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
