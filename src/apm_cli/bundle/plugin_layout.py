@@ -104,29 +104,37 @@ def deployed_rendering_extension(deployed_rel: str) -> str | None:
 
 
 def deployed_rendering_rank(deployed_rel: str) -> int | None:
-    """Rank a deployed rendering by :data:`PLUGIN_RENDERING_PREFERENCE` (lower is kept)."""
-    suffix = deployed_rendering_suffix(deployed_rel)
-    for preference in PLUGIN_RENDERING_PREFERENCE.values():
-        if suffix in preference:
-            return preference.index(suffix)
-    return None
+    """Rank a deployed rendering within its own plugin directory's preference (lower is kept)."""
+    found = _deployed_rendering(deployed_rel)
+    if found is None:
+        return None
+    preference = PLUGIN_RENDERING_PREFERENCE[found[0]]
+    return preference.index(found[1]) if found[1] in preference else len(preference)
 
 
 def deployed_rendering_suffix(deployed_rel: str) -> str | None:
     """Return the deploying target's own extension for *deployed_rel*, if any."""
+    found = _deployed_rendering(deployed_rel)
+    return found[1] if found else None
+
+
+def _deployed_rendering(deployed_rel: str) -> tuple[str, str] | None:
+    """Return ``(plugin directory, target extension)`` of a deployed rendering."""
     from ..integration.targets import KNOWN_TARGETS
 
-    kinds = {
-        kind for head in PLUGIN_RENDERING_PREFERENCE for kind in PLUGIN_LAYOUT[head].primitive_kinds
+    heads = {
+        kind: head
+        for head in PLUGIN_RENDERING_PREFERENCE
+        for kind in PLUGIN_LAYOUT[head].primitive_kinds
     }
     for profile in KNOWN_TARGETS.values():
         for kind, mapping in profile.primitives.items():
             root = mapping.deploy_root or profile.root_dir
             prefix = f"{root.strip('/')}/{mapping.subdir}/"
-            if kind not in kinds or not mapping.subdir or not mapping.extension:
+            if kind not in heads or not mapping.subdir or not mapping.extension:
                 continue
             if deployed_rel.startswith(prefix) and deployed_rel.endswith(mapping.extension):
-                return mapping.extension
+                return heads[kind], mapping.extension
     return None
 
 

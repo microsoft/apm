@@ -48,6 +48,7 @@ from .plugin_layout import (
     PLUGIN_ROOT_DIRS,
     deployed_rendering_extension,
     deployed_rendering_rank,
+    deployed_rendering_suffix,
     duplicate_plugin_renderings,
     find_plugin_root_sources,
 )
@@ -705,10 +706,11 @@ def _plugin_rel_for_deployed_path(
     else:
         return None
 
-    # A target's own commands keep their name; only prompt renderings rename.
-    native_command = len(parts) >= 3 and parts[0].startswith(".") and parts[1] == "commands"
+    # Only a .prompt.md rendering renames; a target's native Markdown command
+    # or prompt (Claude commands/, Kiro prompts/) keeps its stem.
+    native_suffix = deployed_rendering_suffix(PurePosixPath(*parts).as_posix())
     if (
-        not native_command
+        native_suffix in (None, ".prompt.md")
         and plugin_parts[0] == "commands"
         and plugin_parts[-1].endswith(".prompt.md")
     ):

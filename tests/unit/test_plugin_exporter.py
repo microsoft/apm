@@ -1195,6 +1195,57 @@ class TestExportPluginBundle:
         lines = [str(call) for call in info.call_args_list if "rendering" in str(call)]
         assert len(lines) == 1 and f".github/prompts/{copilot}" in lines[0], lines
 
+    @staticmethod
+    def _pack_deployed(tmp_path, deployed: list[tuple[str, str]]):
+        project = _setup_plugin_project(tmp_path)
+        for rel, body in deployed:
+            path = project / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        _write_lockfile(
+            project,
+            [
+                LockedDependency(
+                    repo_url="acme/dep", depth=1, deployed_files=[r for r, _ in deployed]
+                )
+            ],
+        )
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+            return export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+    @pytest.mark.parametrize("claude_first", [True, False])
+    def test_dotted_instruction_stems_keep_each_apm_rendering(self, tmp_path, claude_first):
+        """#3686: py and py.instructions both ship their APM (applyTo) rendering."""
+        claude = [
+            (".claude/rules/py.md", "claude py"),
+            (".claude/rules/py.instructions.md", "claude py.instructions"),
+        ]
+        copilot = [
+            (".github/instructions/py.instructions.md", "copilot py"),
+            (".github/instructions/py.instructions.instructions.md", "copilot py.instructions"),
+        ]
+        bundle = self._pack_deployed(
+            tmp_path, claude + copilot if claude_first else copilot + claude
+        )
+        instructions = bundle / "instructions"
+        assert sorted(p.name for p in instructions.iterdir()) == [
+            "py.instructions.instructions.md",
+            "py.instructions.md",
+        ]
+        assert (instructions / "py.instructions.md").read_text() == "copilot py"
+
+    def test_native_markdown_prompts_keep_their_stem(self, tmp_path):
+        """#3686: a Kiro prompt review.prompt.md pairs with its Claude command, not review.md."""
+        bundle = self._pack_deployed(
+            tmp_path,
+            [
+                (".claude/commands/review.prompt.md", "claude"),
+                (".kiro/prompts/review.prompt.md", "kiro"),
+            ],
+        )
+        assert sorted(p.name for p in (bundle / "commands").iterdir()) == ["review.prompt.md"]
+        assert (bundle / "commands" / "review.prompt.md").read_text() == "claude"
+
     def test_hooks_merged(self, tmp_path):
         """Root (first-party) hooks are packed; dependency cache hooks are not.
 
