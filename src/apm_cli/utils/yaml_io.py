@@ -14,6 +14,7 @@ Public API::
     yaml_to_str(data)               -- serialize dict -> YAML string
 """
 
+import copy
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -409,6 +410,21 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     on malformed, over-budget, huge-int, or deeply-nested input.
     """
     return _bounded_load(text)
+
+
+def copy_plain_tree(node: Any) -> Any:
+    """Copy a parsed YAML tree of dicts and lists; scalars are immutable.
+
+    Equal to ``copy.deepcopy`` only for a tree that shares no node, i.e. text
+    without YAML anchors or aliases; other leaves fall back to deepcopy.
+    """
+    if isinstance(node, dict):
+        return {key: copy_plain_tree(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [copy_plain_tree(value) for value in node]
+    if node is None or isinstance(node, (str, int, float, bool)):
+        return node
+    return copy.deepcopy(node)
 
 
 def load_machine_yaml_str(text: str) -> dict[str, Any] | None:

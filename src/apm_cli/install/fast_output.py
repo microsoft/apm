@@ -83,6 +83,11 @@ def render(
             logger.tree_item("  |-- (files unchanged)")
         else:
             body(logger)
+    from apm_cli.install.helpers.gitignore import update_gitignore_for_apm_modules
+
+    # The full run's point (install/pipeline.py, after integrate, project scope):
+    # it adds apm_modules/ and says so only when the entry is missing.
+    update_gitignore_for_apm_modules(logger=logger)
     services = run_services(
         project_root, manifest, lock, logger, policy_fetch, frozen_disposition=frozen_disposition
     )

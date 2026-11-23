@@ -127,6 +127,40 @@ def test_roundtrip_load_rejects_duplicate_keys_without_writing(tmp_path: Path) -
     assert manifest.read_text(encoding="utf-8") == _DUPLICATE
 
 
+def test_every_manifest_read_gets_a_private_copy(tmp_path: Path) -> None:
+    """Reads of identical text share one parse; a mutated copy leaks nowhere."""
+    text = f"name: memo-{tmp_path.name}\nversion: 1.0.0\ndependencies:\n  apm: [a/b]\n"
+    first, second = tmp_path / "one" / "apm.yml", tmp_path / "two" / "apm.yml"
+    for path in (first, second):
+        path.parent.mkdir()
+        path.write_text(text, encoding="utf-8")
+
+    loaded = load_manifest(first)
+    loaded["dependencies"]["apm"].append("tampered")
+    again = load_manifest(second)
+
+    assert again == {
+        "name": f"memo-{tmp_path.name}",
+        "version": "1.0.0",
+        "dependencies": {"apm": ["a/b"]},
+    }
+    assert APMPackage.from_apm_yml(first).dependencies["apm"][0].repo_url == "a/b"
+    assert first.read_text(encoding="utf-8") == text
+
+
+def test_a_refused_text_is_refused_on_every_read_with_its_own_path(tmp_path: Path) -> None:
+    """Only texts that passed are remembered, so each bad file names itself."""
+    text = f"name: bad-{tmp_path.name}\nversion: 1.0.0\nname: again\n"
+    for name in ("one", "two"):
+        path = tmp_path / name / "apm.yml"
+        path.parent.mkdir()
+        path.write_text(text, encoding="utf-8")
+        for _ in range(2):
+            with pytest.raises(DuplicateManifestKeyError) as info:
+                load_manifest(path)
+            assert info.value.path == path
+
+
 def test_bom_manifest_still_loads(tmp_path: Path) -> None:
     manifest = tmp_path / "apm.yml"
     manifest.write_bytes(b"\xef\xbb\xbfname: demo\nversion: 1.0.0\n")

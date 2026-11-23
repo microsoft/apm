@@ -15,6 +15,8 @@ one actionable error before any command touches the project.
 
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -99,11 +101,48 @@ def reject_manifest_anchors(path: Path, text: str) -> None:
         return
 
 
+class _TextMemo:
+    """A small, thread-safe LRU keyed by exact manifest text.
+
+    One install reads each dependency's ``apm.yml`` several times (resolve,
+    reachability, replay, LSP). The checks and the parse below are pure
+    functions of the text (the path only names a file in error messages), so
+    a text that already passed is not re-scanned; failures are never kept,
+    so a bad manifest raises on every read with its own path.
+    """
+
+    _MISS = object()
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._entries: OrderedDict[Any, Any] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: Any) -> Any:
+        with self._lock:
+            value = self._entries.get(key, self._MISS)
+            if value is not self._MISS:
+                self._entries.move_to_end(key)
+            return value
+
+    def put(self, key: Any, value: Any) -> None:
+        with self._lock:
+            self._entries[key] = value
+            while len(self._entries) > self._limit:
+                self._entries.popitem(last=False)
+
+
+_checked_texts = _TextMemo(256)
+_parsed_texts = _TextMemo(256)
+
+
 def check_manifest_text(path: str | Path, text: str) -> str:
     """Return *text* after the checks every ``apm.yml`` read applies."""
-    manifest_path = Path(path)
-    reject_duplicate_manifest_keys(manifest_path, text)
-    reject_manifest_anchors(manifest_path, text)
+    if _checked_texts.get(text) is _TextMemo._MISS:
+        manifest_path = Path(path)
+        reject_duplicate_manifest_keys(manifest_path, text)
+        reject_manifest_anchors(manifest_path, text)
+        _checked_texts.put(text, True)
     return text
 
 
@@ -120,10 +159,17 @@ def load_manifest_text(path: str | Path, text: str) -> Any:
 
 
 def load_manifest(path: str | Path) -> Any:
-    """Load ``apm.yml`` with the bounded loader."""
-    from ..utils.yaml_io import load_yaml_str
+    """Load ``apm.yml`` with the bounded loader; every caller gets a private copy."""
+    from ..utils.yaml_io import copy_plain_tree, load_yaml_str
 
-    return load_yaml_str(read_manifest_text(path))
+    text = read_manifest_text(path)
+    key = (load_yaml_str, text)  # a substituted loader never reads another's parse
+    parsed = _parsed_texts.get(key)
+    if parsed is _TextMemo._MISS:
+        parsed = load_yaml_str(text)
+        _parsed_texts.put(key, parsed)
+    # The checks above refused every anchor and alias, so no node is shared.
+    return copy_plain_tree(parsed)
 
 
 def load_manifest_roundtrip(path: str | Path) -> Any:
