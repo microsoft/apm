@@ -281,9 +281,6 @@ def test_a_record_expires_with_its_oldest_cached_policy(project: Path, capsys) -
     import json
     import time
 
-    from apm_cli.policy import discovery
-
-    assert verdict_record._POLICY_TTL_CAP == discovery.DEFAULT_CACHE_TTL
     meta = project.parent / "cache" / "policy_v1" / "k" / "src.meta.json"
     meta.parent.mkdir(parents=True)
     meta.write_text(json.dumps({"cached_at": time.time() - 2 * 3600}), encoding="utf-8")
@@ -503,3 +500,45 @@ def test_a_clock_moved_back_before_the_record_misses(
     capsys.readouterr()
     verdict_record.replay(["install"])
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(("ttl", "hits"), [(300, False), (3600, True)])
+def test_a_record_expires_when_discovery_would_refetch_its_policy(
+    project: Path, capsys, ttl: int, hits: bool
+) -> None:
+    """The policy's own cache.ttl (capped), not the cap alone, bounds a hit (W3d R2)."""
+    import json
+    import time
+
+    cache = project.parent / "cache" / "policy_v1"
+    cache.mkdir(parents=True)
+    (cache / "k.yml").write_text(f"enforcement: warn\ncache:\n  ttl: {ttl}\n", encoding="utf-8")
+    (cache / "k.meta.json").write_text(
+        json.dumps({"cached_at": time.time() - 600}), encoding="utf-8"
+    )
+    _record()
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert ("up to date in " in capsys.readouterr().out) is hits
+
+
+def test_a_policy_age_replays_as_its_cache_entry_s_age_now(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """QL O1: the policy line's cache age is templated, never replayed as recorded."""
+    import json
+    import time
+
+    cache = project.parent / "cache" / "policy_v1"
+    cache.mkdir(parents=True)
+    (cache / "k.yml").write_text("enforcement: block\ncache:\n  ttl: 3600\n", encoding="utf-8")
+    (cache / "k.meta.json").write_text(json.dumps({"cached_at": time.time() - 180}), "utf-8")
+    line = "[i] Policy: org:acme/.github (cached, fetched 3m ago) -- enforcement=block\n"
+    _record(line + _OUTPUT)
+    (record,) = (_home(project) / "verdicts").iterdir()
+    assert "fetched 3m ago" not in record.read_text(encoding="utf-8")
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 120)
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert "(cached, fetched 5m ago) -- enforcement=block" in capsys.readouterr().out
