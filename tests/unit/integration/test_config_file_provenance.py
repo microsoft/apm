@@ -539,3 +539,77 @@ def test_a_record_of_a_file_linked_for_now_survives_other_saves(tmp_path, apm_ho
     assert config_file_origin(a_config) is Origin.PREEXISTING
     assert _apm_empties(a_config, root=tmp_path / "a") is False
     assert a_config.read_bytes() == held
+
+
+# -- the record store is indexed: a write touches only its own records (#5037) ---------
+
+
+def _store_files(apm_home: Path) -> dict[Path, tuple[int, int, bytes]]:
+    """Every file of the record store: identity, mtime and bytes."""
+    root = apm_home / "deployment-receipts" / "config-files"
+    found = sorted(p for p in root.rglob("*") if p.is_file()) if root.is_dir() else []
+    return {p: (p.stat().st_ino, p.stat().st_mtime_ns, p.read_bytes()) for p in found}
+
+
+def test_a_write_does_not_rewrite_unrelated_records(tmp_path, apm_home) -> None:
+    """Project B's write leaves the store file holding project A's record untouched."""
+    a_config = tmp_path / "a" / ".mcp.json"
+    _apm_writes(a_config, _WITH_ENTRY)
+    a_key = config_file_key(a_config)
+    holding_a = {
+        path: state for path, state in _store_files(apm_home).items() if a_key.encode() in state[2]
+    }
+    assert holding_a, "no store file holds project A's record"
+
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)
+
+    after = _store_files(apm_home)
+    assert {path: after.get(path) for path in holding_a} == holding_a
+    assert config_file_origin(tmp_path / "b" / ".mcp.json") is Origin.CREATED
+    assert config_file_origin(a_config) is Origin.CREATED
+
+
+def _v1_reader(apm_home: Path) -> dict:
+    """The record store reader that shipped with layout version 1 (#4959), verbatim in
+    what it accepts: anything else is an unreadable store, which keeps every file."""
+    path = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("version") != 1 or not isinstance(data.get("files"), list):
+        raise ValueError("unknown version or layout")
+    return data
+
+
+def test_an_older_apm_fails_closed_on_the_indexed_store(tmp_path, apm_home) -> None:
+    """Downgrade safety: a version 1 reader never mis-reads the new store as empty or
+    partial (which could delete a user's file); it finds an unknown layout."""
+    _apm_writes(tmp_path / "a" / ".mcp.json", _WITH_ENTRY)
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)
+
+    with pytest.raises(ValueError, match="unknown version or layout"):
+        _v1_reader(apm_home)
+
+
+def test_a_version_1_store_is_read_without_losing_a_record(tmp_path, apm_home) -> None:
+    """Migration: every record of an existing store survives the first write."""
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    users = tmp_path / "users" / ".mcp.json"
+    users.parent.mkdir()
+    users.write_text(_SKELETON, encoding="utf-8")
+    rows = [
+        {"path": config_file_key(users), "origin": "preexisting", "hash": "sha256:" + "0" * 64},
+        {
+            "path": config_file_key(tmp_path / "gone" / ".mcp.json"),
+            "origin": "created",
+            "hash": "sha256:" + "1" * 64,
+        },
+    ]
+    store.write_text(json.dumps({"version": 1, "files": rows}), encoding="utf-8")
+
+    _apm_writes(tmp_path / "new" / ".mcp.json", _WITH_ENTRY)
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(tmp_path / "gone" / ".mcp.json") is Origin.CREATED
+    assert config_file_origin(tmp_path / "new" / ".mcp.json") is Origin.CREATED
+    assert _apm_empties(users, root=tmp_path / "users") is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
