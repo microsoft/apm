@@ -113,6 +113,9 @@ def run(ctx: InstallContext) -> None:
         if registries_map is not None:
             extra_kwargs["registries"] = registries_map
 
+    from apm_cli.install.commit_gate import resolved_lockfile
+    from apm_cli.policy.schema import DependencyPolicy
+
     audit_result = run_dependency_policy_checks(
         _with_prefetch_denials(ctx),
         lockfile=ctx.existing_lockfile,
@@ -125,6 +128,13 @@ def run(ctx: InstallContext) -> None:
         declared_refs=getattr(ctx, "declared_direct_refs", None) or None,
         # This install locks deps_to_install; a required one it adds is not absent.
         installing=True,
+        # max_depth judges the graph this install resolved, not the lockfile
+        # it replaces (#4826); without a limit the check reads no rows.
+        depth_lockfile=(
+            resolved_lockfile(ctx)
+            if policy.dependencies.max_depth < DependencyPolicy.max_depth
+            else None
+        ),
         # Root ``marketplaces:`` origins, and the catalog origins of locked
         # and freshly resolved marketplace deps, meet marketplace.allow (#2903).
         marketplace_origins=MarketplaceOrigins(
