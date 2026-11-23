@@ -2,12 +2,11 @@
 
 import builtins
 import contextlib
-import os
 import sys
 import traceback
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import click
@@ -64,6 +63,7 @@ from .engine import (
     manifest_dependency_entries,
     project_shrunk_selections,
 )
+from .hook_absence import absence_proven, root_identity
 from .local_bundle import uninstall_selected_local_bundles
 from .local_reanchor import (
     _abort_unsaved_reanchor,
@@ -748,77 +748,6 @@ def _pop_lock_rows(lockfile, keys, removed_rows: dict) -> bool:
     return popped
 
 
-def _no_follow_handles() -> bool:
-    """Whether the platform opens directory handles that never follow a symlink."""
-    return (
-        os.open in os.supports_dir_fd
-        and os.stat in os.supports_dir_fd
-        and hasattr(os, "O_NOFOLLOW")
-        and hasattr(os, "O_DIRECTORY")
-    )
-
-
-def _root_identity(deploy_root: Path) -> tuple[int, int] | None:
-    """The deploy root's ``(st_dev, st_ino)``, pinned before uninstall changes anything."""
-    try:
-        status = os.stat(deploy_root)
-    except OSError:
-        return None
-    return (status.st_dev, status.st_ino)
-
-
-def _absence_proven(deploy_root: Path, relative: str, *, pinned: tuple[int, int] | None) -> bool:
-    """Return whether *relative* is provably gone under *deploy_root* (#4851).
-
-    Absence counts only through real directories: a symlinked or
-    non-directory parent, one that cannot be inspected, or a ``.``/``..``
-    part leaves the file's fate unknown, so its claim stays. Each parent is
-    opened as a no-follow directory handle and the next lookup goes through
-    that handle, so a parent swapped for a symlink mid-walk cannot redirect
-    it. The opened root must be the directory *pinned* before uninstall
-    began (:func:`_root_identity`), so a root reached through a swapped
-    ancestor proves nothing. Without such handles (Windows, where a junction
-    lstats as a directory) or a pinned identity, nothing is proven: the claim
-    stays.
-    """
-    path = PurePosixPath(str(relative).replace("\\", "/"))
-    parts = path.parts
-    # An absolute or UNC-style ('//server/share') path escapes the deploy root.
-    if pinned is None or not _no_follow_handles() or path.is_absolute() or not parts:
-        return False
-    if ".." in parts:
-        return False
-    return _absence_proven_by_handle(deploy_root, parts, pinned)
-
-
-def _absence_proven_by_handle(
-    deploy_root: Path, parts: tuple[str, ...], pinned: tuple[int, int]
-) -> bool:
-    """:func:`_absence_proven` through no-follow directory handles."""
-    try:
-        # The root as given, never resolved: a root that is (or became) a link proves nothing.
-        handle = os.open(deploy_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError:
-        return False
-    try:
-        status = os.fstat(handle)
-        if (status.st_dev, status.st_ino) != pinned:
-            return False  # an ancestor now leads elsewhere
-        for part in parts[:-1]:
-            # A symlinked (ELOOP) or non-directory (ENOTDIR) parent raises OSError.
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)
-            os.close(handle)
-            handle = child
-        os.stat(parts[-1], dir_fd=handle, follow_symlinks=False)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    finally:
-        os.close(handle)
-    return False
-
-
 def _retain_failed_claims(
     lockfile, removed_rows: dict, sync: tuple, removed_hashes: dict, roots: tuple, logger
 ) -> bool:
@@ -838,7 +767,7 @@ def _retain_failed_claims(
             path
             for row in removed_rows.values()
             for path in row.deployed_files
-            if not _absence_proven(Path(deploy_root), path, pinned=root_pin)
+            if not absence_proven(Path(deploy_root), path, pinned=root_pin)
         )
     if not removed_rows or not failed:
         return True
@@ -1373,7 +1302,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
     manifest_path = get_manifest_path(scope)
     apm_dir = require_current_cli(get_apm_dir(scope), command="apm uninstall")
     deploy_root = get_deploy_root(scope)
-    root_pin = _root_identity(deploy_root)  # before any change: the trusted root (#4851)
+    root_pin = root_identity(deploy_root)  # before any change: the trusted root (#4851)
     modules_dir = get_modules_dir(scope)
     from ...install.mcp.command import manifest_label
 

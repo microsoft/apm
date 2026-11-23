@@ -11,7 +11,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands.uninstall.cli import _no_follow_handles
+from apm_cli.commands.uninstall.hook_absence import no_follow_handles
 
 pytestmark = [
     pytest.mark.component,
@@ -452,7 +452,7 @@ def test_a_retained_hook_claim_survives_the_removal_of_an_emptied_mcp_config(
 def test_a_backslash_claim_through_a_symlinked_parent_is_not_proven_absent(
     tmp_path: Path,
 ) -> None:
-    from apm_cli.commands.uninstall.cli import _absence_proven, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import absence_proven, root_identity
 
     moved = tmp_path / ".github" / "hooks-moved"
     moved.mkdir(parents=True)
@@ -461,20 +461,20 @@ def test_a_backslash_claim_through_a_symlinked_parent_is_not_proven_absent(
     empty.mkdir()
     (tmp_path / ".github" / "hooks").symlink_to(empty, target_is_directory=True)
 
-    assert not _absence_proven(tmp_path, ".github\\hooks\\h.json", pinned=_root_identity(tmp_path))
-    assert not _absence_proven(tmp_path, ".github/hooks/h.json", pinned=_root_identity(tmp_path))
+    assert not absence_proven(tmp_path, ".github\\hooks\\h.json", pinned=root_identity(tmp_path))
+    assert not absence_proven(tmp_path, ".github/hooks/h.json", pinned=root_identity(tmp_path))
     assert (moved / "h.json").is_file()
 
 
 @pytest.mark.skipif(
-    not _no_follow_handles(),
+    not no_follow_handles(),
     reason="no-follow directory handles are unavailable on this platform",
 )
 def test_a_parent_swapped_while_it_is_inspected_is_not_proven_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The hooks directory becomes a symlink to an empty one right after its check."""
-    from apm_cli.commands.uninstall.cli import _absence_proven, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import absence_proven, root_identity
 
     hooks = tmp_path / ".github" / "hooks"
     hooks.mkdir(parents=True)
@@ -498,7 +498,7 @@ def test_a_parent_swapped_while_it_is_inspected_is_not_proven_absent(
     monkeypatch.setattr(os, "lstat", swap_after(os.lstat))
     monkeypatch.setattr(os, "supports_dir_fd", {*os.supports_dir_fd, wrapped_open})
     monkeypatch.setattr(os, "open", wrapped_open)
-    proven = _absence_proven(tmp_path, ".github/hooks/h.json", pinned=_root_identity(tmp_path))
+    proven = absence_proven(tmp_path, ".github/hooks/h.json", pinned=root_identity(tmp_path))
     monkeypatch.undo()
 
     assert swapped
@@ -510,13 +510,13 @@ def test_without_no_follow_handles_absence_is_never_proven(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fail closed where a junction lstats as a directory: the claim stays (#4851)."""
-    from apm_cli.commands.uninstall.cli import _absence_proven, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import absence_proven, root_identity
 
     hooks = tmp_path / ".github" / "hooks"
     hooks.mkdir(parents=True)
     monkeypatch.setattr(os, "supports_dir_fd", set())
 
-    proven = _absence_proven(tmp_path, ".github/hooks/h.json", pinned=_root_identity(tmp_path))
+    proven = absence_proven(tmp_path, ".github/hooks/h.json", pinned=root_identity(tmp_path))
 
     monkeypatch.undo()
     assert not proven
@@ -525,14 +525,14 @@ def test_without_no_follow_handles_absence_is_never_proven(
 
 @pytest.mark.parametrize("relative", ["../outside/h.json", ".github/../outside/h.json"])
 def test_a_dot_dot_part_is_never_proven_absent(tmp_path: Path, relative: str) -> None:
-    from apm_cli.commands.uninstall.cli import _absence_proven, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import absence_proven, root_identity
 
     root = tmp_path / "root"
     (root / ".github").mkdir(parents=True)
     (tmp_path / "outside").mkdir()
     (root / "outside").mkdir()
 
-    assert not _absence_proven(root, relative, pinned=_root_identity(root))
+    assert not absence_proven(root, relative, pinned=root_identity(root))
     assert not (tmp_path / "outside" / "h.json").exists()
     assert not (root / "outside" / "h.json").exists()
 
@@ -540,11 +540,11 @@ def test_a_dot_dot_part_is_never_proven_absent(tmp_path: Path, relative: str) ->
 @pytest.mark.parametrize("relative", ["\\\\server\\share\\h.json", "//server/share/h.json"])
 def test_a_unc_style_claim_is_never_proven_absent(tmp_path: Path, relative: str) -> None:
     """'//' is an absolute POSIX root: the walk must not leave the deploy root (#4851)."""
-    from apm_cli.commands.uninstall.cli import _absence_proven, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import absence_proven, root_identity
 
     (tmp_path / "server" / "share").mkdir(parents=True)
 
-    assert not _absence_proven(tmp_path, relative, pinned=_root_identity(tmp_path))
+    assert not absence_proven(tmp_path, relative, pinned=root_identity(tmp_path))
     assert not (tmp_path / "server" / "share" / "h.json").exists()
 
 
@@ -552,45 +552,49 @@ def test_a_root_replaced_by_a_link_to_an_empty_directory_is_not_proven_absent(
     tmp_path: Path,
 ) -> None:
     """The deploy root itself became a link to an empty directory: nothing is proven."""
-    from apm_cli.commands.uninstall.cli import _absence_proven, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import absence_proven, root_identity
 
     root = tmp_path / "root"
     (root / ".github" / "hooks").mkdir(parents=True)
     (root / ".github" / "hooks" / "h.json").write_text("{}", encoding="ascii")
-    pinned = _root_identity(root)
+    pinned = root_identity(root)
     moved = tmp_path / "root-moved"
     root.rename(moved)
     empty = tmp_path / "empty"
     empty.mkdir()
     root.symlink_to(empty, target_is_directory=True)
 
-    assert not _absence_proven(root, ".github/hooks/h.json", pinned=pinned)
+    assert not absence_proven(root, ".github/hooks/h.json", pinned=pinned)
     assert (moved / ".github" / "hooks" / "h.json").is_file()
 
 
 def test_a_root_reached_through_a_swapped_ancestor_is_not_proven_absent(tmp_path: Path) -> None:
     """An ancestor of the deploy root now links to a lookalike tree: nothing is proven."""
-    from apm_cli.commands.uninstall.cli import _absence_proven, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import absence_proven, root_identity
 
     app = tmp_path / "workspace" / "app"
     (app / ".github" / "hooks").mkdir(parents=True)
     (app / ".github" / "hooks" / "h.json").write_text("{}", encoding="ascii")
-    pinned = _root_identity(app)
+    pinned = root_identity(app)
     (tmp_path / "workspace").rename(tmp_path / "workspace-moved")
     (tmp_path / "lookalike" / "app" / ".github" / "hooks").mkdir(parents=True)
     (tmp_path / "workspace").symlink_to(tmp_path / "lookalike", target_is_directory=True)
 
-    assert not _absence_proven(app, ".github/hooks/h.json", pinned=pinned)
+    assert not absence_proven(app, ".github/hooks/h.json", pinned=pinned)
     assert (tmp_path / "workspace-moved" / "app" / ".github" / "hooks" / "h.json").is_file()
 
 
 def test_a_hook_gone_from_the_pinned_root_is_proven_absent(tmp_path: Path) -> None:
-    from apm_cli.commands.uninstall.cli import _absence_proven, _no_follow_handles, _root_identity
+    from apm_cli.commands.uninstall.hook_absence import (
+        absence_proven,
+        no_follow_handles,
+        root_identity,
+    )
 
     hooks = tmp_path / ".github" / "hooks"
     hooks.mkdir(parents=True)
 
-    proven = _absence_proven(tmp_path, ".github/hooks/h.json", pinned=_root_identity(tmp_path))
+    proven = absence_proven(tmp_path, ".github/hooks/h.json", pinned=root_identity(tmp_path))
 
-    assert proven is _no_follow_handles()
+    assert proven is no_follow_handles()
     assert not (hooks / "h.json").exists()
