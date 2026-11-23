@@ -245,6 +245,10 @@ def receipts(world: World, *, history: bool = True) -> list[object]:
                 data.pop(key, None)
             if not history:
                 data.pop("history", None)
+            # The checkout-keyed file name is identity; its directory (mcp/ or top) is not:
+            # each receipt reader looks only in its own directory.
+            data["directory"] = path.parent.relative_to(folder).as_posix()
+            data["mode"] = oct(path.lstat().st_mode & 0o7777)
             docs.append(without_identity(data, marker))
     return sorted(docs, key=lambda doc: json.dumps(doc, sort_keys=True))
 
