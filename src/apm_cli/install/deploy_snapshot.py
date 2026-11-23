@@ -111,7 +111,7 @@ class DeployJournal:
         self.root = Path(os.path.abspath(root)) if root is not None else None
         self.store: Path | None = None
         self._units: list[_Unit] = []
-        self._recorded: set[Path] = set()
+        self._recorded: dict[Path, int] = {}
         self._lock = threading.Lock()
 
     @property
@@ -153,7 +153,7 @@ class DeployJournal:
                     return base, candidate.relative_to(anchor).as_posix()
         return "root", str(path)
 
-    def _persist(self, unit: _Unit) -> None:
+    def _persist(self, unit: _Unit, expected: str | None = None) -> None:
         """Write *unit* to the manifest before the install changes its path."""
         if self.root is None:
             return
@@ -170,21 +170,30 @@ class DeployJournal:
                 a for b, a in map(self._relative, unit.absent_ancestors) if b == base and a != "."
             ],
         }
+        # The unit line also opens the first write: what it will leave there.
+        line["expected"] = expected
         if unit.kind == "file" and unit.copy is not None:
             line["hash"] = compute_file_hash(unit.copy)
         if unit.kind == "dir" and unit.copy is not None:
             line["files"] = _tree_hashes(unit.copy)
         self._append_line(line)
 
-    def record(self, path: Path, *, contents: bool = True) -> None:
+    def record(self, path: Path, *, contents: bool = True, expected: str | None = None) -> None:
         """Keep the prior state of *path* the first time it is touched.
 
         With ``contents=False`` (a directory about to be created) only an
         absent path is recorded: creating an existing directory changes nothing.
+        *expected* is the content hash the write will leave (``"absent"``,
+        ``"dir"``, or ``None`` when the writer cannot know it); a write killed
+        before its seal is restored only over those bytes.
         """
         path = Path(os.path.abspath(path))
         with self._lock:
-            if self._covered(path) or path.is_relative_to(self.store_parent):
+            if path.is_relative_to(self.store_parent):
+                return
+            if self._covered(path):
+                # A later write to a journaled path: APM is about to change it.
+                self._event("pending", path, expected)
                 return
             exists = os.path.lexists(path)
             if exists and not contents:
@@ -202,30 +211,49 @@ class DeployJournal:
                 else:
                     shutil.copy2(path, copy)
                     unit = _Unit(path, "file", copy, None, ancestors)
-            self._persist(unit)
+            self._persist(unit, expected)
+            self._recorded[path] = len(self._units)
             self._units.append(unit)
-            self._recorded.add(path)
 
-    def seal(self) -> None:
-        """Record what is at every journaled path now, before a gate can refuse.
+    def _unit_of(self, path: Path) -> tuple[int, str] | None:
+        """``(unit index, path below the unit)`` of the unit that journals *path*."""
+        for candidate in (path, *path.parents):
+            index = self._recorded.get(candidate)
+            if index is not None:
+                rel = path.relative_to(candidate).as_posix()
+                return index, "" if rel == "." else rel
+        return None
 
-        Replay removes or replaces a path only while it still holds what the
-        last seal recorded there, so a file a user writes after a kill is kept.
+    def _event(self, event: str, path: Path, expected: str | None = None) -> None:
+        """Append a write event for *path*: ``pending`` before, ``sealed`` after."""
+        if self.root is None or self.store is None:
+            return
+        found = self._unit_of(path)
+        if found is None:
+            return
+        index, sub = found
+        line: dict[str, Any] = {event: index, "sub": sub}
+        if event == "sealed":
+            line["state"] = _state(path) if not sub else _entry(path)
+        else:
+            line["expected"] = expected
+        self._append_line(line)
+
+    def after_write(self, path: Path) -> None:
+        """Seal what APM just wrote at *path* (the post-write seal, #4863).
+
+        Replay changes a path only while it holds its prior state, nothing,
+        these bytes, or a write APM began and never sealed.
         """
         with self._lock:
-            if self.root is None or self.store is None:
-                return
-            for index, unit in enumerate(self._units):
-                self._append_line({"sealed": index, "state": _state(unit.path)})
+            self._event("sealed", Path(os.path.abspath(path)))
 
-    def mark_commit(self, lockfile_identity: str, *, seal: bool = True) -> None:
-        """Seal, then name the lockfile this install is about to commit.
+    def mark_commit(self, lockfile_identity: str) -> None:
+        """Name the lockfile this install is about to commit, or committed.
 
         A journal killed after that lockfile reached disk recorded a committed
         install: replay settles it instead of rolling the deployment back.
         """
-        if seal:
-            self.seal()
         with self._lock:
             if self.root is not None and self.store is not None:
                 self._append_line({"commit": lockfile_identity})
@@ -311,22 +339,27 @@ def _state(path: Path) -> dict[str, Any]:
     Broader than the ledger's content hashes: an empty directory or a mode a
     user added after a kill changes it, so replay keeps that path.
     """
+    if path.is_dir() and not path.is_symlink():
+        entries = {
+            entry.relative_to(path).as_posix(): _entry(entry) for entry in sorted(path.rglob("*"))
+        }
+        return {"dir": entries, "mode": _mode(path)}
     if path.is_symlink():
         return {"link": os.readlink(path)}
     if path.is_file():
         return {"file": compute_file_hash(path), "mode": _mode(path)}
-    if path.is_dir():
-        entries = {}
-        for entry in sorted(path.rglob("*")):
-            rel = entry.relative_to(path).as_posix()
-            if entry.is_symlink():
-                entries[rel] = f"link:{os.readlink(entry)}"
-            elif entry.is_file():
-                entries[rel] = f"{compute_file_hash(entry)}:{_mode(entry)}"
-            else:
-                entries[rel] = f"dir:{_mode(entry)}"
-        return {"dir": entries, "mode": _mode(path)}
     return {"other": True} if os.path.lexists(path) else {"absent": True}
+
+
+def _entry(path: Path) -> str:
+    """One entry below a journaled directory, as a seal and a fingerprint record it."""
+    if path.is_symlink():
+        return f"link:{os.readlink(path)}"
+    if path.is_file():
+        return f"{compute_file_hash(path)}:{_mode(path)}"
+    if path.is_dir():
+        return f"dir:{_mode(path)}"
+    return "absent" if not os.path.lexists(path) else "other"
 
 
 def _mode(path: Path) -> int:
@@ -390,7 +423,9 @@ class _Replay:
     copy: Path | None
     expected: Mapping[str, str]
     ancestors: tuple[Path, ...]
-    written: dict[str, Any] | None = None
+    # Each written path below the unit ("" for the unit itself) -> its last
+    # write event: ("pending", expected hash) when begun, never sealed, or the sealed state.
+    events: Mapping[str, Any] = field(default_factory=dict)
     # The state replay puts back: the journaled copy's, or nothing.
     prior: dict[str, Any] = field(default_factory=lambda: dict(_ABSENT))
 
@@ -416,9 +451,9 @@ def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
 
 
 def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str | None]:
-    """Split manifest lines into units, each unit's last sealed state and the commit mark."""
+    """Split manifest lines into units, each unit's last write events and the commit mark."""
     units = [line for line in lines if not (isinstance(line, dict) and line.keys() & _MARKS)]
-    seals: dict[int, dict[str, Any]] = {}
+    events: dict[int, dict[str, Any]] = {}
     commit: str | None = None
     for line in lines:
         if not (isinstance(line, dict) and line.keys() & _MARKS):
@@ -428,14 +463,31 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
                 raise ValueError("journal manifest holds a malformed commit mark")
             commit = line["commit"]
             continue
-        index, state = line.get("sealed"), line.get("state")
-        if type(index) is not int or not 0 <= index < len(units) or not isinstance(state, dict):
-            raise ValueError("journal manifest holds a malformed seal")
-        seals[index] = state
-    return units, seals, commit
+        pending = "pending" in line
+        index, sub = line.get("pending" if pending else "sealed"), line.get("sub")
+        state = _pending(line) if pending else line.get("state")
+        if (
+            type(index) is not int
+            or not 0 <= index < len(units)
+            or not isinstance(sub, str)
+            or (sub and PurePosixPath(sub).as_posix() != sub)
+            or ".." in PurePosixPath(sub).parts
+            or not isinstance(state, dict | str | tuple)
+        ):
+            raise ValueError("journal manifest holds a malformed write event")
+        events.setdefault(index, {})[sub] = state
+    return units, events, commit
 
 
-_MARKS = frozenset({"sealed", "commit"})
+def _pending(line: dict[str, Any]) -> tuple[str, str | None]:
+    """A write APM began: ``("pending", <expected content hash or None>)``."""
+    expected = line.get("expected")
+    if expected is not None and not isinstance(expected, str):
+        raise ValueError("journal manifest holds a malformed expected hash")
+    return ("pending", expected)
+
+
+_MARKS = frozenset({"pending", "sealed", "commit"})
 
 
 def _inside(rel: Any, root: Path) -> Path:
@@ -485,7 +537,7 @@ def _validate_unit(
     store: Path,
     bases: _Bases,
     ledger: Mapping[str, str | None],
-    written: Mapping[str, Any] | None = None,
+    events: Mapping[str, Any] | None = None,
 ) -> _Replay:
     """Check one manifest line against the store and the ledger, without applying it.
 
@@ -523,7 +575,7 @@ def _validate_unit(
         try:
             _check_vouched(rel, kind, expected, ledger)
         except _Unproven:
-            if not _shared_config_vouched(rel, path, kind, copy, written, ledger):
+            if not _shared_config_vouched(rel, path, kind, copy, events, ledger):
                 raise
     return _Replay(rel, path, kind, copy, expected, ancestors, prior=_state(copy))
 
@@ -544,14 +596,16 @@ def _shared_config_vouched(
     path: Path,
     kind: str,
     copy: Path,
-    written: Mapping[str, Any] | None,
+    events: Mapping[str, Any] | None,
     ledger: Mapping[str, str | None],
 ) -> bool:
     """A file the ledger never claims, restorable from the config file records (#5009).
 
     It still holds its journaled prior bytes (nothing to undo), or exactly the
-    bytes the interrupted install sealed and the records say APM wrote. An
-    edited file, a missing or tampered baseline, or a link never qualifies.
+    bytes the interrupted install sealed and the records say APM wrote. Other
+    content after a seal is a later write, which :func:`_decide` keeps and
+    names. A sealed write the records do not vouch for (missing or tampered
+    baseline), an unsealed or missing file, or a link never qualifies.
     """
     from apm_cli.integration.config_file_provenance import vouches_for_current_bytes
 
@@ -560,7 +614,12 @@ def _shared_config_vouched(
     current = _state(path)
     if current == _state(copy):
         return True
-    return written is not None and current == written and vouches_for_current_bytes(path)
+    sealed = (events or {}).get("")
+    if not isinstance(sealed, dict) or current == _ABSENT:
+        return False  # a write never sealed, or a missing file: nothing proves it
+    if current == sealed:
+        return vouches_for_current_bytes(path)
+    return True  # a later write: _decide keeps and names it, never replaces it
 
 
 def _check_receipt(rel: str, path: Path, kind: str) -> None:
@@ -684,21 +743,73 @@ _KEEP_CHANGED = "it changed after the interrupted install"
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
     """Split *units* into those to restore and those holding data a user wrote.
 
-    A unit is sealed when it is journaled: its manifest line, and any
-    hash-checked copy, reach the store before its first write. A gate-time
-    seal (:meth:`DeployJournal.seal`) can only keep a path, never force one:
-    a path holding neither its prior state, nothing, nor what the last such
-    seal recorded is a later write (a user's file) and is kept.
+    A unit is restored only while what is there now is APM's: nothing, its
+    prior state, the bytes APM's last write sealed, or a write APM began and
+    never sealed (a kill mid-write; the unit line itself opens the first
+    write). Anything else, such as a file a user edited after the kill, is
+    kept.
     """
     apply: list[_Replay] = []
     kept: list[tuple[str, str]] = []
     for unit in units:
-        held = (_ABSENT, unit.prior, unit.written)
-        if unit.written is not None and _state(unit.path) not in held:
-            kept.append((unit.rel, _KEEP_CHANGED))
-        else:
+        if _holds_apm_state(unit):
             apply.append(unit)
+        else:
+            kept.append((unit.rel, _KEEP_CHANGED))
     return apply, kept
+
+
+def _holds_apm_state(unit: _Replay) -> bool:
+    """Whether the path holds only what APM put there (see :func:`_decide`)."""
+    current = _state(unit.path)
+    if current in (_ABSENT, unit.prior):
+        return True
+    whole = unit.events.get("")
+    if isinstance(whole, tuple):
+        if not _matches_expected(current, whole[1]):
+            return False
+        if "dir" not in current or whole[1] is None:
+            return True
+    elif whole == current:
+        return True
+    if "dir" not in current:
+        return False
+    return _dir_holds_apm_state(unit, current["dir"], whole)
+
+
+def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
+    """A write APM began and never sealed left *current* (``None``: cannot tell)."""
+    if expected is None:
+        return True
+    if expected == "dir":
+        return "dir" in current
+    return current.get("file") == expected
+
+
+def _dir_holds_apm_state(unit: _Replay, entries: Mapping[str, str], whole: Any) -> bool:
+    """Every entry below a directory unit is its prior entry or one APM wrote."""
+    prior = unit.prior.get("dir", {})
+    sealed = whole.get("dir", {}) if isinstance(whole, dict) else {}
+    accounted = set()
+    for rel, fingerprint in entries.items():
+        event = unit.events.get(rel)
+        if fingerprint in (prior.get(rel), sealed.get(rel), event) or (
+            isinstance(event, tuple) and _entry_matches_expected(fingerprint, event[1])
+        ):
+            accounted.add(rel)
+    # A directory is APM's when APM wrote something below it.
+    for rel, fingerprint in entries.items():
+        if fingerprint.startswith("dir:") and any(a.startswith(f"{rel}/") for a in accounted):
+            accounted.add(rel)
+    return accounted == set(entries)
+
+
+def _entry_matches_expected(fingerprint: str, expected: str | None) -> bool:
+    if expected is None:
+        return True
+    if expected == "dir":
+        return fingerprint.startswith("dir:")
+    return fingerprint.rsplit(":", 1)[0] == expected
 
 
 def _replay_store(
@@ -758,7 +869,8 @@ def _validated(
         except (TypeError, ValueError, AttributeError, KeyError):
             issues.append((str(store), "journal manifest holds a malformed unit"))
             continue
-        units.append(replace(unit, written=seals.get(index)))
+        events = {"": _pending(line), **seals.get(index, {})}
+        units.append(replace(unit, events=events))
     return units, issues
 
 

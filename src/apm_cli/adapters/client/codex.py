@@ -197,11 +197,12 @@ class CodexClientAdapter(MCPClientAdapter):
         serialized = tomlkit.dumps(config)
         tomlkit.parse(serialized)
         config_path = Path(self.get_config_path())
-        from .base import journal_config_write
+        from .base import journal_config_write, journal_config_written
 
         journal_config_write(config_path)
         config_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(config_path, serialized, new_file_mode=0o600)
+        journal_config_written(config_path)
         _log.debug("Codex config written to %s", config_path)
 
     def migrate_legacy_managed_servers(self, managed_names: set[str]) -> set[str]:

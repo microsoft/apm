@@ -12,8 +12,9 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
 * ``settle+kill``: exit when the journal is discarded, right after the
   lockfile reached disk, so the journal records a committed install.
 * ``deploy+kill``: exit mid-deploy, before the next journal record once
-  ``APM_TEST_DEPLOY_KILL_AFTER`` paths were journaled and written, before
-  any gate seals the journal.
+  ``APM_TEST_DEPLOY_KILL_AFTER`` paths were journaled, written and sealed.
+* ``unsealed+kill``: exit once the ``APM_TEST_DEPLOY_KILL_AFTER``-th journaled
+  path is written, before its post-write seal.
 
 Python runs only the first ``sitecustomize`` on its path, so this one runs
 the next one (the isolated environment's network guard) before anything else.
@@ -53,6 +54,16 @@ if _FAULT:
             return _record(self, path, **kwargs)
 
         deploy_snapshot.DeployJournal.record = _record_or_kill
+    elif "unsealed" in faults:
+        _after = int(os.environ["APM_TEST_DEPLOY_KILL_AFTER"])
+        _seal = deploy_snapshot.DeployJournal.after_write
+
+        def _seal_or_kill(self, path):
+            if len(self.units) >= _after:
+                os._exit(_KILLED_EXIT)
+            return _seal(self, path)
+
+        deploy_snapshot.DeployJournal.after_write = _seal_or_kill
     else:
         deploy_snapshot.DeployJournal.restore = _killed
 

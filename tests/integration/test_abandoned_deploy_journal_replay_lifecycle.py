@@ -387,7 +387,6 @@ def test_a_kill_mid_deploy_restores_every_journaled_path(
     journal = _journal(_abandoned(chain))
     written = [line for line in journal[1:] if "kind" in line and line["base"] == "root"]
     assert written, journal
-    assert not any("sealed" in line for line in journal), journal
     _write_package(chain, revision="v1", description="agent helper", extra=False)
 
     result = chain.run("install", *_SCAN.args)
@@ -509,19 +508,98 @@ def test_an_mcp_install_replays_a_killed_install_first(
     assert not any(path.endswith("extra-agent.md") for path in after), after
 
 
-@pytest.mark.parametrize("damage", ["edited-file", "missing-baseline"])
-def test_a_shared_config_the_records_do_not_vouch_for_is_kept_and_reported(
-    tmp_path: Path, apm_binary_path: Path, damage: str
+def _first_written(chain: Chain, journal: list[dict]) -> tuple[dict, Path]:
+    """The first deploy-root unit and a file at or below it the killed install wrote."""
+    unit = next(line for line in journal[1:] if line.get("base") == "root")
+    path = chain.project / unit["path"]
+    if path.is_dir():
+        path = next(p for p in sorted(path.rglob("*")) if p.is_file())
+    assert path.is_file(), unit
+    return unit, path
+
+
+def test_a_file_a_user_edits_after_a_mid_deploy_kill_is_kept(
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
+    """Post-write seals: the user's edit is kept and named; the other write is restored."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    before = _tree_state(chain.project)
+    _write_package(chain, revision="v2", description="agent helper v2", extra=True)
+    _kill_mid_refusal(chain, "deploy+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_AFTER="2")
+    journal = _journal(_abandoned(chain))
+    unit, edited = _first_written(chain, journal)
+    edited.write_text("# my edit after the crash\n", encoding="utf-8")
+    others = [line for line in journal[1:] if "kind" in line and line is not unit]
+    assert others, journal
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert f"Kept {unit['path']}: it changed after the interrupted install" in _text(result), (
+        _evidence(result)
+    )
+    assert edited.read_text(encoding="utf-8") == "# my edit after the crash\n"
+    for other in others:
+        rel = other["path"]
+        if other["base"] == "root" and rel in before:
+            assert _tree_state(chain.project).get(rel) == before[rel], rel
+    assert _text(result).isascii(), _evidence(result)
+
+
+def test_a_write_killed_before_its_seal_is_restored(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A path written but not yet sealed holds APM's expected bytes: it is restored."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    before = _tree_state(chain.project)
+    _write_package(chain, revision="v2", description="agent helper v2", extra=True)
+    _kill_mid_refusal(chain, "unsealed+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_AFTER="3")
+    journal = _journal(_abandoned(chain))
+    units = [line for line in journal[1:] if "kind" in line]
+    assert len(units) == 3, journal
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert "Kept" not in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+
+
+def test_a_shared_config_without_its_baseline_is_kept_and_reported(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The killed install's write is not vouched by the records: nothing is applied."""
     chain, _before = _killed_shared_config(tmp_path, apm_binary_path)
     store = _abandoned(chain)
     settings = chain.project / _SETTINGS
-    if damage == "edited-file":
-        settings.write_text(settings.read_text(encoding="utf-8") + "\n", encoding="utf-8")
-    else:
-        records = Path(chain.env["APM_HOME"]) / "deployment-receipts" / "config-files"
-        shutil.rmtree(records)
+    shutil.rmtree(Path(chain.env["APM_HOME"]) / "deployment-receipts" / "config-files")
     held = settings.read_bytes()
 
     _assert_kept_and_reported(chain, _SHARED_GATE, store, _SETTINGS)
     assert settings.read_bytes() == held
+
+
+def test_a_shared_config_a_user_edits_after_the_kill_is_kept(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The user's edit is kept and named; the sidecar the killed install changed is restored."""
+    chain, before = _killed_shared_config(tmp_path, apm_binary_path)
+    settings = chain.project / _SETTINGS
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["permissions"] = {"allow": ["Bash(ls)"]}  # the user's own setting
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert f"Kept {_SETTINGS}: it changed after the interrupted install" in _text(result), (
+        _evidence(result)
+    )
+    after = json.loads(settings.read_text(encoding="utf-8"))
+    assert after["permissions"] == {"allow": ["Bash(ls)"]}, after
+    assert _tree_state(chain.project)[_SIDECAR] == before[_SIDECAR], _evidence(result)
+    assert _text(result).isascii(), _evidence(result)

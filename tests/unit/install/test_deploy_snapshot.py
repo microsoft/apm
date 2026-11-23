@@ -175,7 +175,7 @@ def test_the_next_install_replays_only_its_own_abandoned_journals(
         journal.record(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"deployed by a killed install\n")
-        journal.seal()
+        journal.after_write(path)
     retained = store_parent / "retained-needed"
     retained.mkdir()
     (retained / "0").write_bytes(b"prior\n")
@@ -229,7 +229,7 @@ def _journaled_receipt(apm_home: Path, project: Path) -> tuple[Path, Path]:
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(receipt)
     receipt.write_bytes(b"killed\n")
-    journal.seal()
+    journal.after_write(receipt)
     assert journal.store is not None
     return receipt, journal.store
 
@@ -382,7 +382,7 @@ def _killed_journal(apm_home: Path, project: Path, path: Path, *, seal: bool = T
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"killed\n")
     if seal:
-        journal.seal()
+        journal.after_write(path)
     assert journal.store is not None
     return journal.store
 
@@ -420,9 +420,10 @@ def test_a_receipts_directory_the_killed_install_created_is_removed(
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(receipts, contents=False)
     receipts.mkdir(parents=True)
+    journal.after_write(receipts)
     journal.record(receipts / "r.json")
     (receipts / "r.json").write_bytes(b"killed\n")
-    journal.seal()
+    journal.after_write(receipts / "r.json")
 
     outcome = _replay(apm_home, project)
 
@@ -477,7 +478,7 @@ def test_a_directory_restores_only_when_the_ledger_records_all_its_files(
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(skill)
     (skill / "SKILL.md").write_bytes(b"killed\n")
-    journal.seal()
+    journal.after_write(skill / "SKILL.md")
     ledger = {".kiro/skills/s/SKILL.md": digest, ".kiro/skills/s/extra.md": digest}
 
     with pytest.raises(JournalReplayError) as kept:
@@ -614,7 +615,7 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
     journal.record(hook)
     hook.write_bytes(b"#!/bin/sh\necho killed\n")
     hook.chmod(0o644)
-    journal.seal()
+    journal.after_write(hook)
 
     restored = replay_abandoned_journals(
         apm_home / "install-snapshots", project, lambda: ledger, receipts=_receipts(apm_home)
@@ -795,7 +796,7 @@ def _apm_killed_write(apm_home: Path, project: Path, path: Path) -> Path:
     journal.record(path)
     with recorded_config_write(path, manifest_root=project):
         path.write_bytes(_APM_MCP)
-    journal.seal()
+    journal.after_write(path)
     assert journal.store is not None
     return journal.store
 
@@ -826,8 +827,7 @@ def test_a_tampered_seal_over_an_edited_mcp_config_keeps_the_journal(
     """A seal rewritten to match the user's later edit is not APM's write: kept."""
     import json
 
-    from apm_cli.install.deploy_snapshot import JournalReplayError
-    from apm_cli.utils.content_hash import compute_file_hash
+    from apm_cli.install.deploy_snapshot import JournalReplayError, _state
 
     project = tmp_path / "project"
     config = _user_mcp(project)
@@ -838,7 +838,7 @@ def test_a_tampered_seal_over_an_edited_mcp_config_keeps_the_journal(
     lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
     for line in lines:
         if "sealed" in line:
-            line["state"] = {"file": compute_file_hash(config)}
+            line["state"] = _state(config)
     manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
 
     with pytest.raises(JournalReplayError) as kept:
@@ -848,28 +848,42 @@ def test_a_tampered_seal_over_an_edited_mcp_config_keeps_the_journal(
     assert config.read_bytes() == edited
 
 
-@pytest.mark.parametrize("special", ["symlink", "fifo"])
-def test_a_shared_config_replaced_by_a_link_or_special_file_is_kept(
-    tmp_path: Path, apm_home: Path, special: str
+def test_a_shared_config_replaced_by_a_link_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
 ) -> None:
-    """Checklist paths: a link (whatever it points to) or a FIFO is never restored over."""
+    """Checklist path: a link (whatever it points to) is never restored over."""
     from apm_cli.install.deploy_snapshot import JournalReplayError
 
-    if special == "fifo" and not hasattr(os, "mkfifo"):
-        pytest.skip("needs FIFO support")
     project = tmp_path / "project"
     config = _user_mcp(project)
     _apm_killed_write(apm_home, project, config)
     outside = tmp_path / "outside.json"
     outside.write_bytes(_APM_MCP)
     config.unlink()
-    if special == "symlink":
+    try:
         config.symlink_to(outside)
-    else:
-        os.mkfifo(config)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
 
     with pytest.raises(JournalReplayError):
         _replay(apm_home, project)
 
-    assert config.is_symlink() if special == "symlink" else not config.is_file()
+    assert config.is_symlink()
     assert outside.read_bytes() == _APM_MCP
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFO support")
+def test_a_shared_config_replaced_by_a_fifo_is_kept_and_named(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Checklist path: a FIFO swapped in after the kill is a later write, kept unopened."""
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    _apm_killed_write(apm_home, project, config)
+    config.unlink()
+    os.mkfifo(config)
+
+    outcome = _replay(apm_home, project)
+
+    assert [rel for rel, _ in outcome.kept] == [".mcp.json"]
+    assert config.exists() and not config.is_file()

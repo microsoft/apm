@@ -379,7 +379,7 @@ class InstallTransaction:
             # The pipeline's write root; replay matches it to the workspace root.
             root = getattr(ctx, "project_root", None) or _deploy_root_of(self.apm_modules_dir)
             self._deploy_journal = DeployJournal(store_parent, root=root)
-            write_seam.listen(self._record_deploy_write)
+            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)
 
     def _mark_deploy_commit(self) -> None:
         """Seal the journal and name the staged lockfile it is about to commit."""
@@ -392,17 +392,17 @@ class InstallTransaction:
         if journal is not None and text is not None:
             journal.mark_commit(lockfile_identity(text))
 
-    def seal_deploy_writes(self) -> None:
-        """Seal what the journaled paths hold now, before a gate judges deployed bytes (#4863)."""
-        journal = self._deploy_journal
-        if journal is not None:
-            journal.seal()
-
-    def _record_deploy_write(self, path: Path, contents: bool) -> None:
+    def _record_deploy_write(self, path: Path, contents: bool, expected: str | None = None) -> None:
         """Keep *path*'s prior state the first time this attempt touches it."""
         journal = self._deploy_journal
         if journal is not None:
-            journal.record(path, contents=contents)
+            journal.record(path, contents=contents, expected=expected)
+
+    def _seal_deploy_write(self, path: Path) -> None:
+        """Seal what this attempt just wrote at *path* (#4863)."""
+        journal = self._deploy_journal
+        if journal is not None:
+            journal.after_write(path)
 
     def undo_lockfile_migration_on_rollback(self, apm_dir: Path) -> None:
         """A rollback moves the ``apm.lock.yaml`` just migrated back to ``apm.lock`` (#4826)."""
@@ -503,7 +503,7 @@ class InstallTransaction:
         if journal.store is not None:
             committed = _committed_lockfile(self.apm_modules_dir.parent)
             if committed is not None:
-                journal.mark_commit(committed, seal=False)
+                journal.mark_commit(committed)
         journal.discard()
 
     def _restore_deploy_targets(self) -> None:
