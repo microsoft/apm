@@ -521,28 +521,6 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def _route_manifest(config: ReplayConfig, root: Path, lock: Any, targets: list) -> Any:
-    """The native route choices the replay decides by (#4995).
-
-    Only the root manifest's route keys are read; an invalid ``native`` or
-    ``native_plugins`` value raises (fail closed), other manifest problems
-    leave routes automatic. A previous-lock replay keeps each dependency on
-    the route that lock rendered it with.
-    """
-    from apm_cli.native_plugins.route import load_route_manifest, locked_route_manifest
-
-    manifest = load_route_manifest(manifest_file(root))
-    if not config.route_from_lock:
-        return manifest
-    from apm_cli.install.target_governance import install_governance, is_governed_by_install
-    from apm_cli.native_plugins.scopes import CLAUDE, COPILOT
-
-    prefixes, schemes = install_governance([t for t in targets if t.name in (CLAUDE, COPILOT)])
-    return locked_route_manifest(
-        lock, manifest, lambda path: is_governed_by_install(path, prefixes, schemes)
-    )
-
-
 def _dependency_package_info(lock_dep: Any, install_path: Path, deployment_modules_dir: Path):
     """A locked dependency's PackageInfo, deploying from its live install path."""
     package_info = _build_package_info(lock_dep, install_path)
@@ -565,7 +543,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
+    from apm_cli.install.audit_target_roots import (
+        replay_deployment_frame,
+        replay_route_manifest,
+        replay_target,
+    )
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import (
@@ -624,7 +606,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
-    route_manifest = _route_manifest(config, self_source_root, lock, live_targets)
+    route_manifest = replay_route_manifest(
+        manifest_file(self_source_root), lock, live_targets, from_lock=config.route_from_lock
+    )
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None

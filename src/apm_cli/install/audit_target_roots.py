@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from apm_cli.constants import APM_MODULES_DIR
 from apm_cli.core.scope import InstallScope, get_deploy_root, get_modules_dir
@@ -142,3 +143,26 @@ def claims_for_root(
         elif not absolute_only:
             rebased[path] = owner
     return rebased
+
+
+def replay_route_manifest(
+    manifest_path: Path, lock: Any, targets: list[TargetProfile], *, from_lock: bool
+) -> Any:
+    """The native route choices a replay decides by (#4995).
+
+    Only the root manifest's route keys are read; an invalid ``native`` or
+    ``native_plugins`` value raises (fail closed), other manifest problems
+    leave routes automatic. *from_lock* (cleanup's previous-lock replay)
+    keeps each dependency on the route that lock rendered it with.
+    """
+    from apm_cli.install.target_governance import install_governance, is_governed_by_install
+    from apm_cli.native_plugins.route import load_route_manifest, locked_route_manifest
+    from apm_cli.native_plugins.scopes import CLAUDE, COPILOT
+
+    manifest = load_route_manifest(manifest_path)
+    if not from_lock:
+        return manifest
+    prefixes, schemes = install_governance([t for t in targets if t.name in (CLAUDE, COPILOT)])
+    return locked_route_manifest(
+        lock, manifest, lambda path: is_governed_by_install(path, prefixes, schemes)
+    )
