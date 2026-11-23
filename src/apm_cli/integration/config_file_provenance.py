@@ -24,9 +24,9 @@ import json
 import logging
 import os
 import stat
-import unicodedata
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -37,6 +37,9 @@ _log = logging.getLogger(__name__)
 _VERSION = 1
 _VCS_MARKERS = (".git", ".hg", ".svn")
 _LOCKFILE = "apm.lock.yaml"
+
+# Set while a replay renders into a private scratch tree: not a deployment.
+_replaying: ContextVar[bool] = ContextVar("apm_config_provenance_replay", default=False)
 
 # Per process: whether an installation had its own records when first seen, so
 # every write of one install classifies unrecorded files alike.
@@ -53,13 +56,14 @@ class Origin(Enum):
 
 
 def config_file_key(path: str | os.PathLike[str]) -> str:
-    """The record key of *path*: the resolved absolute file, NFC-normalized.
+    """The record key of *path*: the resolved absolute file.
 
     A missing file resolves through its parent; ``..`` and linked directories
-    collapse into the one file they name.
+    collapse into the one file they name. Spellings the file system may keep
+    apart (NFC and NFD, case) stay distinct keys; :meth:`_Store.lookup`
+    matches them only when the file system says they are one file.
     """
-    resolved = Path(os.path.abspath(path)).resolve(strict=False)
-    return unicodedata.normalize("NFC", resolved.as_posix())
+    return Path(os.path.abspath(path)).resolve(strict=False).as_posix()
 
 
 def installation_root(project_root: Path, user_scope: bool) -> Path:
@@ -69,13 +73,24 @@ def installation_root(project_root: Path, user_scope: bool) -> Path:
     return get_apm_dir(InstallScope.USER) if user_scope else project_root
 
 
+@contextmanager
+def replay_render() -> Iterator[None]:
+    """Record nothing while a replay (audit, locked render) writes a scratch tree."""
+    token = _replaying.set(True)
+    try:
+        yield
+    finally:
+        _replaying.reset(token)
+
+
 def _store_path() -> Path:
     from apm_cli.core.deployment_ledger import materialization_evidence_paths
     from apm_cli.core.scope import InstallScope
 
-    # The deployment owner names the receipts directory; one file there serves every root.
+    # The deployment owner names the receipts directory; a subdirectory of it (like
+    # its MCP evidence) keeps the receipts beside it unchanged. One file, every root.
     receipt, _ = materialization_evidence_paths(Path(os.sep), InstallScope.USER)
-    return receipt.parent / "config-files.json"
+    return receipt.parent / "config-files" / "records.json"
 
 
 def _digest(data: bytes) -> str:
@@ -92,11 +107,6 @@ def _regular(path: Path) -> bool:
 def _regular_bytes(path: Path) -> bytes | None:
     """The bytes of *path* when it is a regular file (never opens a FIFO or a link)."""
     return path.read_bytes() if _regular(path) else None
-
-
-def _present(key: str) -> bool:
-    """Whether the file a key names exists, spelled NFC or NFD (a Linux NFD directory)."""
-    return any(os.path.lexists(unicodedata.normalize(form, key)) for form in ("NFC", "NFD"))
 
 
 class _UnreadableStore(ValueError):
@@ -153,10 +163,18 @@ class _Store:
         return key, None
 
     def local(self) -> bool:
-        """(c): no ancestor of the store is a VCS working tree."""
-        directory = self.path.parent.absolute()
+        """(c): the store is reached through no link below ``$APM_HOME`` and no ancestor
+        of it, as spelled or as resolved, is a VCS working tree."""
+        from apm_cli.core.scope import get_apm_home
+        from apm_cli.utils.path_security import has_symlink_component
+
+        if has_symlink_component(get_apm_home(), self.path):
+            return False
+        spelled = self.path.parent.absolute()
+        directories = {spelled, spelled.resolve()}
         return not any(
             os.path.lexists(parent / marker)
+            for directory in directories
             for parent in (directory, *directory.parents)
             for marker in _VCS_MARKERS
         )
@@ -164,7 +182,7 @@ class _Store:
     def save(self) -> None:
         from apm_cli.integration.write_seam import atomic_write_text, mkdir
 
-        live = {key: row for key, row in self.files.items() if _present(key)}
+        live = {key: row for key, row in self.files.items() if os.path.lexists(key)}
         data = {
             "version": _VERSION,
             "installations": sorted(self.installations),
@@ -253,6 +271,10 @@ def recorded_config_write(
     never recorded. Recording failures never fail the write.
     """
     path = Path(path)
+    if _replaying.get():
+        # A replay render into private scratch is not a deployment: nothing to record.
+        yield
+        return
     linked = os.path.lexists(path) and not _regular(path)
     try:
         before = None if linked else _regular_bytes(path)
@@ -303,8 +325,16 @@ def delete_emptied_config(
     origin = _origin(row)
     if row is not None and origin is None:
         return False  # a record APM cannot read proves nothing either way
-    if origin is Origin.PREEXISTING or (origin is Origin.CREATED and not store.local()):
+    if origin is Origin.PREEXISTING:
         return False
+    if origin is Origin.CREATED:
+        try:
+            current = _regular_bytes(path)
+        except OSError:
+            return False
+        # (b) the bytes APM last wrote, so a replaced file is never taken; (c) local.
+        if current is None or row.get("hash") != _digest(current) or not store.local():
+            return False
     unlink(path)
     if row is not None:
         store.files.pop(key, None)

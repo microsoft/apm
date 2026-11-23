@@ -212,16 +212,44 @@ def test_a_fifo_at_the_config_path_is_never_removed(tmp_path, apm_home) -> None:
     assert config.exists() and not config.is_file()
 
 
-def test_nfc_and_nfd_spellings_name_one_record(tmp_path, apm_home) -> None:
-    """(4) A profile directory spelled NFC or NFD is one file on macOS: one key."""
-    nfc = unicodedata.normalize("NFC", "caf\u00e9")
-    nfd = unicodedata.normalize("NFD", nfc)
-    assert nfc != nfd
+def _nfc_nfd(tmp_path: Path) -> tuple[Path, Path, bool]:
+    """Both spellings of one directory name, and whether the file system aliases them."""
+    nfc = tmp_path / unicodedata.normalize("NFC", "caf\u00e9")
+    nfd = tmp_path / unicodedata.normalize("NFD", "caf\u00e9")
+    nfc.mkdir()
+    return nfc, nfd, nfd.exists()
 
-    assert config_file_key(tmp_path / nfd / "x.json") == config_file_key(tmp_path / nfc / "x.json")
-    _apm_writes(tmp_path / nfd / "x.json", _WITH_ENTRY)
-    store = json.loads((apm_home / "deployment-receipts" / "config-files.json").read_text("utf-8"))
-    assert config_file_key(tmp_path / nfc / "x.json") in store["files"]
+
+def test_nfc_and_nfd_directories_that_are_distinct_keep_independent_records(
+    tmp_path, apm_home
+) -> None:
+    """(4) On a normalization-sensitive file system (Linux) the two spellings are two
+    files: APM's record of one never speaks for the user's file in the other."""
+    nfc, nfd, aliased = _nfc_nfd(tmp_path)
+    if aliased:
+        pytest.skip("normalization-insensitive file system: the spellings are one file")
+    nfd.mkdir()
+    _apm_writes(nfc / "x.json", _WITH_ENTRY)
+    (nfd / "x.json").write_text(_SKELETON, encoding="utf-8")  # the user's own file
+    _apm_writes(nfd / "x.json", _WITH_ENTRY, manifest_root=tmp_path)
+
+    assert config_file_key(nfc / "x.json") != config_file_key(nfd / "x.json")
+    assert config_file_origin(nfc / "x.json") is Origin.CREATED
+    assert config_file_origin(nfd / "x.json") is Origin.PREEXISTING
+    assert _apm_empties(nfd / "x.json", root=tmp_path) is False
+    assert (nfd / "x.json").is_file()
+
+
+def test_an_nfd_spelling_finds_the_record_on_a_normalizing_file_system(tmp_path, apm_home) -> None:
+    """(4) On macOS the NFD spelling of a profile directory is the same file."""
+    nfc, nfd, aliased = _nfc_nfd(tmp_path)
+    if not aliased:
+        pytest.skip("normalization-sensitive file system: the spellings are two files")
+    _apm_writes(nfc / "x.json", _WITH_ENTRY)
+
+    assert config_file_origin(nfd / "x.json") is Origin.CREATED
+    assert _apm_empties(nfd / "x.json", root=tmp_path) is True
+    assert not (nfc / "x.json").exists()
 
 
 def _case_insensitive(directory: Path) -> bool:
@@ -267,7 +295,7 @@ def test_a_tampered_record_with_a_relative_or_traversing_path_is_ignored(
     config.parent.mkdir(parents=True)
     config.write_text(_SKELETON, encoding="utf-8")
     _apm_writes(config, _WITH_ENTRY, manifest_root=project)  # recorded as the user's
-    store = apm_home / "deployment-receipts" / "config-files.json"
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
     data = json.loads(store.read_text(encoding="utf-8"))
     created = {"origin": "created"}
     data["files"] = {
@@ -286,7 +314,48 @@ def test_a_tampered_record_with_a_relative_or_traversing_path_is_ignored(
 def test_an_unreadable_record_store_keeps_every_file(tmp_path, apm_home) -> None:
     config = tmp_path / "project" / ".mcp.json"
     _apm_writes(config, _WITH_ENTRY)
-    (apm_home / "deployment-receipts" / "config-files.json").write_text("{", encoding="utf-8")
+    (apm_home / "deployment-receipts" / "config-files" / "records.json").write_text(
+        "{", encoding="utf-8"
+    )
 
     assert _apm_empties(config, root=tmp_path / "project") is False
     assert config.is_file()
+
+
+def test_a_record_store_linked_into_a_vcs_tree_never_deletes(tmp_path, apm_home) -> None:
+    """(c): a receipts directory that links into a checkout is not local evidence."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "receipts").mkdir()
+    apm_home.mkdir(parents=True)
+    (apm_home / "deployment-receipts").symlink_to(checkout / "receipts", target_is_directory=True)
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+
+    assert _apm_empties(config, root=tmp_path / "project") is False
+    assert config.is_file()
+
+
+def test_a_created_file_replaced_with_other_bytes_is_kept(tmp_path, apm_home) -> None:
+    """(b): the record proves APM's bytes only; a file the user replaced (same entries,
+    other bytes) is no longer the file APM created."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    config.write_text(json.dumps(json.loads(_WITH_ENTRY)), encoding="utf-8")
+
+    assert _apm_empties(config, root=project) is False
+    assert config.is_file()
+
+
+def test_a_scratch_render_records_nothing(tmp_path, apm_home) -> None:
+    """Audit and cleanup replays render into private scratch: no durable record."""
+    from apm_cli.integration.config_file_provenance import replay_render
+
+    config = tmp_path / "scratch" / ".mcp.json"
+    with replay_render():
+        _apm_writes(config, _WITH_ENTRY)
+
+    assert config.is_file()
+    assert not (apm_home / "deployment-receipts" / "config-files").exists()
+    assert config_file_origin(config) is None

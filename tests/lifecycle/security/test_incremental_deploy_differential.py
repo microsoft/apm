@@ -286,7 +286,9 @@ def test_a_pre_provenance_install_still_removes_the_config_file_apm_emptied(
     converge(world, spec.start)
     assert "p-exec-mcp" in json.loads(config.read_text(encoding="utf-8"))["mcpServers"]
     # What an older APM left on this machine: no record of the files it created.
-    (world.apm_home / "deployment-receipts" / "config-files.json").unlink(missing_ok=True)
+    (world.apm_home / "deployment-receipts" / "config-files" / "records.json").unlink(
+        missing_ok=True
+    )
 
     spec.apply(world)
     result = _install(world)
