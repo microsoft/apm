@@ -342,12 +342,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         logger,
     )
 
-    from apm_cli.install.diff_apply import package_body
-
-    _body = package_body(package_name)
-
     def _log_integration(msg):
-        _body.append(msg)
         if logger:
             logger.tree_item(msg)
 

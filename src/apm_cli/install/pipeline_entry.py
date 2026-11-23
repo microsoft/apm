@@ -10,12 +10,10 @@ resolution, policy gate and commit gate, then stops before the first write;
 from __future__ import annotations
 
 import contextlib
-import functools
 import os
 import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.models.dependency.reference import DependencyReference
@@ -229,32 +227,3 @@ def preview_install(ctx: Any, *, run_gates: bool) -> InstallResult:
             ),
         ),
     )
-
-
-def stateless_noop(command: Any) -> Any:
-    """Record what a full ``apm install`` deployed for the locked fast path.
-
-    The fast path itself runs before this command is imported
-    (install/fast_entry.py); this wrapper only harvests a successful full run.
-    """
-
-    @functools.wraps(command)
-    def install(*args: Any, **kwargs: Any) -> Any:
-        import click
-
-        from apm_cli.install import diff_apply
-
-        if kwargs.get("root") or kwargs.get("global_"):
-            return command(*args, **kwargs)  # the fast path serves only the cwd project
-        root = Path.cwd()
-        before = diff_apply.snapshot(root)
-        try:
-            result = command(*args, **kwargs)
-        except click.exceptions.Exit as done:
-            if done.exit_code == 0:
-                diff_apply.harvest(root, before)
-            raise
-        diff_apply.harvest(root, before)
-        return result
-
-    return install

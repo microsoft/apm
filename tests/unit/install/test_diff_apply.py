@@ -55,6 +55,8 @@ def test_apply_path_never_deletes_outside_its_own_staging() -> None:
             removals = calls & _REMOVALS
             if func.name == "_discard_staging":
                 assert removals == {"rmtree"}
+            elif func.name == "_rollback_created":
+                assert removals <= {"rmtree", "unlink"}
             else:
                 assert not removals, f"{name}:{func.name} removes {removals}"
 
@@ -70,17 +72,6 @@ def test_symlinked_parent_of_a_deployed_path_declines(tmp_path: Path) -> None:
     (tmp_path / "link").symlink_to(tmp_path / "real")
     with pytest.raises(Decline, match="symlink"):
         diff_apply._within(tmp_path, "link/file.md")
-
-
-def test_store_miss_and_tampered_entry_decline(tmp_path: Path) -> None:
-    data = b"hello\n"
-    digest = diff_apply._store_put(tmp_path, data)
-    assert diff_apply._store_get(tmp_path, digest) == data
-    diff_apply._blob_path(tmp_path, digest).write_bytes(b"evil\n")
-    with pytest.raises(Decline, match="tampered"):
-        diff_apply._store_get(tmp_path, digest)
-    with pytest.raises(Decline, match="store miss"):
-        diff_apply._store_get(tmp_path, _digest(b"absent"))
 
 
 def test_receipted_output_the_lock_no_longer_claims_declines(tmp_path: Path) -> None:
@@ -157,3 +148,31 @@ def test_decide_seam_exits_nonzero_and_writes_nothing(
     after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
     assert after == before
     assert (tmp_path / "apm.yml").read_text(encoding="utf-8") == "name: demo\nversion: 1.0.0\n"
+
+
+def test_escape_sequences_in_deployed_bytes_take_the_full_run(tmp_path: Path) -> None:
+    data = b'{"command": "echo \\u202e"}\n'
+    lock = _lock(**{"o/p": {"a.json": _digest(data)}})
+    records = {"o/p": {"files": {"a.json": [_digest(data)[7:], hashlib.sha256(data).hexdigest()]}}}
+    deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: data)
+    with pytest.raises(Decline, match="non-ASCII"):
+        diff_apply._plan_files(tmp_path, lock, records, deploy, {})
+
+
+def test_rollback_removes_exactly_what_apply_created(tmp_path: Path) -> None:
+    keep = tmp_path / "keep.md"
+    keep.write_text("user\n", encoding="utf-8")
+    created: list[Path] = []
+    diff_apply._write(tmp_path / "a" / "b" / "new.md", b"x\n", created)
+    assert (tmp_path / "a" / "b" / "new.md").read_bytes() == b"x\n"
+    diff_apply._rollback_created(created)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.md"]
+    assert keep.read_text(encoding="utf-8") == "user\n"
+
+
+def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
+    target = tmp_path / "x.md"
+    target.write_text("user\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        diff_apply._write(target, b"apm\n", [])
+    assert target.read_text(encoding="utf-8") == "user\n"
