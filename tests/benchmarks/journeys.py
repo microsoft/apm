@@ -10,7 +10,11 @@ markdown: wall p50/p90, requests, round trips and connects per command, the
 
 Fixtures: ``tree-10``, ``tree-50``, ``tree-200`` (scaling curve),
 ``monorepo-4`` (several ``apm.yml`` roots) and ``real`` (curated public
-packages on github.com, real network). Offline fixtures are served by a local
+packages on github.com, real network). Enterprise shapes: ``tree-N-multi``
+(packages spread over GitHub, GHE Cloud, GitLab and Azure DevOps),
+``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
+suffix on any offline fixture (the project's git remote points at an org
+whose blocking policy is served, so discovery and enforcement run). Offline fixtures are served by a local
 mirror whose RTT is injected per round trip (``--rtt 0,30,100``).
 
 Examples::
@@ -60,8 +64,9 @@ from tests.fixtures.perf import (  # noqa: E402
     serve_offline,
 )
 from tests.fixtures.perf.generator import consumer_manifest, remove_tree, write_lf  # noqa: E402
+from tests.fixtures.perf.offline import POLICY_ORG  # noqa: E402
 
-LOCAL_JOURNEYS = ("compile", "audit", "pack", "install-bundle")
+LOCAL_JOURNEYS = ("compile", "audit", "audit-ci", "pack", "install-bundle")
 NETWORK_JOURNEYS = (
     "install-cold",
     "install-warm",
@@ -73,6 +78,8 @@ NETWORK_JOURNEYS = (
     "install-global-warm",
     "update",
     "uninstall",
+    "outdated",
+    "prune",
 )
 BOOT_JOURNEYS = ("boot-version", "boot-help")
 ALL_JOURNEYS = BOOT_JOURNEYS + NETWORK_JOURNEYS + LOCAL_JOURNEYS
@@ -115,9 +122,25 @@ class Fixture:
     trees: tuple = ()
     real: bool = False
     stats: dict = field(default_factory=dict)
+    policy: bool = False
+
+
+_POLICY_SUFFIX = "-policy"
 
 
 def prepare_fixture(name: str, work: Path) -> Fixture:
+    """Fixture *name*; a ``-policy`` suffix puts the project under the served org policy."""
+    if name.endswith(_POLICY_SUFFIX) and name != _POLICY_SUFFIX:
+        fixture = _prepare_fixture(name[: -len(_POLICY_SUFFIX)], work)
+        if fixture.real:
+            raise SystemExit(f"{name!r}: the policy variant needs an offline fixture")
+        fixture.name, fixture.policy = name, True
+        fixture.stats["policy"] = POLICY_ORG
+        return fixture
+    return _prepare_fixture(name, work)
+
+
+def _prepare_fixture(name: str, work: Path) -> Fixture:
     """Generate (or reuse, when the recipe is unchanged) fixture *name* under *work*."""
     directory = work / "fixtures" / name
     if name == "real":
@@ -136,6 +159,8 @@ def prepare_fixture(name: str, work: Path) -> Fixture:
             "diamonds": tree.diamonds,
             "edges": sum(len(c) for c in tree.edges.values()),
             "primitives_per_package": recipe.primitives.per_package(),
+            "hosts": ",".join(recipe.hosts),
+            "mcp_every": recipe.primitives.mcp_every,
         }
         return Fixture(name, tree.project, (".",), trees=(tree,), stats=stats)
     if name in MONOREPO_RECIPES:
@@ -204,7 +229,7 @@ def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
         with counting_tunnel() as tunnel:
             yield _RealWorld(isolated, env, tunnel)
         return
-    with serve_offline(fixture.trees, directory) as world:
+    with serve_offline(fixture.trees, directory, policy=fixture.policy) as world:
         yield world
 
 
@@ -505,6 +530,23 @@ class Context:
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
         self.is_installed = False
+        if self.fixture.policy:
+            self._govern()
+
+    def _govern(self) -> None:
+        """A git checkout whose ``origin`` is in ``POLICY_ORG``: its policy governs."""
+        remote = f"https://github.com/{POLICY_ORG}/consumer.git"
+        for argv in (
+            ["init", "-q", "--initial-branch=main"],
+            ["remote", "add", "origin", remote],
+        ):
+            subprocess.run(
+                ["git", "-C", str(self.project), *argv],
+                env=self.world.env,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
 
     def installed(self) -> None:
         """Every root installed from the current manifests (warm cache as a side effect)."""
@@ -605,6 +647,21 @@ def _uninstall_steps(ctx: Context) -> list[Step]:
     return [(["uninstall", remote[0].split("#", 1)[0]], root)]
 
 
+def _setup_prune(ctx: Context) -> None:
+    """An installed project whose first remote direct dependency left ``apm.yml``.
+
+    The edit a user makes by hand before ``apm prune``: that package (and any
+    subtree only it needed) is now absent from the resolved graph.
+    """
+    ctx.installed()
+    root = ctx.roots()[0]
+    manifest = yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))
+    deps = manifest["dependencies"]["apm"]
+    deps.remove(next(d for d in deps if not d.startswith(".")))
+    write_lf(root / "apm.yml", yaml.safe_dump(manifest, sort_keys=False))
+    ctx.is_installed = False
+
+
 def _setup_pack(ctx: Context) -> None:
     ctx.installed()
     remove_tree(ctx.work / "dist")
@@ -646,6 +703,9 @@ JOURNEYS: dict[str, Journey] = {
         Journey("uninstall", Context.installed, _uninstall_steps),
         Journey("compile", Context.installed, lambda c: _per_root(c, ["compile"])),
         Journey("audit", Context.installed, lambda c: _per_root(c, ["audit"])),
+        Journey("audit-ci", Context.installed, lambda c: _per_root(c, ["audit", "--ci"])),
+        Journey("outdated", Context.installed, lambda c: _per_root(c, ["outdated"])),
+        Journey("prune", _setup_prune, lambda c: [(["prune"], c.roots()[0])]),
         Journey(
             "pack",
             _setup_pack,
@@ -759,7 +819,9 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             return None
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
-            pstats.Stats(str(prof), stream=handle).sort_stats("cumulative").print_stats(40)
+            stats = pstats.Stats(str(prof), stream=handle)
+            stats.sort_stats("cumulative").print_stats(60)
+            stats.sort_stats("tottime").print_stats(40)
     return str(prof)
 
 

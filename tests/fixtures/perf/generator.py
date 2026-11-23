@@ -22,6 +22,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,6 +106,20 @@ _WORDS = [
     "write",
 ]
 _LANGUAGES = ("py", "ts", "go", "rs", "java", "md", "yml", "sh")
+# Dependency spec per host shape; every one is served by the offline mirror
+# (``tests/lifecycle/world/services.py`` HOST_ALIASES routes on owner + repo).
+HOST_SPECS = {
+    "github": "{owner}/{name}",
+    "ghe": "lifecycle.ghe.com/{owner}/{name}",
+    "gitlab": "gitlab.com/{owner}/group/{name}",
+    "ado": "dev.azure.com/{owner}/{owner}/_git/{name}",
+}
+
+
+def package_spec(recipe: TreeRecipe, name: str) -> str:
+    """``<host path>#<tag>`` of package *name*; the host is fixed per package."""
+    host = recipe.hosts[zlib.crc32(name.encode("ascii")) % len(recipe.hosts)]
+    return HOST_SPECS[host].format(owner=recipe.owner, name=name) + f"#{recipe.tag}"
 
 
 @dataclass(frozen=True)
@@ -122,7 +137,7 @@ class TreeFixture:
         return f"{self.recipe.owner}/{name}"
 
     def spec(self, name: str) -> str:
-        return f"{self.slug(name)}#{self.recipe.tag}"
+        return package_spec(self.recipe, name)
 
     @property
     def depth(self) -> int:
@@ -365,13 +380,13 @@ def build_tree(recipe: TreeRecipe, root: Path) -> TreeFixture:
     for level in levels:
         for name in level:
             rng = _seeded(f"{recipe.seed}:{name}")
-            deps = tuple(f"{recipe.owner}/{child}#{recipe.tag}" for child in edges[name])
+            deps = tuple(package_spec(recipe, child) for child in edges[name])
             package = author_package(factory, name, ordinal, recipe.primitives, rng, deps)
             packages[name] = package.root
             ordinal += 1
     project = root / "project"
     project.mkdir(parents=True)
-    direct = [f"{recipe.owner}/{name}#{recipe.tag}" for name in levels[0]]
+    direct = [package_spec(recipe, name) for name in levels[0]]
     write_lf(
         project / "apm.yml", consumer_manifest(f"{recipe.name}-consumer", direct, recipe.targets)
     )
