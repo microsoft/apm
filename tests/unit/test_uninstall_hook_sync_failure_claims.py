@@ -131,7 +131,9 @@ def test_a_retained_hook_claim_does_not_keep_its_mcp_server(
     assert set(hooks) <= set(_claims(project).get("hooked", [])), _claims(project)
     lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
     assert "hooked-srv" not in (lock.get("mcp_servers") or []), lock
-    servers = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    # The emptied config APM created is deleted outright (#4862).
+    config = project / ".mcp.json"
+    servers = json.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
     assert "hooked-srv" not in servers.get("mcpServers", {}), servers
 
 
