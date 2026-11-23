@@ -153,7 +153,11 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # One violation per offending dependency / MCP server; the check
     # name is only the category (#3835).
-    from apm_cli.policy.install_preflight import emit_check_violations, render_dry_run_verdicts
+    from apm_cli.policy.install_preflight import (
+        emit_check_violations,
+        emit_passed_check_warnings,
+        render_dry_run_verdicts,
+    )
 
     if getattr(ctx, "dry_run", False) is True:
         # --dry-run previews the same verdicts and never stops the preview.
@@ -161,6 +165,8 @@ def run(ctx: InstallContext) -> None:
             render_dry_run_verdicts(logger, audit_result, enforcement)
         return
 
+    if logger:
+        emit_passed_check_warnings(logger, audit_result.checks, source=source)
     has_blocking = False
     for check in audit_result.checks:
         if not check.passed:
@@ -169,11 +175,6 @@ def run(ctx: InstallContext) -> None:
                 emit_check_violations(logger, check, severity=severity, source=source)
             if severity == "block":
                 has_blocking = True
-        elif check.details and logger:
-            # project-wins version-pin mismatches and self-defined MCP
-            # warnings are passed=True with warning details.  Emit them so
-            # warn-mode surfaces all diagnostics.
-            emit_check_violations(logger, check, severity="warn", source=source)
 
     if has_blocking:
         raise PolicyViolationError(

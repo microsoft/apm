@@ -41,7 +41,7 @@ when:
   - '*'
 - run: apm uninstall p-exec
   exit: 1
-  message: is a local bundle\. Bundles installed with
+  message: Local bundle 'p-exec' has no hooks deployed\.
   cells:
   - rule|U8|uninstall-refuses-a-local-bundle
   unchanged:

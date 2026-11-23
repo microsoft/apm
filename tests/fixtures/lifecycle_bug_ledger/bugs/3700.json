@@ -1,16 +1,36 @@
 {
   "issue": 3700,
-  "summary": "Traps bundle hooks parking behind executables gate then registering like source; needs pack bundles, claude target, user scope.",
+  "summary": "Traps bundle hooks parking behind executables gate then registering like source, and uninstall removing them with their claims; needs pack bundles, claude target, user scope.",
   "failure_modes": [
     "ownership",
     "routing"
   ],
   "properties": [
     "ownership.preserve_unowned",
-    "routing.authorized_targets_only"
+    "routing.authorized_targets_only",
+    "transaction.failed_command_preserves_state"
   ],
   "regression_tests": [
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hooks_park_then_register_like_a_source_install",
-    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hooks_register_for_copilot_and_user_scope"
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hooks_register_for_copilot_and_user_scope",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_removes_its_hooks_and_claims",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_reaches_targets_outside_the_manifest",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_keeps_ownership_of_a_hook_it_could_not_remove",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_path_selects_its_installed_alias",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_path_without_dot_slash",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_linked_hook_config_root",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_symlinked_lockfile_before_removing",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_when_a_hook_config_is_unreadable",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_leaves_an_unrelated_sidecar_byte_identical",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_linked_pending_record",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_user_bundle_ignores_an_unrelated_invalid_user_root",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_named_scripts_keeps_sibling_copilot_scripts",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_path_with_the_gate_off_never_guesses_an_alias",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_reaches_a_partially_retired_bundle",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_retains_a_hook_file_it_cannot_delete",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hook_retirement_keeps_a_script_it_cannot_delete",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hook_retirement_reports_a_sidecar_it_cannot_rewrite",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hook_retirement_fails_closed_on_a_kept_hook_config",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_user_bundle_with_a_home_rooted_claude_config"
   ]
 }
