@@ -755,6 +755,43 @@ def retained_lock_keys(
             retained |= candidates
             detail = "; ".join(f"{name}: {reason}" for name, reason in walk.unverifiable)
             reasons.update(dict.fromkeys(candidates - walk.reachable, detail))
+    _retain_children_of_policy_rows(
+        lockfile, project_root, apm_modules_dir, candidates, retained, reasons
+    )
     if unverified is not None:
         unverified.update(reasons)
     return frozenset(retained)
+
+
+def _retain_children_of_policy_rows(
+    lockfile: LockFile,
+    project_root: Path,
+    apm_modules_dir: Path,
+    candidates: set[str],
+    retained: set[str],
+    reasons: dict[str, str],
+) -> None:
+    """Keep what a retained, locally replaced package still declares (#4989).
+
+    A replaced transitive stays under the remote retention policy even when
+    no survivor reaches it; its own manifest is local, so its local children
+    are still needed. A second walk, rooted at those rows, retains them (and
+    is not used for parent or depth repairs). An incomplete walk keeps all.
+    """
+    roots = [
+        dep.to_dependency_ref()
+        for dep in lockfile.get_package_dependencies()
+        if dep.get_unique_key() in retained and dep.replacement is not None and dep.is_local_source
+    ]
+    pending = candidates - retained
+    if not roots or not pending:
+        return
+    walk = compute_forward_reachable_keys(
+        lockfile, project_root, apm_modules_dir, roots, frozenset(pending)
+    )
+    if walk.complete:
+        retained |= pending & walk.reachable
+        return
+    retained |= pending
+    detail = "; ".join(f"{name}: {reason}" for name, reason in walk.unverifiable)
+    reasons.update(dict.fromkeys(pending, detail))
