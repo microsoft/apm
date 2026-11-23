@@ -24,6 +24,14 @@ from urllib.parse import urlparse
 
 import pytest
 
+
+@pytest.fixture
+def _helpers_on_path():
+    """Resolve every helper to its bare name; these cases mock the launch itself."""
+    with patch("apm_cli.utils.git_env.trusted_executable", side_effect=lambda name: name):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Module 1: marketplace/yml_schema.py
 # ---------------------------------------------------------------------------
@@ -1113,6 +1121,7 @@ class TestRuntimeManagerListRuntimes:
         assert runtimes["llm"].get("version") == "2.3.4"
 
 
+@pytest.mark.usefixtures("_helpers_on_path")
 class TestRuntimeManagerRemoveRuntime:
     """Tests for remove_runtime."""
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import itertools
 import json
 import subprocess
 from functools import cache
@@ -35,13 +34,16 @@ from tests.lifecycle.generator.rules import (
     FIRST_PARTY_MCP_CELL,
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
+    ORG_DENY_OPS,
     REFUSAL_EVIDENCE,
     RETIRED_MCP_OWNERS,
     RULE_CELL_REFUSALS,
     RULES,
     U_BIN_PIN,
+    U_USER_ORG_POLICY_PIN,
     UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
+    Verdict,
     classify,
     refusal_cell,
 )
@@ -311,12 +313,15 @@ def test_parallel_prs_crediting_adjacent_cells_merge_cleanly(tmp_path: Path) -> 
     """Two PRs that credit neighbouring cells merge to exactly their regenerated union."""
     base = json.loads(_generated()[0])
     keys = list(base["obligations"])
-    first = next(
-        key
-        for key, after in itertools.pairwise(keys)
-        if base["obligations"][key]["status"] == base["obligations"][after]["status"] == "baseline"
-    )
-    second = keys[keys.index(first) + 1]
+    # Two neighbouring cells in baseline: the ledger may hold none, so demote them.
+    first, second = keys[0], keys[1]
+    for key in (first, second):
+        record = base["obligations"][key]
+        base["obligations"][key] = {
+            name: value
+            for name, value in record.items()
+            if name not in ("credited_by", "tracking", "witness")
+        } | {"status": "baseline"}
     ours, theirs, union = (copy.deepcopy(base) for _ in range(3))
     _promote(ours, first, "ours")
     _promote(theirs, second, "theirs")
@@ -557,6 +562,7 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U8", lambda cell: _u8(cell) is not None),
         ("U-BIN-OPS", lambda cell: _u_bin_ops(cell)),
         ("U-MCPOWN-USER", _u_mcpown_user),
+        ("U-USER-SCOPE-ORG-POLICY", lambda cell: _u_user_org_policy(cell)),
     ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
@@ -706,7 +712,10 @@ def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
 def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
     assert bin_pin.predicate_digest() == U_BIN_PIN
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
-    assert data["pins"] == {"U-BIN": U_BIN_PIN}
+    assert data["pins"] == {
+        "U-BIN": U_BIN_PIN,
+        "U-USER-SCOPE-ORG-POLICY": U_USER_ORG_POLICY_PIN,
+    }
 
 
 def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
@@ -728,6 +737,54 @@ def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
         assert entry["status"] == "required" and entry["witness"].endswith(spine), (key, entry)
 
 
+# -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
+
+
+def _u_user_org_policy(cell) -> bool:
+    """An org dependency deny under install/lock/update/mcp-install at user scope."""
+    op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
+    return (
+        cell.get("GATE") == "denied-dependency"
+        and cell.get("SCOPE") == "user"
+        and op in ("install", "lock", "update", "mcp-install")
+    )
+
+
+def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
+    """Tripwire: the rule removes the #3703 cells only while user scope discovers no
+    org policy. #3703 must change core/scope.policy_discovery_uses_git_remote, so
+    the digest differs and this test fails, as does the live check below: drop
+    the rule and restore the cells as strict obligations then.
+    """
+    from apm_cli.core.scope import get_apm_home, policy_discovery_uses_git_remote
+
+    assert bin_pin.user_org_policy_digest() == U_USER_ORG_POLICY_PIN, (
+        "#3703 changed the user-scope org-policy decision: drop U-USER-SCOPE-ORG-POLICY"
+    )
+    assert policy_discovery_uses_git_remote(get_apm_home()) is False
+    assert policy_discovery_uses_git_remote(tmp_path) is True
+    removed = _removed_by("U-USER-SCOPE-ORG-POLICY")
+    assert removed == {"T2|SCOPE=user|GATE=denied-dependency|FROZEN=on"}
+    kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    assert kept["pair|OP=install|GATE=denied-dependency"]["status"] == "required"
+    # A scope-free bin cell is reachable at project scope: the matrix refusal witnesses it.
+    for op in sorted(ORG_DENY_OPS):
+        entry = kept[f"T1|OP={op}|PRIM=bin|GATE=denied-dependency"]
+        assert entry["status"] == "required", (op, entry)
+        assert entry["witness"].endswith("test_gate_matrix_credits_op_prim_gate_cells[project]")
+
+
+def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
+    pins = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["pins"]
+    assert pins["U-USER-SCOPE-ORG-POLICY"] == U_USER_ORG_POLICY_PIN, pins
+    cell = {"SCOPE": "user", "GATE": "denied-dependency", "FROZEN": "on"}
+    assert classify("T2", cell) == Verdict("removed", ("U-USER-SCOPE-ORG-POLICY",))
+    monkeypatch.setattr(bin_pin, "user_org_policy_digest", lambda *_: "0" * 64)
+    assert classify("T2", cell) == Verdict(
+        "obligation", ("U-USER-SCOPE-ORG-POLICY",), must_cover=True
+    )
+
+
 def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
     """The user-scope bin spine implies this pair only through strict #3703 cells and
     sorts first by node id; the project matrix passes it, so it stays required."""
@@ -736,6 +793,33 @@ def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
     assert entry["status"] == "required", entry
     assert entry["witness"].endswith("test_gate_matrix_credits_op_prim_gate_cells[project]"), entry
     assert "tracking" not in entry, entry
+
+
+def test_no_ungoverned_user_scope_step_credits_an_org_deny() -> None:
+    """User scope discovers no org policy (#3703): a bin spine step under the org
+    deny never evaluates it, so only a strict known cell may carry that label, and
+    no required obligation rests on a user-scope denied-dependency receipt."""
+    from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
+
+    credited = {key for key in bin_cells() if key.endswith("|denied-dependency|user")}
+    assert credited == set(KNOWN_DD), sorted(credited ^ set(KNOWN_DD))
+    rows = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    for key in (
+        "pair|OP=compile|GATE=denied-dependency",
+        "pair|OP=lock|GATE=denied-dependency",
+        "pair|OP=mcp-install|GATE=denied-dependency",
+        "pair|OP=uninstall|GATE=denied-dependency",
+        "pair|OP=approve-deny|GATE=denied-dependency",
+        "T1|OP=compile|PRIM=bin|GATE=denied-dependency",
+    ):
+        assert rows[key]["status"] == "required", (key, rows[key])
+        assert rows[key]["witness"].endswith("[project]"), (key, rows[key])
+    for key, row in rows.items():
+        user_only = row.get("credited_by") and all(
+            cell.endswith("|denied-dependency|user") for cell in row["credited_by"]
+        )
+        if user_only:
+            assert row["status"] == "known-failing", (key, row)
 
 
 # -- U-MCPOWN-USER: bound to the live retired-claim reader ---------------------------
@@ -758,6 +842,8 @@ def test_u_mcpown_user_holds_only_while_the_reader_ignores_user_scope(tmp_path) 
             servers, hashes, apm_version="0.36.0", project_root=tmp_path, user_scope=user_scope
         )
 
+    # No retired destination file on disk: the verdict comes from the lock claims alone.
+    assert not (tmp_path / ".github" / "mcp.json").exists()
     project = claims(user_scope=False)
     assert project.names["vscode"] == {"srv"}, "the fixture lock carries a retired claim"
     user = claims(user_scope=True)

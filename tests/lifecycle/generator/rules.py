@@ -321,7 +321,10 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "is not listed: it retires a trusted project-scope whole plugin's root, bin/ "
         "included (#4559, #4808); nor is audit: its drift replay fingerprints that root "
         "(drift.verify_claude_native_cache). An org-policy level stays its own cell (U2 "
-        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses",
+        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. "
+        "Under marketplace that org-policy level is a real cell (#4894): a trusted "
+        "project-scope plugin deploys whole, bin/ included, and the plugin bin spine "
+        "checks that marketplace leaves that bin/ unchanged under the deny",
         (
             Ev(
                 "src/apm_cli/install/exec_gate.py",
@@ -427,6 +430,50 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_RETIRED, "", "APM <= 0.36 wrote ``copilot`` project MCP servers"),
             Ev(_RETIRED, "split_mcp_claims", "if user_scope:"),
             Ev(_RETIRED, "split_mcp_claims", "return RetiredMcpClaims({}, {})"),
+        ),
+    ),
+    "U-USER-SCOPE-ORG-POLICY": (
+        "org policy does not govern user-scope (-g) installs (#3703, a 0.39 design gap, not "
+        "a defect): user scope has no git remote, so policy_discovery_uses_git_remote is "
+        "False at $APM_HOME and install, lock, update and install --mcp at -g discover no "
+        "org policy; the local executables gate still parks bin/ there, and project scope "
+        "refuses the denied plugin with exit 1. A user-scope cell whose GATE is "
+        "denied-dependency under one of those commands is removed until #3703 lands; a "
+        "scope-free PRIM=bin cell is not (a whole native plugin carries bin/ at project "
+        "scope, where the org deny refuses it). Self-reinstating: "
+        "generator/bin_pin.py hashes the predicate, and when the hash differs from "
+        "U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails",
+        (
+            Ev(
+                "src/apm_cli/core/scope.py",
+                "policy_discovery_uses_git_remote",
+                "def policy_discovery_uses_git_remote",
+            ),
+            Ev(
+                "src/apm_cli/core/scope.py",
+                "policy_discovery_uses_git_remote",
+                "return not is_user_scope_root(root)",
+            ),
+            Ev(
+                "src/apm_cli/policy/discovery.py",
+                "_auto_discover",
+                "policy_discovery_uses_git_remote",
+            ),
+            Ev(
+                "docs/src/content/docs/enterprise/apm-policy.mdx",
+                "",
+                "Org policy does not govern user-scope (`-g`) installs",
+            ),
+            Ev(
+                "docs/src/content/docs/enterprise/security.md",
+                "Threat model",
+                "user-scope installs (`apm install -g`) are not governed by it",
+            ),
+            Ev(
+                "docs/src/content/docs/reference/cli/policy.md",
+                "`apm policy status`",
+                "User scope has no git remote, so no org policy is discovered",
+            ),
         ),
     ),
     "E1": (
@@ -618,6 +665,8 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U8"
     if u_bin_ops_applies(cell) and u_bin_pinned():
         return "U-BIN-OPS"
+    if u_user_org_policy_applies(cell) and u_user_org_policy_pinned():
+        return "U-USER-SCOPE-ORG-POLICY"
     if cell.get("SCOPE") == "user" and cell.get("MCPOWN") in RETIRED_MCP_OWNERS:
         return "U-MCPOWN-USER"
     if (deployed in ("clean", "edited") and lock == "absent") or (
@@ -726,6 +775,8 @@ def must_cover_rules(cell: Mapping[str, str]) -> tuple[str, ...]:
         rules.append("U9")
     if u_bin_applies(cell) and not u_bin_pinned():
         rules.append("U-BIN")
+    if u_user_org_policy_applies(cell) and not u_user_org_policy_pinned():
+        rules.append("U-USER-SCOPE-ORG-POLICY")
     return tuple(rules)
 
 
@@ -787,3 +838,29 @@ def u_bin_pinned() -> bool:
     from tests.lifecycle.generator.bin_pin import predicate_digest
 
     return predicate_digest() == U_BIN_PIN
+
+
+# -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
+
+# The approved digest of core/scope.policy_discovery_uses_git_remote. #3703 must
+# change that decision; the digest then differs, the cells return as must-cover
+# and the tripwire in test_generator_rules.py fails until the rule is dropped.
+U_USER_ORG_POLICY_PIN = "7839bf8d042c59baa029c1323413078d972eebb0c45edfd8e8b14106957fd513"
+# Commands an org dependency deny governs at project scope (FROZEN alone is install).
+ORG_DENY_OPS = frozenset({"install", "lock", "update", "mcp-install"})
+
+
+def u_user_org_policy_applies(cell: Mapping[str, str]) -> bool:
+    """A user-scope cell whose promise is that an org dependency deny governs it."""
+    if cell.get("GATE") != "denied-dependency":
+        return False
+    # Only an explicit user-scope cell: a scope-free bin cell is reachable at project
+    # scope too, where a whole native plugin carries bin/ and the org deny refuses it.
+    op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
+    return cell.get("SCOPE") == "user" and op in ORG_DENY_OPS
+
+
+def u_user_org_policy_pinned() -> bool:
+    from tests.lifecycle.generator.bin_pin import user_org_policy_digest
+
+    return user_org_policy_digest() == U_USER_ORG_POLICY_PIN

@@ -220,18 +220,10 @@ class TestUpdateGitignoreWriteError:
         # Content without the apm_modules/ pattern, so the write path is triggered
         gitignore.write_text("node_modules/\n")
 
-        import builtins
-
-        real_open = builtins.open
-
-        def patched_open(path, mode="r", *args, **kwargs):
-            if ".gitignore" in str(path) and "a" in mode:
-                raise OSError("read-only filesystem")
-            return real_open(path, mode, *args, **kwargs)
-
         with (
             patch("apm_cli.install.helpers.gitignore.GITIGNORE_FILENAME", str(gitignore)),
-            patch("builtins.open", side_effect=patched_open),
+            # The full-text write goes through the deploy write seam (#4863).
+            patch("pathlib.Path.write_text", side_effect=OSError("read-only filesystem")),
             patch("apm_cli.install.helpers.gitignore._rich_warning") as mock_warn,
         ):
             _update_gitignore_for_apm_modules(logger=None)

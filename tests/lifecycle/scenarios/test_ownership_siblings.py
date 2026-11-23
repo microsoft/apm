@@ -808,21 +808,52 @@ def _hook_package(world) -> Scenario:
     return scenario
 
 
-@pytest.mark.parametrize("gate", ["revoked-after-deploy", "unapproved-exec"])
+def _deny_in_manifest(scenario: Scenario, package: str) -> None:
+    """A deny for *package* arrives in apm.yml (a teammate's commit), replacing its approval."""
+    manifest = scenario.world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    allow = data["executables"]["allow"]
+    keys = [key for key in allow if package in key]
+    assert keys, f"no approval of {package} in {allow}"
+    deny = data["executables"].setdefault("deny", {})
+    for key in keys:
+        del allow[key]
+        deny[key] = {"hooks": True}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    scenario.model = scenario.model.deny(package, scenario.kinds[package])
+
+
+# GATE level -> the gate change, made before (revoked, unapproved) or after
+# (denied) the lockfile is lost: a deny that arrives with no lockfile finds no
+# recorded deployment, so it reads as denied-executable.
+_CLOSED_GATES = ("denied-executable", "revoked-after-deploy", "unapproved-exec")
+
+
+@pytest.mark.parametrize("gate", _CLOSED_GATES)
 def test_a_closed_gate_retires_a_hook_without_a_lock(lifecycle_world, gate) -> None:
     scenario = _hook_package(lifecycle_world)
     hook = lifecycle_world.project / ".github/hooks/h-hook-session.json"
     assert hook.is_file()
     if gate == "revoked-after-deploy":
         scenario.run("deny h-hook")
-    else:
+    elif gate == "unapproved-exec":
         _drop_approval(scenario, "h-hook")
     _forget_lock(scenario)
-    step = scenario.run(
-        "install", credit=[_pair("present-provenance-unknown", PRIM="hook", GATE=gate)]
-    )
+    if gate == "denied-executable":
+        _deny_in_manifest(scenario, "h-hook")
+    step = scenario.run("install", credit=_closed_gate_credit(gate))
     assert not hook.exists(), step.output
     scenario.finish()
+
+
+def _closed_gate_credit(gate: str) -> list[dict[str, str]]:
+    return [
+        _pair("present-provenance-unknown", PRIM="hook", GATE=gate),
+        {"LOCK": "absent", "PRIM": "hook", "GATE": gate},
+    ]
+
+
+_WITHHELD_GATE = "denied-executable"
 
 
 def test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected(
@@ -842,8 +873,11 @@ def test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected(
     assert not hook.exists()
     scenario.user_write(rel, committed.decode("ascii"))
     _forget_lock(scenario)
+    # The deny is recorded and nothing of h-hook is deployed: a denied executable.
+    assert scenario.model.gate("h-hook", "hook") == "denied"
     scenario.run(
         "install",
+        credit=[_pair("present-provenance-unknown", PRIM="hook", GATE=_WITHHELD_GATE)],
         keep={"project": (rel,)},
         says=[rf"Kept {re.escape(rel)}: it sits at h-hook's hook path"],
     )
@@ -1497,6 +1531,25 @@ def test_an_edited_mcp_entry_from_each_source_is_refused(lifecycle_world, src) -
     scenario.finish()
 
 
+_INLINE_DRY_RUN = ("install", "--mcp", "p-inline", "--dry-run", "--", INERT_COMMAND, "--stdio")
+
+
+def test_a_dry_run_inline_mcp_install_writes_nothing(lifecycle_world) -> None:
+    """``install --mcp NAME --dry-run -- CMD`` previews the server and changes nothing."""
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(lifecycle_world, (), policy="allow")
+    manifest = (lifecycle_world.project / "apm.yml").read_bytes()
+    step = scenario.run(
+        _INLINE_DRY_RUN,
+        credit=[{"OP": "mcp-install", "SRC": "inline-mcp", "DRYRUN": "on"}],
+        says=[r"would add MCP server 'p-inline'"],
+    )
+    assert not step.changed, step.changed
+    assert not (lifecycle_world.project / ".mcp.json").exists()
+    assert (lifecycle_world.project / "apm.yml").read_bytes() == manifest
+    scenario.finish()
+
+
 @pytest.mark.parametrize("src", sorted(_MCP_SOURCES))
 def test_an_mcp_entry_without_a_lock_is_kept(lifecycle_world, src) -> None:
     use_policy(lifecycle_world, "allow")
@@ -1950,6 +2003,9 @@ CREDITS = credits(
             row for rows in _UNOWNED_EXEC.values() for row in rows
         ],
         "test_a_users_lsp_entry_is_never_taken_over": [_pair("unowned", PRIM="lsp")],
+        "test_a_dry_run_inline_mcp_install_writes_nothing": [
+            {"OP": "mcp-install", "SRC": "inline-mcp", "DRYRUN": "on"}
+        ],
         "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": [
             _pair("unowned", SRC="inline-mcp")
         ],
@@ -1958,11 +2014,12 @@ CREDITS = credits(
         ],
         "test_deployed_executables_without_a_lock_are_kept": _UNKNOWN_EXEC,
         **{
-            f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": [
-                _pair("present-provenance-unknown", PRIM="hook", GATE=gate)
-            ]
-            for gate in ("revoked-after-deploy", "unapproved-exec")
+            f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": _closed_gate_credit(gate)
+            for gate in _CLOSED_GATES
         },
+        "test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected": [
+            _pair("present-provenance-unknown", PRIM="hook", GATE=_WITHHELD_GATE)
+        ],
         **{
             f"test_a_native_plugins_skill_in_the_users_hands_survives_install[{deployed}]": [
                 _pair(deployed, SRC="native-plugin")

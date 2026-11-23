@@ -1012,7 +1012,7 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
 # Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
-SCENARIO_LANES = frozenset({"T-3", "T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
+SCENARIO_LANES = frozenset({"T-2", "T-3", "T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
 NODE_ROOT = "tests/lifecycle/scenarios"
 
 
@@ -1163,6 +1163,20 @@ NEWER_LOCK_REFUSALS = (
     *(f"pair|{partner}|LOCK=newer-generator" for partner in _NEWER_PARTNERS),
     *(f"pair|LOCK=newer-generator|{partner}" for partner in _NEWER_AFTER),
     "T4|OP=pack|SCOPE=project|LOCK=newer-generator",
+    "pair|LOCK=newer-generator|HOSTID=bare-default",
+    "pair|LOCK=newer-generator|HOSTID=proxy-logical",
+    "pair|LOCK=newer-generator|HOSTID=qualified-host-port",
+)
+
+# A local bundle meets dependencies.deny by its own name and every package it
+# records, before any file is written (install/bundle_admission.py, #4646). The
+# cause pins the denied world package and the deny-pattern reason.
+BUNDLE_POLICY_BLOCK = ExpectedRefusal(
+    1,
+    r"(?s)(?=.*Install\s+blocked\s+by\s+org\s+policy)"
+    r"(?=.*Policy\s+violation:\s+\S*p-exec\s+--\s+denied\s+by\s+pattern)",
+    "P-INV-I4",
+    "install/bundle_admission.py admit_bundle: a denied local bundle is refused unwritten",
 )
 
 EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
@@ -1173,6 +1187,13 @@ EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
         r"--frozen: apm\.lock\.yaml is out of sync with apm\.yml\.",
         "P-INV-I3",
         "req-lk-006: --frozen refuses a lockfile the manifest has moved past (install/service.py)",
+    ),
+    **dict.fromkeys(
+        (
+            "pair|OP=bundle-install|GATE=denied-dependency",
+            "pair|SRC=local-bundle|GATE=denied-dependency",
+        ),
+        BUNDLE_POLICY_BLOCK,
     ),
     "pair|DEPLOYED=edited|FROZEN=on": ExpectedRefusal(
         1,
