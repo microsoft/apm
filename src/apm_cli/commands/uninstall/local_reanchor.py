@@ -26,6 +26,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
 
@@ -40,6 +41,8 @@ class LocalReanchorPlan:
     renames: dict[str, str] = field(default_factory=dict)
     identities: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     declaring_parents: dict[str, str] = field(default_factory=dict)
+    # apm.yml and apm.lock.yaml as the command found them, for rollback.
+    snapshot: tuple[tuple[Path, str], ...] = ()
 
     def __bool__(self) -> bool:
         return bool(self.renames or self.declaring_parents)
@@ -117,12 +120,20 @@ def plan_local_reanchor(
     return LocalReanchorPlan(renames, identities, declaring_parents)
 
 
-def _rekey_requests(binding: Any, renames: dict[str, str]) -> bool:
-    """Name each replacement request's parent by its re-anchored key (req-rpl-003)."""
+def _rekey_requests(binding: Any, renames: dict[str, str], dev: dict[str, bool]) -> bool:
+    """Name each replacement request's parent by its re-anchored key (req-rpl-003).
+
+    A re-anchored parent's request also takes the parent's new dev status,
+    as install records the edge.
+    """
     if binding is None or not any(request.parent in renames for request in binding.requests):
         return False
     binding.requests = {
-        replace(request, parent=renames.get(request.parent, request.parent)): None
+        replace(
+            request,
+            parent=renames.get(request.parent, request.parent),
+            dev=dev.get(request.parent, request.dev),
+        ): None
         for request in binding.requests
     }
     return True
@@ -145,8 +156,11 @@ def _rename_ledger_owners(lockfile, renames: dict[str, str]) -> None:
     lockfile.deployment_ledger = DeploymentLedger(records=records)
 
 
-def apply_local_reanchor(lockfile, plan: LocalReanchorPlan) -> bool:
-    """Apply *plan* to the in-memory lock; the caller persists it once."""
+def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = None) -> bool:
+    """Apply *plan* to the in-memory lock; the caller persists it once.
+
+    *dev* maps an old key to the dev status install now records for it.
+    """
     if not plan:
         return False
     renames = {old: new for old, new in plan.renames.items() if old != new}
@@ -168,6 +182,26 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan) -> bool:
                 row.declaring_parent = renames[row.declaring_parent]
             if row.resolved_by in renames:
                 row.resolved_by = renames[row.resolved_by]
-            _rekey_requests(row.replacement, renames)
+            _rekey_requests(row.replacement, renames, dev or {})
             lockfile.dependencies[renames.get(key, key)] = row
     return True
+
+
+def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> LocalReanchorPlan:
+    """Record *paths* as they are now, so a failed receipt rename rolls them back."""
+    if not plan.renames:
+        return plan
+    return replace(
+        plan,
+        snapshot=tuple(
+            (path, path.read_text(encoding="utf-8")) for path in paths if path.is_file()
+        ),
+    )
+
+
+def roll_back(plan: LocalReanchorPlan) -> None:
+    """Restore apm.yml and apm.lock.yaml to the snapshot; receipts were never moved."""
+    from ...integration.write_seam import atomic_write_text
+
+    for path, text in plan.snapshot:
+        atomic_write_text(path, text, normalize_line_endings=False)

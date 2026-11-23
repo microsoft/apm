@@ -138,7 +138,7 @@ def _split_still_needed_packages(
     ]
     if user_scope:
         _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
-    reanchor = _plan_reanchor_or_exit(lockfile, decision, still_needed, apm_yml_path.parent, logger)
+    reanchor = _plan_reanchor_or_exit(lockfile, decision, still_needed, apm_yml_path, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
     repair = _StillNeededRepair(
         dict(decision.rescued_parents),
@@ -150,12 +150,14 @@ def _split_still_needed_packages(
     return removed, still_needed, repair
 
 
-def _plan_reanchor_or_exit(lockfile, decision, still_needed: list, project_root, logger):
+def _plan_reanchor_or_exit(lockfile, decision, still_needed: list, apm_yml_path, logger):
     """Plan re-anchoring of still-needed local packages; refuse before any write (#4889)."""
     from ...core.deployment_reanchor import reanchor_receipt_problems
     from ...core.scope import InstallScope
-    from .local_reanchor import LocalReanchorRefused, plan_local_reanchor
+    from ...deps.lockfile import get_lockfile_path
+    from .local_reanchor import LocalReanchorRefused, plan_local_reanchor, snapshot_for_rollback
 
+    project_root = apm_yml_path.parent
     labels = {_removed_lock_key(package, lockfile): package for package in still_needed}
 
     def label(key: str) -> str:
@@ -179,7 +181,7 @@ def _plan_reanchor_or_exit(lockfile, decision, still_needed: list, project_root,
             "declaration in apm.yml."
         )
         sys.exit(1)
-    return plan
+    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
 
 
 def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logger) -> None:
@@ -189,6 +191,7 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
         return
     from ...core.deployment_reanchor import rename_receipt_owners
     from ...deps.lockfile import LockFile
+    from .local_reanchor import roll_back
 
     committed = LockFile.read(lockfile_path)
     renamed = {new for old, new in plan.renames.items() if old != new}
@@ -197,9 +200,19 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
     try:
         rename_receipt_owners(deploy_root, scope, committed, plan.renames)
     except (OSError, ValueError) as exc:
+        # One transaction: without its receipts the re-anchor does not stand.
+        try:
+            roll_back(plan)
+        except OSError as restore_exc:
+            logger.error(
+                f"Deployment receipts were not moved to the re-anchored package ({exc}), "
+                f"and apm.yml and apm.lock.yaml could not be restored ({restore_exc}); "
+                "every file is kept. Run 'apm install' to rebuild the lockfile."
+            )
+            sys.exit(1)
         logger.error(
-            f"Deployment receipts were not moved to the re-anchored package ({exc}); "
-            "its files are kept. Run 'apm install' to rebuild them."
+            f"Deployment receipts could not be moved to the re-anchored package ({exc}); "
+            "apm.yml and apm.lock.yaml were restored and every file is kept."
         )
         sys.exit(1)
 
@@ -286,7 +299,7 @@ def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
         # Re-key still-needed local rows to the identity install records (#4889).
         from .local_reanchor import apply_local_reanchor
 
-        updated |= apply_local_reanchor(lockfile, repair.reanchor)
+        updated |= apply_local_reanchor(lockfile, repair.reanchor, repair.dev)
     return updated
 
 

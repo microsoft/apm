@@ -22,6 +22,10 @@
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_when_the_kept_package_directory_is_gone",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_through_a_symlinked_local_directory",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_a_symlink_loop",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_of_a_dependency_outside_the_project"
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_of_a_dependency_outside_the_project",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_rekeys_replacement_request_parents",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_case_and_decomposed_unicode_spellings",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_with_a_case_variant_parent_spelling",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_failed_receipt_rename_rolls_the_uninstall_back"
   ]
 }

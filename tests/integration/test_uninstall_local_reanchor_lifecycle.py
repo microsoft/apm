@@ -295,3 +295,104 @@ def test_reanchor_of_a_dependency_outside_the_project(
     world.apm("uninstall", "../shared/e")
 
     _assert_reanchored_like_a_full_install(world)
+
+
+_REPLACEMENTS_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
+
+
+def test_reanchor_rekeys_replacement_request_parents(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4889 cell 5: e's edge into a replaced package names e's new key (req-rpl-003)."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "r", "r")
+    _skill_package(vendor / "e", "e", ("test/r",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "$schema": _REPLACEMENTS_SCHEMA,
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+            "replace": [
+                {"for": {"git": "https://github.com/test/r"}, "with": {"path": "./vendor/r"}}
+            ],
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    world.apm("uninstall", "./vendor/e")
+
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    parents = [
+        request["parent"]
+        for row in lock["dependencies"]
+        for request in (row.get("replacement") or {}).get("requests") or []
+    ]
+    assert parents == ["local:vendor/e"], lock
+    _assert_reanchored_like_a_full_install(world)
+
+
+@pytest.mark.parametrize("e_dir", ["E-Pkg", "cafe\u0301-e"])
+def test_reanchor_keeps_case_and_decomposed_unicode_spellings(
+    tmp_path: Path, apm_binary_path: Path, e_dir: str
+) -> None:
+    """#4889 cell 8d: a mixed-case or NFD directory keeps the identity install records."""
+    world = _local_world(tmp_path, apm_binary_path, e_dir=e_dir)
+    world.apm("uninstall", f"./vendor/{e_dir}")
+    _assert_reanchored_like_a_full_install(world)
+
+
+def test_reanchor_with_a_case_variant_parent_spelling(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 8d: on a case-insensitive filesystem d's ``../e-pkg`` is root's ``E-Pkg``."""
+    probe = tmp_path / "Case-Probe"
+    probe.mkdir()
+    if not (tmp_path / "case-probe").exists():
+        pytest.skip("case-sensitive filesystem: the spellings name different directories")
+    world = ReplayWorld.create(tmp_path / "w2", apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "E-Pkg", "e")
+    _skill_package(vendor / "d", "d", ("../e-pkg",))
+    _manifest(world, ["./vendor/E-Pkg"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    world.apm("uninstall", "./vendor/E-Pkg")
+
+    _assert_reanchored_like_a_full_install(world)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="needs POSIX permissions enforced for a non-root user",
+)
+def test_a_failed_receipt_rename_rolls_the_uninstall_back(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: one transaction -- receipts that cannot move restore apm.yml and the lock."""
+    world = _local_world(tmp_path, apm_binary_path)
+    directory = world.isolated.home / ".apm" / "deployment-receipts"
+    manifest, lock, receipts = (
+        (world.project / "apm.yml").read_bytes(),
+        lock_bytes(world.project),
+        _receipts(world),
+    )
+    directory.chmod(0o500)
+    try:
+        result = world.apm("uninstall", "./vendor/e", expect=1)
+    finally:
+        directory.chmod(0o700)
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "apm.yml and apm.lock.yaml were restored" in output, output
+    assert (world.project / "apm.yml").read_bytes() == manifest
+    assert lock_bytes(world.project) == lock
+    assert _receipts(world) == receipts
+    world.apm("install", "--frozen")
