@@ -478,6 +478,19 @@ def yaml_roundtrip_to_str(data: Any) -> str:
     return stream.getvalue()
 
 
+def _key_label(key: Any) -> str:
+    """Name a frontmatter key in a diagnostic; rendering it can never fail.
+
+    An integer beyond Python's digit limit cannot be rendered in decimal; a
+    long key is elided. Both fall back to ``<type>``.
+    """
+    try:
+        text = repr(key)
+    except ValueError:
+        return f"<{type(key).__name__}>"
+    return text if len(text) <= 40 else f"<{type(key).__name__}>"
+
+
 class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     """python-frontmatter YAML handler bound to ``_BoundedSafeLoader``.
 
@@ -521,8 +534,8 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
             for key in metadata:
                 if not isinstance(key, str):
                     raise yaml.YAMLError(
-                        f"non-string frontmatter key {key!r} ({type(key).__name__}); "
-                        "frontmatter keys must be strings"
+                        f"non-string frontmatter key {_key_label(key)} "
+                        f"({type(key).__name__}); frontmatter keys must be strings"
                     )
         return metadata
 

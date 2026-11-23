@@ -1157,14 +1157,22 @@ class TestSecurityScanFailClosed:
 
 
 class TestNonStringFrontmatterKeys:
-    """A non-string frontmatter key skips that command, never the batch (#4922)."""
+    """A non-string frontmatter key skips that command, never the batch (#4922).
+
+    The frontmatter loader (``utils/yaml_io.py``) owns the rejection and its wording.
+    """
 
     @pytest.mark.parametrize(
-        ("raw_key", "shown_key"),
-        [("1", "1 (int)"), ("true", "True (bool)")],
-        ids=["int-key", "bool-key"],
+        ("key_line", "shown_key"),
+        [
+            ("1: x", "1 (int)"),
+            ("true: x", "True (bool)"),
+            # Beyond Python's int digit limit: still named, never a delimiter error.
+            ("? 0x" + "f" * 5000 + "\n: x", "<int> (int)"),
+        ],
+        ids=["int-key", "bool-key", "int-too-large-to-render"],
     )
-    def test_bad_command_kept_and_batch_continues(self, tmp_path, raw_key, shown_key):
+    def test_bad_command_kept_and_batch_continues(self, tmp_path, key_line, shown_key):
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 
@@ -1172,7 +1180,7 @@ class TestNonStringFrontmatterKeys:
         pkg_info = _make_package(
             tmp_path,
             {
-                "bad.prompt.md": f"---\ndescription: Bad\n{raw_key}: x\n---\nBad body\n",
+                "bad.prompt.md": f"---\ndescription: Bad\n{key_line}\n---\nBad body\n",
                 "good.prompt.md": "---\ndescription: Good\n---\nGood body\n",
             },
         )
@@ -2046,41 +2054,4 @@ class TestClaudeNativeCommandFrontmatter:
         assert any(
             "not supported for cursor commands" in w and "disable-model-invocation" in w
             for w in warnings
-        ), warnings
-
-
-class TestNonStringFrontmatterKeys:
-    """A non-string frontmatter key skips that command only (#4922)."""
-
-    @pytest.mark.parametrize(
-        ("key", "label"),
-        [("1: x", "1"), ("? 0x" + "f" * 5000 + "\n: x", "<int>")],
-        ids=["int", "int-too-large-to-render"],
-    )
-    def test_non_string_key_skips_the_file_and_the_batch_continues(self, tmp_path, key, label):
-        from apm_cli.integration.targets import KNOWN_TARGETS
-        from apm_cli.utils.diagnostics import DiagnosticCollector
-
-        (tmp_path / ".claude").mkdir()
-        pkg_info = _make_package(
-            tmp_path,
-            {
-                "bad.prompt.md": f"---\n{key}\ndescription: Bad\n---\nBad body\n",
-                "good.prompt.md": "---\ndescription: Good\n---\nGood body\n",
-            },
-        )
-        diag = DiagnosticCollector()
-
-        result = CommandIntegrator().integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, tmp_path, diagnostics=diag
-        )
-
-        commands = tmp_path / ".claude" / "commands"
-        assert not (commands / "bad.md").exists()
-        assert frontmatter.load(commands / "good.md").metadata["description"] == "Good"
-        assert result.files_skipped == 1
-        warnings = [d.message for d in diag.by_category().get("warning", [])]
-        assert any(
-            "bad.prompt.md" in m and f"non-string frontmatter key(s): {label})" in m
-            for m in warnings
         ), warnings

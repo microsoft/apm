@@ -21,11 +21,18 @@ def test_frontmatter_preserves_body_after_closing_fence(newline, body):
 
 
 @pytest.mark.parametrize(
-    ("raw_key", "shown"), [("1", "1 (int)"), ("true", "True (bool)"), ("~", "None (NoneType)")]
+    ("key_line", "shown"),
+    [
+        ("1: x", "1 (int)"),
+        ("true: x", "True (bool)"),
+        ("~: x", "None (NoneType)"),
+        ("? 0x" + "f" * 5000 + "\n: x", "<int> (int)"),
+    ],
+    ids=["int", "bool", "null", "int-too-large-to-render"],
 )
-def test_frontmatter_non_string_key_fails_closed_as_yaml_error(raw_key, shown):
+def test_frontmatter_non_string_key_fails_closed_as_yaml_error(key_line, shown):
     with pytest.raises(yaml.YAMLError) as excinfo:
-        loads_frontmatter(f"---\ndescription: d\n{raw_key}: x\n---\nbody\n")
+        loads_frontmatter(f"---\ndescription: d\n{key_line}\n---\nbody\n")
     assert f"non-string frontmatter key {shown}" in str(excinfo.value)
 
 
