@@ -403,7 +403,9 @@ def compute_forward_reachable_keys(
                 if is_dev:
                     dev_only.add(matched_key)
             manifest_dir = real_dir
-            node_key = matched_key or visit_key
+            # A surviving local parent is not in the candidate directory
+            # index; its own identity is still its lock key (#4823).
+            node_key = matched_key or ref.get_unique_key()
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
             # Several edges may alias one node; it is materialized where the

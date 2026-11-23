@@ -280,3 +280,25 @@ def test_uninstall_of_a_virtual_sibling_never_parents_it_to_itself(
     e_row = next(row for row in lock["dependencies"] if row.get("virtual_path") == "e")
     assert e_row["depth"] == 2
     _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_reparents_to_a_surviving_local_parent_by_its_lock_key(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4823: local ./vendor/d declares test/e; e lands one level below d's lock row."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    world.publish("e", _skill_package)
+    _skill_package(world.project / "vendor" / "d", "d", ("test/e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/d", "test/e"]},
+        },
+        world.project / "apm.yml",
+    )
+    world.apm("install")
+    world.apm("uninstall", "test/e")
+    assert _rows(world)["test/e"]["depth"] == 2
+    _assert_install_rewrites_nothing(world)

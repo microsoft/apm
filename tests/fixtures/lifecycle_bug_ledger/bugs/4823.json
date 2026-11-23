@@ -9,6 +9,7 @@
     "idempotency.byte_stable"
   ],
   "regression_tests": [
-    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_of_a_virtual_sibling_never_parents_it_to_itself"
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_of_a_virtual_sibling_never_parents_it_to_itself",
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_reparents_to_a_surviving_local_parent_by_its_lock_key"
   ]
 }

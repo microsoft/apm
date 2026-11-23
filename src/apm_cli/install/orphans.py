@@ -683,23 +683,29 @@ def _rescued_parent_resolver(lockfile: LockFile, repairs: Mapping, walk, modules
     replacements = lockfile.replacements
     dependencies = lockfile.get_package_dependencies()
     by_identity = {lockfile_parent_identity(dep, replacements): dep for dep in dependencies}
-    placed: Mapping = {}
-    if replacements is None:
-        from ..deps.lock_parent_placement import (
-            installed_manifest_children,
-            place_legacy_lock_parents,
-        )
+    placement: list[Mapping] = []
 
-        placed = place_legacy_lock_parents(
-            dependencies, installed_manifest_children(modules_dir)
-        ).parents
+    def placed() -> Mapping:
+        # Reads installed manifests, so only when a descendant needs it.
+        if not placement:
+            from ..deps.lock_parent_placement import (
+                installed_manifest_children,
+                place_legacy_lock_parents,
+            )
+
+            placement.append(
+                place_legacy_lock_parents(
+                    dependencies, installed_manifest_children(modules_dir)
+                ).parents
+            )
+        return placement[0]
 
     def parent_of(key: str, dep):
         exact = walk.parent_keys.get(key) if key in repairs else None
-        if exact is not None:
+        if exact is not None and lockfile.get_dependency(exact) is not None:
             parent = lockfile.get_dependency(exact)
-        elif key not in repairs and key in placed:
-            parent = placed[key]
+        elif key not in repairs and replacements is None and key in placed():
+            parent = placed()[key]
         else:
             parent_id = repairs[key][0] if key in repairs else dep.resolved_by
             if parent_id is None:
@@ -725,6 +731,8 @@ def _rescued_root_depths(
     rescued root under another rescued root lands below it. As install
     records it, an entry sits one level below its recorded parent.
     """
+    if not rescued_roots:
+        return {}
     parent_of = _rescued_parent_resolver(lockfile, repairs, walk, modules_dir)
     affected = _rescued_subtree(lockfile, rescued_roots)
     affected_set = set(affected)
