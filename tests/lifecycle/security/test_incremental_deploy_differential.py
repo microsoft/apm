@@ -110,6 +110,7 @@ def test_install_after_a_change_equals_a_fresh_deploy(
     pre_place = _PRE_PLACE.get(change)
     if pre_place is not None:
         pre_place(incremental, fresh)
+    fresh_held = _raw(fresh)
     reference = _install(fresh)
 
     evidence = (
@@ -130,9 +131,11 @@ def test_install_after_a_change_equals_a_fresh_deploy(
                 assert (world.project / SKILL_PATH).read_bytes() == user_bytes, (
                     "install overwrote the user's file at a managed path" + evidence
                 )
+        # A refused install keeps every byte it found (I7), on either twin.
         if after.returncode != 0:
-            # A refused install keeps every byte it found (I7).
             assert _raw(incremental) == held, "a refused install changed state" + evidence
+        if reference.returncode != 0:
+            assert _raw(fresh) == fresh_held, "a refused fresh install changed state" + evidence
         if after.returncode != 0 or reference.returncode != 0:
             return
     problems = diff(

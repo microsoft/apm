@@ -9,6 +9,7 @@ the ``--target copilot`` selection and no real ``copilot`` binary ever runs.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -484,6 +485,21 @@ def test_inner_skill_of_an_agent_plugin_is_recognized_as_nested(tmp_path: Path) 
 # ---------------------------------------------------------------------------
 
 
+def _version_after_name(output: str, name: str) -> str | None:
+    """Return the token right after *name* on the package row that carries a version.
+
+    Independent of table borders and column positions: tokens are split on
+    whitespace and Rich's vertical box character, so it reads the same from the Rich
+    table and from the plain-text fallback.
+    """
+    for line in output.splitlines():
+        tokens = [t for t in re.split(r"[\s\u2502|]+", line) if t]
+        for index, token in enumerate(tokens[:-1]):
+            if name in token and re.fullmatch(r"v?\d+(\.\d+)*|unknown", tokens[index + 1]):
+                return tokens[index + 1]
+    return None
+
+
 def test_deps_list_reports_the_natively_activated_plugin_with_its_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -499,7 +515,7 @@ def test_deps_list_reports_the_natively_activated_plugin_with_its_version(
     assert result.exit_code == 0, result.output
     assert "sentinel" in result.output
     assert "2.3.4" in result.output
-    assert "unknown" not in result.output
+    assert _version_after_name(result.output, "sentinel") == "2.3.4"
     assert "1 native plugin(s) activated from .agents/plugins: sentinel" in _flat(result.output)
 
 

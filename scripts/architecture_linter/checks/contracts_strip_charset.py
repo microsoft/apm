@@ -32,6 +32,8 @@ _CHARSET_ALLOWLIST: frozenset[str | bytes] = frozenset(
         ".-_",
         "-._",
         "._-",
+        # Windows drops trailing dots and spaces from a path component.
+        ". ",
     }
 )
 

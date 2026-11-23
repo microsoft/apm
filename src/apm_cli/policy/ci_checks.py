@@ -943,8 +943,8 @@ def _kept_mcp_entries(
         name="kept-mcp-entries",
         passed=False,
         message=(
-            f"{len(details)} MCP finding(s): APM kept entries it wrote for servers it no "
-            "longer deploys because it cannot confirm them -- "
+            f"{len(details)} MCP finding(s): APM kept entries it wrote and no longer "
+            "deploys -- "
             f"{remediation.KEPT_MCP_ENTRIES.clause()}"
         ),
         remediations=(remediation.KEPT_MCP_ENTRIES,),
@@ -1746,8 +1746,17 @@ def run_baseline_checks(
     no_policy: bool = False,
     policy_provider: Callable[[], Any] | None = None,
     policy_fetch: Callable[[], Any] | None = None,
+    content_integrity: bool = True,
+    mcp_config_consistency: bool = True,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
+
+    *content_integrity* ``False`` skips the deployed-content scan; only a caller
+    that has itself proven every deployed byte (hash and scan) may pass it.
+    *mcp_config_consistency* ``False`` skips the MCP config-consistency check
+    (Check 7; 7b and 7c still run); only a caller that then runs the install's
+    own MCP phase on the same state (which reconciles and records exactly as
+    install does, honoring personal approvals the audit view ignores) may pass it.
 
     When *fail_fast* is ``True`` (default), stops after the first
     failing check to skip expensive I/O (e.g. content integrity scan).
@@ -1885,14 +1894,17 @@ def run_baseline_checks(
     # Check 7: Config consistency (MCP); 7b: a differing same-name native MCP
     # entry --frozen refuses (#4477)
     if (
-        _run(
-            _check_config_consistency(
-                manifest,
-                lock,
-                prepared_replay=prepared_replay,
-                prepared_replay_error=prepared_replay_error,
-                replay_error_owner=replay_error_owner,
-                no_policy=no_policy,
+        (
+            mcp_config_consistency
+            and _run(
+                _check_config_consistency(
+                    manifest,
+                    lock,
+                    prepared_replay=prepared_replay,
+                    prepared_replay_error=prepared_replay_error,
+                    replay_error_owner=replay_error_owner,
+                    no_policy=no_policy,
+                )
             )
         )
         or _run(
@@ -1929,6 +1941,8 @@ def run_baseline_checks(
     if (
         _run(
             _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+            if content_integrity
+            else CheckResult(name="content-integrity", passed=True, message="proven by the caller")
         )
         or _run(
             _check_local_bundle_hooks(
