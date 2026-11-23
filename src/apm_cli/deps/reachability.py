@@ -985,9 +985,10 @@ def _alias_anchors(lockfile, removed_keys, walk) -> dict[str, str]:
         if key in lockfile.dependencies
     }
     anchors: dict[str, str] = {}
-    for key in sorted(set(lockfile.dependencies) - set(removed_keys)):
+    for key in sorted(lockfile.dependencies):
+        # Every survivor, retained or declared, whose recorded parent goes.
         row = lockfile.dependencies.get(key)
-        if row is None or row.source != "local" or row.replacement is not None:
+        if key in removed_keys or row.source != "local" or row.replacement is not None:
             continue
         if row.resolved_by not in gone or key not in walk.depths:
             continue
