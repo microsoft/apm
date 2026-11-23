@@ -351,13 +351,28 @@ class _MembersOnly:
 
 
 def test_negative_member_size_is_refused_before_the_next_advance(tmp_path: Path) -> None:
+    import threading
+
     member = tarfile.TarInfo("a.md")
     member.size = -1
+    outcome: dict = {}
 
-    with pytest.raises(ArchiveError, match="negative size"):
-        archive_mod.safe_extract_tar(
-            _MembersOnly([member]), tmp_path / "out", error_type=ArchiveError
-        )
+    def run() -> None:
+        try:
+            archive_mod.safe_extract_tar(
+                _MembersOnly([member]), tmp_path / "out", error_type=ArchiveError
+            )
+            outcome["error"] = None
+        except BaseException as exc:
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+
+    assert "error" in outcome, "extraction did not finish"
+    assert isinstance(outcome["error"], ArchiveError), outcome["error"]
+    assert "negative size" in str(outcome["error"])
     assert not (tmp_path / "out").exists()
 
 

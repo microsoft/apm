@@ -378,7 +378,10 @@ def safe_extract_tar(
             _raise(error_type, f"Symlinks and hard links are not supported: {member.name!r}")
         if not (member.isdir() or member.isreg()):
             _raise(error_type, f"Refusing to extract special file: {member.name!r}")
-        declared_total += max(member.size, 0)
+        # A negative size would move the next header read backward, forever.
+        if member.size < 0:
+            _raise(error_type, f"Refusing to extract entry with a negative size: {member.name!r}")
+        declared_total += member.size
         if declared_total > size_limit:
             _raise(
                 error_type,
