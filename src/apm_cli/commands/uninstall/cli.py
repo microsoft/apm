@@ -671,8 +671,10 @@ def _absence_proven(deploy_root: Path, relative: str) -> bool:
     it. Without such handles (Windows, where a junction lstats as a
     directory) nothing is proven: the claim stays.
     """
-    parts = PurePosixPath(str(relative).replace("\\", "/")).parts
-    if not _no_follow_handles() or not parts or any(part in ("/", ".", "..") for part in parts):
+    path = PurePosixPath(str(relative).replace("\\", "/"))
+    parts = path.parts
+    # An absolute or UNC-style ('//server/share') path escapes the deploy root.
+    if not _no_follow_handles() or path.is_absolute() or not parts or ".." in parts:
         return False
     return _absence_proven_by_handle(deploy_root, parts)
 
@@ -680,8 +682,10 @@ def _absence_proven(deploy_root: Path, relative: str) -> bool:
 def _absence_proven_by_handle(deploy_root: Path, parts: tuple[str, ...]) -> bool:
     """:func:`_absence_proven` through no-follow directory handles."""
     try:
-        handle = os.open(deploy_root, os.O_RDONLY | os.O_DIRECTORY)
-    except OSError:
+        # The resolved root is opened without following a symlink swapped in since.
+        root = Path(deploy_root).resolve()
+        handle = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except (OSError, RuntimeError):
         return False
     try:
         for part in parts[:-1]:

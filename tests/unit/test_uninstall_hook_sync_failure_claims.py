@@ -535,3 +535,33 @@ def test_a_dot_dot_part_is_never_proven_absent(tmp_path: Path, relative: str) ->
     assert not _absence_proven(root, relative)
     assert not (tmp_path / "outside" / "h.json").exists()
     assert not (root / "outside" / "h.json").exists()
+
+
+@pytest.mark.parametrize("relative", ["\\\\server\\share\\h.json", "//server/share/h.json"])
+def test_a_unc_style_claim_is_never_proven_absent(tmp_path: Path, relative: str) -> None:
+    """'//' is an absolute POSIX root: the walk must not leave the deploy root (#4851)."""
+    from apm_cli.commands.uninstall.cli import _absence_proven
+
+    (tmp_path / "server" / "share").mkdir(parents=True)
+
+    assert not _absence_proven(tmp_path, relative)
+    assert not (tmp_path / "server" / "share" / "h.json").exists()
+
+
+def test_a_root_swapped_for_a_symlink_after_resolving_is_not_proven_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.commands.uninstall.cli import _absence_proven
+
+    root = tmp_path / "root"
+    (root / ".github" / "hooks").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(root, target_is_directory=True)
+    # resolve() returns a path that a symlink replaced after it was resolved.
+    monkeypatch.setattr(Path, "resolve", lambda self, strict=False: link)
+
+    proven = _absence_proven(root, ".github/hooks/h.json")
+
+    monkeypatch.undo()
+    assert not proven
+    assert link.is_symlink() and not (root / ".github" / "hooks" / "h.json").exists()
