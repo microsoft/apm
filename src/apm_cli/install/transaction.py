@@ -98,16 +98,29 @@ def _receipts_directory(root: Path) -> Path:
     return materialization_evidence_paths(root, InstallScope.PROJECT)[0].parent
 
 
+def _committed_lockfile(apm_dir: Path) -> str | None:
+    """The identity of the lockfile on disk in *apm_dir*, or ``None``."""
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    try:
+        return lockfile_identity(get_lockfile_path(apm_dir).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def _ledger_hashes(apm_dir: Path) -> dict[str, str | None]:
     """Each deployed path the lockfile in *apm_dir* claims, mapped to its recorded hash."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.install.deploy_snapshot import LedgerUnavailable
 
+    path = get_lockfile_path(apm_dir)
     try:
-        lockfile = LockFile.read(get_lockfile_path(apm_dir))
-    except Exception:
-        # An unreadable lockfile vouches for nothing: replay keeps the journal.
-        return {}
+        lockfile = LockFile.read(path)
+    except Exception as exc:
+        # Unreadable evidence is not "nothing claimed": replay keeps the journal.
+        raise LedgerUnavailable(path, f"the lockfile cannot be read: {exc}") from None
     if lockfile is None:
         return {}
     ledger: dict[str, str | None] = dict.fromkeys(
@@ -283,6 +296,7 @@ class InstallTransaction:
                 root,
                 lambda: _ledger_hashes(self.apm_modules_dir.parent),
                 receipts=_receipts_directory(root),
+                committed=lambda: _committed_lockfile(self.apm_modules_dir.parent),
             )
         except JournalReplayError as exc:
             logger = self._logger
@@ -305,8 +319,16 @@ class InstallTransaction:
             raise InstallFailureAlreadyRendered(str(exc)) from None
         if self._logger is None:
             return
+        from apm_cli.core.remediation import kept_note
+
+        copies = ", ".join(str(store) for store in outcome.retained)
         for path, reason in outcome.kept:
-            self._logger.warning(f"Kept {path}: {reason}, so it was not restored. Review it.")
+            note = kept_note(
+                path,
+                f"{reason}, so it was not restored",
+                f"Review it; the pre-install copies are kept at {copies}.",
+            )
+            self._logger.warning(note)
         if outcome.restored:
             self._logger.progress(
                 f"Restored {outcome.restored} deployed path(s) left by an interrupted install."
@@ -336,6 +358,17 @@ class InstallTransaction:
             root = getattr(ctx, "project_root", None) or _deploy_root_of(self.apm_modules_dir)
             self._deploy_journal = DeployJournal(store_parent, root=root)
             write_seam.listen(self._record_deploy_write)
+
+    def _mark_deploy_commit(self) -> None:
+        """Seal the journal and name the staged lockfile it is about to commit."""
+        from apm_cli.deps.lockfile import get_lockfile_path
+        from apm_cli.deps.lockfile_write_authority import staged_lockfile_text
+        from apm_cli.install.deploy_snapshot import lockfile_identity
+
+        journal = self._deploy_journal
+        text = staged_lockfile_text(get_lockfile_path(self.apm_modules_dir.parent))
+        if journal is not None and text is not None:
+            journal.mark_commit(lockfile_identity(text))
 
     def seal_deploy_writes(self) -> None:
         """Seal what the journaled paths hold now, before a gate judges deployed bytes (#4863)."""
@@ -386,7 +419,10 @@ class InstallTransaction:
 
     def release_deploy_targets(self) -> None:
         """Every gate that scans deployed bytes passed: keep the journal until the lock commits."""
-        from apm_cli.deps.lockfile_write_authority import after_lockfile_commit
+        from apm_cli.deps.lockfile_write_authority import (
+            after_lockfile_commit,
+            before_lockfile_commit,
+        )
 
         with self._lock:
             if self._deploy_journal is None or self._journal_released:
@@ -394,6 +430,9 @@ class InstallTransaction:
             self._journal_released = True
             if self._journal_held_until_commit:
                 return
+        # Mark the journal with the lockfile about to commit, so a kill after
+        # the write settles it instead of rolling it back (#4863).
+        before_lockfile_commit(self._mark_deploy_commit)
         # Settle at the durable commit, before receipt binding or any other
         # fallible post-commit action: the lockfile then records the deploys.
         after_lockfile_commit(self._settle_deploy_journal, first=True)

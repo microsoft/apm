@@ -254,7 +254,7 @@ def test_a_receipt_is_restored_from_its_journal_copy(tmp_path: Path, apm_home: P
         apm_home / "install-snapshots", project, dict, receipts=_receipts(apm_home)
     )
 
-    assert (outcome.restored, outcome.kept) == (1, [])
+    assert (outcome.restored, outcome.kept) == (1, ())
     assert receipt.read_bytes() == b"prior\n"
 
 
@@ -364,6 +364,190 @@ def test_a_deploy_root_path_that_is_absolute_or_escapes_is_refused(
     assert deployed.read_bytes() == b"killed\n"
 
 
+def _replay(apm_home: Path, project: Path, ledger=dict):
+    from apm_cli.install.deploy_snapshot import replay_abandoned_journals
+
+    return replay_abandoned_journals(
+        apm_home / "install-snapshots", project, ledger, receipts=_receipts(apm_home)
+    )
+
+
+def _killed_journal(apm_home: Path, project: Path, path: Path, *, seal: bool = True):
+    """Journal *path*, then overwrite it as a killed install would."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project.mkdir(parents=True, exist_ok=True)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"killed\n")
+    if seal:
+        journal.seal()
+    assert journal.store is not None
+    return journal.store
+
+
+def test_shared_config_the_ledger_does_not_claim_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Shared settings are outside the ledger: kept and reported, never restored (#5009)."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    settings = project / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_bytes(b'{"hooks": {}}\n')
+    _killed_journal(apm_home, project, settings)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [
+        (".claude/settings.json", "the deployment ledger does not record these bytes")
+    ]
+    assert settings.read_bytes() == b"killed\n"
+    assert kept.value.store.name.startswith("retained-")
+
+
+def test_a_receipts_directory_the_killed_install_created_is_removed(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    project.mkdir()
+    receipts = _receipts(apm_home)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(receipts, contents=False)
+    receipts.mkdir(parents=True)
+    journal.record(receipts / "r.json")
+    (receipts / "r.json").write_bytes(b"killed\n")
+    journal.seal()
+
+    outcome = _replay(apm_home, project)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert not receipts.exists()
+
+
+def test_an_unsealed_changed_path_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
+    """Killed before any seal: the bytes there may be a user's, so nothing is applied."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    _killed_journal(apm_home, project, created, seal=False)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [
+        ("a.md", "no seal records what the interrupted install wrote here")
+    ]
+    assert created.read_bytes() == b"killed\n"
+    assert not kept.value.applied
+
+
+def test_an_unreadable_ledger_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError, LedgerUnavailable
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    _killed_journal(apm_home, project, created)
+
+    def unreadable():
+        raise LedgerUnavailable(project / "apm.lock.yaml", "the lockfile cannot be read: bad")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, unreadable)
+
+    assert kept.value.issues == [
+        (str(project / "apm.lock.yaml"), "the lockfile cannot be read: bad")
+    ]
+    assert created.read_bytes() == b"killed\n"
+
+
+def test_a_directory_restores_only_when_the_ledger_records_all_its_files(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal, JournalReplayError
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill = project / ".kiro" / "skills" / "s"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"prior\n")
+    digest = compute_file_hash(skill / "SKILL.md")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    (skill / "SKILL.md").write_bytes(b"killed\n")
+    journal.seal()
+    ledger = {".kiro/skills/s/SKILL.md": digest, ".kiro/skills/s/extra.md": digest}
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert kept.value.issues == [
+        (".kiro/skills/s", "the deployment ledger records other files under this directory")
+    ]
+    assert (skill / "SKILL.md").read_bytes() == b"killed\n"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"path": "./a.md"},
+        {"path": "."},
+        {"path": "x//a.md"},
+        {"ancestors": 1},
+        {"ancestors": [3]},
+        {"copy": ["0"]},
+    ],
+    ids=["dot-slash", "dot", "double-slash", "ancestors-int", "ancestor-int", "copy-list"],
+)
+def test_a_malformed_unit_keeps_the_journal(tmp_path: Path, apm_home: Path, mutation: dict) -> None:
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    store = _killed_journal(apm_home, project, created)
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text().splitlines()]
+    lines[1].update(mutation)
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: {"a.md": None})
+
+    assert len(kept.value.issues) == 1, kept.value.issues
+    assert not kept.value.applied
+    assert created.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_symlinked_receipts_directory_is_refused(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    receipt, _store = _journaled_receipt(apm_home, project)
+    real = receipt.parent.rename(tmp_path / "moved")
+    for item in real.iterdir():
+        item.rename(outside / item.name)
+    _receipts(apm_home).symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [
+        ("deployment-receipts/r.json", "journal path escapes the deploy root")
+    ]
+    assert (outside / "r.json").read_bytes() == b"killed\n"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
 def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) -> None:
     from apm_cli.install.deploy_snapshot import DeployJournal, replay_abandoned_journals
@@ -385,7 +569,7 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
         apm_home / "install-snapshots", project, lambda: ledger, receipts=_receipts(apm_home)
     )
 
-    assert (restored.restored, restored.kept) == (1, [])
+    assert (restored.restored, restored.kept) == (1, ())
     assert hook.read_bytes() == b"#!/bin/sh\necho prior\n"
     assert hook.stat().st_mode & 0o777 == 0o755
     assert not any((apm_home / "install-snapshots").iterdir())

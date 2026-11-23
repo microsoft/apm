@@ -250,6 +250,9 @@ still cleans up its managed files, subject to the usual user-edit protections.
   cannot be restored, it restores the others. Either way it names each path,
   keeps the copies under `~/.apm/install-snapshots/retained-*` and exits 1.
   Restore or remove the listed paths by hand, then run the command again.
+  Shared settings the lockfile does not record (hook settings, MCP
+  configuration) are not restored this way: the copies are kept and reported
+  for you to restore by hand.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed

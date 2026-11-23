@@ -28,6 +28,8 @@ a failed install created and left empty (#4159).
 from __future__ import annotations
 
 import contextlib
+import functools
+import hashlib
 import json
 import os
 import re
@@ -42,7 +44,11 @@ from typing import Any, Literal
 
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+)
 
 _Kind = Literal["absent", "file", "dir", "symlink"]
 _STORE_PREFIX = "deploy-"
@@ -159,7 +165,10 @@ class DeployJournal:
             "kind": unit.kind,
             "copy": unit.copy.name if unit.copy is not None else None,
             "link": unit.link,
-            "ancestors": [a for b, a in map(self._relative, unit.absent_ancestors) if b == base],
+            # Only directories strictly inside the base; never the base itself.
+            "ancestors": [
+                a for b, a in map(self._relative, unit.absent_ancestors) if b == base and a != "."
+            ],
         }
         if unit.kind == "file" and unit.copy is not None:
             line["hash"] = compute_file_hash(unit.copy)
@@ -208,6 +217,17 @@ class DeployJournal:
                 return
             for index, unit in enumerate(self._units):
                 self._append_line({"sealed": index, "state": _state(unit.path)})
+
+    def mark_commit(self, lockfile_identity: str) -> None:
+        """Seal, then name the lockfile this install is about to commit.
+
+        A journal killed after that lockfile reached disk recorded a committed
+        install: replay settles it instead of rolling the deployment back.
+        """
+        self.seal()
+        with self._lock:
+            if self.root is not None and self.store is not None:
+                self._append_line({"commit": lockfile_identity})
 
     def restore(self) -> list[tuple[Path, str]]:
         """Put every recorded path back; return the paths that could not be restored."""
@@ -298,12 +318,26 @@ def _state(path: Path) -> dict[str, Any]:
 _ABSENT: dict[str, Any] = {"absent": True}
 
 
+def lockfile_identity(text: str) -> str:
+    """Identify a lockfile document independent of its line endings."""
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
 @dataclass(frozen=True)
 class ReplayOutcome:
-    """Paths an abandoned journal restored, and paths it kept because they changed."""
+    """What replay restored, the paths it kept because they changed, and where."""
 
-    restored: int
-    kept: list[tuple[str, str]]
+    restored: int = 0
+    kept: tuple[tuple[str, str], ...] = ()
+    retained: tuple[Path, ...] = ()
+
+
+class LedgerUnavailable(Exception):
+    """The deployment ledger exists but cannot be read; replay proves nothing."""
+
+    def __init__(self, path: Path, reason: str) -> None:
+        super().__init__(reason)
+        self.issue = (str(path), reason)
 
 
 class JournalReplayError(Exception):
@@ -337,11 +371,6 @@ class _Replay:
             return {"file": self.expected[""]}
         return {"dir": dict(self.expected)}
 
-    def holds_unknown_data(self) -> bool:
-        """Whether something APM did not write (by the last seal) is at the path now."""
-        current = _state(self.path)
-        return current not in (_ABSENT, self.prior, self.written)
-
 
 def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
     """Parse ``journal.jsonl``; raise ``ValueError`` when it is not a journal."""
@@ -363,25 +392,53 @@ def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
     return header, lines[1:]
 
 
+def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str | None]:
+    """Split manifest lines into units, each unit's last sealed state and the commit mark."""
+    units = [line for line in lines if not (isinstance(line, dict) and line.keys() & _MARKS)]
+    seals: dict[int, dict[str, Any]] = {}
+    commit: str | None = None
+    for line in lines:
+        if not (isinstance(line, dict) and line.keys() & _MARKS):
+            continue
+        if "commit" in line:
+            if not isinstance(line["commit"], str):
+                raise ValueError("journal manifest holds a malformed commit mark")
+            commit = line["commit"]
+            continue
+        index, state = line.get("sealed"), line.get("state")
+        if type(index) is not int or not 0 <= index < len(units) or not isinstance(state, dict):
+            raise ValueError("journal manifest holds a malformed seal")
+        seals[index] = state
+    return units, seals, commit
+
+
+_MARKS = frozenset({"sealed", "commit"})
+
+
 def _inside(rel: Any, root: Path) -> Path:
-    """The path *rel* names under *root*; raise ``PathTraversalError`` when it escapes."""
+    """The path canonical *rel* names under *root*; raise ``PathTraversalError`` otherwise."""
     if not isinstance(rel, str) or not rel:
         raise PathTraversalError(f"journal path {rel!r} is not a relative path")
     posix, windows = PurePosixPath(rel), PureWindowsPath(rel)
     if posix.is_absolute() or windows.drive or windows.root or ".." in posix.parts:
         raise PathTraversalError(f"journal path {rel!r} escapes the deploy root")
+    # One spelling per path: no "./", "//", trailing "/" or "." naming the base.
+    if not posix.parts or posix.as_posix() != rel:
+        raise PathTraversalError(f"journal path {rel!r} is not canonical")
     path = root.joinpath(*posix.parts)
     ensure_path_within(path, root)
     return path
 
 
 def _under(rel: Any, directory: str) -> str:
-    """*rel* (``<directory>/<rest>``) as ``<rest>``; raise ``PathTraversalError`` otherwise."""
+    """*rel* (``<directory>[/<rest>]``) as ``<rest>`` (``""`` for the directory itself)."""
     parts = PurePosixPath(rel).parts if isinstance(rel, str) else ()
     prefix = PurePosixPath(directory).parts
-    if len(parts) <= len(prefix) or parts[: len(prefix)] != prefix:
+    if len(parts) < len(prefix) or parts[: len(prefix)] != prefix:
         raise PathTraversalError(f"journal path {rel!r} is outside {directory}")
-    return PurePosixPath(*parts[len(prefix) :]).as_posix()
+    if PurePosixPath(*parts).as_posix() != rel:
+        raise PathTraversalError(f"journal path {rel!r} is not canonical")
+    return PurePosixPath(*parts[len(prefix) :]).as_posix() if len(parts) > len(prefix) else ""
 
 
 @dataclass(frozen=True)
@@ -406,10 +463,11 @@ def _validate_unit(
     """Check one manifest line against the store and the ledger, without applying it.
 
     A path under the deploy root (``base: root``) is restored only when the
-    deployment ledger vouches for it. APM's own metadata under APM home
-    (``base: apm_home``, such as deployment receipts) is outside the ledger:
-    it is confined to APM home, outside the journal stores, and restored only
-    when it re-hashes as journaled. Raise ``_Unproven`` otherwise.
+    deployment ledger vouches for it, a directory only when the ledger
+    records exactly its files. APM's own metadata under APM home
+    (``base: apm_home``) is limited to deployment receipts, which have
+    journal-only integrity: confined to the receipts directory and restored
+    only when they re-hash as journaled. Raise ``_Unproven`` otherwise.
     """
     if not isinstance(line, dict) or line.get("kind") not in _KINDS:
         raise _Unproven(store, "journal manifest holds a malformed unit")
@@ -431,14 +489,28 @@ def _validate_unit(
             raise _Unproven(rel, "the deployment ledger records a file the journal says was absent")
         return _Replay(rel, path, kind, None, {}, ancestors)
     copy, expected = _journaled_copy(line, store)
-
-    def vouched(key: str, digest: str) -> bool:
-        return metadata or ledger.get(key) == digest
-
-    keys = {name: f"{rel}/{name}" if name else rel for name in expected}
-    if not all(digest and vouched(keys[name], digest) for name, digest in expected.items()):
-        raise _Unproven(rel, "the deployment ledger does not record these bytes")
+    if not metadata:
+        _check_vouched(rel, kind, expected, ledger)
     return _Replay(rel, path, kind, copy, expected, ancestors)
+
+
+def _check_vouched(
+    rel: str, kind: str, expected: Mapping[str, str], ledger: Mapping[str, str | None]
+) -> None:
+    """The ledger records exactly the journaled bytes (all of a directory's files)."""
+    keys = {name: f"{rel}/{name}" if name else rel for name in expected}
+    if not all(digest and ledger.get(keys[name]) == digest for name, digest in expected.items()):
+        raise _Unproven(rel, "the deployment ledger does not record these bytes")
+    if kind == "dir" and {k for k in ledger if k.startswith(f"{rel}/")} != set(keys.values()):
+        raise _Unproven(rel, "the deployment ledger records other files under this directory")
+
+
+def _check_receipt(rel: str, path: Path, kind: str) -> None:
+    """APM-home units are deployment receipts: never links, a file only over a file."""
+    if kind not in _RECEIPT_KINDS or path.is_symlink():
+        raise _Unproven(rel, "a deployment receipt is a regular file")
+    if kind == "file" and os.path.lexists(path) and not path.is_file():
+        raise _Unproven(rel, "a deployment receipt is a regular file")
 
 
 def _journaled_copy(line: dict[str, Any], store: Path) -> tuple[Path, dict[str, str]]:
@@ -462,31 +534,28 @@ def _journaled_copy(line: dict[str, Any], store: Path) -> tuple[Path, dict[str, 
     return copy, expected
 
 
-def _check_receipt(rel: str, path: Path, kind: str) -> None:
-    """APM-home units are deployment receipts: regular files, never links (#4863)."""
-    if kind not in _RECEIPT_KINDS:
-        raise _Unproven(rel, "a deployment receipt is a regular file")
-    if path.is_symlink() or (os.path.lexists(path) and not path.is_file()):
-        raise _Unproven(rel, "a deployment receipt is a regular file")
-
-
 def _unit_paths(
     line: dict[str, Any], store: Path, bases: _Bases, *, metadata: bool
 ) -> tuple[Path, tuple[Path, ...]]:
     """The unit's path and absent ancestors, each confined to its base directory.
 
     APM-home units are confined to the deployment receipts directory, both as
-    written (no ``..``) and as resolved (no symlinked component leaves it).
+    written (canonical, no ``..``) and as resolved: no component from APM
+    home down may be a symbolic link.
     """
-    snapshots = store.parent
-    base = bases.receipts if metadata else bases.root
+    snapshots, rels = store.parent, [line.get("path")]
+    ancestors = line.get("ancestors") or []
+    if not isinstance(ancestors, list):
+        raise PathTraversalError("journal ancestors are not a list")
+    rels += ancestors
     if metadata:
-        prefix = bases.receipts.relative_to(snapshots.parent).as_posix()
-        line = dict(line)
-        line["path"] = _under(line.get("path"), prefix)
-        line["ancestors"] = [_under(a, prefix) for a in line.get("ancestors") or ()]
-    paths = [_inside(line.get("path"), base)]
-    paths += [_inside(a, base) for a in line.get("ancestors") or ()]
+        home, prefix = snapshots.parent, bases.receipts.relative_to(snapshots.parent).as_posix()
+        rests = [_under(rel, prefix) for rel in rels]
+        paths = [_inside(rest, bases.receipts) if rest else bases.receipts for rest in rests]
+        if any(has_symlink_component(home, path) for path in paths):
+            raise PathTraversalError("a deployment receipt path crosses a symbolic link")
+    else:
+        paths = [_inside(rel, bases.root) for rel in rels]
     for path in paths:
         if path == snapshots or snapshots in path.parents:
             raise PathTraversalError(f"journal path {path} names the journal stores")
@@ -546,29 +615,88 @@ def _keep(store: Path) -> Path:
     return retained
 
 
-def _seals(lines: list[Any], units: int) -> tuple[list[Any], dict[int, dict[str, Any]]]:
-    """Split manifest lines into unit lines and each unit's last sealed state."""
-    seals: dict[int, dict[str, Any]] = {}
-    unit_lines: list[Any] = []
-    for line in lines:
-        if not (isinstance(line, dict) and "sealed" in line):
-            unit_lines.append(line)
-            continue
-        index, state = line.get("sealed"), line.get("state")
-        if type(index) is not int or not 0 <= index < units or not isinstance(state, dict):
-            raise ValueError("journal manifest holds a malformed seal")
-        seals[index] = state
-    return unit_lines, seals
+_KEEP_CHANGED = "it changed after the interrupted install"
 
 
-def _replay_store(store: Path, bases: _Bases, ledger: Mapping[str, str | None]) -> ReplayOutcome:
+def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
+    """Split *units* into those to restore and those holding data a user wrote.
+
+    A path still holding its prior state, nothing, or what the last seal
+    recorded is restored. A path holding something else is kept: after a
+    seal it is a later write (``_KEEP_CHANGED``); with no seal, replay cannot
+    tell the killed install's bytes from a user's, so it proves nothing.
+    """
+    apply: list[_Replay] = []
+    kept: list[tuple[str, str]] = []
+    unsealed: list[tuple[str, str]] = []
+    for unit in units:
+        current = _state(unit.path)
+        if current in (_ABSENT, unit.prior) or current == unit.written:
+            apply.append(unit)
+        elif unit.written is None:
+            unsealed.append((unit.rel, "no seal records what the interrupted install wrote here"))
+        else:
+            kept.append((unit.rel, _KEEP_CHANGED))
+    if unsealed:
+        raise _Unsealed(unsealed)
+    return apply, kept
+
+
+class _Unsealed(Exception):
+    def __init__(self, issues: list[tuple[str, str]]) -> None:
+        super().__init__("unsealed journal units")
+        self.issues = issues
+
+
+def _replay_store(
+    store: Path,
+    bases: _Bases,
+    ledger: Callable[[], Mapping[str, str | None]],
+    committed: Callable[[], str | None],
+) -> ReplayOutcome:
     """Replay one abandoned store, or raise ``JournalReplayError`` after keeping it."""
     try:
-        _header, lines = _read_manifest(store)
-        units_total = sum(1 for line in lines if not (isinstance(line, dict) and "sealed" in line))
-        lines, seals = _seals(lines, units_total)
+        lines, seals, commit = _parse(_read_manifest(store)[1])
     except ValueError as exc:
         raise JournalReplayError(_keep(store), [(str(store), str(exc))], applied=False) from None
+    if commit is not None and commit == committed():
+        # The killed install's lockfile reached disk: its deployment is committed.
+        shutil.rmtree(store, ignore_errors=True)
+        return ReplayOutcome()
+    try:
+        vouched = ledger()
+    except LedgerUnavailable as exc:
+        raise JournalReplayError(_keep(store), [exc.issue], applied=False) from None
+    units, issues = _validated(lines, seals, store, bases, vouched)
+    try:
+        if issues:
+            raise _Unsealed(issues)
+        apply, kept = _decide(units)
+    except _Unsealed as exc:
+        raise JournalReplayError(_keep(store), exc.issues, applied=False) from None
+    for unit in reversed(apply):
+        try:
+            _apply(unit)
+        except OSError as exc:
+            issues.append((unit.rel, f"could not restore: {exc}"))
+    remove_empty_directories(a for unit in apply for a in unit.ancestors)
+    if issues:
+        raise JournalReplayError(_keep(store), issues, applied=True)
+    if kept:
+        # The copies of what was kept stay available for recovery.
+        return ReplayOutcome(len(apply), tuple(kept), (_keep(store),))
+    shutil.rmtree(store, ignore_errors=True)
+    return ReplayOutcome(len(apply))
+
+
+def _validated(
+    lines: list[Any],
+    seals: Mapping[int, dict[str, Any]],
+    store: Path,
+    bases: _Bases,
+    ledger: Mapping[str, str | None],
+) -> tuple[list[_Replay], list[tuple[str, str]]]:
+    """Validate every unit line; return the units and the issues found."""
     units: list[_Replay] = []
     issues: list[tuple[str, str]] = []
     for index, line in enumerate(lines):
@@ -577,23 +705,11 @@ def _replay_store(store: Path, bases: _Bases, ledger: Mapping[str, str | None]) 
         except _Unproven as exc:
             issues.append(exc.issue)
             continue
-        units.append(replace(unit, written=seals.get(index)))
-    if issues:
-        raise JournalReplayError(_keep(store), issues, applied=False)
-    kept: list[tuple[str, str]] = []
-    for unit in reversed(units):
-        if unit.holds_unknown_data():
-            kept.append((unit.rel, "it changed after the interrupted install"))
+        except (TypeError, ValueError, AttributeError, KeyError):
+            issues.append((str(store), "journal manifest holds a malformed unit"))
             continue
-        try:
-            _apply(unit)
-        except OSError as exc:
-            issues.append((unit.rel, f"could not restore: {exc}"))
-    remove_empty_directories(a for unit in units for a in unit.ancestors)
-    if issues:
-        raise JournalReplayError(_keep(store), issues, applied=True)
-    shutil.rmtree(store, ignore_errors=True)
-    return ReplayOutcome(len(units) - len(kept), kept)
+        units.append(replace(unit, written=seals.get(index)))
+    return units, issues
 
 
 def _store_root(store: Path) -> str | None:
@@ -612,39 +728,39 @@ def replay_abandoned_journals(
     ledger: Callable[[], Mapping[str, str | None]],
     *,
     receipts: Path,
+    committed: Callable[[], str | None] = lambda: None,
 ) -> ReplayOutcome:
     """Replay the journals a killed install left for *root*.
 
-    A path holding data the killed install did not write (by its last seal)
-    is kept and listed in the outcome, never removed or replaced.
-
     Call only while holding the lifecycle lock, before the install changes
     anything: every install that could own a live journal is then this
-    process. *ledger* returns, when a journal for *root* exists, each deployed
-    path the lockfile claims (POSIX, relative to *root*) mapped to its
-    recorded content hash, or ``None``. A journal
-    for another deploy root is left for that root's next install; one whose
-    root cannot be read is kept and reported. *receipts* is the deployment
-    receipts directory, the only APM-home location a journal may restore.
-    Raise ``JournalReplayError`` on the first journal that cannot be replayed,
-    after keeping it.
+    process. *ledger* returns each deployed path the lockfile claims (POSIX,
+    relative to *root*) mapped to its recorded content hash, or ``None``; it
+    raises ``LedgerUnavailable`` when the lockfile exists but cannot be read.
+    *committed* returns the :func:`lockfile_identity` of the lockfile on disk.
+    *receipts* is the deployment receipts directory, the only APM-home
+    location a journal may restore. A journal for another deploy root is left
+    for that root's next install. A path holding data the killed install did
+    not write is kept and listed in the outcome, never removed or replaced.
+    Raise ``JournalReplayError`` on the first journal that cannot be
+    replayed, after keeping it.
     """
     root = Path(os.path.abspath(root))
     real_root = os.path.realpath(root)
-    restored, kept = 0, []
+    bases = _Bases(root, Path(os.path.abspath(receipts)))
+    ledger, committed = functools.cache(ledger), functools.cache(committed)
     stores: list[Path] = []
     with contextlib.suppress(OSError):
         stores = sorted(store_parent.glob(f"{_STORE_PREFIX}*"))
-    vouched: Mapping[str, str | None] | None = None
+    restored, kept, retained = 0, [], []
     for store in stores:
         if not store.is_dir() or store.is_symlink() or os.path.lexists(store / _RETAINED_MARKER):
             continue
         named = _store_root(store)
         if named is not None and os.path.realpath(named) != real_root:
             continue
-        if vouched is None:
-            vouched = ledger()
-        outcome = _replay_store(store, _Bases(root, Path(os.path.abspath(receipts))), vouched)
+        outcome = _replay_store(store, bases, ledger, committed)
         restored += outcome.restored
         kept += outcome.kept
-    return ReplayOutcome(restored, kept)
+        retained += outcome.retained
+    return ReplayOutcome(restored, tuple(kept), tuple(retained))

@@ -346,4 +346,29 @@ def test_a_user_file_at_a_journaled_absent_path_survives_replay(
     assert _text(result).isascii(), _evidence(result)
     after = _tree_state(chain.project)
     assert {path for path in after if path not in before} == {extra["path"]}, after
+    # The pre-install copies stay available, and no later install replays them.
+    assert [s.name.split("-")[0] for s in _stores(chain)] == ["retained"], _stores(chain)
+    assert "pre-install copies are kept at" in _text(result), _evidence(result)
+    assert chain.run("install", *_SCAN.args).returncode == 0
+
+
+def test_a_kill_after_the_lockfile_commit_settles_the_journal(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A journal whose lockfile reached disk recorded a committed install: keep it."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    _write_package(chain, revision="v2", description="agent helper v2", extra=True)
+    _kill_mid_refusal(chain, "settle+kill", *_SCAN.args)
+    _abandoned(chain)
+    committed = _tree_state(chain.project)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert _tree_state(chain.project) == committed, _evidence(result)
+    assert "interrupted install" not in _text(result), _evidence(result)
     assert _stores(chain) == [], _evidence(result)
+    _assert_lock_matches_disk(chain.project)
+    assert chain.run("audit", "--ci").returncode == 0

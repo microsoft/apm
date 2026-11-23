@@ -1,4 +1,4 @@
-"""Simulate an install killed between deploy and the refusal's restore (#4863).
+"""Simulate an install killed between deploy and the journal settling (#4863).
 
 ``tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py`` puts this
 directory on ``PYTHONPATH`` for one engine run (``python -m apm_cli.cli``)
@@ -9,10 +9,23 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
 * ``hash+kill``: also make the post-deploy ``require_hashes`` check refuse,
   then exit at the restore. Install always records a hash for a git row and
   exempts local rows, so that refusal cannot be produced from inputs alone.
+* ``settle+kill``: exit when the journal is discarded, right after the
+  lockfile reached disk, so the journal records a committed install.
+
+Python runs only the first ``sitecustomize`` on its path, so this one runs
+the next one (the isolated environment's network guard) before anything else.
 """
 
 import os
+import runpy
 import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _entry in sys.path:
+    _candidate = os.path.join(_entry or os.curdir, "sitecustomize.py")
+    if os.path.abspath(_entry or os.curdir) != _HERE and os.path.isfile(_candidate):
+        runpy.run_path(_candidate, run_name="sitecustomize")
+        break
 
 _FAULT = os.environ.get("APM_TEST_DEPLOY_FAULT", "")
 _KILLED_EXIT = 137
@@ -20,12 +33,16 @@ _KILLED_EXIT = 137
 if _FAULT:
     from apm_cli.install import deploy_snapshot, integrity
 
-    def _killed(self):
+    def _killed(*_args, **_kwargs):
         os._exit(_KILLED_EXIT)
 
-    deploy_snapshot.DeployJournal.restore = _killed
+    faults = _FAULT.split("+")
+    if "settle" in faults:
+        deploy_snapshot.DeployJournal.discard = _killed
+    else:
+        deploy_snapshot.DeployJournal.restore = _killed
 
-    if "hash" in _FAULT.split("+"):
+    if "hash" in faults:
         _judge_hashes = integrity.enforce_installed_hash_policy
 
         def _refuse_hashes(ctx, lockfile):
