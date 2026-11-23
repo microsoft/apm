@@ -35,6 +35,20 @@ def _write_yaml(path: Path, data: dict) -> Path:
     return path
 
 
+def _fire(runner, event_name: str = "post-install") -> None:
+    """Fire *event_name* without running any script command."""
+    event = LifecycleEvent(
+        event=event_name,
+        packages=[PackageInfo(name="org/repo")],
+        scope="project",
+        timestamp="2026-01-01T00:00:00Z",
+        cli_version="0.0.0",
+        working_directory="/tmp/test",
+    )
+    with patch("apm_cli.core.script_executors.execute_script"):
+        runner.fire(event_name, event)
+
+
 class TestLifecycleEvent:
     def test_to_json_round_trips(self) -> None:
         event = LifecycleEvent(
@@ -457,6 +471,8 @@ class TestBuildRunnerFromContext:
         # Scripts still run: the warn posture is unchanged.
         assert any(script.bash == "echo user" for script in runner._scripts)
         assert any(script.bash == "echo user" for script in second._scripts)
+        _fire(runner)
+        _fire(second)
         # The notice is printed exactly once per command logger.
         notices = [
             line
@@ -475,12 +491,9 @@ class TestBuildRunnerFromContext:
         This is the exact scenario the issue reports: the runner is built with
         ``logger=None`` and previously printed nothing at all.
         """
-        from apm_cli.core import lifecycle_scripts
         from apm_cli.policy.discovery import PolicyFetchResult
 
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
-        # Unique root per test keeps the module-level dedup set isolated.
-        lifecycle_scripts._unresolved_warn_noted_roots.discard(str(tmp_path))
         apm_home = tmp_path / "user"
         _write_yaml(
             apm_home / "apm.yml",
@@ -495,15 +508,26 @@ class TestBuildRunnerFromContext:
         with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed):
             # No logger: the runner is built exactly as ``apm lifecycle`` does.
             runner = build_runner_from_context(project_root=str(tmp_path))
+            # A second command (a separate invocation) builds its own runner.
             second = build_runner_from_context(project_root=str(tmp_path))
         # Scripts still run: the warn posture is unchanged.
         assert any(script.bash == "echo user" for script in runner._scripts)
-        assert any(script.bash == "echo user" for script in second._scripts)
+        # An unfiltered runner (install, update, uninstall) says nothing for an
+        # event with no scripts (#4917 review).
+        _fire(runner, "pre-compile")
+        assert "org policy not applied" not in capsys.readouterr().out
+        _fire(runner)
+        _fire(runner)
         # The real ``[!]`` warning symbol is rendered on the console, once.
         out = " ".join(capsys.readouterr().out.split())
         assert "[!]" in out, out
         assert "org policy not applied to lifecycle scripts" in out, out
         assert out.count("[!]") == 1, out
+        # No process-wide state outlives a command: the next invocation warns
+        # again (#4917 review).
+        _fire(second)
+        again = " ".join(capsys.readouterr().out.split())
+        assert again.count("org policy not applied to lifecycle scripts") == 1, again
 
     def test_unresolved_org_policy_warn_untrusted_only_emits_no_notice(
         self, tmp_path: Path, monkeypatch
@@ -512,11 +536,9 @@ class TestBuildRunnerFromContext:
         untrusted project entries that the trust filter removes, NO unresolved-
         policy notice is emitted -- no scripts will run, so an unapplied-policy
         warning would be misleading (review #4917)."""
-        from apm_cli.core import lifecycle_scripts
         from apm_cli.policy.discovery import PolicyFetchResult
 
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
-        lifecycle_scripts._unresolved_warn_noted_roots.discard(str(tmp_path))
         # Only a project-tier script, which the trust filter will drop.
         _write_yaml(
             tmp_path / "apm.yml",
@@ -544,6 +566,7 @@ class TestBuildRunnerFromContext:
         # No scripts survive the trust filter.
         assert runner._scripts == []
         assert runner._skipped_project_scripts == 1
+        _fire(runner)
         # ...so no unapplied-policy notice should be printed.
         notices = [
             line
@@ -579,6 +602,7 @@ class TestBuildRunnerFromContext:
         with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch):
             runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
         assert any(script.bash == "echo user" for script in runner._scripts)
+        _fire(runner)
         assert not any("org policy" in line.lower() for line in logger.lines), logger.lines
 
     def test_no_policy_outcome_absent_warn_emits_no_notice(
@@ -607,6 +631,7 @@ class TestBuildRunnerFromContext:
         with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=absent):
             runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
         assert any(script.bash == "echo user" for script in runner._scripts)
+        _fire(runner)
         assert not any("org policy" in line.lower() for line in logger.lines), logger.lines
 
     def test_untrusted_project_scripts_are_skipped(self, tmp_path: Path, monkeypatch) -> None:

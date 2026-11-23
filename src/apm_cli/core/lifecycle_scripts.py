@@ -528,6 +528,7 @@ class LifecycleScriptRunner:
         project_root: str | None = None,
         skipped_project_scripts: int = 0,
         skipped_project_file: str | None = None,
+        policy_unenforced: bool = False,
     ) -> None:
         self._scripts = scripts or []
         self._logger = logger
@@ -536,6 +537,34 @@ class LifecycleScriptRunner:
         self._skipped_project_scripts = skipped_project_scripts
         self._skipped_project_file = skipped_project_file
         self._skip_notice_emitted = False
+        # Org policy was unavailable under fetch_failure_default=warn (#4913).
+        self._policy_unenforced = policy_unenforced
+        self._policy_notice_emitted = False
+
+    def _emit_policy_notice(self) -> None:
+        """Warn once, before scripts run, that org policy was not applied (#4913).
+
+        Once per command logger (several runners may share one command), or
+        once per runner when there is no logger.
+        """
+        if not self._policy_unenforced or self._policy_notice_emitted:
+            return
+        self._policy_notice_emitted = True
+        msg = "org policy not applied to lifecycle scripts (policy unavailable; fetch_failure_default=warn)"
+        if self._logger is None:
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(msg, symbol="warning")
+            return
+        if getattr(self._logger, _UNRESOLVED_POLICY_NOTED, None) is True:
+            return
+        emit = getattr(self._logger, "warning", None) or getattr(
+            self._logger, "verbose_detail", None
+        )
+        if emit is not None:
+            emit(msg)
+        with contextlib.suppress(AttributeError):
+            setattr(self._logger, _UNRESOLVED_POLICY_NOTED, True)
 
     def _emit_skip_notice(self) -> None:
         """Warn once that untrusted project scripts were skipped."""
@@ -572,6 +601,7 @@ class LifecycleScriptRunner:
         matching = [s for s in self._scripts if s.event == event_name]
         if not matching:
             return []
+        self._emit_policy_notice()
         # Scripts run outside APM, so they must observe the committed lockfile.
         from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes
 
@@ -631,12 +661,6 @@ _SUPPRESSION_NOTED = "_apm_lifecycle_suppression_noted"
 # (fetch_failure_default=warn) notice, so it fires once per command (#4913).
 _UNRESOLVED_POLICY_NOTED = "_apm_lifecycle_unresolved_policy_noted"
 
-# Project roots that already printed the unresolved-policy notice when no
-# command logger is available (the runner is built with ``logger=None``, as
-# ``apm lifecycle`` does). Keyed by root so one command that builds several
-# runners for the same project still prints the notice exactly once (#4913).
-_unresolved_warn_noted_roots: set[str] = set()
-
 
 def build_runner_from_context(
     *,
@@ -662,12 +686,13 @@ def build_runner_from_context(
       suppresses all lifecycle scripts as a one-directional safety
       ceiling. A discovery error or a blocking outcome (for example
       fetch_failure_default=block, a hash mismatch, or an inheritance
-      chain error) also fails CLOSED and suppresses scripts with an
-      "org policy could not be enforced" notice -- it never raises into
-      the command. Under fetch_failure_default=warn an unavailable
-      policy does NOT suppress scripts (the warn posture is unchanged),
-      but a one-time notice is still printed so the operator knows the
-      org ceiling was not applied (#4913).
+      chain error) also fails CLOSED and suppresses scripts -- it never
+      raises into the command; with a command *logger*, that logger
+      prints an "org policy could not be enforced" notice. Under
+      fetch_failure_default=warn an unavailable policy does NOT suppress
+      scripts (the warn posture is unchanged), but the runner prints a
+      one-time notice before the first script it runs, so the operator
+      knows the org ceiling was not applied (#4913).
     - Project-source scripts (apm.yml lifecycle:) are dropped unless
       their exact lifecycle: subtree has been explicitly trusted via
       apm lifecycle trust (see apm_cli.core.script_trust). Policy and
@@ -721,7 +746,7 @@ def build_runner_from_context(
     # suppress scripts (the warn posture is unchanged), but the operator
     # must still be told org policy could not be enforced before lifecycle
     # scripts run -- otherwise the scripts fire with no notice at all
-    # (#4913). The notice is emitted once per command logger.
+    # (#4913). The runner emits it before the first script it fires.
     suppressed_reason = None
     unresolved_warn = False
     try:
@@ -778,12 +803,6 @@ def build_runner_from_context(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
 
-    # Apply the project trust filter BEFORE deciding whether to emit the
-    # unresolved-policy notice. If the only scripts are untrusted project
-    # entries that the trust filter removes, no scripts will run, so an
-    # "org policy not applied to lifecycle scripts" notice would be
-    # misleading -- there is nothing for the org ceiling to gate (review
-    # #4917). The notice fires only when at least one script survives.
     project_trusted = is_fingerprint_trusted(project_yml, project_fp)
 
     kept: list[ScriptEntry] = []
@@ -794,35 +813,6 @@ def build_runner_from_context(
             continue
         kept.append(script)
 
-    if unresolved_warn and kept:
-        # Scripts run, but the operator must know org policy was not applied
-        # before they do. The runner is often built with ``logger=None`` (for
-        # example ``apm lifecycle``), so the notice must not depend on a
-        # logger being present -- otherwise the exact scenario the issue
-        # reports (a silent script phase) stays silent (#4913). One notice
-        # per command logger, or once per project root when there is none.
-        if logger is not None:
-            if getattr(logger, _UNRESOLVED_POLICY_NOTED, None) is not True:
-                emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
-                if emit is not None:
-                    emit(
-                        "org policy not applied to lifecycle scripts "
-                        "(policy unavailable; fetch_failure_default=warn)"
-                    )
-                with contextlib.suppress(AttributeError):
-                    setattr(logger, _UNRESOLVED_POLICY_NOTED, True)
-        else:
-            from apm_cli.utils.console import _rich_warning
-
-            root_key = str(root)
-            if root_key not in _unresolved_warn_noted_roots:
-                _unresolved_warn_noted_roots.add(root_key)
-                _rich_warning(
-                    "org policy not applied to lifecycle scripts "
-                    "(policy unavailable; fetch_failure_default=warn)",
-                    symbol="warning",
-                )
-
     return LifecycleScriptRunner(
         scripts=kept,
         logger=logger,
@@ -830,4 +820,7 @@ def build_runner_from_context(
         project_root=project_root,
         skipped_project_scripts=skipped,
         skipped_project_file=str(project_yml) if skipped else None,
+        # The runner warns only before scripts it actually fires, so an
+        # unrelated event or a trust-filtered script never prints it (#4913).
+        policy_unenforced=unresolved_warn,
     )
