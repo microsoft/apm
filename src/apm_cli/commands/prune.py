@@ -10,6 +10,7 @@ from apm_cli.core.remediation import (
     HOOK_CONFIG_STALE,
     PROJECT_MANIFEST_MISSING,
     PRUNE_INCOMPLETE,
+    PRUNE_NATIVE_GATE_UNCHECKED,
     PRUNE_PARTIAL,
 )
 
@@ -39,6 +40,11 @@ from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
 from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
+from ..native_plugins.uninstall import (
+    NativeGateCheckError,
+    preview_native_settings,
+    retire_gated_native_plugins,
+)
 from ..utils.path_security import safe_rmtree
 from ._helpers import _scan_installed_packages
 from .uninstall.lockfile_state import lockfile_has_persisted_state
@@ -152,14 +158,25 @@ def prune(ctx, dry_run):
             lockfile_path = get_lockfile_path(project_root)
             lockfile = LockFile.read(lockfile_path)
             native_before = _native_ownership(lockfile, lockfile_path)
-            from ..native_plugins.uninstall import retire_gated_native_plugins
-
-            # A gate-retired native record makes this a lock-changing prune (#3921).
-            native_retired = not dry_run and retire_gated_native_plugins(
-                lockfile, apm_modules_dir, manifest_file(project_root), project_root, logger
+            # A gate-retired native record makes this a lock-changing prune (#3921);
+            # a dry run previews it without touching the lock (#4754).
+            native_retired = retire_gated_native_plugins(
+                lockfile,
+                apm_modules_dir,
+                manifest_file(project_root),
+                project_root,
+                logger,
+                dry_run=dry_run,
             )
         except LockfileFormatError as e:
             logger.error(str(e))
+            sys.exit(1)
+        except NativeGateCheckError as e:
+            logger.error(str(e))
+            logger.error_detail(
+                "Prune stopped before removing packages or native plugins. "
+                f"{PRUNE_NATIVE_GATE_UNCHECKED.sentence()}"
+            )
             sys.exit(1)
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
@@ -298,6 +315,13 @@ def prune(ctx, dry_run):
                         f"remove owner(s) {', '.join(sorted(removed_owners))}"
                     )
                     logger.verbose_detail(f"    ledger key: {locator.key}")
+            preview_native_settings(
+                lockfile,
+                planned_pruned_keys | set(missing_orphaned_keys) | set(native_retired),
+                apm_modules_dir,
+                project_root,
+                logger,
+            )
             logger.success("Dry run complete - no changes made")
             return
 

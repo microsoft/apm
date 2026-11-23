@@ -427,7 +427,13 @@ class GateRetirements(NamedTuple):
 
 
 def gate_retirements(
-    lockfile: Any, modules_dir: Path, apm_package: Any, project_root: Path, *, user_scope: bool
+    lockfile: Any,
+    modules_dir: Path,
+    apm_package: Any,
+    project_root: Path,
+    *,
+    user_scope: bool,
+    migrate_user_legacy: bool = True,
 ) -> GateRetirements | None:
     """What the current gates no longer allow on a path that skips install's gate.
 
@@ -441,7 +447,8 @@ def gate_retirements(
     install's executables gate no longer deploys (:func:`locked_hooks_retired`),
     and the native plugins install would now park (``locked_native_retired``).
     ``None`` when the org policy blocks or is unresolved: install's policy
-    preflight owns that outcome.
+    preflight owns that outcome. A preview passes ``migrate_user_legacy=False``
+    so reading a legacy ``approvals.yml`` does not migrate it.
     """
     from apm_cli.core.scope import manifest_root, scope_manifest_path
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
@@ -461,7 +468,9 @@ def gate_retirements(
         apm_package,
         lockfile,
         modules_dir,
-        admission=McpAdmission.for_project(project_root, user_scope=user_scope),
+        admission=McpAdmission.for_project(
+            project_root, user_scope=user_scope, migrate_user_legacy=migrate_user_legacy
+        ),
         recorded=None,
     )
 
@@ -476,6 +485,7 @@ def gate_retirements(
                     scope_manifest_path(project_root, user_scope=user_scope),
                     policy=route.policy,
                     fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+                    migrate_user_legacy=migrate_user_legacy,
                 )
             )
         return trust[0]
