@@ -70,7 +70,8 @@ apm install contoso/review-skills --skill security-review
 APM saves the selection as a `skills:` list on the entry, so a bare
 `apm install` deploys the same subset. A later `--skill` adds to the list;
 `--skill '*'` resets it to every skill. To drop one, edit the `skills:` list
-and run `apm install`.
+and run `apm install`. `apm install contoso/review-skills#v2` on that entry
+changes only its `ref`; `skills:`, `targets:` and `alias:` stay.
 
 ## Install local paths and bundles
 

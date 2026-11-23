@@ -10,8 +10,9 @@ Ports four of the canonical owner decisions in
 * ``transport-platform-host-reference-coordinates`` -- ``host_virtual.py`` owns
   host-qualified reference host/repo/subpath coordinates.
 * ``transport-platform-url-path-security`` -- ``utils/path_security.py`` owns
-  symlink-component containment and strict percent-encoded URL-path decoding
-  (legacy symlink-component guard + AC10a).
+  symlink-component containment, filesystem-aware (case-insensitive) path
+  containment and strict percent-encoded URL-path decoding (legacy
+  symlink-component guard + AC10a).
 * ``transport-platform-windows-stable-path`` -- ``install.ps1`` owns the
   Windows ``current/apm.exe`` stable path (legacy AC8 /
   check_windows_stable_path_owner).
@@ -1740,6 +1741,35 @@ _URL_PATH_DECODER_CONSUMERS: tuple[str, ...] = (
 def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
+
+    # Filesystem-aware containment: path_security computes it; git_env only
+    # applies the helper-exclusion policy on top.
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            _PATH_SECURITY_OWNER,
+            (("re", r"^def filesystem_containment\(", 1, "eq"),),
+            "filesystem_containment must be owned by utils/path_security.py",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            "src/apm_cli/utils/git_env.py",
+            (
+                ("sub", "filesystem_containment(path, root)", 1, "eq"),
+                ("sub", "samefile(", 0, "eq"),
+                ("sub", "normcase(", 0, "eq"),
+                ("sub", "casefold(", 0, "eq"),
+            ),
+            "Helper exclusion must compute containment through "
+            "utils/path_security.filesystem_containment",
+        )
+    )
 
     # Symlink-component containment: owner defines it exactly once, no duplicates.
     findings.extend(
