@@ -13,7 +13,7 @@ from typing import Any
 
 from ...utils.github_host import default_host
 from ...utils.path_security import validate_path_segments
-from .object_fields import parse_alias_override
+from .object_fields import parse_alias_override, parse_native_route
 from .subsets import parse_skill_subset, parse_target_subset
 
 _ID_SEGMENT_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
@@ -82,7 +82,7 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
     target_subset = parse_target_subset(targets_raw) if targets_raw is not None else None
 
     # Reject any unknown keys to catch typos early.
-    known = {"registry", "id", "path", "version", "alias", "skills", "targets"}
+    known = {"registry", "id", "path", "version", "alias", "skills", "targets", "native"}
     unknown = set(entry.keys()) - known
     if unknown:
         raise ValueError(
@@ -107,4 +107,5 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
         registry_name=registry_name,
         skill_subset=skill_subset,
         target_subset=target_subset,
+        native=parse_native_route(entry.get("native")),
     )

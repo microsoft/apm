@@ -352,6 +352,7 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "author",
         "license",
         "default_host",
+        "native_plugins",
         "target",
         "targets",
         "type",
@@ -521,6 +522,9 @@ class APMPackage:
     # Value of ``default_host:`` -- the host shorthand dependencies in this
     # manifest resolve against (OpenAPM req-mf-019). None when omitted.
     default_host: str | None = None
+    # Value of ``native_plugins:`` (#4995): False sends every dependency without its
+    # own ``native:`` key loose; None (absent) or True leaves the route automatic.
+    native_plugins: bool | None = None
     manifest_contract: str = "working-draft"
 
     # Top-level ``allowExecutables:`` block -- per-package approval for
@@ -748,6 +752,12 @@ class APMPackage:
         if not isinstance(data["version"], str) or not data["version"].strip():
             raise ValueError("Invalid apm.yml identity: 'version' must be a non-empty string")
 
+        native_plugins = data.get("native_plugins")
+        if native_plugins is not None and not isinstance(native_plugins, bool):
+            raise ValueError(
+                f"Invalid apm.yml: 'native_plugins' must be true or false, got {native_plugins!r}"
+            )
+
         # Top-level ``registries:`` block per design §3.1.
         registries, default_registry = _parse_registries_block(
             data,
@@ -903,6 +913,7 @@ class APMPackage:
             registries=registries,
             default_registry=default_registry,
             default_host=manifest_default_host,
+            native_plugins=native_plugins,
             manifest_contract=manifest_contract.value,
             allow_executables=allow_executables,
             extensions=extensions,
@@ -1137,6 +1148,8 @@ class PackageInfo:
     deployment_package_root: Path | None = None
     # (replay output root, live deploy root): audit replay renders links live (#3901)
     deployment_frame: tuple[Path, Path] | None = None
+    # Root manifest a replay without an install context decides the native route by (#4995)
+    route_manifest: Any = None
     local_bundle_id: str | None = None  # Set only for a local bundle's hook view (#3700)
     local_bundle_approval: str | None = None  # The key that admitted those hooks (#4027)
     # Verbatim licence copies APM added after materialization (#3556); see

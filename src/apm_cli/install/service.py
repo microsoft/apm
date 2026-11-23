@@ -644,6 +644,14 @@ class InstallService:
 
         refuse_withdrawn_bundle_lsp(request, lockfile, lockfile_path.parent)
         InstallService._refuse_frozen_dropped_targets(request, lockfile, lockfile_path)
+        from apm_cli.native_plugins.route import frozen_route_change_reasons
+
+        if route_reasons := frozen_route_change_reasons(lockfile, request.apm_package):
+            raise FrozenInstallError(
+                "--frozen: apm.yml changes a dependency's native plugin route.",
+                reasons=route_reasons,
+                tip="Run 'apm install' without --frozen to move it, then commit apm.lock.yaml.",
+            )
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
 
     @staticmethod

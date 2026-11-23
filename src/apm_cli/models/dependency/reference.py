@@ -112,6 +112,9 @@ class DependencyReference(ProviderCoordinateMixin):
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
     target_subset: list[str] | None = None  # Sorted lowercase target names, or None = all
+    # ``native:`` route choice (#4995): False keeps the dependency loose, True or
+    # None (absent) leaves the native plugin route automatic.
+    native: bool | None = None
 
     # SSH username for SCP-shorthand or ``ssh://`` dependencies. ``None`` for
     # non-SSH inputs. Defaults to ``"git"`` whenever an SSH form was parsed
@@ -868,7 +871,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
-            reject_unknown_fields(entry, {"path", "alias", "skills", "targets"}, "path")
+            reject_unknown_fields(entry, {"path", "alias", "skills", "targets", "native"}, "path")
             local = entry["path"]
             if not isinstance(local, str) or not local.strip():
                 raise ValueError("'path' field must be a non-empty string")
@@ -2001,12 +2004,13 @@ class DependencyReference(ProviderCoordinateMixin):
                 entry["targets"] = sorted(self.target_subset)
             return entry
         if self.is_local and self.local_path:
-            if self.skill_subset or self.target_subset or self.alias:
+            if self.skill_subset or self.target_subset or self.alias or self.native is not None:
                 return local_path_apm_yml_entry(
                     self.local_path,
                     self.alias,
                     self.skill_subset,
                     self.target_subset,
+                    self.native,
                 )
             return self.to_display_reference()
         if self.is_insecure:
@@ -2023,7 +2027,7 @@ class DependencyReference(ProviderCoordinateMixin):
             if self.target_subset:
                 entry["targets"] = sorted(self.target_subset)
             return entry
-        if self.skill_subset or self.target_subset:
+        if self.skill_subset or self.target_subset or self.native is not None:
             entry = {"git": self._format_reference(self.repo_url).split("#", 1)[0]}
             if self.reference:
                 entry["ref"] = self.reference
@@ -2033,6 +2037,8 @@ class DependencyReference(ProviderCoordinateMixin):
                 entry["skills"] = sorted(self.skill_subset)
             if self.target_subset:
                 entry["targets"] = sorted(self.target_subset)
+            if self.native is not None:
+                entry["native"] = self.native
             return entry
         return self.to_display_reference()
 

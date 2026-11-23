@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **152 normative statements (147 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **153 normative statements (148 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -535,6 +535,30 @@ diagnostic naming that marketplace and the root manifest entry to add.
 > organization policy allow-list for declared catalog origins; that
 > policy key is implementation-defined in v0.1.
 
+#### 4.2.6 `native_plugins`
+
+A root manifest MAY declare a top-level boolean `native_plugins`. It is the
+project default for the `native` dependency field (Section 4.3): `false`
+keeps every dependency that does not set its own `native` off native plugin
+activation; `true` or absent leaves activation to the consumer.
+
+<a id="req-mf-030"></a>
+**[req-mf-030]** A conforming **consumer** implementation that natively
+activates plugins ([Section 8.5.11](#8511-native-plugin-activation-profile))
+MUST NOT natively activate, on any target, a dependency that the root
+manifest's own declaration marks `native: false`, nor, when that
+declaration sets no `native` key, a dependency of a root manifest that
+declares `native_plugins: false`. Such a dependency MUST instead be projected
+as primitives into target directories, as for a plugin the consumer does not
+activate natively. A `native` key binds only the declaration that carries
+it: a transitive dependency follows the root manifest's `native_plugins`
+default, never a parent's `native` key. The consumer MUST reject a `native`
+or `native_plugins` value that is not a boolean, with a diagnostic naming the
+field. When a dependency moves between native activation and projection, the
+consumer MUST remove only the activation entries and deployed plugin root it
+recorded writing for that dependency, and MUST NOT modify activation entries
+it did not write.
+
 ### 4.3 Dependencies block (apm + mcp)
 
 The OPTIONAL `dependencies` block has two OPTIONAL list-valued keys:
@@ -603,6 +627,7 @@ and MUST NOT use both on the same entry.
 | `path`   | no / yes (local form)                   | Subpath within repo, or local filesystem path.                        |
 | `alias`  | no                                      | Local install-directory override; see [req-mf-025](#req-mf-025).        |
 | `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)); merged across edges per [req-rs-018](#req-rs-018). |
+| `native` | no                                      | Boolean. `false` keeps this dependency off native plugin activation on every target; `true` or absent leaves activation to the consumer. See [req-mf-030](#req-mf-030). |
 
 <a id="req-mf-025"></a>
 **[req-mf-025]** A conforming **consumer** implementation that supports
@@ -1068,7 +1093,7 @@ This section's normative statements are:
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
   [req-mf-027](#req-mf-027), [req-mf-028](#req-mf-028),
-  [req-mf-029](#req-mf-029),
+  [req-mf-029](#req-mf-029), [req-mf-030](#req-mf-030),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-ext-003](#req-ext-003),
@@ -5051,7 +5076,7 @@ conformance statement identifying:
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
 [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
 [req-mf-027](#req-mf-027), [req-mf-028](#req-mf-028),
-[req-mf-029](#req-mf-029),
+[req-mf-029](#req-mf-029), [req-mf-030](#req-mf-030),
 [req-ext-001](#req-ext-001), [req-ext-003](#req-ext-003),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -5533,6 +5558,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-mf-027](#req-mf-027)                | MUST    | 4.5     | consumer    |
 | [req-mf-028](#req-mf-028)                | MUST    | 4.2.5   | consumer    |
 | [req-mf-029](#req-mf-029)                | MUST    | 4.2.5   | consumer    |
+| [req-mf-030](#req-mf-030)                | MUST    | 4.2.6   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-ext-003](#req-ext-003)              | MUST    | 4.6.2   | consumer    |
@@ -5657,7 +5683,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 152** (147 MUST, 5 SHOULD).
+**Total normative statements: 153** (148 MUST, 5 SHOULD).
 
 ---
 
@@ -5740,12 +5766,13 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.74 (proposed) | 2026-11-20 | Amendment for issue #3921 (native plugins at project scope for Claude Code and GitHub Copilot; PR #4559, superseding #4010). Pending editor decision; the number is provisional. Revised the [req-na-002](#req-na-002) root digest clause in place: at project scope, where the deployed roots and the lockfile are shared project files, the recorded root digest omits the executable-bit byte (it equals the [req-na-005](#req-na-005) approval digest construction), and the consumer compares the deployed root with the materialized source under the executable-bit-including construction on the deploying machine before writing activation entries, without recording that comparison; the editorial note is rewritten accordingly. Revised criterion [A5](#na-crit-a5) in place: at project scope, a target that documents which other target's files it reads but not their precedence meets A5 for a consumer that discloses the file priority it verified against a cited client version, with a conformance test that runs that client where installed and skips where not. Revised [req-na-004](#req-na-004) in place: at project scope, in the settings file of a target that also reads another target's file at lower priority, the enable key of a plugin the consumer declares to that other target is the consumer's own, written `false` when the plugin's effective targets exclude the reading target (cross-target suppression) and changed or removed as targets or the lockfile change; every other `false` stays untouched. Part C (informative) records GitHub Copilot CLI as native-eligible at project scope under that test, with the order `.claude/settings.json` < `.claude/settings.local.json` < `.github/copilot/settings.json` < `.github/copilot/settings.local.json` verified against Copilot CLI 1.0.112, records that a Claude-only plugin gets the consumer's own `false` in `.github/copilot/settings.json`, and records that the Copilot route of [req-tg-013](#req-tg-013) moved to this profile. The Section 5.2 `native_plugin` row is updated and names the optional sibling `native_declared` (the targets whose settings held the consumer's `true` when the lock was written), which is advisory and not trust-bearing: it has no identity, replay or ownership role. [req-na-005](#req-na-005) is unchanged. Under Section 9.2 this changes verdicts: a project-scope consumer that records the executable bit in the committed root digest, that does not compare the bit on the deploying machine, or that lets Copilot load a plugin activated for Claude Code alone, no longer conforms; a project-scope root digest recorded with the bit is reported as drift until the next install records it without. Sections 5.2 and 8.5.11 are updated; schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 151 (146 MUST, 5 SHOULD). |
 | 0.1.75  | 2026-11-21 | Amendment for accepted issue #1925 (explicit policy source on install and update). Added [req-pl-022](#req-pl-022) (Section 6.1, governance MUST): an install or update operation that accepts an explicit policy source in addition to discovery evaluates the tighten-only merge of the discovered policy (parent) and the explicit policy (child) per [req-pl-006](#req-pl-006), uses the explicit policy alone when none is discovered, fails closed when the explicit source cannot be resolved, fetched or parsed into a valid policy or publishes none (non-zero before any deployment write, naming the source and the cause, whatever `policy.fetch_failure_default` says; a discovered-policy failure keeps its own routing), and reports every policy source in effect; a valid stale cached copy counts as resolved and the manifest `policy.hash` pin still covers only the discovered policy. Revised [req-pl-001](#req-pl-001) and the Section 6.1 lead sentence in place to admit the composed explicit source; [req-pl-021](#req-pl-021) is unchanged. Under Section 9.2 this adds a capability, so it is an amendment, not behavior-neutral errata; an operation that replaces discovery is unchanged. Proposed and adopted 2026-11-21 in this Working Draft by editor decision (CEO sign-off D5, issue #1925), without the Section 9.3 reviewer-panel approval and public comment period. Statement count: 151 -> 152 (147 MUST, 5 SHOULD). |
 | 0.1.76 (proposed) | 2026-11-22 | Amendment from private security coordination (direction signed by the CEO). Revised [req-sc-016](#req-sc-016) (Section 10.13, consumer MUST) in place: when the organization policy sets `mcp.trust_transitive` to `false`, or leaves it unset while setting any restriction (a non-default field; metadata and `enforcement` alone are not restrictions), a transitive MCP server of any declaration form, including a plain registry reference, is admitted only when `mcp.allow` matches its name, neither a bound grant nor the per-invocation opt-in overrides that, and a root re-declaration makes it a direct declaration; `enforcement: block` fails the operation before deployment, `enforcement: warn` emits a diagnostic as for `mcp.deny`, and an audit reports each such server. A policy that sets no restriction imposes nothing. Under Section 9.2 a consumer that deploys such a server without a matching `mcp.allow` entry no longer conforms. Schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 152 (147 MUST, 5 SHOULD). |
+| 0.1.77 (proposed) | 2026-11-23 | Amendment for accepted issue #4995 (opting a dependency out of native plugin activation). Added the `native` dependency field (Section 4.3), Section 4.2.6 `native_plugins` and [req-mf-030](#req-mf-030) (Section 4.2.6, consumer MUST, conditional on native plugin activation): a dependency whose root-manifest declaration sets `native: false`, or that sets no `native` key in a root manifest declaring `native_plugins: false`, is never natively activated on any target and is projected as primitives instead; a `native` key binds only its own declaration, so a transitive dependency follows the root default; a non-boolean value is rejected naming the field; and moving a dependency between routes removes only the activation entries and plugin root the consumer recorded writing. Under Section 9.2, a consumer that natively activates such a dependency, or rewrites a user's activation entries when moving it, no longer conforms. Sections 1.3, 4.2, 4.3, 4.9, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Adds one MUST. Statement count: 152 -> 153 (148 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63, 0.1.69 and 0.1.75 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place, and the 0.1.76 proposal revises [req-sc-016](#req-sc-016) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63, 0.1.69 and 0.1.75 amendments and the 0.1.64 and 0.1.77 proposals each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place, and the 0.1.76 proposal revises [req-sc-016](#req-sc-016) in place; none adds a statement. Together, this
 working draft
-contains 152 statements (147 MUST, 5 SHOULD). Combining the proposals does not establish
+contains 153 statements (148 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
 
 Amendments 0.1.70, 0.1.71 and 0.1.72 were adopted on 2026-11-20 by editor decision (issues #4234 and #4092); their Date is the adoption date. They revise [req-sc-004](#req-sc-004), [req-lk-015](#req-lk-015) and [req-sc-005](#req-sc-005) in place and add no statement. Amendment 0.1.75 was adopted on 2026-11-21 by editor decision (CEO sign-off D5, issue #1925); its Date is the adoption date. It adds [req-pl-022](#req-pl-022) and revises [req-pl-001](#req-pl-001) in place.

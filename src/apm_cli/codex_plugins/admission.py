@@ -146,13 +146,19 @@ def plan_native_codex_plugin(
     parked_reported: bool = False,
     policy: Any = None,
     transitive: bool = False,
+    manifest: Any = None,
 ) -> CodexNativePlugin | None:
     """Never normalize or partially project a selected Codex compatibility bundle.
 
     A *transitive* bundle's servers meet org ``mcp.trust_transitive`` as a
     loose transitive server does (req-sc-016): Codex loads them itself, so the
-    merged-set preflight never sees them.
+    merged-set preflight never sees them. A dependency the root *manifest*
+    keeps off the native route deploys loose (#4995).
     """
+    from apm_cli.native_plugins.route import effective_native_route
+
+    if not effective_native_route(getattr(package_info, "dependency_ref", None), manifest):
+        return None
     package = getattr(package_info, "package", None)
     manifest = getattr(package, "codex_plugin", None)
     if not isinstance(manifest, CodexCompatibilityPlugin):

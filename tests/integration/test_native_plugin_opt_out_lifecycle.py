@@ -270,7 +270,10 @@ def test_an_opted_out_dependency_gets_no_native_route_notice(world: _World) -> N
 
 @pytest.mark.parametrize(
     ("dep_key", "top", "field"),
-    [('"no"', "", "native"), ("", "native_plugins: maybe", "native_plugins")],
+    [
+        ('"no"', "", "'native' field must be true or false"),
+        ("", "native_plugins: maybe", "'native_plugins' must be true or false"),
+    ],
     ids=["native", "native_plugins"],
 )
 def test_an_invalid_value_is_refused_at_parse_time(

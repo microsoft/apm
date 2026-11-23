@@ -162,6 +162,9 @@ def prepare_package_deployment(  # noqa: PLR0913
         else getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     )
     transitive = _is_transitive(package_info, ctx)
+    root_manifest = getattr(ctx, "apm_package", None) or getattr(
+        package_info, "route_manifest", None
+    )
     codex_native = plan_native_codex_plugin(
         package_info,
         package_name,
@@ -182,6 +185,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         parked_reported=parked_reported,
         policy=org_policy,
         transitive=transitive,
+        manifest=root_manifest,
     )
     # The project's own content is never deployed as one of its native plugins.
     native_claude_plugin = (
@@ -201,6 +205,7 @@ def prepare_package_deployment(  # noqa: PLR0913
             policy=org_policy,
             bin_denied=bin_deploy_denial(package_info, org_policy),
             transitive=transitive,
+            manifest=root_manifest,
         )
     )
     projection_targets = PackageDeploymentPlan(

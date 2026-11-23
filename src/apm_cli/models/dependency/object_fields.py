@@ -17,6 +17,7 @@ _REMOTE_GIT_DEPENDENCY_FIELDS = frozenset(
         "alias",
         "allow_insecure",
         "git",
+        "native",
         "path",
         "ref",
         "skills",
@@ -78,8 +79,21 @@ def reject_unknown_git_fields(entry: dict, *, parent: bool) -> None:
     reject_unknown_fields(entry, allowed, dependency_type)
 
 
+def parse_native_route(raw: object) -> bool | None:
+    """Return a dependency's ``native:`` route choice (#4995); only booleans are valid."""
+    if raw is None:
+        return None
+    if not isinstance(raw, bool):
+        raise ValueError(
+            f"'native' field must be true or false, got {raw!r}; "
+            "use native: false to deploy this dependency loose"
+        )
+    return raw
+
+
 def apply_optional_dependency_fields(dep: Any, entry: dict) -> None:
-    """Apply common alias, skills, and targets fields to a dependency."""
+    """Apply common alias, skills, targets and native fields to a dependency."""
+    dep.native = parse_native_route(entry.get("native"))
     alias = parse_alias_override(entry.get("alias"))
     if alias is not None:
         dep.alias = alias
@@ -96,9 +110,12 @@ def local_path_apm_yml_entry(
     alias: str | None,
     skill_subset: list[str] | None,
     target_subset: list[str] | None,
+    native: bool | None = None,
 ) -> dict[str, object]:
     """Build the dict form for a local path dependency with optional fields."""
     entry: dict[str, object] = {"path": local_path}
+    if native is not None:
+        entry["native"] = native
     if alias:
         entry["alias"] = alias
     if skill_subset:

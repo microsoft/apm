@@ -1331,6 +1331,39 @@
       ]
     },
     {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[auto]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_an_opted_out_plugin_is_never_planned_natively",
+        "tests/spec_conformance/test_native_route_reqs.py::test_non_boolean_values_are_rejected_naming_the_field",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[auto]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[default-off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-on]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-false]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-mf-030",
+      "keyword": "MUST",
+      "section": "4.2.6",
+      "status": "active",
+      "test_count": 11,
+      "tests": [
+        "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[auto]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_an_opted_out_plugin_is_never_planned_natively",
+        "tests/spec_conformance/test_native_route_reqs.py::test_non_boolean_values_are_rejected_naming_the_field",
+        "tests/spec_conformance/test_native_route_reqs.py::test_spec_states_the_native_opt_out",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[auto]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[default-off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-on]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-false]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]"
+      ]
+    },
+    {
       "behavioral_tests": [],
       "conformance_class": "consumer",
       "id": "req-na-001",
@@ -3377,7 +3410,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 111,
+      "active": 112,
       "partial": 1,
       "skipped": 2,
       "text-only": 3,
@@ -3409,5 +3442,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 152
+  "total_requirements": 153
 }

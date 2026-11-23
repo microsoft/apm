@@ -518,6 +518,17 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
+def _route_manifest(root: Path) -> Any:
+    """The root manifest the replay decides each native route by (#4995), if readable."""
+    from apm_cli.models.apm_package import APMPackage
+
+    path = manifest_file(root)
+    try:
+        return APMPackage.from_apm_yml(path) if path.exists() else None
+    except (OSError, ValueError):
+        return None
+
+
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
 
@@ -573,6 +584,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     )
     live_modules_dir = project_root / "apm_modules"
     self_source_root = get_source_root(InstallScope.USER) if config.user_scope else project_root
+    route_manifest = _route_manifest(self_source_root)
     deployment_modules_dir, deployment_frame = replay_deployment_frame(
         scratch_root, project_root, user_scope=config.user_scope
     )
@@ -699,6 +711,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             lock_dep.to_dependency_ref().get_install_path(deployment_modules_dir)
                         )
                     package_info.deployment_frame = deployment_frame
+                    package_info.route_manifest = route_manifest
                     dep_key = lock_dep.get_unique_key()
 
                     # Replay deploys the locked selection, as uninstall does (#3760).

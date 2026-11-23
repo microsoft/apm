@@ -443,6 +443,7 @@ def plan_native_claude_plugin(
     policy: Any = None,
     bin_denied: str | None = None,
     transitive: bool = False,
+    manifest: Any = None,
 ) -> ClaudeNativePlugin | None:
     """Admit a complete, approved plugin without altering native selection.
 
@@ -462,7 +463,13 @@ def plan_native_claude_plugin(
     Normalized virtual plugins in older locks can have SKILL_BUNDLE type.
     Only the parser-owned normalization receipt admits that compatibility
     case; an incidental Claude manifest never overrides APM package intent.
+    A dependency the root *manifest* keeps off the native route (``native:
+    false`` or ``native_plugins: false``) deploys loose (#4995).
     """
+    from apm_cli.native_plugins.route import effective_native_route
+
+    if not effective_native_route(package_info.dependency_ref, manifest):
+        return None
     user_scope = is_user_scope(scope)
     harnesses = plugin_harnesses(agent_plugin=False, user_scope=user_scope) & {
         t.name for t in targets
