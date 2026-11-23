@@ -226,3 +226,26 @@ def test_a_retained_descendant_without_its_apm_modules_copy_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "is missing" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def test_a_retained_descendant_with_a_stale_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """e -> f direct, dev d -> e; f's source changed after install: its copy is stale."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _world(
+        tmp_path,
+        apm_binary_path,
+        (("f", ()), ("e", ("../f",)), ("d", ("../e",))),
+        {"dependencies": {"apm": ["./vendor/e"]}, "devDependencies": {"apm": ["./vendor/d"]}},
+    )
+    skill = world.project / "vendor/f/.apm/skills/f-skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "differs from its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before

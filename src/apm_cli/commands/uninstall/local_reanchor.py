@@ -202,9 +202,9 @@ def plan_local_reanchor(
         if row is not None and row.source == "local" and key not in nodes:
             # A re-parented descendant must still install where its row says, from a copy.
             _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
-            _require_copy(
-                row.to_dependency_ref().get_install_path(modules_dir), key, label, modules_dir
-            )
+            copy = row.to_dependency_ref().get_install_path(modules_dir)
+            _require_copy(copy, key, label, modules_dir)
+            _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label)
         if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
@@ -247,6 +247,28 @@ def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
             f"{label(key)} stays, but its apm_modules copy "
             f"{path.relative_to(modules_dir).as_posix()} is missing, so the re-anchor cannot "
             "keep it as a fresh install would"
+        )
+
+
+def _require_fresh_copy(row, source: Path | None, copy: Path, key: str, label) -> None:
+    """Refuse a kept descendant whose local source no longer matches its copy (#4999).
+
+    Install recopies a changed local source, so keeping the old copy would not
+    leave apm_modules as a fresh install does. An unreadable source refuses too.
+    """
+    from ...install.phases.local_content import compute_local_package_hash
+
+    framed = row.content_hash_framed
+    try:
+        fresh = source is not None and compute_local_package_hash(
+            source, framed=framed
+        ) == compute_local_package_hash(copy, framed=framed)
+    except (OSError, ValueError, TypeError):
+        fresh = False
+    if not fresh:
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but its local source differs from its apm_modules copy, "
+            "so the re-anchor cannot keep it as a fresh install would"
         )
 
 
