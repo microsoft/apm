@@ -47,4 +47,6 @@ jobs:
       working-directory: harness
       run: |
         if [ "$RUNNER_OS" = "Windows" ]; then b=Scripts/python.exe; else b=bin/python; fi
-        uv run --frozen python scripts/perf/l5_miss.py "$GITHUB_WORKSPACE/base/.venv/$b" "$GITHUB_WORKSPACE/new/.venv/$b" "$RUNNER_TEMP/l5m" tree-10 3
+        cp ../mine/scripts/perf/l5_benchprobe.py scripts/perf/
+        if [ "$RUNNER_OS" = "Windows" ]; then a=Scripts/apm.exe; else a=bin/apm; fi
+        uv run --frozen python scripts/perf/l5_benchprobe.py "$GITHUB_WORKSPACE/new/.venv/$a" "$RUNNER_TEMP/l5p"
