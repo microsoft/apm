@@ -118,11 +118,34 @@ def deployed_path_entry(
         project_path = ensure_path_within(target_path, project_root)
         return portable_relpath(project_path, project_root)
     except (PathTraversalError, ValueError):
+        linked = _symlinked_component(target_path, project_root)
+        if linked is not None:
+            # Refused as before; the message names the link and the next step (#5156).
+            raise RuntimeError(  # noqa: B904
+                f"Refusing deployment through a symlinked path component: {linked}. "
+                "Replace the symlink with a regular directory or remove it, then retry."
+            )
         raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
             f"target matched. This is a bug -- please report it."
         )
+
+
+def _symlinked_component(target_path: Path, project_root: Path) -> str | None:
+    """Return the first symlinked component of a path lexically under *project_root*."""
+    try:
+        parts = target_path.relative_to(project_root).parts
+    except ValueError:
+        return None
+    if ".." in parts:
+        return None
+    current = project_root
+    for index, part in enumerate(parts):
+        current = current / part
+        if current.is_symlink():
+            return "/".join(parts[: index + 1])
+    return None
 
 
 def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) -> tuple[str, ...]:
