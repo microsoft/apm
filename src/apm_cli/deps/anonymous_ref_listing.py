@@ -310,10 +310,10 @@ def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, st
         for name in _FALLBACK_ENV:
             if env.get(name):
                 raise _Fallback(f"{name} is set")
-        allow = env.get("GIT_ALLOW_PROTOCOL")
+        config, child_env = _effective_config(env)
+        allow = child_env.get("GIT_ALLOW_PROTOCOL")
         if allow is not None and "https" not in allow.split(":"):
             raise _Fallback("https is not an allowed git protocol")
-        config, child_env = _effective_config(env)
         for name in _FALLBACK_ENV:
             if child_env.get(name):
                 raise _Fallback(f"{name} is set for git")

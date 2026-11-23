@@ -239,3 +239,14 @@ def test_config_that_cannot_touch_an_https_fetch_stays_eligible():
 )
 def test_config_that_changes_gits_request_falls_back(pair):
     assert arl._classify(_entries(("credential.helper", ""), pair)) is None
+
+
+@pytest.mark.parametrize("allowed", ["file", "file:ssh", ""])
+def test_https_not_allowed_in_gits_child_env_falls_back(allowed, monkeypatch):
+    child_env = {"GIT_ALLOW_PROTOCOL": allowed}
+    monkeypatch.setattr(arl, "_effective_config", lambda _env: ({}, child_env))
+    monkeypatch.setattr(arl, "_session_for_refs", lambda: pytest.fail("no request expected"))
+
+    listed = arl.list_refs_anonymously("https://github.com/owner/repo", include_heads=False, env={})
+
+    assert listed is None
