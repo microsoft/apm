@@ -1,70 +1,45 @@
-"""Install engine parity: the fast engine and the full pipeline leave identical state.
+"""Install engine parity: journeys the fast engines claim, cleanup and W4's change table.
 
 PROMISE: P-INV-I2 -- repeating a converged install changes no bytes, whichever
-engine answers (source: tests/lifecycle/oracles.py).
-PROMISE: P-INV-I1 -- the lockfile matches the deployed files after every step.
-PROMISE: P-INV-I4 -- a stricter policy, an edited or deleted deployed file, a
-changed manifest, a lockfile from another apm version, a store miss or a
-non-default flag is honored by the next install: the fast engine declines and
-the full pipeline decides ("any doubt = full pipeline", Lane C plan).
+engine answers. PROMISE: P-INV-I1 -- the lockfile matches the deployed files.
 
-LANDING GATE for lane C S0 (no-op engine) and S2 (diff-apply engine).
-
-DIFFERENTIAL ORACLE. Two clones of one world run the same steps: the fast
-world with ``APM_INSTALL_FAST_PATH=trace`` (one decision line on stderr per
-install), the full world with ``APM_INSTALL_FAST_PATH=0`` (every fast engine
-off). After every step the exit code, the output (paths, timings and the
-decision line normalized away) and ``_deploy_diff.comparable`` (project and
-HOME bytes, manifest, lock; identity aside) must match. The change table and
-the state oracle are shared with W4's incremental-vs-fresh suite.
-
-DECISIONS (engine contract agreed with the no-op and diff-apply owners):
-``no-op (...)``, ``applied a verified diff (<n> files)`` or ``full run
-(<reason>)``. A cell names the decision it requires, so it is red while the
-engine owning that decision is absent: a ``KnownFailure`` (tracking #4770,
-signature: the missing decision) until the engine module exists, then required. Only
-the missing decision is the expected failure: a parity break or a failed
-command fails the cell even at main.
+LANDING GATE for lane C S0 (no-op) and S2 (diff-apply); oracle and cell contract in
+tests/lifecycle/scenarios/_engine_parity.py.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import json
-import os
-import re
-import shutil
 import sys
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-import yaml
 
-from apm_cli.deps.lockfile import LockFile
-from tests.lifecycle import driver
-from tests.lifecycle.known import KnownFailure
-from tests.lifecycle.scenarios._deploy_diff import (
-    CHANGES,
-    comparable,
-    converge,
-    diff,
-    digest,
-    revoke_user_approval,
+from tests.lifecycle.scenarios._deploy_diff import CHANGES, converge, digest
+from tests.lifecycle.scenarios._engine_parity import (
+    BOTH,
+    CHANGE_EXIT,
+    DIFF,
+    FULL,
+    NEEDS_ANY,
+    NEEDS_DIFF,
+    NEEDS_NOOP,
+    NOOP,
+    TRUST_CHANGES,
+    Twin,
+    _assert_decision,
+    _checkout,
+    _converge,
+    _converge_exec_user_approved,
+    _declare,
+    _deployed,
+    _publish_skill,
+    _remove_deployed,
+    _snapshot,
+    _user_and_orphan_files,
+    make_twin,
 )
 from tests.lifecycle.world import World
-from tests.lifecycle.world.clone import clone
-from tests.lifecycle.world.scopes import use_policy, use_registry
-from tests.lifecycle.world.services import (
-    ORG,
-    POLICY_FILE,
-    POLICY_REPO,
-    policy_documents,
-    policy_org,
-)
-from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
-from tests.utils.lifecycle_evidence import expect_output_violation
+from tests.lifecycle.world.services import ORG
 
 pytestmark = [
     pytest.mark.e2e,
@@ -74,242 +49,10 @@ pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="fast engines are POSIX-only"),
 ]
 
-FAST_ENV = "APM_INSTALL_FAST_PATH"
-NOOP = "no-op"
-DIFF = "diff"
-FULL = "full"
-_DECISION = re.compile(r"^\[i\] install fast path: (.*)$", re.MULTILINE)
-_ELAPSED = re.compile(r"\b\d+(?:\.\d+)?m?s\b")
-_PARALLEL = re.compile(r"^\s*\[>\] Resolving ")
-# Policy freshness depends on when each world last fetched it (as #4775 normalized).
-_POLICY_AGE = re.compile(r" \(cached, fetched \d+s ago\)")
-BOTH = ("p-skill:git", "p-exec:git")
-# The deploy store (#4846): <APM_CACHE_DIR>/deploy_v1/<key[:2]>/<key>.
-DEPLOY_BUCKET = "deploy_v1"
-POLICY_CACHE = "policy_v1"  # policy/discovery.py POLICY_CACHE_DIR
-
-
-def _present(*modules: str) -> bool:
-    return any(importlib.util.find_spec(name) is not None for name in modules)
-
-
-NOOP_ENGINE = _present("apm_cli.install.noop_diff", "apm_cli.install.desired_state")
-DIFF_ENGINE = _present("apm_cli.install.diff_apply")
-# S4 (a fresh, lockfile-less install served from a warm cache) has its own seam.
-FRESH_ENGINE = _present("apm_cli.install.fresh_apply")
-ANY_ENGINE = NOOP_ENGINE or DIFF_ENGINE
-
-
-class MissingDecision(AssertionError):
-    """The fast world did not take the decision the cell requires."""
-
-
-# Lane C engines (S0 no-op, S2 diff-apply) are tracked by one open issue.
-_ENGINE_ISSUE = "#4770"
-_MISSING = r"expected a [a-z/-]+ decision, got"
-
-
-@dataclass(frozen=True)
-class Needs:
-    """Red-first marks of a cell owned by an engine: known-failing while it is absent."""
-
-    marks: tuple[pytest.MarkDecorator, ...]
-
-    def __call__(self, test: Callable) -> Callable:
-        for mark in self.marks:
-            test = mark(test)
-        return test
-
-
-def _needs(present: bool, engine: str) -> Needs:
-    if present:
-        return Needs(())
-    known = KnownFailure(
-        _ENGINE_ISSUE,
-        f"the {engine} install engine is not on this branch yet",
-        _MISSING,
-        kind="deferred-design",
-        raises=MissingDecision,
-    )
-    return Needs((known.mark(),))
-
-
-NEEDS_NOOP = _needs(NOOP_ENGINE, "no-op")
-NEEDS_DIFF = _needs(DIFF_ENGINE, "diff-apply")
-NEEDS_FRESH = _needs(FRESH_ENGINE, "fresh-apply")
-NEEDS_ANY = _needs(ANY_ENGINE, "fast")
-
-
-def _kind(decision: str) -> str:
-    if decision.startswith("no-op"):
-        return NOOP
-    if decision.startswith("applied a verified diff"):
-        return DIFF
-    if decision.startswith("full run"):
-        return FULL
-    return f"none ({decision!r})"
-
-
-def _assert_decision(decision: str, *kinds: str) -> None:
-    if _kind(decision) not in kinds:
-        raise MissingDecision(f"expected a {'/'.join(kinds)} decision, got {decision!r}")
-
-
-def _normalized(world: World, text: str) -> list[str]:
-    """Output without the decision line, the world root and timings.
-
-    Dependencies resolve in parallel, so each run of consecutive progress lines
-    ("[>] Resolving ...") is compared as a sorted block; all other order counts.
-    """
-    text = _POLICY_AGE.sub("", _DECISION.sub("", text)).replace(str(world.root), "<ROOT>")
-    text = _ELAPSED.sub("<T>", text)
-    lines: list[str] = []
-    block: list[str] = []
-    for line in [line for line in text.splitlines() if line.strip()] + [""]:
-        if _PARALLEL.match(line):
-            block.append(line)
-            continue
-        lines += sorted(block) + ([line] if line else [])
-        block = []
-    return lines
-
-
-def _modes(world: World) -> dict[str, str]:
-    """``st_mode`` permission bits of every project file and directory (apm_modules included)."""
-    root = world.project
-    return {
-        path.relative_to(root).as_posix(): oct(path.lstat().st_mode & 0o7777)
-        for path in sorted(root.rglob("*"))
-        if not path.relative_to(root).as_posix().startswith((".git/", ".apm-local"))
-        and path.relative_to(root).as_posix() != ".git"
-    }
-
-
-# -- the twin -------------------------------------------------------------------
-
-
-@dataclass
-class Twin:
-    fast: World
-    full: World
-    codes: list[int] = field(default_factory=list)
-    evidence: str = ""
-
-    @property
-    def worlds(self) -> tuple[World, World]:
-        return (self.fast, self.full)
-
-    def each(self, change: Callable[[World], object]) -> None:
-        for world in self.worlds:
-            change(world)
-
-    def invoke(self, world: World, argv: tuple[str, ...]):
-        """Run *argv* in one world with that world's engine mode."""
-        world.env[FAST_ENV] = "trace" if world is self.fast else "0"
-        try:
-            return driver.run(world, argv)
-        finally:
-            world.env.pop(FAST_ENV, None)
-
-    def run(self, *argv: str, exempt: tuple[str, ...] = ()) -> str:
-        """Run *argv* in both worlds, assert parity, return the fast world's decision."""
-        fast, full = (self.invoke(world, argv) for world in self.worlds)
-        decisions = _DECISION.findall(fast.stderr)
-        assert len(decisions) <= 1, f"one decision per command, got {decisions}"
-        label = " ".join(argv)
-        evidence = f"\n--- fast\n{fast.stdout}{fast.stderr}\n--- full\n{full.stdout}{full.stderr}"
-        assert fast.returncode == full.returncode, f"{label}: exit codes differ{evidence}"
-        for stream in ("stdout", "stderr"):
-            assert _normalized(self.fast, getattr(fast, stream)) == _normalized(
-                self.full, getattr(full, stream)
-            ), f"{label}: {stream} differs from the full pipeline{evidence}"
-        problems = diff(
-            comparable(self.fast, exempt),
-            comparable(self.full, exempt),
-            self.worlds,
-            ("fast", "full"),
-        )
-        assert not problems, f"{label}: state differs from the full pipeline\n" + "\n".join(
-            problems
-        )
-        modes = [_modes(world) for world in self.worlds]
-        assert modes[0] == modes[1], f"{label}: file modes differ: " + ", ".join(
-            f"{rel} fast={modes[0].get(rel)} full={modes[1].get(rel)}"
-            for rel in sorted(modes[0].keys() | modes[1].keys())
-            if modes[0].get(rel) != modes[1].get(rel)
-        )
-        self.codes.append(fast.returncode)
-        self.evidence = evidence
-        return decisions[0] if decisions else ""
-
-    def ok(self, *argv: str) -> str:
-        decision = self.run(*argv)
-        assert self.codes[-1] == 0, f"{' '.join(argv)} failed in both worlds{self.evidence}"
-        return decision
-
 
 @pytest.fixture
 def twin(lifecycle_template: World, tmp_path: Path) -> Twin:
-    pair = Twin(
-        clone(lifecycle_template, tmp_path / "f"), clone(lifecycle_template, tmp_path / "r")
-    )
-    pair.fast.services.reset()  # one service set per worker: both worlds share it
-    pair.each(lambda w: use_policy(w, "allow"))
-    return pair
-
-
-def _declare(world: World, *keys: str) -> None:
-    manifest = world.project / "apm.yml"
-    data = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
-    data.setdefault("dependencies", {})["apm"] = [world.packages[k].spec for k in keys]
-    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-
-def _converge(twin: Twin, *keys: str) -> None:
-    twin.each(lambda w: _declare(w, *keys))
-    twin.ok("install")
-    if "p-exec:git" in keys:
-        twin.ok("approve", f"{ORG}/p-exec")
-        twin.ok("install")
-
-
-def _deployed(world: World, package: str = "") -> list[Path]:
-    lock = LockFile.read(world.project / "apm.lock.yaml")
-    assert lock is not None, "no lockfile"
-    paths = [
-        world.project / rel
-        for key, dep in lock.dependencies.items()
-        if package in key
-        for rel in sorted(dep.deployed_file_hashes)
-        if (world.project / rel).is_file()
-    ]
-    assert paths, f"the lock records no hashed deployed file of {package or 'any package'}"
-    return paths
-
-
-def _publish_skill(twin: Twin, body: str, tag: str) -> None:
-    source = Path(twin.fast.packages["p-skill"].spec)
-    skill = next(source.rglob("SKILL.md")).relative_to(source).as_posix()
-    text = f"---\nname: p-skill\ndescription: lifecycle skill.\n---\n\n{body}\n"
-    twin.fast.services.publish_revision(f"{ORG}/p-skill", {skill: text}, tag=tag)
-
-
-def _remove_deployed(world: World) -> None:
-    for path in _deployed(world):
-        path.unlink()
-    shutil.rmtree(world.project / "apm_modules", ignore_errors=True)
-
-
-def _checkout(world: World, files: dict[str, bytes]) -> None:
-    for rel, data in files.items():
-        (world.project / rel).write_bytes(data)
-
-
-def _snapshot(world: World) -> dict[str, bytes]:
-    return {rel: (world.project / rel).read_bytes() for rel in ("apm.yml", "apm.lock.yaml")}
-
-
-# -- journeys the engines claim -------------------------------------------------
+    return make_twin(lifecycle_template, tmp_path)
 
 
 @NEEDS_NOOP
@@ -405,23 +148,6 @@ def test_update_matches_the_full_pipeline(twin: Twin) -> None:
     _assert_decision(twin.ok("update", "--yes") or "full run (not install)", FULL)
 
 
-# -- cleanup on a hit and on a doubt (the engine is pre-pipeline) -------------------
-
-
-def _user_and_orphan_files(world: World) -> dict[str, bytes]:
-    """A user file next to a claimed file, plus an unclaimed file in a managed root."""
-    claimed = _deployed(world, "p-skill")[0]
-    extra = {
-        claimed.parent.relative_to(world.project).as_posix() + "/user-notes.md": b"mine\n",
-        ".agents/skills/p-gone/SKILL.md": b"---\nname: p-gone\ndescription: stale.\n---\n",
-    }
-    for rel, data in extra.items():
-        path = world.project / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-    return extra
-
-
 @NEEDS_NOOP
 def test_noop_hit_changes_no_project_file(twin: Twin) -> None:
     """A hit skips lockfile, cleanup and finalize: not one project byte moves."""
@@ -447,13 +173,6 @@ def test_cleanup_on_a_doubt_prunes_like_the_full_pipeline(twin: Twin) -> None:
     _assert_decision(decision, FULL)
 
 
-# -- W4's change table: change -> install, fast == full -----------------------------
-
-
-# The full pipeline's exit code after each change (0 unless listed).
-CHANGE_EXIT: dict[str, int] = {"symlinked-destination": 1}  # refuses to write through it
-
-
 @pytest.mark.parametrize(
     "change", [pytest.param(c, marks=NEEDS_ANY.marks) for c in sorted(CHANGES)]
 )
@@ -474,173 +193,6 @@ def test_install_after_a_change_matches_the_full_pipeline(twin: Twin, change: st
     _assert_decision(decision, DIFF, FULL)
 
 
-# -- doubt triggers: the fast engine must decline ------------------------------------
-
-
-def _edit_deployed(world: World) -> None:
-    path = _deployed(world)[0]
-    path.write_bytes(path.read_bytes() + b"\nuser edit\n")
-
-
-def _drop_exec_from_manifest(world: World) -> None:
-    _declare(world, "p-skill:git")
-
-
-def _stricter_policy(world: World) -> None:
-    use_policy(world, "deny-pkg")  # denies p-exec
-
-
-def _lock_from_another_apm(world: World) -> None:
-    lock = world.project / "apm.lock.yaml"
-    data = yaml.safe_load(lock.read_text(encoding="utf-8"))
-    data["apm_version"] = "0.0.1"
-    lock.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-
-def _cache_roots(world: World) -> list[Path]:
-    roots = {world.cache_root, world.env.get("APM_CACHE_DIR")}
-    return [Path(root) for root in roots if root]
-
-
-def _empty_store(world: World) -> None:
-    _remove_deployed(world)
-    for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def _tamper_store(world: World) -> None:
-    """Corrupt every deploy-store entry, then remove the deployed tree."""
-    _remove_deployed(world)
-    _tamper_store_entries(world)
-
-
-def _tamper_store_entries(world: World) -> None:
-    entries = [
-        entry
-        for root in _cache_roots(world)
-        for entry in sorted((root / DEPLOY_BUCKET).glob("*/*"))
-        if entry.is_file()
-    ]
-    assert entries or not DIFF_ENGINE, "the deploy store holds no entry to tamper"
-    for entry in entries:
-        entry.write_bytes(entry.read_bytes() + b"\ntampered\n")
-
-
-def _nothing(world: World) -> None:
-    del world
-
-
-DOUBTS: dict[str, tuple[Callable[[World], None], tuple[str, ...], int]] = {
-    # trigger: (change after converging, install argv, exit code of the full pipeline)
-    "apm-version-changed": (_lock_from_another_apm, ("install",), 0),
-    "apm-yml-changed": (_drop_exec_from_manifest, ("install",), 0),
-    "deployed-file-edited": (_edit_deployed, ("install",), 0),
-    "non-default-flag": (_nothing, ("install", "--force"), 0),
-    "policy-changed": (_stricter_policy, ("install",), 1),
-    "store-miss": (_empty_store, ("install",), 0),
-    "store-entry-tampered": (_tamper_store, ("install",), 0),
-}
-
-
-@pytest.mark.parametrize(
-    "trigger", [pytest.param(t, marks=NEEDS_ANY.marks) for t in sorted(DOUBTS)]
-)
-def test_doubt_trigger_declines_to_the_full_pipeline(twin: Twin, trigger: str) -> None:
-    change, argv, code = DOUBTS[trigger]
-    _converge(twin, *BOTH)
-    twin.each(change)
-    decision = twin.run(*argv)
-    assert twin.codes[-1] == code, (
-        f"{trigger}: exit {twin.codes[-1]}, expected {code}{twin.evidence}"
-    )
-    _assert_decision(decision, FULL)
-
-
-@NEEDS_ANY
-def test_external_scanners_flag_declines_to_the_full_pipeline(twin: Twin) -> None:
-    _converge(twin, *BOTH)
-    twin.ok("experimental", "enable", "external_scanners")
-    _assert_decision(twin.ok("install"), FULL)
-
-
-@pytest.mark.parametrize(
-    "char",
-    [
-        pytest.param("\u200b", id="zero-width-space", marks=NEEDS_ANY.marks),
-        pytest.param("\ufeff", id="mid-file-bom", marks=NEEDS_ANY.marks),
-        pytest.param("\u202e", id="bidi-override", marks=NEEDS_ANY.marks),
-    ],
-)
-def test_hidden_unicode_in_a_deployed_file_takes_the_full_scan(twin: Twin, char: str) -> None:
-    """The ASCII guard: a non-ASCII hidden character means a full scan, same findings."""
-    _publish_skill(twin, f"Use p{char}skill. Hidden character mid-file.", tag="v1.0.0")
-    twin.each(lambda w: _declare(w, "p-skill:git"))
-    twin.run("install")  # a critical finding may block: parity holds either way
-    _assert_decision(twin.run("install"), FULL)
-
-
-def _local_path_source(twin: Twin) -> None:
-    _converge(twin, "p-skill")
-
-
-def _marketplace_source(twin: Twin) -> None:
-    """Marketplace specs go through ``apm install <spec>``, which records the resolved form."""
-    twin.ok("marketplace", "add", twin.fast.services.marketplace_url)
-    twin.ok("install", twin.fast.packages["p-skill:marketplace"].spec)
-
-
-def _registry_source(twin: Twin) -> None:
-    twin.each(use_registry)
-    _converge(twin, "p-skill:registry")
-
-
-SOURCES: dict[str, Callable[[Twin], None]] = {
-    "local-path": _local_path_source,
-    "marketplace": _marketplace_source,
-    "registry": _registry_source,
-}
-
-
-@pytest.mark.parametrize(
-    "source", [pytest.param(s, marks=NEEDS_ANY.marks) for s in sorted(SOURCES)]
-)
-def test_source_without_an_immutable_pin_declines_to_the_full_pipeline(
-    twin: Twin, source: str
-) -> None:
-    SOURCES[source](twin)
-    _assert_decision(twin.ok("install"), FULL)
-
-
-# -- Git-only security baselines: prove a hit, then the trust change must decline ----
-
-
-def _clear_policy_cache(world: World) -> None:
-    for root in _cache_roots(world):
-        shutil.rmtree(root / POLICY_CACHE, ignore_errors=True)
-
-
-def _deny_executables_at_the_same_origin(twin: Twin) -> None:
-    """Serve exec-deny-all from the project's existing policy origin (no remote change)."""
-    document = yaml.safe_dump(policy_documents()["exec-deny-all"] | {"name": "allow"})
-    twin.fast.services.publish_revision(
-        f"{policy_org('allow')}/{POLICY_REPO}", {POLICY_FILE: document}
-    )
-    twin.each(_clear_policy_cache)  # the next install rediscovers the policy live
-
-
-def _converge_exec_user_approved(twin: Twin) -> None:
-    twin.each(lambda w: _declare(w, "p-exec:git"))
-    twin.ok("install")
-    twin.ok("approve", "--user", "p-exec")
-    twin.ok("install")
-
-
-TRUST_CHANGES: dict[str, Callable[[Twin], None]] = {
-    "approval-revoked": lambda twin: twin.each(revoke_user_approval),
-    "executables-denied-at-same-origin": _deny_executables_at_the_same_origin,
-}
-
-
 @pytest.mark.parametrize(
     "trust", [pytest.param(t, marks=NEEDS_NOOP.marks) for t in sorted(TRUST_CHANGES)]
 )
@@ -654,259 +206,4 @@ def test_trust_change_after_a_noop_hit_declines(twin: Twin, trust: str) -> None:
         assert _snapshot(world) == pinned[world.root], (
             "the trust change touched apm.yml or the lock"
         )
-    _assert_decision(twin.ok("install"), FULL)
-
-
-# -- S4: FRESH install (no lockfile) on a warm machine ------------------------------
-
-
-def _fresh_checkout(world: World) -> None:
-    """A fresh clone of the project on a machine whose cache is warm.
-
-    No lock, no deployed tree and no checkout ownership evidence (the
-    installation identity and its receipts); the machine cache stays warm.
-    """
-    _remove_deployed(world)
-    (world.project / "apm.lock.yaml").unlink()
-    shutil.rmtree(world.project / ".apm-local", ignore_errors=True)
-    for folder in {
-        world.home / ".apm" / "deployment-receipts",
-        world.apm_home / "deployment-receipts",
-    }:
-        shutil.rmtree(folder, ignore_errors=True)
-
-
-@NEEDS_FRESH
-def test_fresh_install_on_a_warm_cache_applies_the_diff(twin: Twin) -> None:
-    """Exit, output, project bytes AND the written lockfile bytes equal the full pipeline."""
-    _converge(twin, "p-skill:git")
-    twin.each(_fresh_checkout)
-    _assert_decision(twin.ok("install"), DIFF)
-
-
-def _fresh_store_miss(world: World) -> None:
-    _fresh_checkout(world)
-    for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def _fresh_tampered_store(world: World) -> None:
-    _fresh_checkout(world)
-    _tamper_store_entries(world)
-
-
-def _fresh_under_stricter_policy(world: World) -> None:
-    _fresh_checkout(world)
-    use_policy(world, "exec-deny-all")
-
-
-FRESH_DOUBTS: dict[str, tuple[tuple[str, ...], Callable[[World], None]]] = {
-    # doubt: (packages converged on the warm machine, change before the fresh install)
-    "store-miss": (("p-skill:git",), _fresh_store_miss),
-    "store-entry-tampered": (("p-skill:git",), _fresh_tampered_store),
-    "policy-on": (("p-skill:git",), _fresh_under_stricter_policy),
-    "local-source": (("p-skill",), _fresh_checkout),
-    "mcp-heavy-package": (BOTH, _fresh_checkout),
-}
-
-
-@pytest.mark.parametrize(
-    "doubt", [pytest.param(d, marks=NEEDS_ANY.marks) for d in sorted(FRESH_DOUBTS)]
-)
-def test_fresh_install_doubt_declines_to_the_full_pipeline(twin: Twin, doubt: str) -> None:
-    keys, change = FRESH_DOUBTS[doubt]
-    _converge(twin, *keys)
-    twin.each(change)
-    _assert_decision(twin.ok("install"), FULL)
-
-
-@NEEDS_ANY
-def test_fresh_marketplace_install_declines_to_the_full_pipeline(twin: Twin) -> None:
-    _marketplace_source(twin)
-    twin.each(_fresh_checkout)
-    _assert_decision(twin.ok("install"), FULL)
-
-
-# -- invariant: a declined fast path writes nothing before the full run ------------
-
-# trigger: (packages converged, change, install argv, exit of the ordinary pipeline)
-DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, ...], int]] = {
-    **{f"lock-{t}": (BOTH, change, argv, code) for t, (change, argv, code) in DOUBTS.items()},
-    **{f"fresh-{d}": (keys, change, ("install",), 0) for d, (keys, change) in FRESH_DOUBTS.items()},
-}
-# Log files are written by every invocation; they are not install state.
-_RAW_SKIP = (".git", ".apm/logs")
-
-
-def _raw_state(world: World) -> dict[str, dict[str, str]]:
-    """Unnormalized bytes of everything an install may write: project, HOME, APM_HOME and
-    caches, ownership metadata (.apm-local, receipts) and deploy-store entries included.
-    """
-    roots = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
-    roots.update({f"cache:{root}": root for root in _cache_roots(world)})
-    return {name: digest(root, _RAW_SKIP, world) for name, root in roots.items()}
-
-
-# The decide seam's exit on a decline: distinct and non-zero, so it can never pass for
-# a successful install (VP ruling; apm_cli.install.fast_entry.DECIDE_EXIT).
-DECIDE_EXIT = 3
-
-
-def _decide(world: World, argv: tuple[str, ...]):
-    """Run *argv* in decide mode through the driver's entry point.
-
-    The decide seam is a test-only exit, outside every command's user exit contract,
-    so I8 is suspended (the driver hook and the runner's output oracle); this cell
-    asserts the exit, ASCII and the empty stdout itself.
-    """
-    args = driver.command_args(argv, scope="project")
-    runner = ApmLifecycleRunner(driver.driver_command(), timeout_seconds=driver.TIMEOUT_SECONDS)
-    env = {**world.env, FAST_ENV: "decide"}
-    cwd = driver.command_cwd(world, "project")
-    reason = f"the decide seam exits DECIDE_EXIT={DECIDE_EXIT} by design; the cell asserts it"
-    with expect_output_violation("I8", reason=reason):
-        return runner.run(args, cwd=cwd, env=env, scenario_id="lifecycle-decide")
-
-
-@pytest.mark.parametrize(
-    "trigger", [pytest.param(t, marks=NEEDS_ANY.marks) for t in sorted(DECLINES)]
-)
-def test_declined_fast_path_writes_nothing(twin: Twin, trigger: str) -> None:
-    """Hand-off invariant: with ``APM_INSTALL_FAST_PATH=decide`` the engine decides and,
-    on a decline, exits ``DECIDE_EXIT`` before the full pipeline; not one byte may
-    have moved by then.
-    """
-    keys, change, argv, ordinary = DECLINES[trigger]
-    _converge(twin, *keys)
-    world = twin.fast
-    change(world)
-    before = _raw_state(world)
-    result = _decide(world, argv)
-    evidence = result.stdout + result.stderr
-    if result.returncode != DECIDE_EXIT:
-        # No decide seam: the ordinary pipeline ran, and it must still behave.
-        assert result.returncode == ordinary, f"exit {result.returncode}, expected {ordinary}"
-        raise MissingDecision("expected a decide decision, got the full pipeline")
-    decisions = _DECISION.findall(result.stderr)
-    assert len(decisions) == 1, f"one decision per command, got {decisions}"
-    _assert_decision(decisions[0], FULL)
-    assert not result.stdout.strip(), f"a decline printed pipeline output: {evidence}"
-    assert evidence.isascii(), "I6: decide output is not ASCII"
-    after = _raw_state(world)
-    changed = [
-        f"{name}:{rel}"
-        for name in before
-        for rel in sorted(before[name].keys() | after[name].keys())
-        if before[name].get(rel) != after[name].get(rel)
-    ]
-    assert not changed, f"{trigger}: the declined fast path wrote: {changed}"
-
-
-# -- review-fix cells (must pass once the engine lands) -----------------------------
-
-_WRITE_FAULT = """import os
-
-_at = int(os.environ.get("APM_TEST_WRITE_FAULT_AT", "0"))
-if _at:
-    try:
-        import apm_cli.install.diff_apply as _engine
-    except Exception:
-        _engine = None
-    if _engine is not None and hasattr(_engine, "_write"):
-        _original, _calls = _engine._write, [0]
-
-        def _write(*args, **kwargs):
-            _calls[0] += 1
-            if _calls[0] == _at:
-                raise OSError("injected write fault")
-            return _original(*args, **kwargs)
-
-        _engine._write = _write
-"""
-
-
-@NEEDS_DIFF
-def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) -> None:
-    """A fault on the commit's 2nd write: the engine declines and the full run's tree wins.
-
-    The fault is injected through a ``sitecustomize`` on the fast world's PYTHONPATH,
-    so the tree must equal the full world's (never a mix of both).
-    """
-    if os.environ.get("APM_LIFECYCLE_DRIVER") == "binary":
-        pytest.skip("the fault hook loads only under the engine driver")
-    _converge(twin, *BOTH)
-    twin.each(_remove_deployed)
-    hook = twin.fast.root / "fault-hook"
-    hook.mkdir()
-    existing = twin.fast.env.get("PYTHONPATH", "")
-    # Python loads only the first sitecustomize: run the world's network guard first.
-    guards = [
-        Path(entry) / "sitecustomize.py"
-        for entry in existing.split(os.pathsep)
-        if entry and (Path(entry) / "sitecustomize.py").is_file()
-    ]
-    assert guards, "the world's network guard sitecustomize is missing"
-    guard = guards[0].read_text(encoding="utf-8")
-    (hook / "sitecustomize.py").write_text(guard + "\n\n" + _WRITE_FAULT, encoding="utf-8")
-    path = [str(hook), existing]
-    twin.fast.env["PYTHONPATH"] = os.pathsep.join(p for p in path if p)
-    twin.fast.env["APM_TEST_WRITE_FAULT_AT"] = "2"
-    try:
-        decision = twin.ok("install")
-    finally:
-        twin.fast.env.pop("APM_TEST_WRITE_FAULT_AT", None)
-    _assert_decision(decision, FULL)
-    assert "write failed" in decision, decision
-
-
-def _lifecycle_scripts(world: World, tier: str) -> None:
-    manifest = (world.project if tier == "project" else world.apm_home) / "apm.yml"
-    exists = manifest.is_file()
-    data = yaml.safe_load(manifest.read_text(encoding="utf-8")) if exists else None
-    data = data or {"name": "user-scope", "version": "0.0.0"}
-    log = f"echo {tier} >> lifecycle-{tier}.log"
-    data["lifecycle"] = {
-        "pre-install": [{"type": "command", "command": log}],
-        "post-install": [{"type": "command", "command": log}],
-    }
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-
-@pytest.mark.parametrize(
-    "tier", [pytest.param(t, marks=NEEDS_ANY.marks) for t in ("project", "user")]
-)
-def test_lifecycle_scripts_decline_to_the_full_pipeline(twin: Twin, tier: str) -> None:
-    """Scripts fire around the full pipeline only, so their presence must decline."""
-    twin.each(lambda w: _lifecycle_scripts(w, tier))
-    _converge(twin, "p-skill:git")
-    decision = twin.ok("install")
-    _assert_decision(decision, FULL)
-    assert "lifecycle scripts" in decision, decision
-
-
-@NEEDS_ANY
-def test_escaped_hidden_unicode_in_a_deployed_hook_declines(twin: Twin) -> None:
-    """A JSON hook carrying a literal backslash-u202e escape decodes to a bidi override."""
-    hook = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo p-exec"}]}]}}
-    hook["hooks"]["SessionStart"][0]["hooks"][0]["command"] = "echo p-exec\u202e"
-    text = json.dumps(hook, indent=2, ensure_ascii=True) + "\n"
-    assert "\\u202e" in text and text.isascii()
-    twin.fast.services.publish_revision(
-        f"{ORG}/p-exec", {".apm/hooks/session.json": text}, tag="v1.0.0"
-    )
-    twin.each(lambda w: _declare(w, *BOTH))
-    for argv in (("install",), ("approve", f"{ORG}/p-exec"), ("install",)):
-        twin.run(*argv)  # a scanner finding may block: parity holds either way
-    decision = twin.run("install")
-    _assert_decision(decision, FULL)
-    assert "non-ASCII deployed content" in decision, decision
-
-
-@NEEDS_ANY
-def test_revoked_approval_with_apm_modules_absent_declines(twin: Twin) -> None:
-    """Fresh-checkout shape (lock kept, apm_modules and deployed tree gone) + a revoked grant."""
-    _converge_exec_user_approved(twin)
-    twin.each(_remove_deployed)
-    twin.each(revoke_user_approval)
     _assert_decision(twin.ok("install"), FULL)
