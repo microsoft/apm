@@ -40,6 +40,13 @@ def test_a_fresh_daily_check_skips_the_notice(monkeypatch) -> None:
     assert _notified(due=False) is False
 
 
+def test_the_install_decision_seam_skips_the_notice(monkeypatch) -> None:
+    """APM_INSTALL_FAST_PATH=decide promises no writes: no update cache, no fetch."""
+    monkeypatch.delenv("APM_E2E_TESTS", raising=False)
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "decide")
+    assert _notified(due=True) is False
+
+
 def test_disabled_self_update_skips_the_notice(monkeypatch) -> None:
     monkeypatch.delenv("APM_E2E_TESTS", raising=False)
     assert _notified(due=True, enabled=False) is False

@@ -219,7 +219,7 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
     from apm_cli.cache.paths import get_cache_root
     from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.drift import locked_copy_is_stale
-    from apm_cli.install.cache_pin import CachePinError, verify_marker
+    from apm_cli.install.cache_pin import marker_is_current
     from apm_cli.install.source_helpers import locked_content_mismatch
 
     modules = project_root / APM_MODULES_DIR
@@ -246,12 +246,10 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
             # Not a package copy: APPLY never replaces it, the full run decides.
             raise Decline("non-directory at a package path")
         if install_path.is_dir():
-            try:
+            if not marker_is_current(install_path, sha):
                 # A matching content hash does not restore a deleted or foreign
                 # marker; the full run's cache-pin sync does (cache_pin.py).
-                verify_marker(install_path, sha)
-            except CachePinError:
-                raise Decline("cache pin marker") from None
+                raise Decline("cache pin marker")
             # A present copy must already prove its locked content: decline before any write.
             if locked_copy_is_stale(dep, install_path) or locked_content_mismatch(
                 key, dep, install_path, lockfile=lock

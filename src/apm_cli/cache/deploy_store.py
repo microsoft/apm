@@ -381,7 +381,7 @@ def process_umask() -> int:
                         return int(line.split()[1], 8)
         except (OSError, ValueError):
             pass
-    mask = os.umask(0o022)
+    mask = os.umask(0o077)  # a create in this instant gets the more private mode
     os.umask(mask)
     return mask
 

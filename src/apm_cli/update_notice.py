@@ -16,6 +16,8 @@ def _nothing_to_do() -> bool:
     """True only when ``_check_and_notify_updates`` would print nothing and fetch nothing."""
     from apm_cli.update_policy import is_self_update_enabled
 
+    if os.environ.get("APM_INSTALL_FAST_PATH", "").strip().lower() == "decide":
+        return True  # the install decision seam reads only: no update cache, no fetch
     if not is_self_update_enabled():
         return True
     if os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes"):
