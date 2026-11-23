@@ -13,6 +13,8 @@ from click.testing import CliRunner
 
 from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.commands.audit import audit
+from apm_cli.install import audit_replay as _audit_replay
+from apm_cli.install import drift as _drift
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
 pytestmark = pytest.mark.component
@@ -31,6 +33,16 @@ def _clear_cache():
     clear_apm_yml_cache()
     yield
     clear_apm_yml_cache()
+
+
+def _assert_run_replay_binding_is_real() -> None:
+    """The drift patch must not leak a Mock into audit_replay's globals (#4876).
+
+    audit_replay is imported at module top so its ``run_replay`` binding is
+    the real function before any test patches ``drift.run_replay``; a first
+    import under that patch would capture the Mock for good.
+    """
+    assert _audit_replay.run_replay is _drift.run_replay
 
 
 def _setup_clean_project(project: Path) -> None:
@@ -220,6 +232,7 @@ class TestCIOutputFormats:
                 ["--ci", "--no-policy", "-f", output_format],
             )
 
+        _assert_run_replay_binding_is_real()
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
         if output_format == "json":
@@ -245,6 +258,7 @@ class TestCIOutputFormats:
         ):
             result = runner.invoke(audit, ["--ci", "--no-policy", "-f", "json"])
 
+        _assert_run_replay_binding_is_real()
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
         drift = next(check for check in payload["checks"] if check["name"] == "drift")
