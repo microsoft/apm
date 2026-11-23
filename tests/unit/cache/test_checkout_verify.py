@@ -28,6 +28,7 @@ from apm_cli.cache.checkout_verify import (
     verify_checkout,
 )
 from apm_cli.cache.git_cache import GitCache
+from apm_cli.utils.file_ops import robust_rmtree
 from tests.utils.git_link_fixture import (
     EXPECTED_PKG,
     build_link_origin,
@@ -319,7 +320,7 @@ def test_a_poisoned_bare_is_never_the_source_of_a_rebuild(tmp_path: Path) -> Non
 
 def test_an_unhealable_cache_entry_is_refused(tmp_path: Path) -> None:
     origin, sha, cache_root, checkout = _poisoned_cache(tmp_path)
-    shutil.rmtree(origin)  # the commit is no longer available anywhere else
+    robust_rmtree(origin)  # the commit is no longer available anywhere else
 
     with pytest.raises(RuntimeError, match=r"Failed to clone|does not match its commit"):
         GitCache(cache_root).get_checkout(str(origin), sha, locked_sha=sha)
