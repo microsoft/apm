@@ -521,13 +521,16 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def _dependency_package_info(lock_dep: Any, install_path: Path, deployment_modules_dir: Path):
-    """A locked dependency's PackageInfo, deploying from its live install path."""
-    package_info = _build_package_info(lock_dep, install_path)
-    package_info.deployment_package_root = lock_dep.to_dependency_ref().get_install_path(
-        deployment_modules_dir
-    )
-    return package_info
+def _place_replay_package(package_info: Any, lock_dep: Any, root: Path, modules_dir: Path) -> None:
+    """Deploy the root from *root*, where install read it (#4832); a dependency from its path."""
+    from apm_cli.deps.lockfile import _SELF_KEY
+
+    if lock_dep.local_path == _SELF_KEY:
+        package_info.root_local_project_root = package_info.deployment_package_root = root
+    else:
+        package_info.deployment_package_root = lock_dep.to_dependency_ref().get_install_path(
+            modules_dir
+        )
 
 
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
@@ -544,7 +547,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import (
-        frame_root_package,
         replay_deployment_frame,
         replay_route_manifest,
         replay_target,
@@ -607,9 +609,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
-    route_manifest = replay_route_manifest(
-        manifest_file(self_source_root), lock, live_targets, from_lock=config.route_from_lock
-    )
+    route_manifest = replay_route_manifest(config, lock, live_targets)
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None
@@ -715,11 +715,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
                     if lock_dep.local_path == _SELF_KEY:
                         package_info = build_project_local_package_info(install_path)
-                        frame_root_package(package_info, self_source_root)
                     else:
-                        package_info = _dependency_package_info(
-                            lock_dep, install_path, deployment_modules_dir
-                        )
+                        package_info = _build_package_info(lock_dep, install_path)
+                    _place_replay_package(
+                        package_info, lock_dep, self_source_root, deployment_modules_dir
+                    )
                     package_info.deployment_frame = deployment_frame
                     package_info.route_manifest = route_manifest
                     dep_key = lock_dep.get_unique_key()

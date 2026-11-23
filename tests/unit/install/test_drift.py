@@ -993,3 +993,68 @@ def test_run_replay_fails_closed_when_the_route_cannot_be_read(
     with pytest.raises(ValueError):
         run_replay(config, CheckLogger(verbose=False))
     assert lockfile_path.read_bytes() == lock_bytes
+
+
+def _native_lock(key: str) -> LockFile:
+    from apm_cli.native_plugins.record import NativePluginRecord
+
+    lock = LockFile()
+    locked = LockedDependency(repo_url=key, resolved_commit="a" * 40)
+    locked.native_plugin = NativePluginRecord(
+        "n", "sha256:" + "0" * 64, "apm-p-00000000", "./.agents/plugins"
+    )
+    lock.dependencies[key] = locked
+    return lock
+
+
+@pytest.mark.parametrize("route_from_lock", [False, True], ids=["audit", "cleanup"])
+def test_replay_refuses_a_locked_native_plugin_the_manifest_keeps_loose(
+    tmp_path, route_from_lock: bool
+):
+    """Audit names an opted-out locked native plugin with nothing rendered (#4995);
+    cleanup's previous-lock replay keeps the route that lock recorded."""
+    from apm_cli.install.audit_target_roots import replay_route_manifest
+    from apm_cli.native_plugins.route import NativeRouteDriftError, effective_native_route
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "apm.yml").write_text(
+        "name: proj\ndependencies:\n  apm:\n    - git: acme/native\n      native: false\n",
+        encoding="utf-8",
+    )
+    config = ReplayConfig(
+        project_root=project_root,
+        lockfile_path=project_root / "apm.lock.yaml",
+        route_from_lock=route_from_lock,
+    )
+
+    if route_from_lock:
+        manifest = replay_route_manifest(config, _native_lock("acme/native"), [])
+        locked = _native_lock("acme/native").dependencies["acme/native"].to_dependency_ref()
+        assert effective_native_route(locked, manifest) is False
+        return
+    with pytest.raises(NativeRouteDriftError, match="acme/native") as refused:
+        replay_route_manifest(config, _native_lock("acme/native"), [])
+    assert "native: false" in str(refused.value) and "apm install" in str(refused.value)
+
+
+def test_user_scope_replay_reads_the_route_from_apm_home(monkeypatch, tmp_path):
+    """install -g reads $APM_HOME/apm.yml, so the replay's route does too (#4995)."""
+    from apm_cli.install.audit_target_roots import replay_route_manifest
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.native_plugins.route import effective_native_route
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "apm.yml").write_text("name: unrelated\nnative_plugins: true\n", encoding="utf-8")
+    apm_home = tmp_path / "apm-home"
+    apm_home.mkdir()
+    (apm_home / "apm.yml").write_text("name: user\nnative_plugins: false\n", encoding="utf-8")
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    config = ReplayConfig(
+        project_root=home, lockfile_path=apm_home / "apm.lock.yaml", user_scope=True
+    )
+
+    manifest = replay_route_manifest(config, LockFile(), [])
+
+    assert effective_native_route(DependencyReference.parse("acme/plugin"), manifest) is False

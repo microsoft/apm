@@ -145,32 +145,32 @@ def claims_for_root(
     return rebased
 
 
-def frame_root_package(package_info: Any, root: Path) -> None:
-    """Point the replayed root package at *root*, where install read it.
+def replay_route_manifest(config: Any, lock: Any, targets: list[TargetProfile]) -> Any:
+    """The native route choices a replay of *config* decides by (#4995).
 
-    The root package deploys from there; its links render in the live frame
-    like any dependency (#4832: a user-root context link from ~/.apm).
+    Only the scope manifest's route keys are read (``$APM_HOME/apm.yml`` at
+    user scope, as ``install -g`` reads); an invalid ``native`` or
+    ``native_plugins`` value raises (fail closed). Cleanup's previous-lock
+    replay (``route_from_lock``) keeps each dependency on the route that lock
+    rendered it with. Any other replay refuses a locked native plugin the
+    manifest now keeps loose, so the drift shows even when the loose route
+    renders nothing.
     """
-    package_info.root_local_project_root = root
-    package_info.deployment_package_root = root
-
-
-def replay_route_manifest(
-    manifest_path: Path, lock: Any, targets: list[TargetProfile], *, from_lock: bool
-) -> Any:
-    """The native route choices a replay decides by (#4995).
-
-    Only the root manifest's route keys are read; an invalid ``native`` or
-    ``native_plugins`` value raises (fail closed), other manifest problems
-    leave routes automatic. *from_lock* (cleanup's previous-lock replay)
-    keeps each dependency on the route that lock rendered it with.
-    """
+    from apm_cli.core.scope import scope_manifest_path
     from apm_cli.install.target_governance import install_governance, is_governed_by_install
-    from apm_cli.native_plugins.route import load_route_manifest, locked_route_manifest
+    from apm_cli.native_plugins.route import (
+        NativeRouteDriftError,
+        frozen_route_change_reasons,
+        load_route_manifest,
+        locked_route_manifest,
+    )
     from apm_cli.native_plugins.scopes import CLAUDE, COPILOT
 
-    manifest = load_route_manifest(manifest_path)
-    if not from_lock:
+    path = scope_manifest_path(config.project_root, user_scope=config.user_scope)
+    manifest = load_route_manifest(path)
+    if not config.route_from_lock:
+        if reasons := frozen_route_change_reasons(lock, manifest):
+            raise NativeRouteDriftError(reasons)
         return manifest
     prefixes, schemes = install_governance([t for t in targets if t.name in (CLAUDE, COPILOT)])
     return locked_route_manifest(

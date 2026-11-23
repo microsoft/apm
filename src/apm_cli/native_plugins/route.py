@@ -66,6 +66,20 @@ def frozen_route_change_reasons(lockfile: Any, manifest: Any) -> list[str]:
     return reasons
 
 
+class NativeRouteDriftError(ValueError):
+    """The lock records a native plugin apm.yml now keeps loose; install has not moved it."""
+
+    def __init__(self, reasons: list[str]) -> None:
+        from apm_cli.core import remediation
+
+        self.reasons = reasons
+        super().__init__(
+            "apm.yml changes the native plugin route of a locked dependency:\n"
+            + "\n".join(reasons)
+            + f"\nTip: {remediation.FROZEN_NATIVE_ROUTE_CHANGED.sentence()}"
+        )
+
+
 def _misspelled(text: str, node: Any) -> str | None:
     """The raw spelling of a YAML 1.1 boolean that is not plain ``true``/``false``."""
     if getattr(node, "tag", None) != _BOOL_TAG or node.value in ("true", "false"):
