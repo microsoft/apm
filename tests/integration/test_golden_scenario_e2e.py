@@ -53,6 +53,7 @@ pytestmark = [
     # scheduler that honors xdist_group); without it the marker is
     # silently ignored and tests would race on global env state.
     pytest.mark.xdist_group(name="home_env"),
+    pytest.mark.e2e,
 ]
 
 

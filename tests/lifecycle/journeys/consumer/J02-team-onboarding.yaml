@@ -32,7 +32,7 @@ steps:
     docs:
       page: quickstart.mdx
       commands: [apm audit]
-      output: ["[+] Replayed 2 package(s)", "[+] No drift detected", "[*] 8 file(s) scanned -- no issues found"]
+      output: ["[+] Replayed 2 package(s)", "[+] No drift detected"]
     key_lines: ["[+] No drift detected", "file(s) scanned -- no issues found"]
     forbidden_lines: ["[!]"]
   - n: 4

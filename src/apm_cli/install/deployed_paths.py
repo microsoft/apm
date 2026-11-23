@@ -7,9 +7,9 @@ from typing import Any
 
 from apm_cli.security.gate import is_generated_python_artifact
 from apm_cli.utils.path_security import (
+    CheckRoot,
     PathTraversalError,
     ensure_path_within,
-    resolve_for_containment,
 )
 from apm_cli.utils.paths import portable_relpath
 
@@ -68,14 +68,6 @@ def deployed_path_entry(
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
-    resolved: list[Path] = []
-
-    def _resolved_candidate() -> Path:
-        # Resolved lazily, once per call (external-root targets never need it).
-        if not resolved:
-            resolved.append(resolve_for_containment(target_path))
-        return resolved[0]
-
     def _try_target(tgts) -> str | None:
         for _t in tgts:
             deploy_root = _t.managed_deploy_root
@@ -97,13 +89,15 @@ def deployed_path_entry(
                 else:
                     resolved_target = ensure_path_within(target_path, deploy_root)
                     return portable_relpath(resolved_target, project_root)
+            check = CheckRoot(project_root)
+            candidate = check.resolve(target_path)
             try:
                 locator = DeploymentLedgerCodec.locator_for_path(
-                    _resolved_candidate(),
+                    candidate,
                     project_root=project_root,
                     target=_t,
                     scope=InstallScope.PROJECT,
-                    candidate_resolved=True,
+                    check=check,
                 )
             except RuntimeError:
                 continue
@@ -123,6 +117,21 @@ def deployed_path_entry(
             f"path is outside the project tree and no dynamic-root "
             f"target matched. This is a bug -- please report it."
         )
+
+
+def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) -> tuple[str, ...]:
+    """Return the skill directory entry a normal lock records beside a member (#3772)."""
+    for target in targets:
+        if target.name != target_name or not target.supports("skills"):
+            continue
+        skills_root = target.skills_deploy_path(root)
+        try:
+            parts = physical.relative_to(skills_root.resolve()).parts
+        except ValueError:
+            continue
+        if len(parts) > 1:
+            return (deployed_path_entry(skills_root / parts[0], root, [target]),)
+    return ()
 
 
 def skill_bundle_file_entries(

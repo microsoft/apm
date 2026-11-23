@@ -14,6 +14,7 @@ install/deployment group must not re-port these, to avoid split authority.
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterable
 
 from scripts.architecture_linter.checks.mutation_write_shared import (
@@ -251,7 +252,48 @@ def _check_hook_cleanup_scope(provider: FactsProvider) -> Iterable[Violation]:
     )
 
 
+_HOOK_BUNDLE = "src/apm_cli/integration/hook_bundle.py"
+_CONTAINMENT_OWNER = "hook_containment_root"
+_CONTAINMENT_CONSUMER = "copy_deployed_hook_bundle"
+
+
+def _check_hook_containment_root(provider: FactsProvider) -> Iterable[Violation]:
+    """Hook bundle writes are contained only by ``hook_containment_root`` (#4772).
+
+    ``copy_deployed_hook_bundle`` must take its containment root from the owner
+    and may not check a destination against ``project_root`` itself, so an
+    external Claude root cannot be re-decided (or silently loosened) inline.
+    """
+    rule_id = "mutation_writes.hook_containment_root"
+    facts, failures = checked_facts(provider, _HOOK_BUNDLE, rule_id, require_python=True)
+    if facts is None or facts.tree_index is None:
+        return tuple(failures)
+    function = facts.tree_index.function(_CONTAINMENT_CONSUMER)
+    if function is None:
+        return (violation(rule_id, _HOOK_BUNDLE, f"{_CONTAINMENT_CONSUMER} not found", line=1),)
+    findings: list[Violation] = []
+    calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+    names = {getattr(call.func, "id", getattr(call.func, "attr", None)) for call in calls}
+    if _CONTAINMENT_OWNER not in names:
+        message = f"{_CONTAINMENT_CONSUMER} must take its root from {_CONTAINMENT_OWNER}"
+        findings.append(violation(rule_id, _HOOK_BUNDLE, message, line=function.lineno))
+    for call in calls:
+        name = getattr(call.func, "id", getattr(call.func, "attr", None))
+        roots = [arg.id for arg in call.args[1:2] if isinstance(arg, ast.Name)]
+        if name == "ensure_path_within" and roots == ["project_root"]:
+            message = f"contain hook writes by {_CONTAINMENT_OWNER}, not project_root"
+            findings.append(violation(rule_id, _HOOK_BUNDLE, message, line=call.lineno))
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id="mutation_writes.hook_containment_root",
+        group=GROUP,
+        guard_ids=("hooks-integrations-hook-containment-root",),
+        description="Hook bundle writes are contained by the resolved Claude root owner.",
+        check=_check_hook_containment_root,
+    ),
     Rule(
         id="mutation_writes.user_root_scope",
         group=GROUP,

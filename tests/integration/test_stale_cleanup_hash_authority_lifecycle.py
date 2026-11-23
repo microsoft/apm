@@ -25,6 +25,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 _USER_SKILL = ".claude/skills/mine/SKILL.md"

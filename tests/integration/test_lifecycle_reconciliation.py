@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import (
     DeploymentIntent,
@@ -18,6 +20,8 @@ from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.policy.ci_checks import _check_content_integrity
 from apm_cli.utils.diagnostics import DiagnosticCollector
+
+pytestmark = pytest.mark.component
 
 
 def test_install_update_compile_uninstall_share_one_owner(tmp_path: Path) -> None:

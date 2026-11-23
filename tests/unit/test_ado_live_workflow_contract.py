@@ -116,6 +116,7 @@ def _assert_auth_acceptance_selects_live_ado(workflow: dict[str, Any]) -> None:
 def test_ado_e2e_is_live_and_credential_gated() -> None:
     """The real ADO fixture requires both opt-in scheduling and a PAT."""
     assert {mark.name for mark in test_ado_e2e.pytestmark} == {
+        "e2e",
         "live",
         "requires_ado_pat",
     }

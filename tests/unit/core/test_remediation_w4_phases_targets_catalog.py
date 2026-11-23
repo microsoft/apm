@@ -50,6 +50,8 @@ _RESTORE = (
 _LEGACY_SKILLS = "needs legacy per-client skill deployments recorded by an older APM"
 
 COMPONENT_ONLY: dict[str, str] = {
+    "native-plugin-update-held": "needs a native plugin whose locked version changed while "
+    "--target excludes its harness; covered by test_native_project_scope",
     "repository-not-found": "needs a direct dependency whose host answers repository-not-found; "
     "covered by the install not-found lifecycle tests",
     "security-findings-review": "needs the external-scanners flag and a block audit mode; covered "
@@ -65,6 +67,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "agent-source-unreadable": _ROOT,
     "casing-migration-source-missing": _FAULT,
     "claude-native-switch-loose-hooks": "needs a real Claude native plugin switch over "
+    "deployed loose hooks",
+    "claude-native-switch-loose-hooks-project": "needs a real Claude native plugin switch over "
     "deployed loose hooks",
     "skill-path-migration-conflict": _LEGACY_SKILLS,
     "skill-path-migration-legacy": _LEGACY_SKILLS,

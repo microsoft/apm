@@ -78,3 +78,28 @@ def write_legacy_package(
 def read_json(path: Path) -> dict:
     """Read one JSON document from *path*."""
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def native_plugins_root(deploy_root: Path) -> Path:
+    """Where APM deploys natively activated plugin roots (#3921)."""
+    return deploy_root / ".agents" / "plugins"
+
+
+def native_catalog_path(deploy_root: Path) -> Path:
+    """The directory marketplace APM generates beside the deployed roots."""
+    return native_plugins_root(deploy_root) / ".claude-plugin" / "marketplace.json"
+
+
+def copilot_project_settings(project: Path) -> Path:
+    """The committed Copilot project settings file APM declares plugins in."""
+    return project / ".github" / "copilot" / "settings.json"
+
+
+def legacy_copilot_settings(project: Path) -> Path:
+    """The machine-local file the removed ``apm`` marketplace route wrote."""
+    return project / ".github" / "copilot" / "settings.local.json"
+
+
+def native_marketplace(deploy_root: Path) -> str:
+    """The marketplace name APM generated for this deploy root."""
+    return read_json(native_catalog_path(deploy_root))["name"]

@@ -28,6 +28,7 @@ from __future__ import annotations
 import ast
 import re
 
+from scripts.architecture_linter.checks.path_check_root import check_root_lifetime
 from scripts.architecture_linter.checks.python_semantics import (
     direct_definitions,
     effective_definition,
@@ -1730,6 +1731,13 @@ _SYMLINK_DEF = re.compile(r"^def has_symlink_component\(")
 _UNQUOTE = re.compile(r"unquote(_to_bytes)?\(")
 
 
+# A CheckRoot is one containment check's live root: storing it on an object,
+# a container or a module global would turn it into a cross-check cache.
+_CHECK_ROOT_STORED = re.compile(
+    r"^(?:\s*(?:self|cls)\.[\w.]+|\s*[\w.]+\[[^\]]*\]|[A-Za-z_]\w*)\s*(?::[^=]+)?=\s*CheckRoot\("
+)
+
+
 _URL_PATH_DECODER_CONSUMERS: tuple[str, ...] = (
     "src/apm_cli/marketplace/yml_schema.py",
     "src/apm_cli/models/dependency/reference.py",
@@ -1763,6 +1771,20 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
             exempt=False,
         )
     )
+
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            _src_python(provider),
+            _CHECK_ROOT_STORED,
+            "A CheckRoot lives for one containment check; never store it on an "
+            "attribute, a subscript or a module global",
+            exempt=False,
+        )
+    )
+    findings.extend(check_root_lifetime(provider, _src_python(provider)))
 
     # AC10a -- strict percent-encoded URL-path decoding authority.
     findings.extend(
