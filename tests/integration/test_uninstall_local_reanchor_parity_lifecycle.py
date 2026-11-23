@@ -448,7 +448,7 @@ def test_a_reanchor_with_a_recorded_path_outside_the_project_refuses(
     assert (tree_digest(world.project), _modules(world.project)) == before
 
 
-# -- Open follow-ups, pinned as strict known cells (#5097, #5102) -------------------
+# -- Open follow-ups, pinned as strict known cells (#5097) -------------------------
 #
 # Each cell is red until its fix lands; the fix PR flips it to required.
 
@@ -469,11 +469,6 @@ _LEDGER_ONLY_LINK = KnownFailure(
     "#5097",
     "a canonical ledger-only claim is outside the scanned view: its link dangles",
     r"dangles after the re-anchor",
-)
-_STALE_EXCLUDED = KnownFailure(
-    "#5102",
-    "the re-anchor moves a copy whose hash-excluded files went stale",
-    r"the next install rewrote the re-anchored copy",
 )
 
 
@@ -566,11 +561,11 @@ def test_a_ledger_only_claim_linking_into_the_moving_copy_keeps_resolving(
     _assert_link_resolves(world, skill + "/SKILL.md")
 
 
-@_STALE_EXCLUDED.mark()
 def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#5102: e's .git/HEAD (hash-excluded) changes after install; e re-anchors."""
+    """#5102: e's .git/HEAD (hash-excluded) changes after install; e re-anchors with a
+    fresh copy, so the next install rewrites nothing and no copy is left aside."""
 
     def git_head(project: Path) -> None:
         head = project / "vendor/e/.git/HEAD"
@@ -591,3 +586,4 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     )
     assert lock_bytes(world.project) == lock, "the next install rewrote the lockfile"
     assert not changed, f"the next install rewrote the re-anchored copy: {changed}"
+    assert not [key for key in modules if ".apm-reanchor-" in key], sorted(modules)
