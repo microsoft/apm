@@ -62,6 +62,7 @@ from tests.lifecycle.world.services import (
     policy_org,
 )
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.lifecycle_evidence import expect_output_violation
 
 pytestmark = [
     pytest.mark.e2e,
@@ -724,14 +725,16 @@ def _decide(world: World, argv: tuple[str, ...]):
     """Run *argv* in decide mode through the driver's entry point.
 
     The decide seam is a test-only exit, outside every command's user exit contract,
-    so it bypasses the driver's I8 output hook; this cell asserts the exit, ASCII and
-    the empty stdout itself.
+    so I8 is suspended (the driver hook and the runner's output oracle); this cell
+    asserts the exit, ASCII and the empty stdout itself.
     """
     args = driver.command_args(argv, scope="project")
     runner = ApmLifecycleRunner(driver.driver_command(), timeout_seconds=driver.TIMEOUT_SECONDS)
     env = {**world.env, FAST_ENV: "decide"}
     cwd = driver.command_cwd(world, "project")
-    return runner.run(args, cwd=cwd, env=env, scenario_id="lifecycle-decide")
+    reason = f"the decide seam exits DECIDE_EXIT={DECIDE_EXIT} by design; the cell asserts it"
+    with expect_output_violation("I8", reason=reason):
+        return runner.run(args, cwd=cwd, env=env, scenario_id="lifecycle-decide")
 
 
 @pytest.mark.parametrize(
