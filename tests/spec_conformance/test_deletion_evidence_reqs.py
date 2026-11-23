@@ -1155,3 +1155,51 @@ def test_selected_cleanup_keeps_an_unchanged_consent_kept_link_without_failing(
     assert link.is_symlink() and target.read_text(encoding="utf-8") == "outside\n"
     assert outcome.failed_paths == set() and outcome.rejected_paths == {}
     assert cleanup.rejected == {}
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_member_replaced_by_a_link_after_the_scan(tmp_path: Path) -> None:
+    """A member swapped for a link after the scan is kept; a linked ancestor is rejected (#4815)."""
+    skill = ".agents/skills/alpha"
+    linked, nested = f"{skill}/notes.md", f"{skill}/refs/guide.md"
+    hashes, evidence = _skill_world(
+        tmp_path, {f"{skill}/SKILL.md": "skill\n", linked: "notes\n", nested: "guide\n"}
+    )
+    (tmp_path / f"{skill}/SKILL.md").write_text("my edit\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "notes.md").write_text("outside\n", encoding="utf-8")
+    proven = evidence.verdict
+    scanned: set[str] = set()
+
+    def scan_then_user_relinks(claim: str, physical: Path, **kwargs) -> str:
+        verdict = proven(claim, physical, **kwargs)
+        if claim in (linked, nested) and {linked, nested} - scanned == {claim}:
+            refs = tmp_path / nested.rpartition("/")[0]
+            try:
+                (tmp_path / linked).unlink()
+                os.symlink(outside / "notes.md", tmp_path / linked)
+                refs.rename(outside / "refs")
+                os.symlink(outside / "refs", refs, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+        scanned.add(claim)
+        return verdict
+
+    evidence.verdict = scan_then_user_relinks
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert (tmp_path / linked).is_symlink()
+    assert (outside / "notes.md").read_text(encoding="utf-8") == "outside\n"
+    assert linked not in result.rejected and linked in evidence.kept_under_consent()
+    assert nested in result.rejected
