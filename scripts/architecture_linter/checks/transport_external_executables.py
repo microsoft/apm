@@ -151,7 +151,8 @@ def _may_launch(facts: object) -> bool:
     """
     for call in getattr(facts, "calls", ()):
         attr = call.qualname.rpartition(".")[2]
-        if attr in _LAUNCHERS or attr in {"which", "create_subprocess_exec"}:
+        # ``partial`` can wrap a launcher whose own call fact never appears.
+        if attr in _LAUNCHERS or attr in {"which", "create_subprocess_exec", "partial"}:
             return True
         if attr.startswith(("exec", "spawn", "posix_spawn")):
             return True

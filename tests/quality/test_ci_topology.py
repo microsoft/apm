@@ -3660,7 +3660,8 @@ def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> No
     """ci.yml's Lint job and the train guard run the one lint-chain action."""
     lint = workflow_job(ci, "lint")
     assert lint["name"] == "Lint"
-    assert lint["permissions"] == {"contents": "read", "pull-requests": "read"}
+    # The chain reads the live state of known-cell issues (GraphQL).
+    assert lint["permissions"] == {"contents": "read", "issues": "read", "pull-requests": "read"}
     lint_steps = _run_steps(lint)
     assert [str(step.get("uses", "")).partition("@")[0] for step in lint_steps] == [
         "actions/checkout",
@@ -3671,6 +3672,7 @@ def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> No
     assert lint_steps[2]["with"] == {"base-sha": LINT_CHAIN_BASE}
     _assert_h4_step(lint_steps[3])
     guard = workflow_job(train, TRAIN_GUARD_JOB)
+    assert guard["permissions"] == lint["permissions"], guard["permissions"]
     chain = [step for step in _run_steps(guard) if step.get("uses") == LINT_CHAIN_ACTION]
     assert len(chain) == 1 and chain[0]["with"] == {"base-sha": TRAIN_BASE}
     action_steps = _lint_chain_steps()

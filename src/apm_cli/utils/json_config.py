@@ -84,6 +84,13 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
+def json_config_text(path: Path, data: Any, *, default_trailing_newline: bool) -> str:
+    """The text :func:`write_json_config` writes for *data* at *path*, in its own style."""
+    current = _read_text(path)
+    style = detect_json_config_style(current, default_trailing_newline=default_trailing_newline)
+    return render_json_config(data, style)
+
+
 def write_json_config(
     path: Path,
     data: Any,

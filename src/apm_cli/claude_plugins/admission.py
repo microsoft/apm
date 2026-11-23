@@ -24,7 +24,7 @@ from apm_cli.deps.plugin_parser import (
 )
 from apm_cli.models.apm_package import PackageInfo, PackageType
 from apm_cli.models.dependency.server_names import is_reserved_server_name
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.subsets import has_skill_selection
 from apm_cli.native_plugins.record import is_safe_plugin_name
 from apm_cli.native_plugins.scopes import CLAUDE, COPILOT, plugin_harnesses, record_harnesses
 from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
@@ -377,7 +377,7 @@ def _intact_source(
             "it has no .claude-plugin/plugin.json, so Claude cannot load it intact",
             f"Ask the publisher to add .claude-plugin/plugin.json, {_EXCLUDE_CLAUDE}",
         )
-    if skill_subset_filter_tokens(skill_subset) is not None:
+    if has_skill_selection(skill_subset):
         return _Ineligible(
             "Claude loads whole plugins, so its skills: selection cannot be honored",
             f"Remove the skills: selection to install the complete plugin, {_EXCLUDE_CLAUDE}",
@@ -512,8 +512,7 @@ def plan_native_claude_plugin(
     if (package_type is not PackageType.MARKETPLACE_PLUGIN and not normalized_virtual) or (
         not user_scope
         and (
-            not (root / ".claude-plugin/plugin.json").is_file()
-            or skill_subset_filter_tokens(skill_subset) is not None
+            not (root / ".claude-plugin/plugin.json").is_file() or has_skill_selection(skill_subset)
         )
     ):
         return None
