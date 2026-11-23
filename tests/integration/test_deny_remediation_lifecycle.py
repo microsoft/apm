@@ -3,7 +3,7 @@
 ``apm install --frozen`` names the executables gate, not a missing
 declaration. ``apm approve <pkg>`` lifts a deny in the store it writes, while
 ``--all`` skips denied packages, and a deny in another layer makes approve
-exit 1 naming it. ``apm deny --user`` and ``apm approve --user`` work outside
+exit 1 naming it, before any write. ``apm deny --user`` and ``apm approve --user`` work outside
 a project and write only the user store.
 """
 
@@ -80,6 +80,12 @@ def test_approve_exits_1_when_another_layer_still_denies(
 ) -> None:
     chain = _chain(tmp_path, apm_binary_path)
     chain.ok("deny", "--user", _PACKAGE)
+    stores = (
+        chain.project / "apm.yml",
+        chain.project / "apm.lock.yaml",
+        chain.isolated.home / ".apm" / "config.json",
+    )
+    before = {path: path.read_bytes() for path in stores}
 
     result = chain.run("approve", "tools")
 
@@ -88,6 +94,8 @@ def test_approve_exits_1_when_another_layer_still_denies(
     assert "still denied (user-deny)" in text
     assert "apm approve --user ./pkgs/tools" in text
     assert "[+] Approved" not in text
+    # A failed approve changes no store (I7, #4923).
+    assert {path: path.read_bytes() for path in stores} == before
 
 
 def test_user_store_deny_and_approve_work_outside_a_project(

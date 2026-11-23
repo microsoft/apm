@@ -29,6 +29,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle.generator.rules import MARKETPLACE_UNTOUCHED
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
@@ -58,8 +59,12 @@ OBSERVED: Mapping[str, frozenset[str]] = {
 # Kinds no spine step observes an outcome for, so the matrix credits none:
 # bin/ deploys only for a Claude marketplace plugin at user scope (U-BIN,
 # install/exec_gate.py plugin_bin_deployable); the p-mixed instruction
-# (other-file) has no compile-staged output to assert for the copilot target.
+# (other-file) is observed only by ``render`` (compile deduplicates it for
+# copilot unless --force-instructions writes it into AGENTS.md).
 _UNOBSERVED = frozenset({"bin", "other-file"})
+_RENDER = ("compile", "--force-instructions")
+_AGENTS_MD = "AGENTS.md"
+_INSTRUCTION_BODY = "Keep the lifecycle world mixed."
 _PLAIN = frozenset({"skill", "other-file"})
 _MIXED_SKILL = f".agents/skills/{MIXED}/SKILL.md"
 # Project surfaces of every primitive but MCP: install --mcp must leave them alone (U7).
@@ -70,6 +75,9 @@ _NON_MCP = (
     ".github/extensions",
     ".github/instructions",
 )
+# The levels the requested registry server shares with p-exec-mcp: the gate is
+# off, or the org policy denies every dependency (the server too).
+_MCP_LEVELS = frozenset({"none", "denied-dependency"})
 _DURABLE = ("apm.yml", "apm.lock.yaml", "apm_modules", ".agents", ".github", ".mcp.json")
 _HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo mixed"}]}]}}
 _INSTRUCTION = '---\napplyTo: "**"\n---\n\nKeep the lifecycle world mixed.\n'
@@ -173,9 +181,16 @@ class GateMatrix(StepRunner):
             # U-MKT: below an org deny every marketplace cell maps onto one rule cell.
             return [MARKETPLACE_UNTOUCHED]
         unobserved = _UNOBSERVED
-        if command.op == "mcp-install":
-            # U7 credits the collateral primitives only: the MCP level would be
-            # the requested registry server's, which the spine never gates.
+        if command.args == _RENDER:
+            # The forced render observes the instruction and nothing else.
+            return sorted(
+                f"G1|compile|other-file|{self.state.gate(MIXED, 'other-file')}|{self.scope}"
+                for package in command.packages
+                if package == MIXED
+            )
+        if command.op == "mcp-install" and self.state.gate("p-exec", "mcp") not in _MCP_LEVELS:
+            # U7 credits the collateral primitives only: a first-party server
+            # requested by name is never gated (U-FIRST-PARTY-MCP).
             unobserved = unobserved | {"mcp"}
         return sorted(
             {
@@ -250,7 +265,11 @@ class GateMatrix(StepRunner):
             state.exec_deployed -= set(named)
             state.revoked -= set(named)
         if verb == "approve":
-            state.gate_on = True
+            # A project approval writes apm.yml's executables block, which opts the
+            # project into the gate; a user approval (APM_HOME/config.json) never
+            # does (security/executables.py gate_enabled).
+            if self.scope == "project":
+                state.gate_on = True
             for package in named:
                 state.decisions[package] = "allowed"
                 state.revoked.discard(package)
@@ -309,10 +328,12 @@ class GateMatrix(StepRunner):
         if command.op == "marketplace":
             # A catalog command leaves every project byte, deployed or locked, alone.
             unchanged["project"] = ("*",)
-        elif command.op == "mcp-install":
-            unchanged["project"] = _NON_MCP
         elif exit_code != 0:
             unchanged["project"] = _DURABLE
+        elif command.op == "mcp-install":
+            unchanged["project"] = _NON_MCP
+        if command.args == _RENDER and exit_code == 0:
+            present["project"] = [_AGENTS_MD]
         if (
             MIXED in command.packages
             and MIXED in self.state.revoked
@@ -359,6 +380,31 @@ class GateMatrix(StepRunner):
 
         self.edit_inputs("gate-off", change, lambda state: setattr(state, "gate_on", False))
 
+    def gate_on(self) -> None:
+        """Opt the scope manifest into the gate; at user scope an allow alone never
+        does (security/executables.py: a manifest block, a user deny or an org signal)."""
+
+        def change() -> None:
+            data = self.bench.manifest()
+            data.setdefault("executables", {"allow": {}})
+            self.bench.write_manifest(data)
+
+        self.edit_inputs("gate-on", change, lambda state: setattr(state, "gate_on", True))
+
+    def assert_gate_enforced(self, packages: Sequence[str]) -> None:
+        """The CLI ran the gate: the lock records each package's executable trust
+        state, which package_exec_decision (security/trust.py) omits while it is off."""
+        if self.dry:
+            return
+        lock = LockFile.read(self.bench.lock_path)
+        status = {
+            package: sorted(
+                str(dep.exec_status) for key, dep in lock.dependencies.items() if package in key
+            )
+            for package in packages
+        }
+        assert all(values and set(values) == {"deployed"} for values in status.values()), status
+
     def revoke(self, packages: Sequence[str]) -> None:
         """Drop every decision on *packages* from the scope's approval store."""
 
@@ -396,6 +442,18 @@ class GateMatrix(StepRunner):
             state.denied_by_policy = frozenset(PACKAGES)
 
         self.edit_inputs("policy-deny-all-deps", change, transition)
+
+    def render(self) -> None:
+        """``compile --force-instructions`` renders the instruction the gate keeps."""
+        self.run("compile", *_RENDER)
+        if not self.dry:
+            body = (self.bench.deploy_root / _AGENTS_MD).read_text(encoding="utf-8")
+            assert _INSTRUCTION_BODY in body, f"{_AGENTS_MD} lacks the {MIXED} instruction:\n{body}"
+
+        def change() -> None:
+            (self.bench.deploy_root / _AGENTS_MD).unlink()
+
+        self.edit_inputs("remove-agents-md", change, lambda state: None)
 
     def marketplace(self, verb: str) -> None:
         """``apm marketplace add|update``: a catalog command over the declared set."""
@@ -451,7 +509,11 @@ def replay_user_matrix(machine: GateMatrix, exits: Mapping[str, int] = USER_FROZ
     machine.run("install", "install", packages=PACKAGES)
     frozen("none")
     machine.run("approve", "approve", packages=exec_and_mixed)
+    # A user allow leaves the gate off; opt in as the bin spine does, so the
+    # allowed level below is the gate's verdict, not an open gate.
+    machine.gate_on()
     machine.probes("install")
+    machine.assert_gate_enforced(exec_and_mixed)
     frozen("allowed")
     machine.run("deny", "deny", packages=exec_and_mixed)
     frozen("revoked-after-deploy")
@@ -476,6 +538,7 @@ def replay_project_matrix(machine: GateMatrix) -> None:
     machine.gate_off()
     machine.run("install", "install", packages=PACKAGES)
     machine.probes(*reads, "mcp-install")
+    machine.render()
     machine.run("uninstall", "uninstall", packages=EXEC_PACKAGES)
     machine.run("install", "install", packages=EXEC_PACKAGES)
     # approve under the open gate turns the gate on (allowed).
@@ -488,6 +551,7 @@ def replay_project_matrix(machine: GateMatrix) -> None:
     machine.run("deny", "deny", packages=exec_and_mixed)
     machine.marketplace("update")
     machine.probes("mcp-install", "install", *reads)
+    machine.render()
     machine.run("deny", "deny", packages=(MIXED,))
     machine.run("uninstall", "uninstall", packages=exec_and_mixed)
     # denied-executable: denied before any deploy.
@@ -509,6 +573,7 @@ def replay_project_matrix(machine: GateMatrix) -> None:
         "lock": 1,
         "audit-ci": 1,
         "compile": 1,
+        "mcp-install": 1,
     }
     probes = ("install", "install-frozen", "update", "lock", "audit-ci", "compile", "prune")
     machine.probes(*probes, "mcp-install", exits=refused)

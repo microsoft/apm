@@ -30,7 +30,6 @@ when:
 - apm install
 - run: apm pack --dry-run
   cells:
-  - T1|OP=pack|PRIM=bin|GATE=denied-executable
   - T1|OP=pack|PRIM=hook|GATE=denied-executable
   - T1|OP=pack|PRIM=mcp|GATE=denied-executable
   - pair|OP=pack|GATE=denied-executable
