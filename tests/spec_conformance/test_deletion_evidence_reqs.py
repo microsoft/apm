@@ -1007,6 +1007,7 @@ def test_consent_reports_one_deletion_for_absolute_and_relative_spellings(tmp_pa
     evidence.consent_to_lockfile_hashes()
     for claim in (_PATH, (root / _PATH).as_posix()):
         evidence.verdict(claim, path)
+    assert path.is_file(), "a consent verdict never deletes the file itself"
     path.unlink()
 
     assert evidence.take_consented_deletions() == [_PATH]
@@ -1229,6 +1230,8 @@ def test_consent_names_every_kept_member_of_a_skill_directory(tmp_path: Path) ->
     text = " ".join(d.message for d in diagnostics._diagnostics)
     assert all(member in text for member in members), text
     assert "more)" not in text, text
+    # Every edited member stays on disk with the user's bytes.
+    assert all((tmp_path / m).read_text(encoding="utf-8") == "my edit\n" for m in members)
 
 
 @pytest.mark.req("req-lk-024")

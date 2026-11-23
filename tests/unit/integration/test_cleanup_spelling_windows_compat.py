@@ -92,3 +92,4 @@ def test_consent_reads_case_variant_cowork_spellings_as_one_file(
 
     assert evidence.lockfile_consentable(claim, path) is False
     assert evidence.refusals([claim])
+    assert path.read_text(encoding="utf-8") == "# Notes\n", "a refused claim keeps the file"
