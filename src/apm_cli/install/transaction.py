@@ -12,6 +12,7 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from apm_cli.cache.commit_reachability import open_verdict_stage
 from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
@@ -375,6 +376,8 @@ class InstallTransaction:
             self._resolution = ResolutionStagingSession(apm_modules_dir)
             # Marketplace ref pins resolved by this attempt; written on commit only.
             self._ref_pins = open_ref_pin_stage()
+            # Commit reachability verdicts of this attempt; written on commit only.
+            self._verdicts = open_verdict_stage()
         except BaseException:
             self._release_workspace_lock()
             raise
@@ -420,6 +423,7 @@ class InstallTransaction:
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
                     self._ref_pins.commit()
+                    self._verdicts.commit()
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
@@ -493,6 +497,7 @@ class InstallTransaction:
                     self._discard_deploy_evidence()
                     self._settle_deploy_journal()
                     self._ref_pins.discard()
+                    self._verdicts.discard()
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)
                     self._completed = True
@@ -702,6 +707,7 @@ class InstallTransaction:
                 self._discard_deploy_evidence()
                 self._ref_pins.discard()
                 try:
+                    self._verdicts.discard()
                     self._undo_deploys()
                 finally:
                     try:

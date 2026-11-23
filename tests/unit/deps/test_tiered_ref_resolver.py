@@ -32,7 +32,7 @@ from apm_cli.deps.tiered_ref_resolver import (
     ref_freshness_policy_for_install,
 )
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef, ResolvedReference
 
 pytestmark = pytest.mark.unit
 
@@ -169,13 +169,23 @@ def test_l1_returns_sha_directly_when_ref_is_already_a_sha():
     assert tier.try_resolve(_dep(ref=SHA_A), SHA_A) == SHA_A
 
 
-def test_l1_delegates_to_legacy_resolve_commit_sha_for_ref():
+def test_l1_resolves_a_branch_from_the_exact_ref_listing():
+    legacy = MagicMock()
+    legacy.list_remote_refs.return_value = [RemoteRef("main", GitReferenceType.BRANCH, SHA_B)]
+    host = MagicMock()
+    host._refs = legacy
+    tier = L1CommitsAPI(host=host)
+    assert tier.try_resolve(_dep(), "main") == SHA_B
+    legacy.resolve_commit_sha_for_ref.assert_not_called()
+
+
+def test_l1_expands_an_abbreviated_commit_through_the_commits_api():
     legacy = MagicMock()
     legacy.resolve_commit_sha_for_ref.return_value = SHA_B
     host = MagicMock()
     host._refs = legacy
     tier = L1CommitsAPI(host=host)
-    assert tier.try_resolve(_dep(), "main") == SHA_B
+    assert tier.try_resolve(_dep(), SHA_B[:12]) == SHA_B
     legacy.resolve_commit_sha_for_ref.assert_called_once()
 
 
@@ -645,3 +655,160 @@ def test_factory_preserves_l2_for_explicit_compatibility_policy(monkeypatch):
     tier_names = [t.name for t in resolver._tiers]
     assert "bare_rev_parse" in tier_names
     assert tier_names == ["per_run_cache", "commits_api", "bare_rev_parse", "legacy_clone"]
+
+
+class _RevParseCommitsApi:
+    """A commits API that resolves names like ``git rev-parse`` (as GitHub does)."""
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+        self.listings = 0
+        self._REFS = {
+            "refs/heads/main": "a" * 40,
+            "refs/tags/v1": "b" * 40,
+            "refs/pull/1/head": "f" * 40,
+        }
+
+    def list_remote_refs(self, _dep_ref) -> list[RemoteRef]:
+        self.listings += 1
+        kinds = (("refs/heads/", GitReferenceType.BRANCH), ("refs/tags/", GitReferenceType.TAG))
+        return [
+            RemoteRef(name.removeprefix(prefix), kind, sha)
+            for name, sha in self._REFS.items()
+            for prefix, kind in kinds
+            if name.startswith(prefix)
+        ]
+
+    def resolve_commit_sha_for_ref(self, _dep_ref, ref: str) -> str | None:
+        self.queries.append(ref)
+        for prefix in ("", "refs/", "refs/tags/", "refs/heads/"):
+            if f"{prefix}{ref}" in self._REFS:
+                return self._REFS[f"{prefix}{ref}"]
+        return None
+
+
+@pytest.mark.parametrize("ref", ["main", "refs/heads/main"])
+def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    del api._REFS["refs/heads/main"]
+    api._REFS["refs/tags/heads/main"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+
+
+@pytest.mark.parametrize("namespace", ["tags", "heads"])
+def test_a_hex_named_ref_wins_over_a_commit_abbreviation(namespace: str) -> None:
+    api = _RevParseCommitsApi()
+    api._REFS[f"refs/{namespace}/20241201"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "20241201") == "d" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_hex_name_no_ref_holds_expands_through_the_commits_api() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["f00dfeed1"] = "9" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "f00dfeed1") == "9" * 40
+    assert (api.queries, api.listings) == (["f00dfeed1"], 1)
+
+
+def test_a_branch_wins_over_a_tag_named_like_its_namespace() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/heads/main"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "main") == "a" * 40
+
+
+@pytest.mark.parametrize("ref", ["pull/1/head", "refs/pull/1/head"])
+def test_the_commits_api_tier_never_answers_with_a_pull_request_commit(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+    assert all(query.startswith(("heads/", "tags/")) for query in api.queries)
+
+
+@pytest.mark.parametrize(
+    ("ref", "want"),
+    [
+        ("main", "a" * 40),
+        ("refs/heads/main", "a" * 40),
+        ("v1", "b" * 40),
+        ("refs/tags/v1", "b" * 40),
+    ],
+)
+def test_the_commits_api_tier_resolves_exact_branches_and_tags(ref: str, want: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) == want
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["main..pull/1/head", "pull%2F1%2Fhead", "refs/pull/1/head", "main^{}", "main~1", "main@{1}"],
+    ids=["range", "percent-encoded", "refs-namespace", "peel", "ancestor", "reflog"],
+)
+def test_a_revision_expression_never_reaches_the_commits_api(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+    assert api.queries == []
+
+
+def test_a_full_commit_ref_is_not_a_commits_api_query() -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "f" * 40) == "f" * 40
+    assert api.queries == []
+
+
+def test_a_branch_literally_named_like_a_pull_ref_resolves_to_its_own_commit() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/heads/pull/1/head"] = "c" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "pull/1/head") == "c" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_ref_with_a_space_gets_no_commits_api_query() -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "main pull/1/head") is None
+    assert api.queries == []
+
+
+def test_a_non_ascii_name_resolves_only_as_a_branch_or_tag() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/v\u00e9"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v\u00e9") == "d" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_version_like_tag_is_found_in_one_listing() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/v1.2.0"] = "e" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v1.2.0") == "e" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_branch_named_like_a_version_still_resolves() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/heads/2.x"] = "9" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "2.x") == "9" * 40
+    assert (api.queries, api.listings) == ([], 1)

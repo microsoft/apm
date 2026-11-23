@@ -76,6 +76,8 @@ from apm_cli.integration.hook_ownership import (
     read_hook_object,
     read_merged_hook_config,
     remove_emptied_hook_file,
+    remove_hook_sidecar,
+    write_hook_sidecar,
 )
 from apm_cli.integration.hook_ownership import (
     extract_apm_source_sidecar as _extract_apm_source_sidecar,
@@ -1506,12 +1508,9 @@ class HookIntegrator(BaseIntegrator):
             # Write sidecar
             sidecar_path = target_dir / _APM_HOOKS_SIDECAR
             if sidecar_out:
-                write_seam.atomic_write_text(
-                    sidecar_path,
-                    json.dumps(sidecar_out, indent=2) + "\n",
-                )
+                write_hook_sidecar(sidecar_path, sidecar_out, project_root, user_scope)
             elif sidecar_path.exists():
-                write_seam.unlink(sidecar_path)
+                remove_hook_sidecar(sidecar_path)
 
         # Display only finalized, schema-clean native entries.
         for _label, _path, _hook_file, _file_event_entries in pending_display:
@@ -1850,12 +1849,9 @@ class HookIntegrator(BaseIntegrator):
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
-                    write_seam.atomic_write_text(
-                        sidecar_path,
-                        json.dumps(sidecar_out, indent=2) + "\n",
-                    )
+                    write_hook_sidecar(sidecar_path, sidecar_out)
                 elif sidecar_path.exists():
-                    write_seam.unlink(sidecar_path)
+                    remove_hook_sidecar(sidecar_path)
                 stats["files_removed"] += 1
         except (json.JSONDecodeError, OSError, TypeError):
             stats["errors"] += 1
@@ -2067,7 +2063,7 @@ class HookIntegrator(BaseIntegrator):
 
             if container not in data:
                 if sidecar_path is not None and sidecar_path.exists():
-                    write_seam.unlink(sidecar_path)
+                    remove_hook_sidecar(sidecar_path)
                 return
 
             had_sidecar = sidecar_path is not None and sidecar_path.exists()
@@ -2090,9 +2086,9 @@ class HookIntegrator(BaseIntegrator):
                     write_seam.write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if kept:
-                write_seam.atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")
+                write_hook_sidecar(sidecar_path, kept)
             elif had_sidecar:
-                write_seam.unlink(sidecar_path)
+                remove_hook_sidecar(sidecar_path)
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1
             stats.setdefault("failed_paths", []).append(json_path.as_posix())

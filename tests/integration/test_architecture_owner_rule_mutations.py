@@ -1021,6 +1021,36 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "(_install_lb)(",
             id="bundle-entry-unjournaled",
         ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "            write_seam.unlink(path)  # journaled like the deploy (#5130)\n",
+            "            path.unlink()\n",
+            id="bundle-canvas-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "                write_seam.unlink(hook_file)  # journaled like the deploy (#5130)\n",
+            "                hook_file.unlink()\n",
+            id="bundle-hook-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "                write_seam.unlink(path)\n                removed.setdefault(",
+            "                path.unlink()\n                removed.setdefault(",
+            id="bundle-script-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_pending.py",
+            "        write_seam.unlink(path, missing_ok=True)  # journaled like its write (#5130)\n",
+            "        path.unlink(missing_ok=True)\n",
+            id="bundle-pending-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "def _retire(\n",
+            "def _drop(path: Path) -> None:\n    path.unlink()\n\n\ndef _retire(\n",
+            id="bundle-retire-new-helper-raw-unlink",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
@@ -3393,6 +3423,30 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A registry update download skips the locked-hash check for an unchanged version.",
     ),
     MutationCase(
+        guard_id="marketplace-catalog-origin-fetch-pin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/client.py",
+        old="        bound = require_origin_pin(source)",
+        new='        bound = source.ref or ""',
+        intent="A catalog is fetched at a ref the origin does not publish.",
+    ),
+    MutationCase(
+        guard_id="marketplace-catalog-origin-pin-tips",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/catalog_ref_pins.py",
+        old="        tips = origin_ref_tips(source)",
+        new="        tips = {}",
+        intent="A commit pin is accepted without the origin's branch and tag tips.",
+    ),
+    MutationCase(
+        guard_id="marketplace-catalog-origin-registration-pin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/registration.py",
+        old="                check_catalog_ref(explicit)",
+        new="                pass",
+        intent="A registration accepts a catalog ref outside the origin's branches and tags.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
         rule_id="marketplace-integrations-agent-plugin-contract",
         path="src/apm_cli/agent_plugins/ir.py",
@@ -3961,7 +4015,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-cached-repo-git",
         rule_id="transport-platform-cached-repo-git",
         path="src/apm_cli/cache/git_cache.py",
-        old="if not self._bare_trusted(bare_dir):\n            raise RuntimeError(",
+        old="if not self._bare_trusted(bare_dir, url=url, env=env):\n            raise RuntimeError(",
         new="if False:\n            raise RuntimeError(",
         intent="A fetch into a cached bare runs Git without the owner's trust check.",
     ),
@@ -5195,6 +5249,22 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         new="    return tuple(sorted(retired))\n",
         intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/utils/git_env.py",
+        old="    return filesystem_containment(path, root) is not False",
+        new="    return os.path.samefile(path, root) or filesystem_containment(path, root) is not False",
+        intent="Helper exclusion computes containment itself beside the path_security owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/utils/path_security.py",
+        old="def filesystem_containment(path: Path, root: Path) -> bool | None:",
+        new="def _filesystem_containment(path: Path, root: Path) -> bool | None:",
+        intent="The path_security owner stops defining filesystem-aware containment.",
+    ),
 )
 
 EXECUTABLE_MUTATIONS = MUTATIONS + USER_ROOT_ROUTING_MUTATIONS
@@ -5367,6 +5437,13 @@ def test_owner_rules_report_nothing_before_mutation(
             "if delete_emptied_config(path, root=project_root, empty=emptied):",
             "if emptied and not path.unlink():",
             id="retired-heal-deletes-an-emptied-file-without-provenance-4867",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/install/deploy_snapshot.py",
+            "        return vouches_for_current_bytes(path, prior)",
+            "        return True",
+            id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
         ),
         pytest.param(
             "install-deployment-outcome",
