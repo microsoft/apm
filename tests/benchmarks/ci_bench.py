@@ -106,6 +106,12 @@ def abab(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _shard_of(path: Path, root: Path) -> str:
+    """The shard directory a run JSON sits under (artifact layouts nest ``runs/``)."""
+    parts = path.relative_to(root).parts
+    return next((p for p in parts if p.startswith(("perf-bench-shard-", "shard-"))), parts[0])
+
+
 def _load(root: Path) -> dict:
     """{(fixture, journey, rtt): {side: [(shard_pair, record), ...]}} from every JSON."""
     cells: dict = {}
@@ -114,7 +120,7 @@ def _load(root: Path) -> dict:
         side, _, pair = run_dir.partition("-")
         if side not in SIDES:
             continue
-        shard = path.parent.parent.name
+        shard = _shard_of(path, root)
         report = json.loads(path.read_text(encoding="utf-8"))
         for record in report["results"]:
             key = (record["fixture"], record["journey"], record["rtt_ms"])
