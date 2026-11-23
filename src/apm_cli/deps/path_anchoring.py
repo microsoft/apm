@@ -38,6 +38,7 @@ detection repo-wide.
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -151,6 +152,26 @@ def resolve_local_dep_base(
     return resolve_local_dep_dir(
         replace(lock_dep, local_path="."), lockfile, project_root, parent_index=parent_index
     )
+
+
+def root_anchored_local_path(
+    lock_dep: LockedDependency, lockfile: LockFile | None, project_root: Path
+) -> str:
+    """Re-spell a locked local dep's ``local_path`` against *project_root*.
+
+    The result names the same directory once the row is root-declared
+    (``resolved_by`` cleared), so a ``../sibling`` declared by a parent at
+    ``./packages/parent`` becomes ``./packages/sibling``. Raises
+    :class:`LocalResolutionError` like :func:`resolve_local_dep_dir`.
+    """
+    resolved = resolve_local_dep_dir(lock_dep, lockfile, project_root)
+    try:
+        relative = Path(os.path.relpath(resolved, project_root.resolve())).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+    if relative == "." or relative.startswith("../") or relative == "..":
+        return relative
+    return f"./{relative}"
 
 
 def build_local_parent_index(

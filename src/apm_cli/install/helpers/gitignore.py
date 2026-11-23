@@ -13,10 +13,12 @@ def update_gitignore_for_apm_modules(logger=None):
 
     # Read current .gitignore content
     current_content = []
+    current_text = ""
     if gitignore_path.exists():
         try:
-            with open(gitignore_path, encoding="utf-8") as f:
-                current_content = [line.rstrip("\n\r") for line in f.readlines()]
+            with open(gitignore_path, encoding="utf-8", newline="") as f:
+                current_text = f.read()
+            current_content = [line.rstrip("\n\r") for line in current_text.splitlines()]
         except Exception as e:
             if logger:
                 logger.warning(f"Could not read .gitignore: {e}")
@@ -30,13 +32,12 @@ def update_gitignore_for_apm_modules(logger=None):
 
     # Add apm_modules/ to .gitignore
     try:
-        from ...integration.write_seam import open_for_write
+        from ...integration import write_seam
 
-        with open_for_write(gitignore_path, "a", encoding="utf-8") as f:
-            # Add a blank line before our entry if file isn't empty
-            if current_content and current_content[-1].strip():
-                f.write("\n")
-            f.write(f"\n# APM dependencies\n{apm_modules_pattern}\n")
+        # The full text, so the deploy journal knows the bytes it writes (#4863).
+        separator = "\n" if current_content and current_content[-1].strip() else ""
+        addition = f"{separator}\n# APM dependencies\n{apm_modules_pattern}\n"
+        write_seam.write_text(gitignore_path, current_text + addition, newline="")
 
         if logger:
             logger.progress(f"Added {apm_modules_pattern} to .gitignore")

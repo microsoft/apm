@@ -34,6 +34,7 @@ from tests.lifecycle.generator.rules import (
     FIRST_PARTY_MCP_CELL,
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
+    ORG_DENY_OPS,
     REFUSAL_EVIDENCE,
     RETIRED_MCP_OWNERS,
     RULE_CELL_REFUSALS,
@@ -47,7 +48,7 @@ from tests.lifecycle.generator.rules import (
     refusal_cell,
 )
 from tests.lifecycle.generator.space import Entry, build_space, raw_cells
-from tests.lifecycle.generator.witnesses import credits, machine_cells
+from tests.lifecycle.generator.witnesses import BIN_WITNESSES, credits, credits_bin, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -742,10 +743,9 @@ def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
 def _u_user_org_policy(cell) -> bool:
     """An org dependency deny under install/lock/update/mcp-install at user scope."""
     op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
-    user = cell.get("SCOPE") == "user" or (cell.get("PRIM") == "bin" and "SCOPE" not in cell)
     return (
         cell.get("GATE") == "denied-dependency"
-        and user
+        and cell.get("SCOPE") == "user"
         and op in ("install", "lock", "update", "mcp-install")
     )
 
@@ -764,15 +764,18 @@ def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
     assert policy_discovery_uses_git_remote(get_apm_home()) is False
     assert policy_discovery_uses_git_remote(tmp_path) is True
     removed = _removed_by("U-USER-SCOPE-ORG-POLICY")
-    assert removed == {
-        "T1|OP=install|PRIM=bin|GATE=denied-dependency",
-        "T1|OP=lock|PRIM=bin|GATE=denied-dependency",
-        "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency",
-        "T1|OP=update|PRIM=bin|GATE=denied-dependency",
-        "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on",
-    }
+    assert removed == {"T2|SCOPE=user|GATE=denied-dependency|FROZEN=on"}
     kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
     assert kept["pair|OP=install|GATE=denied-dependency"]["status"] == "required"
+    # A scope-free bin cell rests only on a witness that deploys bin/ (#4981): the project
+    # matrix's p-exec bin/ never deploys, so each cell names a bin witness or is baseline.
+    for op in sorted(ORG_DENY_OPS):
+        key = f"T1|OP={op}|PRIM=bin|GATE=denied-dependency"
+        entry = kept[key]
+        if "witness" in entry:
+            assert credits_bin(entry["witness"], parse_cell(key)[1]), (op, entry)
+        else:
+            assert entry["status"] == "baseline", (op, entry)
 
 
 def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
@@ -811,10 +814,12 @@ def test_no_ungoverned_user_scope_step_credits_an_org_deny() -> None:
         "pair|OP=mcp-install|GATE=denied-dependency",
         "pair|OP=uninstall|GATE=denied-dependency",
         "pair|OP=approve-deny|GATE=denied-dependency",
-        "T1|OP=compile|PRIM=bin|GATE=denied-dependency",
     ):
         assert rows[key]["status"] == "required", (key, rows[key])
         assert rows[key]["witness"].endswith("[project]"), (key, rows[key])
+    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell (#4981).
+    bin_cell = "T1|OP=compile|PRIM=bin|GATE=denied-dependency"
+    assert rows[bin_cell]["status"] == "baseline", (bin_cell, rows[bin_cell])
     for key, row in rows.items():
         user_only = row.get("credited_by") and all(
             cell.endswith("|denied-dependency|user") for cell in row["credited_by"]
@@ -873,3 +878,22 @@ def test_only_a_changed_target_set_routes_an_offline_pair_to_target_history() ->
         if entry["family"] == "pair" and "NET=offline" in key and "-unchanged" in key
     }
     assert len(unchanged) == 2 and set(unchanged.values()) == {"T-6e"}, unchanged
+
+
+# -- bin cells need a witness that deploys bin/ at the cell's scope (#4981) ------
+
+
+def test_bin_cells_are_credited_only_by_a_witness_that_deploys_bin() -> None:
+    """A row acting on p-exec at project scope never deploys its loose bin/, so its
+    receipt proves nothing about a bin cell; only a bin-deploying witness credits one."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    wrong = sorted(
+        key
+        for key, entry in data["obligations"].items()
+        if "witness" in entry and not credits_bin(entry["witness"], parse_cell(key)[1])
+    )
+    assert wrong == [], f"{len(wrong)} bin cells credited without a deployed bin/: {wrong[:5]}"
+    root = Path(__file__).parents[3]
+    for node in BIN_WITNESSES:
+        path, name = node.split("::")
+        assert f"def {name.split('[')[0]}(" in (root / path).read_text(encoding="utf-8"), node

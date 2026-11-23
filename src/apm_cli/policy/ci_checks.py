@@ -655,6 +655,7 @@ def _missing_recorded_skill_subset_paths(
 
     from ..install.outcome import missing_requested_components
     from ..integration.skill_integrator import SkillIntegrator
+    from ..models.dependency.subsets import skill_subset_selects_all
     from ..models.validation import PackageType
 
     try:
@@ -668,6 +669,9 @@ def _missing_recorded_skill_subset_paths(
         available = frozenset()
     if available is None:
         available = frozenset()
+    if skill_subset_selects_all(subset):
+        # ``skills: ["*"]`` needs only one skill to be present.
+        return () if available else tuple(subset)
     return missing_requested_components(requested=subset, available=available)
 
 

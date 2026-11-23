@@ -689,6 +689,12 @@ def try_apply(
             # Source routing (and PROXY_REGISTRY_ONLY's lockfile refusal,
             # install/pipeline.py) is the full pipeline's egress decision.
             raise Decline("registry proxy configured")
+        from apm_cli.core.scope import get_apm_home
+        from apm_cli.install.deploy_snapshot import has_abandoned_journals
+
+        if has_abandoned_journals(get_apm_home() / "install-snapshots"):
+            # The full run replays it first, under the lifecycle lock (#4863).
+            raise Decline("interrupted install journal")
         import click
 
         from apm_cli.deps.lockfile_generator import require_current_cli
