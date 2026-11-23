@@ -11,7 +11,7 @@ $ apm install --frozen
 [i] Targets: claude  (source: apm.yml)
   [+] github.com/anthropics/claude-plugins-official/plugins/commit-commands #main @<SHA8>
 1 native plugin(s) deployed to .agents/plugins/ and declared in .claude/settings.json (Claude Code) and .github/copilot/settings.json (GitHub Copilot). Start a new session, or run /reload-plugins in Claude, to load them.
-
+  [!] [anthropics/claude-plugins-official/plugins/commit-commands] installed as a native plugin. Native plugins are reported not to load in git worktrees, in non-interactive claude -p runs (including claude-code-action) and in Copilot CLI 1.0.106.
 [*] Installed 1 APM dependency in <DUR>.
 [i] Deployed files verified against apm.lock.yaml.
 --- stderr

@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,6 +65,16 @@ class AllowlistProject:
     # devDependencies block (uninstall drops ``apm`` once it is empty).
     required_fields: frozenset[str] = frozenset()
     dev_section_keys: frozenset[str] = frozenset()
+    # apm.yml's default_host, which scopes shorthand as uninstall parses it (#5007).
+    manifest_host: Mapping[str, object] = field(default_factory=dict)
+
+
+class AdviceWithheld(Exception):
+    """An uninstall the proof would otherwise offer stops; *reason* says why (#5008)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 def allowlist_project(
@@ -103,6 +113,7 @@ def allowlist_project(
         ),
         required_fields=frozenset(policy.manifest.required_fields),
         dev_section_keys=frozenset(dev_block) if isinstance(dev_block, dict) else frozenset(),
+        manifest_host={"default_host": (raw_yml or {}).get("default_host")},
     )
 
 
@@ -137,10 +148,15 @@ def with_allowlist_next_step(
     project = allowlist_project(*project_inputs, policy)
     refs = {subject.ref for subject in failed.subjects}
     denied = [dep for dep in source_deps if dependency_policy_subject(dep) in refs]
+    try:
+        selectors, withheld = uninstall_selectors(denied, project), None
+    except AdviceWithheld as exc:
+        selectors, withheld = [], exc.reason
     remedy, sentence = dependency_not_allowed_advice(
-        uninstall_selectors(denied, project),
+        selectors,
         len(failed.subjects),
         _redact_policy_ref(policy_source) if policy_source else None,
+        withheld,
     )
     advised = replace(failed, next_step=sentence, remediations=(remedy,) if remedy else ())
     return [advised if check is failed else check for check in checks]
@@ -149,9 +165,27 @@ def with_allowlist_next_step(
 def uninstall_selectors(
     denied: Sequence[DependencyReference], project: AllowlistProject
 ) -> list[str]:
-    """Return the ``apm uninstall`` arguments that clear *denied*, or ``[]`` if unproven."""
+    """Return the ``apm uninstall`` arguments that clear *denied*, or ``[]`` if unproven.
+
+    The proof parses declarations in apm.yml's ``default_host`` scope, as
+    uninstall does (#5007). Raises :class:`AdviceWithheld` when an uninstall
+    would stop for a reason worth naming.
+    """
+    from ..models.dependency.manifest_host import manifest_host_scope_for
+
     if project.lock is None or not denied or not project.modules_dir.is_dir():
         return []
+    try:
+        scope = manifest_host_scope_for(project.manifest_host)
+    except ValueError:
+        return []
+    with scope:
+        return _proven_selectors(denied, project)
+
+
+def _proven_selectors(
+    denied: Sequence[DependencyReference], project: AllowlistProject
+) -> list[str]:
     from ..models.dependency.selection import ManifestSelectionIndex, parse_dependency_entry
 
     declared: dict[str, object] = {}
@@ -338,6 +372,11 @@ def _uninstall_clears(
     if transitive.rescued_roots or not denied_keys - set(roots) <= transitive.removed_keys:
         return False
     cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
+    linked = _final_symlinks(cleanup_keys, project)
+    if linked is None:
+        return False
+    if linked:
+        raise AdviceWithheld(f"{linked[0]} is a symbolic link, which uninstall does not remove")
     return (
         _lockfile_writable(project)
         and _deployment_paths_validate(cleanup_keys, project)
@@ -356,6 +395,27 @@ def _deployment_paths_validate(cleanup_keys: set[str], project: AllowlistProject
     return not uninstall_unvalidated_paths(
         project.lock, cleanup_keys, project.project_root, user_scope=False
     )
+
+
+def _final_symlinks(cleanup_keys: set[str], project: AllowlistProject) -> list[str] | None:
+    """Files the uninstall would delete that are final symlinks (#5008).
+
+    Target cleanup keeps such a path, out of the project
+    (``allow_final_symlink=False`` containment) or in it (a link carries no
+    receipt or render evidence), so the uninstall would stop. A path a
+    surviving dependency still claims is kept anyway and does not count.
+    """
+    from ..commands.uninstall.selection_shrink import uninstall_deletion_candidates
+
+    root = project.project_root
+    try:
+        return [
+            path
+            for path in uninstall_deletion_candidates(project.lock, cleanup_keys)
+            if "://" not in path and (root / path).is_symlink()
+        ]
+    except OSError:
+        return None  # an unreadable claim proves nothing: the advice is admin-only
 
 
 def _deletions_have_evidence(

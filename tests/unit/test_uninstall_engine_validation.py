@@ -109,7 +109,7 @@ class TestValidateUninstallPackages:
         assert not_found == ["./project-1.0.0.zip"]
         message = logger.error.call_args.args[0]
         assert "'project-1.0.0.zip' is a local bundle" in message
-        assert "cannot remove local-bundle content" in message
+        assert "uninstall them apart from other packages" in message
         assert "deps list" not in message
 
     @pytest.mark.parametrize(
