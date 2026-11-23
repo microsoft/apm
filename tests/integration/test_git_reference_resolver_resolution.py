@@ -600,10 +600,7 @@ class TestResolve:
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
             patch("tempfile.mkdtemp", return_value=str(temp_dir)),
-            patch(
-                "apm_cli.utils.git_env.git_resolve_commit",
-                return_value="e" * 40,
-            ),
+            patch("apm_cli.utils.git_env.git_exact_ref_commit", return_value="e" * 40),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -627,13 +624,7 @@ class TestResolve:
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
             patch("tempfile.mkdtemp", return_value=str(temp_dir)),
-            patch(
-                "apm_cli.utils.git_env.git_resolve_commit",
-                side_effect=[
-                    subprocess.CalledProcessError(1, "git"),
-                    "f" * 40,
-                ],
-            ),
+            patch("apm_cli.utils.git_env.git_exact_ref_commit", side_effect=[None, "f" * 40]),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -657,6 +648,7 @@ class TestResolve:
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
             patch("tempfile.mkdtemp", return_value=str(temp_dir)),
+            patch("apm_cli.utils.git_env.git_exact_ref_commit", return_value=None),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(
@@ -726,3 +718,111 @@ class TestResolve:
 
         assert result.ref_name == "main"
         mock_rmtree.assert_not_called()
+
+
+class TestLegacyFullyQualifiedRefs:
+    """A fully qualified ref resolves on the clone-only path, in its own namespace only."""
+
+    @pytest.fixture
+    def origin(self, tmp_path: Path) -> tuple[Path, dict[str, str]]:
+        import os
+
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        repo = tmp_path / "origin"
+
+        def git(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", str(repo), *args], env=env, check=True, capture_output=True, text=True
+            ).stdout.strip()
+
+        repo.mkdir()
+        git("init", "-q", "-b", "main")
+        git(
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "a",
+        )
+        shas = {"a": git("rev-parse", "HEAD")}
+        git("branch", "release")
+        git(
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "b",
+        )
+        shas["b"] = git("rev-parse", "HEAD")
+        git("tag", "release")
+        git("tag", "v1")
+        return repo, {**shas, "env": env}
+
+    def _resolve(self, origin, ref: str):
+        repo, shas = origin
+        host = _make_host()
+        host.git_env = shas["env"]
+
+        def clone(_url, target, *, depth=None, branch=None, **_kwargs):
+            args = ["git", "clone", "-q"]
+            if depth:
+                args += ["--depth", str(depth)]
+            if branch:
+                args += ["--branch", branch]
+            done = subprocess.run(
+                [*args, repo.as_uri(), str(target)], env=shas["env"], capture_output=True
+            )
+            if done.returncode:
+                raise GitCommandError(args, done.returncode, done.stderr)
+
+        host._clone_with_fallback.side_effect = clone
+        return GitReferenceResolver(host).resolve(_make_dep(reference=ref))
+
+    @pytest.mark.parametrize(
+        ("ref", "commit", "ref_type"),
+        [
+            ("refs/heads/release", "a", GitReferenceType.BRANCH),
+            ("refs/tags/release", "b", GitReferenceType.TAG),
+        ],
+    )
+    def test_a_fully_qualified_ref_resolves_in_its_namespace(
+        self, origin, ref: str, commit: str, ref_type: GitReferenceType
+    ) -> None:
+        result = self._resolve(origin, ref)
+
+        assert (result.resolved_commit, result.ref_type, result.ref_name) == (
+            origin[1][commit],
+            ref_type,
+            ref,
+        )
+
+    @pytest.mark.parametrize("ref", ["feature", "refs/heads/feature"])
+    def test_a_tag_named_like_a_remote_tracking_ref_never_answers_for_a_branch(
+        self, origin, ref: str
+    ) -> None:
+        repo, shas = origin
+        subprocess.run(
+            ["git", "-C", str(repo), "tag", "refs/remotes/origin/feature", shas["a"]],
+            env=shas["env"],
+            check=True,
+            capture_output=True,
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            self._resolve(origin, ref)
+
+    def test_a_qualified_branch_never_resolves_a_tag_of_that_name(self, origin) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            self._resolve(origin, "refs/heads/v1")

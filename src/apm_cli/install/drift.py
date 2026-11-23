@@ -557,7 +557,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.install.audit_target_roots import (
         replay_deployment_frame,
         replay_route_manifest,
-        replay_target,
+        replay_targets,
     )
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
@@ -610,14 +610,18 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     )
     codex_records = None
 
-    live_targets = resolve_audit_targets(
-        project_root,
-        user_scope=config.user_scope,
-        lockfile=lock,
-        include_recorded=config.include_recorded_targets,
+    converged_targets = _filter_targets(
+        resolve_audit_targets(
+            project_root,
+            user_scope=config.user_scope,
+            lockfile=lock,
+            include_recorded=config.include_recorded_targets,
+            recorded_layout=False,
+        ),
+        config.targets,
     )
-    targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
-    route_manifest = replay_route_manifest(config, lock, live_targets)
+    targets = replay_targets(converged_targets, lock=lock)
+    route_manifest = replay_route_manifest(config, lock, converged_targets)
     from apm_cli.install.replay_transport import replay_sources
 
     downloader, registry_resolver, registries, declared_transports = replay_sources(
@@ -734,7 +738,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         result = integrate_package_primitives(
                             package_info,
                             scratch_root,
-                            targets=targets,
+                            # Each dependency replays in the skill layout its claims record (#5092).
+                            targets=replay_targets(
+                                converged_targets, recorded_paths=lock_dep.deployed_files
+                            ),
                             integrators=IntegratorBundle(
                                 prompt=integrators["prompt"],
                                 agent=integrators["agent"],
@@ -762,7 +769,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     except AgentPluginTargetExcludedError:
                         continue
                     carry_kept_loose_into_replay(
-                        result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
+                        result,
+                        lock_dep,
+                        deployment_frame[1],
+                        scratch_root,
+                        config.user_scope,
+                        converged_targets,
                     )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(

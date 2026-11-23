@@ -386,6 +386,14 @@ UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
     "delete the files marked deletable and keep the rest",
     before="if the source is gone for good",
 )
+# A kept local descendant whose source changed since install refuses the
+# re-anchor (#5058); reinstalling recopies it, then the uninstall can proceed.
+UNINSTALL_REANCHOR_STALE_COPY = _entry(
+    "uninstall-reanchor-stale-copy",
+    "apm install --no-frozen",
+    "recopy the edited local source into apm_modules",
+    then="retry the uninstall",
+)
 # -- end W2 integration --
 # -- W2 marketplace --
 MARKETPLACE_DUPLICATE_ALIAS = _entry(

@@ -269,6 +269,10 @@ def test_full_clone_fallback_materializes_out_of_cone_links(tmp_path: Path) -> N
     downloader._clone_with_fallback = lambda _url, target, **_kwargs: clone_git_worktree(
         str(bare), target, env=env
     )
+    # Commit admission contacts the same origin over the clone's transport plan.
+    downloader._execute_transport_plan = lambda _base, target, *, clone_action, **_kw: clone_action(
+        str(bare), env, target
+    )
     dep = DependencyReference(
         repo_url="owner/repo", reference=sha, is_virtual=True, virtual_path="pkg"
     )

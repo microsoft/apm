@@ -659,7 +659,38 @@ def write_per_file_bundle_record(
         write_seam.mkdir(sidecar_path.parent, parents=True, exist_ok=True)
         write_seam.write_text(sidecar_path, json.dumps(data, indent=2) + "\n")
     elif sidecar_path.exists():
-        write_seam.unlink(sidecar_path)
+        remove_hook_sidecar(sidecar_path)
+
+
+def write_hook_sidecar(
+    path: Path,
+    data: dict,
+    project_root: Path | None = None,
+    user_scope: bool = False,
+) -> None:
+    """Write APM's hook ownership sidecar and record the write (#5009).
+
+    The record is the baseline crash recovery verifies the sidecar against.
+    *project_root* (an install write) also classifies a sidecar that existed
+    without a record; a cleanup rewrite passes none.
+    """
+    from apm_cli.integration import config_file_provenance as provenance
+
+    record = (
+        provenance.recorded_install_write(path, project_root, user_scope)
+        if project_root is not None
+        else provenance.recorded_config_write(path)
+    )
+    with record:
+        write_seam.atomic_write_text(path, json.dumps(data, indent=2) + "\n")
+
+
+def remove_hook_sidecar(path: Path) -> None:
+    """Remove APM's hook ownership sidecar and forget the record of its writes (#5009)."""
+    from apm_cli.integration.config_file_provenance import forget_config_file
+
+    write_seam.unlink(path)
+    forget_config_file(path)
 
 
 def remove_emptied_hook_file(

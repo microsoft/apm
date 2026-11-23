@@ -2836,12 +2836,73 @@ over the network as usual. The recorded `resolved_commit` is the
 lockfile's resolution anchor ([req-lk-003](#req-lk-003)); content
 integrity remains subject to `content_hash` ([req-lk-015](#req-lk-015))
 and `resolved_hash` ([req-lk-013](#req-lk-013)).
+Notwithstanding the prohibition above, a consumer that holds no
+recorded outcome of the reachability verification described here for
+the entry's repository identity, the endpoint it would contact and the
+commit MUST, before reusing the recorded commit, verify once that the
+recorded commit is reachable from a branch or tag of the entry's
+origin; the verification MAY use more than one request to the origin,
+such as a ref advertisement followed by a fetch limited to commit
+objects. Reachable means the recorded commit is the peeled target of,
+or an ancestor of, a ref the origin advertises under `refs/heads/` or
+`refs/tags/`; no other ref namespace counts, and neither fetchability
+of the commit by its identifier nor objects the consumer already holds
+establish reachability. When the consumer's own configuration rewrites
+the origin URL to another endpoint (Section 7.5.1), that endpoint's
+advertised branches and tags answer the verification and the outcome
+stands only for that endpoint; an offline cache is not an endpoint for
+this purpose. This verification is not a ref-resolution, and not a
+remote tag enumeration, for the purposes of this requirement
+(including the replay rule of [req-rs-017](#req-rs-017) that cites
+it), even when it uses a ref advertisement, and MUST NOT select a
+commit other than the recorded one. When the origin is contacted and
+no branch or tag of it reaches the recorded commit, the consumer MUST
+refuse the entry before fetching or deploying its content, with a
+message naming the entry, the commit and a remedy (for example pinning
+a commit that a branch or tag of the origin reaches), and MUST NOT
+record the commit as verified; refusing an entry is not a change of
+the resolution result. When the origin cannot be contacted, the
+consumer MUST refuse the entry (fail closed) with a message naming the
+entry and stating that one verification with access to its origin is
+required, and MUST NOT treat the commit as verified. Refusing an entry
+under this requirement fails the operation: the consumer MUST exit
+non-zero and MUST NOT rewrite the lockfile. An entry that the
+consumer's own registry proxy configuration routes through a proxy, so
+that the consumer contacts no origin for it, is exempt from this
+verification. After a verification that finds the commit reachable, in
+an operation that completes and is not a preview, dry-run or read-only
+operation, the consumer MUST record the outcome, so that later
+non-update replays of that entry issue no ref-resolution or
+reachability-verification request for it. The consumer MUST keep the
+recorded outcome in consumer-local state keyed by the full commit
+identifier, the entry's repository identity
+([req-rs-016](#req-rs-016)) and the endpoint contacted (for lookup,
+the endpoint the consumer would contact for the entry under its
+configuration); it MUST NOT store the outcome in, or read it from, the
+lockfile, the manifest or any other file distributed with the project,
+and an outcome recorded for one origin or endpoint MUST NOT admit the
+same commit for another. A preview, dry-run or read-only operation MAY
+verify without recording, and an operation that fails MUST NOT record
+an outcome.
 
-> **NOTE (non-normative).** This requirement makes a warm install of an
-> already-locked reference network-free at the resolution step, which
-> is what permits reproducible and offline-capable resolution for
-> commit-pinned and branch-tracking entries not covered by the
-> semver-range equivalence of [req-rs-004](#req-rs-004).
+> **NOTE (non-normative).** This requirement makes a warm install of
+> an already-locked, already-verified reference network-free at the
+> resolution step, which is what permits reproducible and
+> offline-capable resolution for commit-pinned and branch-tracking
+> entries not covered by the semver-range equivalence of
+> [req-rs-004](#req-rs-004). For entries scoped by this requirement,
+> the reachability verification keeps a replay from pinning a commit
+> that no branch or tag of its origin contains; a commit reused under
+> [req-rs-004](#req-rs-004), and a commit taken from the manifest when
+> the entry is re-resolved, are outside this verification in this
+> revision. The recorded outcome reflects the origin at verification
+> time and is not revisited. It is local to the consumer: an
+> environment without it, such as a fresh CI runner or a cache created
+> before this revision, contacts the origin once per origin, contacted
+> endpoint and commit, so offline replay needs one earlier replay with
+> origin access on that consumer state, or a registry proxy route that
+> the consumer's own configuration sets. Discarding the consumer-local
+> state makes the next replay verify again.
 
 #### 7.5.1 Mirror resolution
 
@@ -2849,6 +2910,9 @@ OpenAPM v0.1 anchors trust on the recorded `resolved_hash`, not on
 the recorded `resolved_url`. This permits enterprise mirrors,
 content-addressable proxies, and offline caches to substitute for
 the origin URL without lockfile churn.
+The first replay of an unverified git commit still needs the contact
+that [req-rs-015](#req-rs-015) requires; an offline cache does not
+satisfy it.
 
 Registry-class implementations participating in mirror resolution
 MUST satisfy [req-rg-001](#req-rg-001) (Registry-class trust
@@ -5796,11 +5860,12 @@ uninstall the user explicitly consents to on that invocation.
 | 0.1.76 (proposed) | 2026-11-22 | Amendment from private security coordination (direction signed by the CEO). Revised [req-sc-016](#req-sc-016) (Section 10.13, consumer MUST) in place: when the organization policy sets `mcp.trust_transitive` to `false`, or leaves it unset while setting any restriction (a non-default field; metadata and `enforcement` alone are not restrictions), a transitive MCP server of any declaration form, including a plain registry reference, is admitted only when `mcp.allow` matches its name, neither a bound grant nor the per-invocation opt-in overrides that, and a root re-declaration makes it a direct declaration; `enforcement: block` fails the operation before deployment, `enforcement: warn` emits a diagnostic as for `mcp.deny`, and an audit reports each such server. A policy that sets no restriction imposes nothing. Under Section 9.2 a consumer that deploys such a server without a matching `mcp.allow` entry no longer conforms. Schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 152 (147 MUST, 5 SHOULD). |
 | 0.1.77 (proposed) | 2026-11-21 | Amendment for accepted issue #4295 (uninstall consent for missing evidence). Revised [req-lk-024](#req-lk-024) (Section 5.2, consumer MUST) in place with one per-invocation consent exception: on an uninstall the user explicitly consents to, a file whose local deployment records were read without error and hold none for it (an absent record store holds none; an unreadable one does not qualify), and for which the consumer attempted and failed to produce any render of its owning locked dependencies, MAY be deleted when its content hash over the [req-lk-012](#req-lk-012) domain equals the one distinct hash the lockfile records for that path across its owners, compared per [req-lk-016](#req-lk-016); every condition is re-evaluated immediately before removal, and each deletion is named with the lockfile hash as its basis. The exception never covers a path a remaining dependency also lists, a differing record or render, a render lacking the path, no or two or more distinct recorded hashes, or an unreadable file or one that is not a regular file, and consent is never inferred from another option, an environment variable, configuration, or manifest or lockfile content. Under Section 9.2 this relaxes a fail-closed obligation only under explicit per-invocation consent, so it is an amendment, not errata; a consumer that does not offer the exception still conforms, and the only verdict that changes is for a consented deletion on a lockfile hash alone, which now conforms. Without consent, behavior is unchanged. Section 10.7 and Appendix C, the requirements manifest and conformance coverage are updated; schema bytes and `lockfile_version` are unchanged. No statement added; the count remains 152 (147 MUST, 5 SHOULD). |
 | 0.1.78 (proposed) | 2026-11-23 | Amendment for accepted issue #4995 (opting a dependency out of native plugin activation). Added the `native` dependency field (Section 4.3.2), Section 4.2.6 `native_plugins` (with a Section 4.2 table row) and [req-mf-030](#req-mf-030) (Section 4.2.6, consumer MUST, conditional on native plugin activation): a dependency whose root-manifest declaration sets `native: false`, or that sets no `native` key in a root manifest declaring `native_plugins: false`, is never natively activated on any target, nor registered under [req-tg-013](#req-tg-013); it is handled as a plugin the consumer does not activate natively, projected as primitives except where [req-tg-011](#req-tg-011) makes it opaque at the deployment boundary, and that projection is not a [req-na-006](#req-na-006) split install; a `native` key binds only its own declaration, so a transitive dependency follows the root default, and the root manifest at user scope is the [req-tg-014](#req-tg-014) user-scope manifest; a value that is not exactly the plain scalar `true` or `false` (or a `!!bool`-tagged scalar), including `True`, `FALSE` and the YAML 1.1 spellings `yes`, `no`, `on` and `off` in any case, is rejected naming the field in any manifest the consumer parses; duplicate root declarations of one dependency resolve `native: false` first, then `native: true`, then the default, whatever their order or block; a move between routes is reconciled per [req-na-004](#req-na-004) from the previous and the next lockfile; a frozen install ([req-lk-006](#req-lk-006)), or a restore that does not rewrite the lockfile, fails before any lockfile, target configuration, deployment or cache mutation when the lockfile records a `native_plugin` entry for an opted-out dependency, with a diagnostic naming the dependency and stating that its route changed, and an audit replay does not activate it from that entry but reports the mismatch as drift without writing. Revised [req-na-002](#req-na-002) in place to exclude such dependencies from the activated set. Under Section 9.2, a consumer that natively activates or registers such a dependency, that activates it from a locked entry under a frozen install, restore or audit replay, or that rewrites activation entries req-na-004 does not attribute to it, no longer conforms. Sections 1.3, 4.2, 4.2.6, 4.3.2, 4.9, 5.2, 8.5.11, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Adds one MUST. Statement count: 152 -> 153 (148 MUST, 5 SHOULD). |
+| 0.1.79 (proposed) | 2026-11-23 | Amendment for PR #4970 (pinned-commit reachability on replay; regent ruling). Pending editor decision; the number is provisional. Revised [req-rs-015](#req-rs-015) (Section 7.5, consumer MUST) in place. Before reusing a recorded commit that has no recorded outcome, a non-update replay verifies once that the commit is reachable from a branch or tag of its origin (refs under `refs/heads/` or `refs/tags/` only). The verification is not a ref-resolution and never selects another commit. The consumer refuses a commit that no origin branch or tag reaches. It fails closed with a named remedy when the origin cannot be contacted; entries that the consumer's own configuration routes through a registry proxy are exempt. It records a positive outcome only in consumer-local state keyed by origin, contacted endpoint and commit, never in the lockfile, so later replays issue no ref-resolution or reachability-verification request for that entry. Under Section 9.2 this changes verdicts: for an entry scoped by req-rs-015, a consumer no longer conforms if it replays a recorded commit that no branch or tag of its origin reaches, replays an unverified commit when the origin cannot be contacted outside a registry proxy route that its own configuration sets, reads a verification outcome from the lockfile or another project file, or continues the operation or rewrites the lockfile after refusing an entry. Commits reused under [req-rs-004](#req-rs-004) and commits taken from the manifest on re-resolution are unchanged. Replays with a recorded outcome are unchanged; consumer state without one, including a cache created before this revision, verifies on its first replay. The requirements manifest note and the conformance tests are updated; Appendix C, schema bytes and `lockfile_version` are unchanged. No requirement ID, keyword or statement count changes. Statement count: 152 (147 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 Version 0.1.74 is reserved for a concurrently proposed amendment (open pull request #4559) and has no row in this working draft.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63, 0.1.69 and 0.1.75 amendments and the 0.1.64 and 0.1.78 proposals each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place, the 0.1.76 proposal revises [req-sc-016](#req-sc-016) in place, and the 0.1.77 proposal revises [req-lk-024](#req-lk-024) in place, and the 0.1.78 proposal revises [req-na-002](#req-na-002) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63, 0.1.69 and 0.1.75 amendments and the 0.1.64 and 0.1.78 proposals each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place, the 0.1.76 proposal revises [req-sc-016](#req-sc-016) in place, the 0.1.77 proposal revises [req-lk-024](#req-lk-024) in place, the 0.1.78 proposal revises [req-na-002](#req-na-002) in place, and the 0.1.79 proposal revises [req-rs-015](#req-rs-015) in place; none adds a statement. Together, this
 working draft
 contains 153 statements (148 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.

@@ -709,8 +709,9 @@ class TestBareCloneFallback:
     def test_short_sha_skips_tier1_and_resolves_via_tier2(self, tmp_path: Path) -> None:
         """Copilot review #1135: short SHA must skip tier 1 (which requires
         full SHA for `git fetch <sha>`) and resolve to a 40-char SHA via
-        tier-2 `rev-parse --verify <short>^{commit}`. The resolved 40-char
-        SHA is what gets passed to `update-ref HEAD`, not the abbreviation.
+        tier 2, which expands the abbreviation to its unique commit when no
+        branch or tag holds that name. The resolved 40-char SHA is what gets
+        passed to `update-ref HEAD`, not the abbreviation.
         """
         from apm_cli.models.dependency.reference import DependencyReference
 
@@ -724,8 +725,10 @@ class TestBareCloneFallback:
         def fake_run(args, **kwargs):
             captured.append(list(args))
             cmd_str = " ".join(args)
-            if "rev-parse --verify" in cmd_str:
+            if "rev-parse --verify" in cmd_str or "rev-parse --disambiguate" in cmd_str:
                 return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
+            if "cat-file -t" in cmd_str:
+                return MagicMock(returncode=0, stdout="commit\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run):
@@ -1077,7 +1080,8 @@ class TestBareCloneRetryRmtree:
             strict=False,
         )
         d._transport_selector.select = MagicMock(return_value=plan)
-        dep = DependencyReference.parse("o/r/skills/X#abc1234567890abcdef1234567890abcdef12345678")
+        sha = "abc1234567890abcdef1234567890abcdef12345"
+        dep = DependencyReference.parse(f"o/r/skills/X#{sha}")
 
         # Pre-create the target with stale content; verify it gets wiped.
         bare = tmp_path / "bare"
@@ -1091,6 +1095,8 @@ class TestBareCloneRetryRmtree:
             # init must see clean target
             if args[1] == "init" and args[2] == "--bare":
                 assert not (bare / "stale_file").exists(), "rmtree did not run before init"
+            if "rev-parse" in args:
+                return MagicMock(returncode=0, stdout=sha + "\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run):
@@ -1098,7 +1104,7 @@ class TestBareCloneRetryRmtree:
                 "https://example/o/r",
                 bare,
                 dep_ref=dep,
-                ref="abc1234567890abcdef1234567890abcdef12345678",
+                ref=sha,
                 is_commit_sha=True,
             )
 

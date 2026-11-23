@@ -316,6 +316,49 @@ def test_a_lockfile_the_cli_gate_refuses_takes_the_full_pipeline(
     assert (tmp_path / "apm.lock.yaml").read_text(encoding="utf-8") == lock
 
 
+@pytest.mark.parametrize("owner", ["this-workspace", "another-workspace"])
+def test_only_this_workspace_s_abandoned_journal_declines_the_fast_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, owner: str
+) -> None:
+    """Another workspace's journal waits for that workspace; it costs this install nothing."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    for name in ("PROXY_REGISTRY_URL", "PROXY_REGISTRY_ONLY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "trace")
+    project, other = tmp_path / "project", tmp_path / "other"
+    project.mkdir()
+    other.mkdir()
+    _locked_project(project)
+    root = project if owner == "this-workspace" else other
+    disposition = SimpleNamespace(replay=False, withhold_lockfile_writes=False)
+
+    def decide() -> tuple[bool, list[str]]:
+        applied = diff_apply.try_apply({}, ["install"], project, frozen_disposition=disposition)
+        trace = [line for line in capsys.readouterr().err.splitlines() if "fast path" in line]
+        return applied, trace
+
+    without_journal = decide()
+    assert not any("interrupted install journal" in line for line in without_journal[1])
+    killed = root / "killed.md"
+    journal = DeployJournal(tmp_path / "home" / "install-snapshots", root=root)
+    journal.record(killed)
+    killed.write_bytes(b"half\n")
+    journal.after_write(killed)
+
+    with_journal = decide()
+
+    if owner == "this-workspace":
+        assert with_journal[0] is False
+        assert any("full run (interrupted install journal)" in line for line in with_journal[1])
+    else:
+        # The same decision, and the same trace, as with no journal at all.
+        assert with_journal == without_journal
+    assert journal.store is not None and journal.store.is_dir()
+    assert killed.read_bytes() == b"half\n"
+
+
 def test_a_symlink_in_a_package_copy_takes_the_full_pipeline(tmp_path: Path) -> None:
     """Package hashes skip symlinks and the source plan warns on them: only the full run judges."""
     from apm_cli.install import noop_diff
@@ -631,3 +674,72 @@ def test_a_pending_legacy_skill_migration_takes_the_full_pipeline(
     monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
     before = _locked_project(tmp_path, "  deployed_files:\n  - .github/skills/s/SKILL.md\n")
     _assert_declines_with(tmp_path, monkeypatch, capsys, before, "legacy skill migration pending")
+
+
+def test_an_abandoned_journal_declines_and_the_full_run_recovers_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A killed install's journal sends the fast path to the full run, which replays it."""
+    from apm_cli.constants import APM_MODULES_DIR
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.install.transaction import replay_abandoned_deploys
+
+    for name in ("PROXY_REGISTRY_URL", "PROXY_REGISTRY_ONLY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    _locked_project(project)
+    killed = project / ".github" / "prompts" / "killed.prompt.md"
+    journal = DeployJournal(tmp_path / "home" / "install-snapshots", root=project)
+    journal.record(killed)
+    killed.parent.mkdir(parents=True)
+    killed.write_bytes(b"half\n")
+    journal.after_write(killed)
+    store = journal.store
+    assert store is not None
+
+    def contents() -> dict[str, bytes]:
+        return {
+            f"{base.name}/{p.relative_to(base).as_posix()}": p.read_bytes()
+            for base in (project, store)
+            for p in sorted(base.rglob("*"))
+            if p.is_file()
+        }
+
+    untouched = contents()
+    before = sorted(str(p.relative_to(project)) for p in project.rglob("*"))
+
+    _assert_declines_with(project, monkeypatch, capsys, before, "interrupted install journal")
+    assert contents() == untouched, "a decline reads; it never changes the project or the journal"
+
+    replay_abandoned_deploys(project / APM_MODULES_DIR, None)
+
+    assert not killed.exists()
+    assert not store.exists()
+
+
+def test_a_fast_apply_config_write_is_sealed_at_the_write_seam(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fast apply journals each seam write and listens for its post-write seal.
+
+    Its journal is in memory (no deploy root): it records and seals at the
+    seam like an install's, but persists nothing for replay (#4982).
+    """
+    from apm_cli.install.transaction import journaled_apply
+    from apm_cli.integration import write_seam
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    config = tmp_path / "project" / ".gitignore"
+    config.parent.mkdir()
+
+    with journaled_apply() as journal:
+        sealed_by = write_seam._after
+        write_seam.write_text(config, "apm_modules/\n")
+        recorded = [unit.path for unit in journal.units]
+
+    assert sealed_by == journal.after_write
+    assert recorded == [config]
+    assert config.read_text(encoding="utf-8") == "apm_modules/\n"
+    assert write_seam._after is None, "the seam stops listening once the apply settles"

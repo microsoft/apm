@@ -885,3 +885,62 @@ def test_a_hook_bearing_reanchor_refuses_and_keeps_its_hooks(
 
     _assert_refused_before_any_write(world, "ships hooks")
     assert (settings.read_bytes() if settings.exists() else None) == hooks_before
+
+
+def _legacy_plugin_world(tmp_path: Path, apm_binary_path: Path) -> ReplayWorld:
+    """Local e, dev d -> e, and a direct local legacy plugin p deployed to Cursor (#5049)."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "d", "d", ("../e",))
+    write(
+        vendor / "p" / ".claude-plugin" / "plugin.json",
+        json.dumps({"name": "p", "version": "1.0.0"}),
+    )
+    write(
+        vendor / "p" / "skills" / "p-skill" / "SKILL.md",
+        "---\nname: p-skill\ndescription: Skill of p\n---\n# p\n",
+    )
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["cursor"],
+            "dependencies": {"apm": ["./vendor/e", "./vendor/p"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".cursor").mkdir()
+    world.apm("install")
+    return world
+
+
+def test_an_unchanged_legacy_plugin_survivor_does_not_block_a_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5049: a legacy plugin's copy is normalized at install; its source still matches."""
+    world = _legacy_plugin_world(tmp_path, apm_binary_path)
+    copy = world.project / "apm_modules" / "_local" / "p"
+    assert (copy / "apm.yml").is_file() and not (world.project / "vendor/p/apm.yml").exists()
+
+    result = world.apm("uninstall", "./vendor/e")
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "./vendor/e stays installed because" in output, output
+    assert "Refreshed local package" not in output, output
+    rows = _rows(world)
+    assert rows["_local/e"]["declaring_parent"] and "_local/p" in rows, sorted(rows)
+    _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_changed_legacy_plugin_survivor_still_refuses_a_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5049: a legacy plugin whose source changed after install still refuses first."""
+    world = _legacy_plugin_world(tmp_path, apm_binary_path)
+    write(
+        world.project / "vendor" / "p" / "skills" / "p-skill" / "SKILL.md",
+        "---\nname: p-skill\ndescription: Skill of p\n---\n# p, edited\n",
+    )
+
+    _assert_refused_before_any_write(world, "changed since it was installed")

@@ -1729,7 +1729,11 @@ def _restage_changed_local_survivors(
     hook whose local definition changed since approval is never re-judged.
     Returns the restaged lock keys; their lock rows record the new content hash.
     """
-    from ...install.phases.local_content import _copy_local_package, compute_local_package_hash
+    from ...install.phases.local_content import (
+        _copy_local_package,
+        compute_local_package_hash,
+        local_source_matches_copy,
+    )
 
     restaged: set[str] = set()
     for key, dep in sorted(lockfile.dependencies.items()):
@@ -1745,8 +1749,8 @@ def _restage_changed_local_survivors(
         except (OSError, ValueError, TypeError, PathTraversalError):
             continue
         # Judge the source against the materialized copy, not the lock row.
-        if not install_path.is_dir() or current == compute_local_package_hash(
-            install_path, framed=dep.content_hash_framed
+        if not install_path.is_dir() or local_source_matches_copy(
+            dep, source, install_path, source_hash=current
         ):
             continue
         staged_path = modules_dir / "_local" / f".apm-uninstall-refresh-{uuid4().hex}"
