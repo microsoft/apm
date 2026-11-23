@@ -42,7 +42,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
-from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
+from apm_cli.install.deploy_state import ABSENT as _ABSENT
+from apm_cli.install.deploy_state import OTHER as _OTHER
+from apm_cli.install.deploy_state import entry_state as _entry
+from apm_cli.install.deploy_state import path_state as _state
+from apm_cli.install.deploy_state import tree_hashes as _tree_hashes
+from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -330,56 +335,6 @@ class DeployJournal:
             store.parent.rmdir()
 
 
-def _tree_hashes(directory: Path) -> dict[str, str]:
-    """POSIX path -> content hash of every entry below *directory* (a link maps to ``""``)."""
-    hashes: dict[str, str] = {}
-    for path in sorted(directory.rglob("*")):
-        rel = path.relative_to(directory).as_posix()
-        if path.is_symlink() or not (path.is_file() or path.is_dir()):
-            hashes[rel] = ""
-        elif path.is_file():
-            hashes[rel] = compute_file_hash(path)
-    return hashes
-
-
-def _state(path: Path) -> dict[str, Any]:
-    """What is at *path* now: content, modes and entries, as seals record it.
-
-    Broader than the ledger's content hashes: an empty directory or a mode a
-    user added after a kill changes it, so replay keeps that path.
-    """
-    if path.is_dir() and not path.is_symlink():
-        entries = {
-            entry.relative_to(path).as_posix(): _entry(entry) for entry in sorted(path.rglob("*"))
-        }
-        return {"dir": entries, "mode": _mode(path)}
-    if path.is_symlink():
-        return {"link": os.readlink(path)}
-    if path.is_file():
-        # Byte-exact, unlike the ledger: a line-ending-only edit is a user's edit.
-        return {"file": compute_exact_file_hash(path), "mode": _mode(path)}
-    return dict(_OTHER) if os.path.lexists(path) else dict(_ABSENT)
-
-
-def _entry(path: Path) -> str:
-    """One entry below a journaled directory, as a seal and a fingerprint record it."""
-    if path.is_symlink():
-        return f"link:{os.readlink(path)}"
-    if path.is_file():
-        return f"{compute_exact_file_hash(path)}:{_mode(path)}"
-    if path.is_dir():
-        return f"dir:{_mode(path)}"
-    return "absent" if not os.path.lexists(path) else "other"
-
-
-def _mode(path: Path) -> int:
-    return stat.S_IMODE(path.lstat().st_mode)
-
-
-_ABSENT: dict[str, Any] = {"absent": True}
-_OTHER: dict[str, Any] = {"other": True}
-
-
 def lockfile_identity(text: str) -> str:
     """Identify a lockfile document by its content, not its formatting.
 
@@ -574,7 +529,11 @@ class _Unproven(Exception):
 
 
 def _validate_unit(
-    line: Any, store: Path, bases: _Bases, ledger: Mapping[str, str | None]
+    line: Any,
+    store: Path,
+    bases: _Bases,
+    ledger: Mapping[str, str | None],
+    events: Mapping[str, Any] | None = None,
 ) -> _Replay:
     """Check one manifest line against the store and the ledger, without applying it.
 
@@ -583,7 +542,10 @@ def _validate_unit(
     records exactly its files. APM's own metadata under APM home
     (``base: apm_home``) is limited to deployment receipts, which have
     journal-only integrity: confined to the receipts directory and restored
-    only when they re-hash as journaled. Raise ``_Unproven`` otherwise.
+    only when they re-hash as journaled. A shared config file the ledger never
+    claims (hook settings, the hook sidecar, an MCP config) is restored when
+    the config file records vouch for it (:func:`_shared_config_vouched`).
+    Raise ``_Unproven`` otherwise.
     """
     if not isinstance(line, dict) or line.get("kind") not in _KINDS:
         raise _Unproven(store, "journal manifest holds a malformed unit")
@@ -606,7 +568,11 @@ def _validate_unit(
         return _Replay(rel, path, kind, None, {}, ancestors)
     copy, expected = _journaled_copy(line, store)
     if not metadata:
-        _check_vouched(rel, kind, expected, ledger)
+        try:
+            _check_vouched(rel, kind, expected, ledger)
+        except _Unproven:
+            if not _shared_config_vouched(rel, path, kind, copy, events, ledger):
+                raise
     return _Replay(rel, path, kind, copy, expected, ancestors, prior=_state(copy))
 
 
@@ -619,6 +585,43 @@ def _check_vouched(
         raise _Unproven(rel, "the deployment ledger does not record these bytes")
     if kind == "dir" and {k for k in ledger if k.startswith(f"{rel}/")} != set(keys.values()):
         raise _Unproven(rel, "the deployment ledger records other files under this directory")
+
+
+def _shared_config_vouched(
+    rel: str,
+    path: Path,
+    kind: str,
+    copy: Path,
+    events: Mapping[str, Any] | None,
+    ledger: Mapping[str, str | None],
+) -> bool:
+    """A file the ledger never claims, restorable from the config file records (#5009).
+
+    It still holds its journaled prior bytes (nothing to undo), or exactly the
+    bytes the interrupted install sealed and the records say APM wrote. Other
+    content after a seal is a later write, which :func:`_decide` keeps and
+    names. A sealed write the records do not vouch for (missing or tampered
+    baseline), an unsealed or missing file, or a link never qualifies.
+    """
+    from apm_cli.integration.config_file_provenance import vouches_for_current_bytes
+
+    if kind != "file" or rel in ledger or path.is_symlink():
+        return False
+    current = _state(path)
+    if "dir" in current:
+        return False  # a directory swapped in is never replaced by a config file
+    if current == _state(copy):
+        return True
+    sealed = (events or {}).get("")
+    if not isinstance(sealed, dict) or current == _ABSENT:
+        return False  # a write never sealed, or a missing file: nothing proves it
+    if current == sealed:
+        try:
+            prior = _read_no_follow(copy)
+        except OSError:
+            return False
+        return vouches_for_current_bytes(path, prior)
+    return True  # a later write: _decide keeps and names it, never replaces it
 
 
 def _check_receipt(rel: str, path: Path, kind: str) -> None:
@@ -745,8 +748,9 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
     A unit is restored only while what is there now is APM's: nothing, its
     prior state, the bytes APM's last write sealed, or a write APM began and
     never sealed (a kill mid-write; the unit line itself opens the first
-    write). Anything else, such as a file a user edited after the kill, is
-    kept.
+    write). A directory a removal APM began left partial holds only entries
+    APM journaled: it is rolled back whole. Anything else, such as a file a
+    user edited after the kill, is kept.
     """
     apply: list[_Replay] = []
     kept: list[tuple[str, str]] = []
@@ -764,12 +768,17 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
 
 def _holds_apm_state(unit: _Replay) -> bool:
     """Whether the path holds only what APM put there (see :func:`_decide`)."""
+    _ensure_listable(unit.path)
     current = _state(unit.path)
     whole = unit.events.get("")
     sealed = whole[2] if isinstance(whole, tuple) else whole
     if current in (_ABSENT, unit.prior, sealed):
         return True
     if isinstance(whole, tuple):
+        was_dir = "dir" in unit.prior or (isinstance(sealed, dict) and "dir" in sealed)
+        if whole[1] == _ABSENT_EXPECTED and "dir" in current and was_dir:
+            # A removal of a directory killed partway leaves part of the tree (#5087).
+            return _dir_holds_apm_state(unit, current, sealed)
         if not _matches_expected(current, whole[1]):
             return False
         if "dir" not in current or whole[1] is None:
@@ -777,6 +786,25 @@ def _holds_apm_state(unit: _Replay) -> bool:
     if "dir" not in current:
         return False
     return _dir_holds_apm_state(unit, current, sealed)
+
+
+_ABSENT_EXPECTED = "absent"
+
+
+def _ensure_listable(path: Path) -> None:
+    """Raise ``OSError`` when a directory below *path* cannot be listed.
+
+    ``Path.rglob`` skips such a subtree silently, so its fingerprint would
+    omit entries a user may have changed.
+    """
+    if not path.is_dir() or path.is_symlink():
+        return
+
+    def fail(exc: OSError) -> None:
+        raise exc
+
+    for _ in os.walk(path, onerror=fail):
+        pass
 
 
 def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
@@ -871,7 +899,7 @@ def _validated(
     issues: list[tuple[str, str]] = []
     for index, line in enumerate(lines):
         try:
-            unit = _validate_unit(line, store, bases, ledger)
+            unit = _validate_unit(line, store, bases, ledger, seals.get(index))
             events = {"": _pending(line), **seals.get(index, {})}
         except _Unproven as exc:
             issues.append(exc.issue)

@@ -24,14 +24,16 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
 from apm_cli.utils.content_hash import compute_file_hash
-from tests.integration._mcp_chain_kit import Chain
+from tests.integration._mcp_chain_kit import Chain, stdio_server
 from tests.lifecycle import driver
 from tests.utils.apm_lifecycle_runner import CommandResult
 
@@ -398,6 +400,62 @@ def test_a_kill_mid_deploy_restores_every_journaled_path(
     assert chain.run("audit", "--ci").returncode == 0
 
 
+# -- shared config files: hook settings and the hook sidecar (#5009) ------------------
+#
+# The ledger never claims shared config files; APM's config file records do. A
+# killed install's write is restored when the file still holds exactly what the
+# journal sealed and the record says APM wrote those bytes; else kept and reported.
+
+_SETTINGS = ".claude/settings.json"
+_SIDECAR = ".claude/apm-hooks.json"
+_SHARED_GATE = _Gate("require-hashes", "claude", "hash+kill")
+
+
+def _write_root_hook(chain: Chain, revision: str) -> None:
+    """The project's own hook, deployed into Claude's shared settings and its sidecar."""
+    hooks = chain.project / ".apm" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    command = {"type": "command", "command": f"echo lint-{revision}"}
+    data = {"hooks": {"Stop": [{"hooks": [command]}]}}
+    (hooks / "lint.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _killed_shared_config(tmp_path: Path, binary: Path) -> tuple[Chain, dict[str, str]]:
+    """Install v1 of the project's hook, then kill a refused v2 install that changed it."""
+    chain = Chain(tmp_path / "shared", binary, dirs=(".claude",))
+    chain.write_manifest([], apm=[], targets=["claude"], includes="auto")
+    _write_root_hook(chain, "v1")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    assert {_SETTINGS, _SIDECAR} <= set(before), before
+
+    _write_root_hook(chain, "v2")
+    _kill_mid_refusal(chain, _SHARED_GATE.fault)
+    journal = _journal(_abandoned(chain))
+    assert {_unit(journal, path)["path"] for path in (_SETTINGS, _SIDECAR)} == {
+        _SETTINGS,
+        _SIDECAR,
+    }
+    assert _tree_state(chain.project)[_SETTINGS] != before[_SETTINGS], "nothing changed"
+    _write_root_hook(chain, "v1")
+    return chain, before
+
+
+def test_a_kill_after_a_shared_config_change_is_restored_on_the_next_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    chain, before = _killed_shared_config(tmp_path, apm_binary_path)
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "interrupted install" in _text(result), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert chain.run("audit", "--ci").returncode == 0
+
+
 def test_a_tampered_root_copy_is_kept_and_reported_not_restored(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -511,6 +569,74 @@ def test_a_write_killed_before_its_seal_is_restored(tmp_path: Path, apm_binary_p
     assert "Kept" not in _text(result), _evidence(result)
     assert _tree_state(chain.project) == before, _evidence(result)
     assert _stores(chain) == [], _evidence(result)
+
+
+def test_a_shared_config_without_its_baseline_is_kept_and_reported(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The killed install's write is not vouched by the records: nothing is applied."""
+    chain, _before = _killed_shared_config(tmp_path, apm_binary_path)
+    store = _abandoned(chain)
+    settings = chain.project / _SETTINGS
+    shutil.rmtree(Path(chain.env["APM_HOME"]) / "deployment-receipts" / "config-files")
+    held = settings.read_bytes()
+
+    _assert_kept_and_reported(chain, _SHARED_GATE, store, _SETTINGS)
+    assert settings.read_bytes() == held
+
+
+def test_a_shared_config_a_user_edits_after_the_kill_is_kept(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The user's edit is kept and named; the sidecar the killed install changed is restored."""
+    chain, before = _killed_shared_config(tmp_path, apm_binary_path)
+    settings = chain.project / _SETTINGS
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["permissions"] = {"allow": ["Bash(ls)"]}  # the user's own setting
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert f"Kept {_SETTINGS}: it changed after the interrupted install" in _text(result), (
+        _evidence(result)
+    )
+    after = json.loads(settings.read_text(encoding="utf-8"))
+    assert after["permissions"] == {"allow": ["Bash(ls)"]}, after
+    assert _tree_state(chain.project)[_SIDECAR] == before[_SIDECAR], _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+def test_a_mode_change_on_an_mcp_config_directory_apm_created_is_kept(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5086: the native MCP config directory is journaled with its mode, so replay keeps it."""
+    chain = Chain(tmp_path / "mcp-dir", apm_binary_path)
+    chain.write_manifest([stdio_server("replay-srv", "hi")], apm=["./pkg"])
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    settings = ".kiro/settings"
+    config = f"{settings}/mcp.json"
+    _kill_mid_refusal(chain, "path+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_PATH=config)
+    config_dir = chain.project / settings
+    assert (chain.project / config).is_file(), _tree_state(chain.project)
+    _abandoned(chain)
+    os.chmod(config_dir, 0o700)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert f"Kept {settings}: it changed after the interrupted install" in _text(result), _evidence(
+        result
+    )
+    assert config_dir.is_dir(), _evidence(result)
+    assert _mode(config_dir) == 0o700, _evidence(result)
+    assert (config_dir / "mcp.json").is_file(), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
 
 
 def _packed_bundle(chain: Chain, version: str) -> Path:

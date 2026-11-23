@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import posixpath
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,7 @@ from apm_cli.utils.path_security import (
     has_symlink_component,
     validate_path_segments,
 )
+from apm_cli.utils.paths import SpellingAliasIndex
 
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
 from .plan_admission import _is_transitive
@@ -60,7 +62,11 @@ class PackageDeploymentPlan:
         return [target for target in targets if target.name not in native_target_names]
 
     def kept_loose_values(
-        self, prior_values: Iterable[str], *, user_scope: bool
+        self,
+        prior_values: Iterable[str],
+        *,
+        user_scope: bool,
+        live_targets: Mapping[str, TargetProfile] | None = None,
     ) -> tuple[str, ...]:
         """Prior loose values a parked native Claude plan keeps in place (#5036).
 
@@ -68,12 +74,26 @@ class PackageDeploymentPlan:
         the native plugin is parked nothing replaces the loose files there, so
         they stay installed (and keep their lock claims) instead of being
         cleaned as stale. Nothing new is deployed loose for those harnesses.
+        Claims are matched in the layout they were recorded in (#5092):
+        ``live_targets`` names the profiles install deployed through when the
+        plan was built for scratch-contained replay targets, and a harness
+        whose recorded skills sit under its per-client root keeps that root.
         """
         native = self.claude_native
         if self.codex_native is not None or native is None or not native.parked:
             return ()
-        targets = self.target_selection.targets
-        kept = _inert_prefixes(t for t in targets if t.name in native.harnesses)
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        prior = tuple(prior_values)
+        targets = [
+            (live_targets or {}).get(target.name, target)
+            for target in self.target_selection.targets
+        ]
+        kept = _inert_prefixes(
+            resolve_skill_layout(
+                (t for t in targets if t.name in native.harnesses), recorded_paths=prior
+            )
+        )
         # A root a loose target still serves (Codex shares .agents/skills with
         # Copilot) is rewritten by this install, so it is not kept as it was.
         loose = _inert_prefixes(t for t in targets if t.name not in native.harnesses)
@@ -82,7 +102,7 @@ class PackageDeploymentPlan:
         )
         return tuple(
             value
-            for value in prior_values
+            for value in prior
             if prefixes
             and value.startswith(prefixes)
             and _EXECUTABLE_SEGMENTS.isdisjoint(value.split("/"))
@@ -99,8 +119,29 @@ def _inert_prefixes(targets: Iterable[TargetProfile]) -> tuple[str, ...]:
                 base = (
                     f"{mapping.deploy_root.rstrip('/')}/" if mapping.deploy_root else target.prefix
                 )
-                prefixes.append(f"{base}{mapping.subdir}/")
+                # Claims are POSIX: a Windows root is spelled with "/", and a
+                # root of "." (CLAUDE_CONFIG_DIR=$HOME) records "skills/...".
+                prefix = f"{base}{mapping.subdir}".replace("\\", "/")
+                prefixes.append(f"{posixpath.normpath(prefix)}/")
     return tuple(prefixes)
+
+
+def parked_kept_values_after_writes(ctx: InstallContext) -> frozenset[str]:
+    """Parked kept values no package wrote in this install (#5108).
+
+    A path another package wrote takes that writer's claim and new hash, so
+    the parked package's previous claim on it is not kept. A spelling the
+    volume proves is the same entry (case or Unicode normalization, #5150)
+    counts as written; a case-sensitive volume keeps both claims.
+    """
+    kept = getattr(ctx, "parked_native_kept_values", frozenset())
+    written = {path for paths in ctx.package_deployed_files.values() for path in paths}
+    remaining = kept - written
+    if not remaining:
+        return frozenset()
+    spellings = SpellingAliasIndex(written)
+    root = Path(ctx.project_root)
+    return frozenset(value for value in remaining if spellings.alias(value, root) is None)
 
 
 def keep_loose_for_parked_native(
@@ -130,7 +171,9 @@ def keep_loose_for_parked_native(
         for value in kept
         if not any(value.startswith(f"{other}/") for other in kept if other != value)
     )
-    shown = ", ".join(f"{'~/' if user_scope else ''}{value}" for value in roots)
+    shown = ", ".join(
+        f"{'~/' if user_scope and not Path(value).is_absolute() else ''}{value}" for value in roots
+    )
     message = kept_note(
         shown,
         f"the native plugin that replaces it was parked, so the previous install of "
@@ -357,30 +400,66 @@ def prepare_package_deployment(  # noqa: PLR0913
 
 
 def carry_kept_loose_into_replay(
-    result: dict, lock_dep: Any, deploy_root: Path, scratch_root: Path, user_scope: bool
+    result: dict,
+    lock_dep: Any,
+    deploy_root: Path,
+    scratch_root: Path,
+    user_scope: bool,
+    live_targets: Iterable[TargetProfile] = (),
 ) -> None:
     """Carry the loose files a parked native replacement keeps into a drift replay (#5036).
 
     Install keeps them as they were; the replay renders no loose copy for a
     natively routed harness, so their live bytes stand in for it. Their lock
-    hashes still bind them through content-integrity.
+    hashes still bind them through content-integrity. Claims are selected
+    through the live target profiles, and a claim under an external root
+    (``CLAUDE_CONFIG_DIR`` outside HOME) lands in that root's replay
+    projection (#5092).
     """
     import shutil
 
     plan = result.get("deployment_plan")
     if not isinstance(plan, PackageDeploymentPlan):
         return
+    live = {target.name: target for target in live_targets}
     hashed = getattr(lock_dep, "deployed_file_hashes", None) or {}
-    for value in plan.kept_loose_values(lock_dep.deployed_files, user_scope=user_scope):
+    kept = plan.kept_loose_values(lock_dep.deployed_files, user_scope=user_scope, live_targets=live)
+    for value in kept:
         if value not in hashed:
             continue  # only bytes the lock binds by hash stand in for the replay
         try:
-            validate_path_segments(value, context="kept lock claim", reject_empty=True)
-            live = ensure_path_within(deploy_root / value, deploy_root)
-            replayed = ensure_path_within(scratch_root / value, scratch_root)
+            live_root, replay_root, relative = _replay_frame(
+                value, live.values(), deploy_root, scratch_root
+            )
+            validate_path_segments(relative, context="kept lock claim", reject_empty=True)
+            live_file = ensure_path_within(live_root / relative, live_root)
+            # Contain the copy at scratch_root: a symlinked replay root never redirects it.
+            replayed = ensure_path_within(replay_root / relative, scratch_root)
         except PathTraversalError:
             continue  # a claim outside its root is never carried; drift reports it
-        if has_symlink_component(deploy_root, deploy_root / value) or not live.is_file():
+        if has_symlink_component(live_root, live_root / relative) or not live_file.is_file():
             continue
+        if replayed.exists() or replayed.is_symlink():
+            continue  # another package rendered this path; its copy stands (#5108)
         replayed.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(live, replayed)
+        shutil.copyfile(live_file, replayed)
+
+
+def _replay_frame(
+    value: str, live_targets: Iterable[TargetProfile], deploy_root: Path, scratch_root: Path
+) -> tuple[Path, Path, str]:
+    """Return ``(live root, replay root, relative path)`` for one kept lock claim."""
+    from apm_cli.install.audit_target_roots import external_replay_root
+
+    if Path(value).is_absolute():
+        for target in live_targets:
+            root = target.managed_deploy_root
+            if root is None:
+                continue
+            try:
+                relative = Path(value).relative_to(root)
+            except ValueError:
+                continue
+            return root, external_replay_root(scratch_root, target), relative.as_posix()
+        raise PathTraversalError(f"kept lock claim {value!r} is outside every target root")
+    return deploy_root, scratch_root, value

@@ -247,17 +247,21 @@ still cleans up its managed files, subject to the usual user-edit protections.
   one found at the MCP write keeps the deployed files the lockfile records. A killed process (SIGKILL, power loss)
   cannot restore itself: the next `apm install` in that project (including
   `--mcp` and local-bundle installs) restores every file first and prints `Restored N deployed path(s) left by an interrupted
-  install.` It restores only bytes that `apm.lock.yaml` records for the path,
-  and never removes or replaces a file that changed after the interrupted
+  install.` It restores only bytes that `apm.lock.yaml` records for the path.
+  A shared config file the lockfile does not record (hook settings such as
+  `.claude/settings.json`, the `apm-hooks.json` sidecar, an MCP config file) is
+  restored only when it still holds exactly what the interrupted install wrote
+  and this machine's record of APM's config file writes confirms those bytes.
+  It never removes or replaces a file that changed after the interrupted
   install (for example one you wrote there): it keeps that file and names it
-  in a warning.
+  in a warning. A directory a killed removal left half-deleted is restored
+  whole, unless you changed it.
   If the kept copies do not match the lockfile, it restores nothing; if a file
   cannot be restored, it restores the others. Either way it names each path,
   keeps the copies under `~/.apm/install-snapshots/retained-*` and exits 1.
   Restore or remove the listed paths by hand, then run the command again.
-  Shared settings the lockfile does not record (hook settings, MCP
-  configuration) are not restored this way: the copies are kept and reported
-  for you to restore by hand.
+  A shared config file this machine's records cannot confirm is not restored
+  either: its copy is kept and reported for you to restore by hand.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed
@@ -368,7 +372,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
 - **Local edit hint.** Before re-syncing a project install, `apm install` compares the managed files of the remote dependencies being installed with the hashes recorded at deployment. When some were edited locally, it prints one `[i]` hint that this install may overwrite them; run [`apm export-patch`](../export-patch/) before the next install to keep such edits as upstream patches. The install still proceeds. `--dry-run`, global installs, and `apm lock` skip the check.
-- **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces, and files of removed dependencies, are removed only with evidence that APM deployed their current bytes: a local deployment receipt, or byte equality with what the locked package version renders (fetched from its locked commit when needed). Lockfile hashes alone are never that evidence. Edited files, and files with no evidence, are kept with a warning naming them; delete them manually if no longer needed. The same checks apply to project-local `.apm/` output with recorded concrete target ownership, including after renames, deletions, or target removal; [ambiguous legacy rows](../../lockfile-spec/#unattributed-rows) remain untouched. Shared `.agents/skills/` files stay while another package or target claims them, including a declared target skipped by `--target`. When a removed dependency's skill directory also holds your own files, install deletes APM's files, keeps the directory with yours, and drops the dependency from `apm.lock.yaml`; `apm deps list` then reports it as orphaned and `apm prune` removes its `apm_modules/` copy, as for any removed dependency.
+- **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces, and files of removed dependencies, are removed only with evidence that APM deployed their current bytes: a local deployment receipt, or byte equality with what the locked package version renders (fetched from its locked commit when needed). Lockfile hashes alone are never that evidence. Edited files, and files with no evidence, are kept with a warning naming them; delete them manually if no longer needed. A removed dependency's hook entries merged into a shared config such as Claude `settings.json` are retired as `apm uninstall` retires them; entries APM did not write, or ones you edited, stay. The same checks apply to project-local `.apm/` output with recorded concrete target ownership, including after renames, deletions, or target removal; [ambiguous legacy rows](../../lockfile-spec/#unattributed-rows) remain untouched. Shared `.agents/skills/` files stay while another package or target claims them, including a declared target skipped by `--target`. When a removed dependency's skill directory also holds your own files, install deletes APM's files, keeps the directory with yours, and drops the dependency from `apm.lock.yaml`; `apm deps list` then reports it as orphaned and `apm prune` removes its `apm_modules/` copy, as for any removed dependency.
   Narrowing one dependency's `targets:` also reconciles its removed targets
   within the current install scope, even when the consumer still enables those
   targets. Successfully removed files lose their file/hash/ledger claims;

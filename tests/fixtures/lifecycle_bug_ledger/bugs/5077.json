@@ -1,0 +1,16 @@
+{
+  "issue": 5077,
+  "fixed_in": "Unreleased",
+  "summary": "An interrupt (Ctrl-C) after apm uninstall saved the re-anchored package's renamed deployment receipts rolled apm.yml and the lock back but not the receipts, so lock and receipts named different owners and a retried uninstall could not prove its files. The re-anchor rollback now restores the receipts byte for byte with the lock.",
+  "failure_modes": [
+    "transaction",
+    "ownership"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state",
+    "lockfile.frozen_preserves_bytes"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_local_reanchor_interrupt.py::test_an_interrupt_after_the_receipt_rename_restores_lock_and_receipts"
+  ]
+}

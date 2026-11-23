@@ -916,6 +916,35 @@ def _shared_skill_world(
     return world
 
 
+def _legacy_plugin_world(tmp_path: Path, apm_binary_path: Path) -> ReplayWorld:
+    """Local e, dev d -> e, and a direct local legacy plugin p deployed to Cursor (#5049)."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "d", "d", ("../e",))
+    write(
+        vendor / "p" / ".claude-plugin" / "plugin.json",
+        json.dumps({"name": "p", "version": "1.0.0"}),
+    )
+    write(
+        vendor / "p" / "skills" / "p-skill" / "SKILL.md",
+        "---\nname: p-skill\ndescription: Skill of p\n---\n# p\n",
+    )
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["cursor"],
+            "dependencies": {"apm": ["./vendor/e", "./vendor/p"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".cursor").mkdir()
+    world.apm("install")
+    return world
+
+
 @pytest.mark.parametrize("e_first", [True, False], ids=["e-installed-first", "z-installed-first"])
 def test_a_reanchor_records_the_shared_skill_writer_a_fresh_install_records(
     tmp_path: Path, apm_binary_path: Path, e_first: bool
@@ -1003,3 +1032,33 @@ def test_a_reanchor_refuses_a_shared_file_whose_owner_declares_no_rule(
     world.apm("install")
 
     _assert_refused_before_any_write(world, ".claude/agents/shared.md", "would change its writer")
+
+
+def test_an_unchanged_legacy_plugin_survivor_does_not_block_a_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5049: a legacy plugin's copy is normalized at install; its source still matches."""
+    world = _legacy_plugin_world(tmp_path, apm_binary_path)
+    copy = world.project / "apm_modules" / "_local" / "p"
+    assert (copy / "apm.yml").is_file() and not (world.project / "vendor/p/apm.yml").exists()
+
+    result = world.apm("uninstall", "./vendor/e")
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "./vendor/e stays installed because" in output, output
+    assert "Refreshed local package" not in output, output
+    rows = _rows(world)
+    assert rows["_local/e"]["declaring_parent"] and "_local/p" in rows, sorted(rows)
+    _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_changed_legacy_plugin_survivor_still_refuses_a_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5049: a legacy plugin whose source changed after install still refuses first."""
+    world = _legacy_plugin_world(tmp_path, apm_binary_path)
+    write(
+        world.project / "vendor" / "p" / "skills" / "p-skill" / "SKILL.md",
+        "---\nname: p-skill\ndescription: Skill of p\n---\n# p, edited\n",
+    )
+
+    _assert_refused_before_any_write(world, "changed since it was installed")

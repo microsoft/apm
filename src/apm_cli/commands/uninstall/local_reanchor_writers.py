@@ -115,6 +115,7 @@ def _render_providers(post: Any, project_root: Path) -> dict[str, dict[str, str]
         DiagnosticCollector(),
         cache_only=True,
         on_package=record,
+        records=False,
     )
     return None if scratch is None else providers
 

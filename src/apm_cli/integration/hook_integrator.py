@@ -43,6 +43,8 @@ from apm_cli.integration.hook_bundle import (
     iter_deployable_hook_bundle_files,
 )
 from apm_cli.integration.hook_command_paths import (
+    SCRIPTS_SUBDIR_HOOK_TARGETS,
+    hook_scripts_parent,
     iter_plugin_root_paths,
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
@@ -74,6 +76,8 @@ from apm_cli.integration.hook_ownership import (
     read_hook_object,
     read_merged_hook_config,
     remove_emptied_hook_file,
+    remove_hook_sidecar,
+    write_hook_sidecar,
 )
 from apm_cli.integration.hook_ownership import (
     extract_apm_source_sidecar as _extract_apm_source_sidecar,
@@ -610,11 +614,11 @@ class HookIntegrator(BaseIntegrator):
         command = normalize_quoted_plugin_root(command)
         edits: list[tuple[int, int, str]] = []
 
-        if target == "vscode":
-            scripts_base = f"{root_dir or '.github'}/hooks/scripts/{package_name}"
+        if target in SCRIPTS_SUBDIR_HOOK_TARGETS:
+            default_root = ".github"
         else:
             default_root = f".{target}" if target in _DOT_NAMED_HOOK_ROOTS else ".claude"
-            scripts_base = f"{root_dir or default_root}/hooks/{package_name}"
+        scripts_base = hook_scripts_parent(target, root_dir or default_root) + package_name
 
         def scoped(target_rel: str, quote: str) -> str:
             return self._project_scoped_command_path(
@@ -1504,12 +1508,9 @@ class HookIntegrator(BaseIntegrator):
             # Write sidecar
             sidecar_path = target_dir / _APM_HOOKS_SIDECAR
             if sidecar_out:
-                write_seam.atomic_write_text(
-                    sidecar_path,
-                    json.dumps(sidecar_out, indent=2) + "\n",
-                )
+                write_hook_sidecar(sidecar_path, sidecar_out, project_root, user_scope)
             elif sidecar_path.exists():
-                write_seam.unlink(sidecar_path)
+                remove_hook_sidecar(sidecar_path)
 
         # Display only finalized, schema-clean native entries.
         for _label, _path, _hook_file, _file_event_entries in pending_display:
@@ -1848,12 +1849,9 @@ class HookIntegrator(BaseIntegrator):
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
-                    write_seam.atomic_write_text(
-                        sidecar_path,
-                        json.dumps(sidecar_out, indent=2) + "\n",
-                    )
+                    write_hook_sidecar(sidecar_path, sidecar_out)
                 elif sidecar_path.exists():
-                    write_seam.unlink(sidecar_path)
+                    remove_hook_sidecar(sidecar_path)
                 stats["files_removed"] += 1
         except (json.JSONDecodeError, OSError, TypeError):
             stats["errors"] += 1
@@ -1881,20 +1879,18 @@ class HookIntegrator(BaseIntegrator):
         guard_targets = list(KNOWN_TARGETS.values())
         if targets is not None:
             guard_targets = guard_targets + list(targets)
-        hook_prefixes = [
-            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
-            for t in guard_targets
-            if t.supports("hooks")
-        ]
-        hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import consent_outcome, remove_synced_files
+            from apm_cli.integration.cleanup import (
+                consent_outcome,
+                managed_hook_prefixes,
+                remove_synced_files,
+            )
 
             # Deletion needs deployment evidence; None keeps every file (#3701).
             cleanup = remove_synced_files(
                 managed_files,
                 project_root,
-                prefixes=hook_prefix_tuple,
+                prefixes=managed_hook_prefixes(targets),
                 dep_key="<uninstall hooks>",
                 targets=guard_targets,
                 evidence=evidence,
@@ -2067,7 +2063,7 @@ class HookIntegrator(BaseIntegrator):
 
             if container not in data:
                 if sidecar_path is not None and sidecar_path.exists():
-                    write_seam.unlink(sidecar_path)
+                    remove_hook_sidecar(sidecar_path)
                 return
 
             had_sidecar = sidecar_path is not None and sidecar_path.exists()
@@ -2090,9 +2086,9 @@ class HookIntegrator(BaseIntegrator):
                     write_seam.write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if kept:
-                write_seam.atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")
+                write_hook_sidecar(sidecar_path, kept)
             elif had_sidecar:
-                write_seam.unlink(sidecar_path)
+                remove_hook_sidecar(sidecar_path)
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1
             stats.setdefault("failed_paths", []).append(json_path.as_posix())
