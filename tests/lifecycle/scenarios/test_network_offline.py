@@ -56,7 +56,7 @@ _CONTEXT = {"SCOPE": "project", "NET": "offline", "DEPLOYED": "clean"}
 # Package -> the units it proves: (SRC, PRIM, GATE) once its executables are approved.
 _UNITS = {
     "p-skill:git": (("git", "skill", "none"),),
-    # bin/ never deploys at project scope (U-BIN), so no project row proves a bin unit.
+    # p-exec's loose bin/ never deploys at project scope (U-BIN), so no row proves a bin unit.
     "p-exec": (
         ("local-path", "hook", "allowed"),
         ("local-path", "mcp", "allowed"),

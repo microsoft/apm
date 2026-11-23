@@ -28,25 +28,36 @@ from pathlib import Path
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
-from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.oracles import (
+    Evidence,
+    ExpectedCell,
+    check_obligation,
+    partition_expected,
+    strict_misses,
+)
 from tests.lifecycle.rows import _SURFACE_GLOBS
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.lifecycle.world.packages import INERT_COMMAND
+from tests.lifecycle.world.scopes import use_policy
 from tests.utils.local_package import LocalPackageFactory
 
 MIX, LSP = "p-bmix", "p-lsp"
 BUNDLES = (MIX, LSP)
 # Credited kinds; ``other-file`` is the p-bmix instruction, checked by path.
 KINDS: Mapping[str, frozenset[str]] = {
-    MIX: frozenset({"skill", "other-file", "hook", "mcp"}),
+    MIX: frozenset({"skill", "other-file", "hook", "mcp", "canvas"}),
     LSP: frozenset({"lsp"}),
 }
 OBSERVED: Mapping[str, frozenset[str]] = {
-    MIX: frozenset({"skill", "hook", "mcp"}),
+    MIX: frozenset({"skill", "hook", "mcp", "canvas"}),
     LSP: frozenset({"lsp"}),
 }
-EXEC_TYPES: Mapping[str, tuple[str, ...]] = {MIX: ("hooks", "mcp"), LSP: ("lsp",)}
+EXEC_TYPES: Mapping[str, tuple[str, ...]] = {MIX: ("canvas", "hooks", "mcp"), LSP: ("lsp",)}
+# The org policy that denies every bundle by name (world policy variant).
+BUNDLE_DENY_POLICY = "deny-all-deps"
 _PLAIN = frozenset({"skill", "other-file"})
+# Project paths a refused install must leave byte-identical.
+_DURABLE = ("apm.yml", "apm.lock.yaml", "apm_modules", ".agents", ".github", ".mcp.json")
 _INSTRUCTION = ".github/instructions/p-bmix.instructions.md"
 _PENDING = Path("apm_modules") / ".local-bundle-pending.json"
 _HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo bmix"}]}]}}
@@ -65,6 +76,7 @@ def author_bundle(root: Path, env: Mapping[str, str]) -> Path:
     package = factory.create(MIX, version="1.0.0", mcp_dependencies=[server])
     factory.add_instruction(package, MIX, '---\napplyTo: "**"\n---\n\nKeep the bundle mixed.\n')
     factory.add_hook(package, "session", _HOOK)
+    factory.add_canvas(package, MIX, "export default function render() {\n  return 'p-bmix';\n}\n")
     factory.set_targets(package, ["copilot"])
     # A package with a .apm/ tree packs only .apm/ sources (plugin_exporter.py).
     skill = package.root / ".apm" / "skills" / MIX / "SKILL.md"
@@ -84,8 +96,11 @@ class BundleState:
     decisions: dict[str, str] = field(default_factory=dict)
     revoked: set[str] = field(default_factory=set)
     exec_deployed: set[str] = field(default_factory=set)
+    denied_by_policy: bool = False
 
     def gate(self, bundle: str, kind: str) -> str:
+        if self.denied_by_policy:
+            return "denied-dependency"
         if kind in _PLAIN:
             return "revoked-after-deploy" if bundle in self.revoked else "none"
         if not self.gate_on:
@@ -146,6 +161,9 @@ class GateBundles(StepRunner):
         if self.dry:
             self._advance(bundle)
             return
+        if self.state.denied_by_policy:
+            self._refused(bundle, cells)
+            return
         step = self.step(
             ("install", str(self.archives[bundle])),
             exits={0},
@@ -166,6 +184,36 @@ class GateBundles(StepRunner):
                 evidence=evidence,
             )
         self._advance(bundle)
+
+    def _refused(self, bundle: str, cells: list[str]) -> None:
+        """Under an org dependency deny the bundle install refuses and changes nothing."""
+        step = self.step(
+            ("install", str(self.archives[bundle])), exits={1}, cells=cells, mutating=False
+        )
+        output = step.result.stdout + step.result.stderr
+        assert "Install blocked by org policy" in output, output
+        evidence = Evidence(
+            unchanged={"project": _DURABLE, "outside": ("*",)},
+            output_matches=(r"Policy violation: \S*" + bundle,),
+            exit=1,
+        )
+        for cell in cells:
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=evidence,
+            )
+
+    def deny_by_policy(self) -> None:
+        """The org policy denies both bundles by name (an input edit)."""
+        if not self.dry:
+            self.edit(
+                "policy-deny-bundles", lambda: use_policy(self.bench.world, BUNDLE_DENY_POLICY)
+            )
+        self.state.denied_by_policy = True
 
     def _advance(self, bundle: str) -> None:
         self.state.applied[bundle] = {k: self.state.gate(bundle, k) for k in KINDS[bundle] - _PLAIN}
@@ -249,6 +297,8 @@ def replay_bundles(machine: GateBundles) -> None:
     both()  # revoked after deploy: executables retire, plain files stay
     machine.gate_off()
     both()  # no layer opts into the gate
+    machine.deny_by_policy()
+    both()  # the org denies the bundles: each install refuses, nothing changes
 
 
 def bundle_cells() -> frozenset[str]:
@@ -261,34 +311,71 @@ def bundle_cells() -> frozenset[str]:
 
 # -- pack: what a project bundles of its gated dependencies -----------------------
 
-PACKED = ("p-exec", "p-lsp")
-PACK_KINDS: Mapping[str, frozenset[str]] = {
-    "p-exec": frozenset({"hook", "mcp"}),
-    "p-lsp": frozenset({"lsp"}),
-}
-# The bundle path each deployed dependency executable packs to; pack never ships
-# an MCP server ``apm install`` manages (it ships only servers apm.yml defines).
-_PACKED_PATH = {"hook": "hooks/p-exec-session.json", "lsp": ".lsp.json"}
+
+@dataclass(frozen=True)
+class PackSet:
+    """The git dependencies one pack project declares, and what pack ships of them."""
+
+    kinds: Mapping[str, frozenset[str]]
+    # Gate verdicts name only the packages that declare executables.
+    decided: tuple[str, ...]
+    # The bundle paths each deployed dependency executable packs to.
+    executables: Mapping[str, tuple[str, ...]]
+    # Plain dependency files ship at every gate level.
+    plain: tuple[str, ...] = ()
+
+    @property
+    def packed(self) -> tuple[str, ...]:
+        return tuple(self.kinds)
+
+
+# Pack never ships an MCP server ``apm install`` manages (only servers apm.yml defines).
+EXEC_PACK = PackSet(
+    kinds={
+        "p-exec": frozenset({"hook", "mcp"}),
+        "p-lsp": frozenset({"lsp"}),
+        "p-skill": frozenset({"skill"}),
+    },
+    decided=("p-exec", "p-lsp"),
+    executables={"hook": ("hooks/p-exec-session.json",), "lsp": (".lsp.json",)},
+    plain=("skills/p-skill/SKILL.md",),
+)
+# A canvas packs in a project of its own, so a canvas failure never hides the other
+# kinds' cells (a parked canvas failed the whole pack until #4714 was fixed).
+CANVAS_PACK = PackSet(
+    kinds={"p-canvas": frozenset({"canvas"})},
+    decided=("p-canvas",),
+    executables={"canvas": ("extensions/p-canvas/extension.mjs", "extensions/p-canvas/icon.txt")},
+)
+PACK_SETS = (EXEC_PACK, CANVAS_PACK)
+# Strict known cells (R: pack must exit 0 and ship what the gate deploys); none
+# since #4714 closed.
+KNOWN_PACK: dict[str, str] = {}
+_KNOWN_PACK_MATCH = r"pack exited 1: .*Cannot pack dependency lifecycle/p-canvas"
 
 
 class GatePack(StepRunner):
     """``apm pack --dry-run`` over git dependencies at five gate levels (project scope)."""
 
-    def __init__(self, bench: Bench | None) -> None:
-        super().__init__(bench, ModelState(), PACK_KINDS)
+    def __init__(self, bench: Bench | None, packs: PackSet = EXEC_PACK) -> None:
+        super().__init__(bench, ModelState(), packs.kinds)
+        self.packs = packs
         self.dry = bench is None
         self.level = "unapproved-exec"
         self.credited: set[str] = set()
 
     def specs(self) -> tuple[str, ...]:
-        return tuple(self.bench.world.packages[f"{name}:git"].spec for name in PACKED)
+        return tuple(self.bench.world.packages[f"{name}:git"].spec for name in self.packs.packed)
 
     def level_model(self) -> ModelState:
         allowed = self.level in ("none", "allowed")
         decisions = {
-            (name, kind): "allowed" for name in PACKED for kind in PACK_KINDS[name] if allowed
+            (name, kind): "allowed"
+            for name in self.packs.decided
+            for kind in self.packs.kinds[name]
+            if allowed
         }
-        return ModelState(declared=frozenset(PACKED), decisions=decisions)
+        return ModelState(declared=frozenset(self.packs.packed), decisions=decisions)
 
     def install(self, *names: str) -> None:
         if not self.dry:
@@ -296,7 +383,8 @@ class GatePack(StepRunner):
 
     def decide(self, verdict: str, level: str) -> None:
         if not self.dry:
-            result = self.bench.run((verdict, *(f"lifecycle/{name}" for name in PACKED)))
+            names = (f"lifecycle/{name}" for name in self.packs.decided)
+            result = self.bench.run((verdict, *names))
             assert result.returncode == 0, result.stdout + result.stderr
         self.level = level
 
@@ -313,20 +401,30 @@ class GatePack(StepRunner):
     def pack(self) -> None:
         """Pack ships exactly the executables the gate lets the project deploy."""
         cells = sorted(
-            f"G1|pack|{kind}|{self.level}|project" for name in PACKED for kind in PACK_KINDS[name]
+            f"G1|pack|{kind}|{self._level(name, kind)}|project"
+            for name in self.packs.packed
+            for kind in self.packs.kinds[name]
         )
         self.credited.update(cells)
         if self.dry:
             return
+        if self.level == "denied-dependency":
+            self._refused(cells)
+            return
         step = self.step(
-            ("pack", "--dry-run"), exits={0}, cells=cells, read_only=True, mutating=False
+            ("pack", "--dry-run"), exits={0, 1}, cells=cells, read_only=True, mutating=False
         )
+        known = self._reference(step, cells)
         listed = {line.strip() for line in step.result.stdout.splitlines()}
         shipped = self.level in ("none", "allowed")
-        for path in _PACKED_PATH.values():
-            assert (path in listed) == shipped, f"{self.level}: {path} packed={path in listed}"
+        for path in (p for paths in self.packs.executables.values() for p in paths):
+            assert known or (path in listed) == shipped, f"{self.level}: {path} in {listed}"
+        for path in self.packs.plain:
+            assert path in listed, f"{self.level}: plain {path} not packed:\n{step.result.stdout}"
         assert not any("mcp" in line.lower() and line.endswith(".json") for line in listed), listed
         for cell in cells:
+            if cell in KNOWN_PACK:
+                continue
             check_obligation(
                 cell,
                 strength="e2e-evidence",
@@ -335,6 +433,56 @@ class GatePack(StepRunner):
                 result=step.result,
                 evidence=Evidence(unchanged={"project": ("*",), "outside": ("*",)}, exit=0),
             )
+
+    def _level(self, name: str, kind: str) -> str:
+        """The GATE value of one packed (package, kind): a plain file of a package
+        the spine never decided has no executable beside it, so no gate level (U2);
+        the org dependency deny covers every package."""
+        if kind in _PLAIN and name not in self.packs.decided and self.level != "denied-dependency":
+            return "none"
+        return self.level
+
+    def _refused(self, cells: list[str]) -> None:
+        """Under an org dependency deny pack refuses and ships nothing."""
+        step = self.step(
+            ("pack", "--dry-run"), exits={1}, cells=cells, read_only=True, mutating=False
+        )
+        evidence = Evidence(
+            unchanged={"project": ("*",), "outside": ("*",)},
+            output_matches=(r"Pack blocked by org policy", r"Nothing was packed"),
+            exit=1,
+        )
+        for cell in cells:
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=evidence,
+            )
+
+    def deny_by_policy(self) -> None:
+        """The org policy denies every dependency of the pack project (an input edit)."""
+        if not self.dry:
+            self.edit("policy-deny-deps", lambda: use_policy(self.bench.world, BUNDLE_DENY_POLICY))
+        self.level = "denied-dependency"
+
+    def _reference(self, step: Step, cells: list[str]) -> bool:
+        """R: pack exits 0; a strict known cell must fail on its step, and only it."""
+        result = step.result
+        output = f"{result.stdout}\n{result.stderr}"
+        error = next((line for line in output.splitlines() if "Error" in line), "")
+        problems = [f"pack exited {result.returncode}: {error}"] if result.returncode else []
+        expected = [ExpectedCell(cell, _KNOWN_PACK_MATCH) for cell in cells if cell in KNOWN_PACK]
+        unexpected, owners = partition_expected(problems, expected)
+        misses = strict_misses(expected, owners)
+        assert not unexpected and not misses, (
+            f"R: pack at {self.level}: {unexpected}; known cells that passed: {misses}\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+        self.expected_seen.update(owners)
+        return bool(owners)
 
 
 def replay_pack(machine: GatePack) -> None:
@@ -353,9 +501,14 @@ def replay_pack(machine: GatePack) -> None:
     machine.gate_off()
     machine.install()
     machine.pack()
+    machine.deny_by_policy()
+    machine.pack()  # the org denies every dependency: pack refuses, ships nothing
 
 
 def pack_cells() -> frozenset[str]:
-    machine = GatePack(None)
-    replay_pack(machine)
-    return frozenset(machine.credited)
+    credited: set[str] = set()
+    for packs in PACK_SETS:
+        machine = GatePack(None, packs)
+        replay_pack(machine)
+        credited |= machine.credited
+    return frozenset(credited)

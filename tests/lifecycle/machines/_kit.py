@@ -53,7 +53,7 @@ USER_SURFACE_GLOBS: Mapping[tuple[str, str], str | tuple[str, str]] = {
     ("mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
     ("lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
     ("canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
-    # bin/ of a Claude marketplace plugin (U-BIN: user scope only).
+    # bin/ of a Claude marketplace plugin (loose bin/ deploys at user scope only).
     ("bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
 LOCKFILE = "apm.lock.yaml"

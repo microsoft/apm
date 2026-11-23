@@ -671,6 +671,99 @@ class TestKeptEntryReviewThree:
         assert "pyright" not in json.loads(opencode.read_text()).get("lsp", {})
         assert record.kept_unowned.get("opencode") == {"pyright"}
 
+    def _upgrade_to_socket(self, tmp_path, *, edit_copilot: bool, edit_opencode=False):
+        stdio = [_make_dep("pyright", command="p-v1")]
+        targets = ["copilot", "opencode"]
+        LSPIntegrator.install(stdio, project_root=tmp_path, target_runtimes=targets)
+        if edit_copilot:
+            self._edit(tmp_path / ".github" / "lsp.json", "pyright")
+        opencode = tmp_path / "opencode.json"
+        if edit_opencode:
+            data = json.loads(opencode.read_text())
+            data["lsp"]["pyright"]["command"] = ["mine"]
+            # Compact JSON: a hold must not even reformat the file.
+            opencode.write_text(json.dumps(data), encoding="utf-8")
+        before = opencode.read_bytes()
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(stdio))
+        LSPIntegrator.install(
+            [_make_dep("pyright", command=None, transport="socket", extension_to_language=None)],
+            project_root=tmp_path,
+            target_runtimes=targets,
+            managed_target_servers={"copilot": {"pyright"}, "opencode": {"pyright"}},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+        return record, before
+
+    @pytest.mark.parametrize("edit_opencode", [False, True], ids=["unedited", "edited"])
+    def test_a_blocked_upgrade_holds_a_target_the_new_config_cannot_reach(
+        self, tmp_path, edit_opencode
+    ):
+        """#4871: OpenCode keeps its stdio entry, and any edit, while Copilot holds."""
+        record, before = self._upgrade_to_socket(
+            tmp_path, edit_copilot=True, edit_opencode=edit_opencode
+        )
+
+        assert (tmp_path / "opencode.json").read_bytes() == before
+        assert record.held_claims == {"opencode": {"pyright"}}
+        assert record.kept_edits == {"pyright": "blocked"}
+
+    def test_a_held_target_with_an_unchanged_sibling_is_not_rewritten(self, tmp_path):
+        stdio = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
+        targets = ["copilot", "opencode"]
+        LSPIntegrator.install(stdio, project_root=tmp_path, target_runtimes=targets)
+        self._edit(tmp_path / ".github" / "lsp.json", "pyright")
+        opencode = tmp_path / "opencode.json"
+        # Compact JSON: holding with an unchanged sibling must not reformat it.
+        opencode.write_text(json.dumps(json.loads(opencode.read_text())), encoding="utf-8")
+        before = opencode.read_bytes()
+
+        LSPIntegrator.install(
+            [
+                _make_dep("pyright", transport="socket", extension_to_language=None),
+                _make_dep("ruff", command="r-v1"),
+            ],
+            project_root=tmp_path,
+            target_runtimes=targets,
+            managed_target_servers={
+                "copilot": {"pyright", "ruff"},
+                "opencode": {"pyright", "ruff"},
+            },
+            record=LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(stdio)),
+            diagnostics=MagicMock(),
+        )
+
+        assert opencode.read_bytes() == before
+
+    def test_a_held_target_that_cannot_be_prepared_fails_the_install(self, tmp_path):
+        stdio = [_make_dep("pyright", command="p-v1")]
+        targets = ["copilot", "opencode"]
+        LSPIntegrator.install(stdio, project_root=tmp_path, target_runtimes=targets)
+        self._edit(tmp_path / ".github" / "lsp.json", "pyright")
+        opencode = tmp_path / "opencode.json"
+        opencode.write_text(json.dumps({"lsp": False}), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="non-object 'lsp'"):
+            LSPIntegrator.install(
+                [_make_dep("pyright", transport="socket", extension_to_language=None)],
+                project_root=tmp_path,
+                target_runtimes=targets,
+                managed_target_servers={"copilot": {"pyright"}, "opencode": {"pyright"}},
+                record=LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(stdio)),
+                diagnostics=MagicMock(),
+                fail_on_write_error=True,
+            )
+
+        assert json.loads(opencode.read_text()) == {"lsp": False}
+
+    def test_an_upgrade_that_is_not_blocked_reaches_no_held_target(self, tmp_path):
+        record, _before = self._upgrade_to_socket(tmp_path, edit_copilot=False)
+
+        copilot = json.loads((tmp_path / ".github" / "lsp.json").read_text())["lspServers"]
+        assert copilot["pyright"]["transport"] == "socket"
+        assert record.held_claims == {}
+        assert record.kept_edits == {}
+
     def test_a_targets_own_unproven_keep_stays_claimed_when_another_is_held(self, tmp_path):
         """#4626 review: rebuilding for a held server never withholds the target's own keep."""
         v1 = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
