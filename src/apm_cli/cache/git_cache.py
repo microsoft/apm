@@ -363,9 +363,37 @@ class GitCache:
                 full and sparse variants of the same SHA coexist.
 
         Returns:
-            Path to the checkout directory (guaranteed to contain valid
-            git working copy at the expected SHA).
+            Path to the checkout directory, verified against its commit
+            (``cache/checkout_verify.py``): a checkout that fails is evicted
+            and rebuilt once, then refused.
         """
+        from ..utils.git_env import git_subprocess_env
+        from .checkout_verify import verify_checkout
+
+        for _attempt in range(2):
+            checkout = self._get_checkout(
+                url, ref, locked_sha=locked_sha, env=env, sparse_paths=sparse_paths
+            )
+            sha = checkout.parent.name
+            if verify_checkout(checkout, sha, paths=sparse_paths, env=git_subprocess_env(env)):
+                return checkout
+            if self._read_only:
+                raise LookupError("cached checkout does not match its commit")
+            _log.warning("[!] Rebuilding cached checkout that does not match %s", sha[:12])
+            self._evict_checkout(checkout)
+        raise RuntimeError(
+            f"Cached checkout for {_sanitize_url(url)} does not match its commit; refusing it"
+        )
+
+    def _get_checkout(
+        self,
+        url: str,
+        ref: str | None,
+        *,
+        locked_sha: str | None,
+        env: dict[str, str] | None,
+        sparse_paths: list[str] | None,
+    ) -> Path:
         shard_key = cache_shard_key(url)
         if self._read_only:
             return self._read_only_checkout(shard_key, ref, locked_sha, sparse_paths, env)

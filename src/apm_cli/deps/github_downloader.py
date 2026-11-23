@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Union
 import requests
 
 from ..cache.cached_repo import validate_cached_links
+from ..cache.checkout_verify import require_verified_checkout
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
@@ -1650,7 +1651,9 @@ class GitHubPackageDownloader:
 
             if not source_subdir.is_dir():
                 raise RuntimeError(f"Path '{subdir_path}' is not a directory")
-            validate_cached_links(temp_clone_path, [subdir_path], self._git_env_dict())
+            _env, _scope = self._git_env_dict(), [subdir_path]
+            validate_cached_links(temp_clone_path, _scope, _env)
+            require_verified_checkout(temp_clone_path, _ws2_resolved_commit, paths=_scope, env=_env)
 
             # Create target directory
             target_path.mkdir(parents=True, exist_ok=True)
@@ -2012,7 +2015,9 @@ class GitHubPackageDownloader:
                 progress_reporter.disabled = True
 
             # Links become their Git-object content while .git exists (#3457).
-            materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
+            _env, _sha = self._git_env_dict(), resolved_ref.resolved_commit
+            materialize_tracked_symlinks("git", target_path, None, env=_env)
+            require_verified_checkout(target_path, _sha, env=_env)
 
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"

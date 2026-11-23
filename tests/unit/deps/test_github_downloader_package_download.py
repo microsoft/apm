@@ -19,6 +19,7 @@ from apm_cli.models.apm_package import (
     GitReferenceType,
     ResolvedReference,
 )
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
 
@@ -287,6 +288,7 @@ class TestDownloadVirtualFilePackageErrors:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestDownloadSubdirectoryPackageErrors:
     def test_raises_if_not_virtual(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
@@ -625,6 +627,7 @@ class TestTrySparseCheckout:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestDownloadPackage:
     def test_invalid_string_ref_raises_value_error(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
@@ -1012,6 +1015,7 @@ class TestArtifactoryStubs:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestPersistentGitCacheInDownloadPackage:
     def test_cache_hit_returns_package_without_clone(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

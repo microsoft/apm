@@ -25,6 +25,7 @@ from apm_cli.cache.git_cache import (
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
 from tests.utils.cached_repo_trust import trust_cached_repos
+from tests.utils.checkout_trust import trust_checkout_contents
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 _REAL_RUN = subprocess.run
@@ -97,6 +98,7 @@ class TestGitCacheInit:
 
 
 @trust_cached_repos()
+@trust_checkout_contents()
 class TestGetCheckout:
     def test_cache_hit_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"
