@@ -82,6 +82,7 @@ def _save(sources: list[MarketplaceSource]) -> None:
     # A root project's ``marketplaces:`` map is never registered (#2903 D3).
     if any(s.origin not in PERSISTED_ORIGINS for s in sources):
         raise ValueError("Project-declared marketplaces are never written to the registry")
+    _adopt_ref_pins(_leaving(_load(), sources))
     from ..config import CONFIG_DIR
 
     # Only the directory: config.json is written by 'apm config set' alone.
@@ -127,6 +128,22 @@ def get_marketplace_by_name(name: str) -> MarketplaceSource:
     raise MarketplaceNotFoundError(name, host=default_host())
 
 
+def _leaving(
+    before: Sequence[MarketplaceSource], after: Sequence[MarketplaceSource]
+) -> list[MarketplaceSource]:
+    """Registrations whose name is removed or now names another catalog."""
+    from .source_identity import catalog_pin_identity
+
+    def identity(source: MarketplaceSource) -> str | None:
+        try:
+            return catalog_pin_identity(source)
+        except ValueError:
+            return None
+
+    kept = {(s.name.lower(), identity(s)) for s in after}
+    return [s for s in before if (s.name.lower(), identity(s)) not in kept]
+
+
 def _adopt_ref_pins(leaving: Sequence[MarketplaceSource]) -> None:
     """Move legacy alias pins to the catalog each leaving registration names (#4966)."""
     if not leaving:
@@ -144,10 +161,6 @@ def _adopt_ref_pins(leaving: Sequence[MarketplaceSource]) -> None:
 
 def add_marketplace(source: MarketplaceSource) -> None:
     """Register a marketplace (replaces if same name exists)."""
-    # Legacy pins move to the catalog this name leaves; the pin file has its own writes.
-    _adopt_ref_pins(
-        [s for s in get_registered_marketplaces() if s.name.lower() == source.name.lower()]
-    )
     with _marketplace_mutation():
         sources = [s for s in _load() if s.name.lower() != source.name.lower()]
         sources.append(source)
@@ -168,7 +181,6 @@ def remove_marketplace(name: str) -> None:
             from ..utils.github_host import default_host
 
             raise MarketplaceNotFoundError(name, host=default_host())
-        _adopt_ref_pins([s for s in before if s.name.lower() == name.lower()])
         _save(after)
     logger.debug("Removed marketplace '%s'", name)
 
@@ -199,7 +211,6 @@ def apply_manifest_marketplaces(
             if owner is not None and owner.origin != ORIGIN_MANIFEST:
                 conflicts.append(owner.name)
                 continue
-            _adopt_ref_pins([owner] if owner is not None else [])
             sources = [s for s in sources if s.name.lower() != lower]
             sources.append(source)
             applied.append(source.name)
@@ -208,7 +219,6 @@ def apply_manifest_marketplaces(
             kept = [
                 s for s in sources if not (s.name.lower() == lower and s.origin == ORIGIN_MANIFEST)
             ]
-            _adopt_ref_pins([s for s in sources if s not in kept])
             if len(kept) != len(sources):
                 removed.append(name)
                 sources = kept

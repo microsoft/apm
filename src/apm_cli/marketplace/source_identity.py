@@ -146,7 +146,11 @@ def catalog_pin_identity(source: MarketplaceSource) -> str:
     if source.kind == "local":
         return f"local:{os.path.realpath(source.local_path)}:{source.path}"
     if source.kind == "url":
-        return f"url:{_origin_comparison_key(marketplace_origin(source))}"
+        # A hosted file: only the authority is case-insensitive; path and query name it.
+        parts = urlsplit(marketplace_origin(source))
+        port = f":{parts.port}" if parts.port not in (None, 443) else ""
+        query = f"?{parts.query}" if parts.query else ""
+        return f"url:{(parts.hostname or '').lower()}{port}{parts.path}{query}"
     return f"{_origin_comparison_key(marketplace_origin(source))}:{source.path}"
 
 

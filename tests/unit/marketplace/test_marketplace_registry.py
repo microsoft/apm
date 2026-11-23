@@ -291,7 +291,8 @@ class TestCatalogScopedRefPins:
         registry_mod.add_marketplace(respelled)
 
         assert self._check("team", "v2", respelled) == "v1"
-        assert json.loads(self.pins.read_text()) == {self._key(respelled): "v1"}
+        # The name still names the same catalog, so its legacy pin stays with it.
+        assert json.loads(self.pins.read_text()) == {"team/tool/1.0.0": "v1"}
 
     def test_a_manifest_removal_keeps_its_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1"})
@@ -316,6 +317,34 @@ class TestCatalogScopedRefPins:
         assert pins[scoped] == "v1"
         assert "github.com/tool/1.0.0" not in pins
         assert pins["github.com/b/catalog:marketplace.json#tool/1.0.0"] == "v0"
+
+    def test_adoption_follows_the_registration_another_writer_left_on_disk(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        rebound = MarketplaceSource(name="team", owner="b", repo="catalog")
+        Path(registry_mod._marketplaces_path()).write_text(
+            json.dumps({"marketplaces": [rebound.to_dict()]})
+        )
+
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="c", repo="catalog"))
+
+        assert json.loads(self.pins.read_text()) == {self._key(rebound): "v1"}
+
+    def test_a_project_map_shadowing_an_alias_never_reads_or_consumes_its_legacy_pins(self):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import record_ref_pin
+
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        shadow = MarketplaceSource(name="team", owner="b", repo="catalog")
+
+        assert self._check("team", "v2", shadow) is None
+        record_ref_pin("team", "tool", "v1", "1.0.0", catalog=catalog_pin_identity(shadow))
+
+        assert json.loads(self.pins.read_text()) == {
+            "team/tool/1.0.0": "v1",
+            self._key(shadow): "v1",
+        }
 
 
 class TestCatalogPinIdentity:
@@ -350,3 +379,14 @@ class TestCatalogPinIdentity:
         self._record(pins_dir, MarketplaceSource(name="t", url=str(root), path="b.json"))
 
         assert len(json.loads((pins_dir / "version-pins.json").read_text())) == 2
+
+    def test_hosted_catalog_paths_that_differ_only_in_case_are_different_catalogs(self, tmp_path):
+        base = "https://gitlab.com/group/project/-/raw/main"
+        self._record(
+            tmp_path, MarketplaceSource(name="t", url=f"{base}/A/marketplace.json", path="")
+        )
+        self._record(
+            tmp_path, MarketplaceSource(name="t", url=f"{base}/a/marketplace.json", path="")
+        )
+
+        assert len(json.loads((tmp_path / "version-pins.json").read_text())) == 2

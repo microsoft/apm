@@ -22,7 +22,7 @@ A pin is scoped to the catalog it was read from
 alias, so an alias re-registered for another catalog starts without pins and
 removing a marketplace keeps the pins of its catalog (#4966). Pins written by
 an older APM are keyed ``alias/plugin/version``; they are read as belonging to
-the catalog the alias currently names and move to that catalog's key when the
+the catalog the alias's registration currently names and move to that catalog's key when the
 alias is re-registered or removed, or when the pin is next recorded.
 
 All functions are **fail-open**: filesystem or JSON errors are logged
@@ -194,8 +194,8 @@ def check_ref_pin(
     """
     pins = load_ref_pins(pins_dir)
     previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version, catalog))
-    if previous_ref is None and catalog:
-        # A legacy alias pin belongs to the catalog the alias names now.
+    if previous_ref is None and catalog and _owns_legacy_pins(marketplace_name, catalog):
+        # A legacy alias pin belongs to the catalog the alias's registration names.
         previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version))
     if previous_ref is None:
         return None
@@ -226,9 +226,27 @@ def record_ref_pin(
     save_ref_pins(pins, pins_dir)
 
 
+def _owns_legacy_pins(marketplace_name: str, catalog: str) -> bool:
+    """Whether *marketplace_name*'s persisted registration names *catalog*.
+
+    Legacy pins are keyed by the alias of a registration; a project map that
+    shadows the alias with another catalog never reads or consumes them.
+    """
+    from .registry import get_registered_marketplaces
+    from .source_identity import catalog_pin_identity
+
+    for source in get_registered_marketplaces():
+        if source.name.lower() == marketplace_name.lower():
+            try:
+                return catalog_pin_identity(source) == catalog
+            except ValueError:
+                return False
+    return False
+
+
 def _put(pins: dict, marketplace: str, plugin: str, version: str, catalog: str, ref: str) -> None:
     pins[_pin_key(marketplace, plugin, version, catalog)] = ref
-    if catalog:
+    if catalog and _owns_legacy_pins(marketplace, catalog):
         pins.pop(_pin_key(marketplace, plugin, version), None)
 
 
