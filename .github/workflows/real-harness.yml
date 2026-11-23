@@ -1,0 +1,106 @@
+# Real-harness lane: does a real, pinned Claude Code / Copilot CLI LOAD a plugin
+# that apm installs natively? The lifecycle suite asserts deployed files and
+# settings; this lane asserts the harness itself loads them (hook fires, MCP
+# server handshakes, skill listed). See scripts/real_harness/probe.py.
+#
+# Non-required. Secrets: COPILOT_GITHUB_TOKEN starts Copilot sessions; it is
+# never available to fork PRs, where the Copilot session cells report BLOCKED.
+# Claude Code never reaches a model (ANTHROPIC_BASE_URL is a closed port).
+name: Real Harness
+
+on:
+  push:
+    branches: [danielmeppiel-ql-real-harness-lane]
+    paths:
+      - scripts/real_harness/**
+      - .github/workflows/real-harness.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  probe:
+    name: ${{ matrix.harness }} ${{ matrix.version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { harness: claude, package: '@anthropic-ai/claude-code', version: '2.1.326', os: ubuntu-24.04 }
+          - { harness: claude, package: '@anthropic-ai/claude-code', version: '2.1.323', os: ubuntu-24.04 }
+          - { harness: copilot, package: '@github/copilot', version: '1.0.106', os: ubuntu-24.04 }
+          - { harness: copilot, package: '@github/copilot', version: '1.0.113', os: ubuntu-24.04 }
+          - { harness: copilot, package: '@github/copilot', version: '1.0.114-0', os: ubuntu-24.04 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Build apm from this SHA
+        run: |
+          uv sync --frozen
+          echo "APM_BIN=$PWD/.venv/bin/apm" >> "$GITHUB_ENV"
+          .venv/bin/apm --version
+
+      - name: Install ${{ matrix.package }}@${{ matrix.version }}
+        env:
+          PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ matrix.version }}
+          HARNESS: ${{ matrix.harness }}
+        run: |
+          npm install -g --no-fund --no-audit "${PACKAGE}@${VERSION}"
+          "$HARNESS" --version
+
+      - name: Probe every cell
+        env:
+          HARNESS: ${{ matrix.harness }}
+          COPILOT_GITHUB_TOKEN: ${{ matrix.harness == 'copilot' && secrets.COPILOT_GITHUB_TOKEN || '' }}
+        run: python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.harness }} ${{ matrix.version }} on ${{ matrix.os }}"
+            python3 scripts/real_harness/probe.py summarize "$RUNNER_TEMP/rh"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: real-harness-${{ matrix.harness }}-${{ matrix.version }}-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/rh/*/cell.json
+            ${{ runner.temp }}/rh/*/logs/
+            ${{ runner.temp }}/rh/*/markers/
+            ${{ runner.temp }}/rh/*/home/.claude/
+            ${{ runner.temp }}/rh/*/home/.claude.json
+            ${{ runner.temp }}/rh/*/home/.copilot/settings.json
+            ${{ runner.temp }}/rh/*/home/.copilot/config.json
+            ${{ runner.temp }}/rh/*/work/consumer/.claude/
+            ${{ runner.temp }}/rh/*/work/consumer/.github/
+            ${{ runner.temp }}/rh/*/work/consumer/apm.yml
+            ${{ runner.temp }}/rh/*/work/consumer/apm.lock.yaml
+          include-hidden-files: true
+          retention-days: 14
