@@ -3240,8 +3240,11 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-ref-pin-commit",
         rule_id="marketplace-integrations-ref-pin-commit",
         path="src/apm_cli/install/transaction.py",
-        old="            try:\n                self._ref_pins.discard()\n                try:",
-        new="            try:\n                try:",
+        old=(
+            "                self._discard_deploy_evidence()\n"
+            "                self._ref_pins.discard()\n                try:"
+        ),
+        new="                self._discard_deploy_evidence()\n                try:",
         intent="A rolled-back install keeps its staged ref pins for a later commit.",
     ),
     MutationCase(
