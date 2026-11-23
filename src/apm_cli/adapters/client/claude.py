@@ -598,7 +598,6 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             from .config_journal import journal_config_write, journal_config_written
 
             journal_config_write(path, json_config_text(path, data, default_trailing_newline=True))
-            path.parent.mkdir(parents=True, exist_ok=True)
             write_json_config(path, data, default_trailing_newline=True, new_file_mode=0o600)
             journal_config_written(path)
             _log.debug("Claude user-scope MCP config written to %s", path)

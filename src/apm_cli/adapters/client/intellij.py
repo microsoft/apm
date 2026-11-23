@@ -271,7 +271,6 @@ class IntelliJClientAdapter(CopilotClientAdapter):
             journal_config_write(
                 path, json_config_text(path, config, default_trailing_newline=True)
             )
-            path.parent.mkdir(parents=True, exist_ok=True)
             write_json_config(path, config, default_trailing_newline=True)
             journal_config_written(path)
         except OSError as exc:
