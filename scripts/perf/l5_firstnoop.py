@@ -16,10 +16,13 @@ from tests.benchmarks import journeys  # noqa: E402
 
 base_apm, new_apm, work = sys.argv[1], sys.argv[2], Path(sys.argv[3]).resolve()
 fixture_name, n = sys.argv[4], int(sys.argv[5])
+diag = sys.argv[6:] == ["diag"]
 fixture = journeys.prepare_fixture(fixture_name, work)
 cpu: dict[str, list[tuple[float, float]]] = {"base": [], "new": []}
 with journeys.open_world(fixture, work / "world") as world:
     world.rtt_ms = 30
+    if diag:
+        world.env["APM_INSTALL_FAST_PATH"] = "verdict"
     home = Path(world.env["APM_HOME"])
     for i in range(n):
         for side, apm in (("base", base_apm), ("new", new_apm)):
@@ -32,6 +35,10 @@ with journeys.open_world(fixture, work / "world") as world:
             first = ctx.timed_run(["install"], ctx.project)
             second = ctx.timed_run(["install"], ctx.project)
             assert first[0] == 0 and second[0] == 0, (first[1], second[1])
+            if diag and side == "new":
+                for label, run in (("first", first), ("second", second)):
+                    lines = [x for x in run[1].splitlines() if "verdict record" in x or "fast path" in x]
+                    print(f"DIAG {label}: {lines}")
             cpu[side].append((first[2], second[2]))
 for k, label in ((0, "first no-op after install"), (1, "second no-op")):
     b = statistics.median(x[k] for x in cpu["base"])
