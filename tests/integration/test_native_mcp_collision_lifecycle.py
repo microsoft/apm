@@ -548,6 +548,44 @@ def test_a_refused_retirement_records_the_entry_it_wrote(
     assert scenario.lock().mcp_target_servers == {}
 
 
+def test_a_refused_legacy_cleanup_keeps_the_runtime_it_did_not_clean(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """A lock without per-target ownership cleans claude, then codex's edit refuses (#4792).
+
+    Recording ``new`` gives the lock ownership, which ends legacy cleanup, so
+    the codex retirement that did not run stays claimed: once the user
+    restores APM's entry, the next install retires it.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    if scenario.user_scope:
+        pytest.skip("legacy cleanup is project scope only")
+    scenario.declare([_http()])
+    _success(scenario.install())
+    lock_path = scenario.root / "apm.lock.yaml"
+    legacy = load_yaml(lock_path)
+    legacy.pop("mcp_target_servers", None)
+    legacy.pop("deployment_ledger", None)
+    dump_yaml(legacy, lock_path)
+    written = scenario.servers("codex")["notes"]
+    scenario.edit("codex", "notes", {**written, "url": "http://127.0.0.1:9/personal"})
+    scenario.declare([{**_http(), "name": "new"}])
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert "notes" not in scenario.servers("claude")
+    assert scenario.lock().mcp_target_servers["codex"] == ["new", "notes"]
+
+    scenario.edit("codex", "notes", written)
+    _success(scenario.install())
+    assert set(scenario.servers("codex")) == {"new"}
+    assert scenario.lock().mcp_target_servers == {"claude": ["new"], "codex": ["new"]}
+
+
 def test_a_refused_deselection_keeps_the_claim_it_did_not_remove(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
     apm_binary_path: Path,

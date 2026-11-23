@@ -887,7 +887,8 @@ def run_mcp_integration(  # noqa: PLR0913
                 lock_path,
                 logger,
                 managed_target_servers=managed_target_servers,
-                old_target_servers=old_mcp_target_servers,
+                # cleanup_owners adds the runtimes a legacy lock's cleanup reached.
+                old_target_servers=cleanup_owners or old_mcp_target_servers,
                 removed=removed,
                 planned=planned,
                 servers=(new_mcp_servers, old_mcp_servers),
