@@ -1077,3 +1077,27 @@ def test_bundle_hook_retirement_fails_closed_on_a_kept_hook_config(
     assert diagnostics.error_count == 1
     assert (consumer / hook).is_symlink()
     assert hook in _claims(world, consumer)
+
+
+def test_uninstall_user_bundle_with_a_home_rooted_claude_config(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4679 review: CLAUDE_CONFIG_DIR=$HOME roots Claude at '.', and its scripts still leave."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    home = world.isolated.home
+    world.env["CLAUDE_CONFIG_DIR"] = str(home)
+    write(home / ".apm" / "apm.yml", "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    _allow(home / ".apm", key)
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle))
+    lock_path = home / ".apm" / "apm.lock.yaml"
+    scripts = [
+        p for p in load_yaml(lock_path).get("local_deployed_files") or [] if p.endswith("/x.sh")
+    ]
+    assert scripts, load_yaml(lock_path)
+
+    text = output(world.apm(world.isolated.work_root, "uninstall", "-g", "hookpkg"))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    claims = load_yaml(lock_path).get("local_deployed_files") or []
+    assert not [p for p in claims if p.endswith("/x.sh")], claims
+    assert not (home / "hooks" / "hookpkg").exists()

@@ -30,6 +30,7 @@
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_retains_a_hook_file_it_cannot_delete",
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hook_retirement_keeps_a_script_it_cannot_delete",
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hook_retirement_reports_a_sidecar_it_cannot_rewrite",
-    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hook_retirement_fails_closed_on_a_kept_hook_config"
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hook_retirement_fails_closed_on_a_kept_hook_config",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_user_bundle_with_a_home_rooted_claude_config"
   ]
 }

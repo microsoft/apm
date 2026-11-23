@@ -273,9 +273,14 @@ def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
     return blockers
 
 
+def _hooks_dir_prefix(root_dir: str, *parts: str) -> str:
+    """Return ``<root_dir>/hooks/<parts>/`` normalized as lock rows are (a ``.`` root drops out)."""
+    return Path(root_dir, "hooks", *parts).as_posix() + "/"
+
+
 def _hooks_prefixes(targets: Any) -> tuple[str, ...]:
     return tuple(
-        f"{target.root_dir}/hooks/"
+        _hooks_dir_prefix(target.root_dir)
         for target in targets or ()
         if callable(getattr(target, "supports", None)) and target.supports("hooks")
     )
@@ -297,7 +302,7 @@ def _retire_per_file(
         write_per_file_bundle_record,
     )
 
-    prefixes = tuple(f"{target.root_dir}/hooks/" for target in _per_file_targets(targets))
+    prefixes = tuple(_hooks_dir_prefix(target.root_dir) for target in _per_file_targets(targets))
     kept: set[str] = set()
     for value in item.hook_files:
         hook_file = contained_bundle_path(project_root, value, prefixes)
@@ -439,7 +444,9 @@ def _script_bases(targets: Any) -> tuple[str, ...]:
     from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
 
     return tuple(
-        f"{target.root_dir}/hooks/" + ("" if target.name in _MERGE_HOOK_TARGETS else "scripts/")
+        _hooks_dir_prefix(
+            target.root_dir, *(() if target.name in _MERGE_HOOK_TARGETS else ("scripts",))
+        )
         for target in targets or ()
         if callable(getattr(target, "supports", None)) and target.supports("hooks")
     )
