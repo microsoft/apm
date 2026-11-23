@@ -59,4 +59,4 @@ jobs:
       working-directory: new
       run: |
         uv sync --frozen --extra dev --quiet
-        uv run --frozen pytest -p no:cacheprovider -q -n 2 -rA tests/lifecycle/scenarios/test_engine_parity.py 2>&1 | tail -250 || true
+        uv run --frozen pytest -p no:cacheprovider -q -n 2 -rA tests/lifecycle/scenarios/test_engine_parity.py 2>&1 | grep -E "^(E   |FAILED|PASSED|_{5,} test)" | cut -c1-240 | head -1500 || true
