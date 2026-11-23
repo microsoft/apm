@@ -262,6 +262,12 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Restore or remove the listed paths by hand, then run the command again.
   A shared config file this machine's records cannot confirm is not restored
   either: its copy is kept and reported for you to restore by hand.
+  A journal left by an earlier apm version, which did not record permissions,
+  is not replayed: the next install keeps it under
+  `~/.apm/install-snapshots/retained-*`, names that directory and exits 1; its
+  `journal.jsonl` lists the paths to restore or remove by hand. A
+  restored file never gets permissions wider than it has at replay time, and
+  a file that carries a POSIX ACL is kept and reported.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed
@@ -385,6 +391,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   exit `1`; fix the reported files in the package source and reinstall. Use
   `--force` only after reviewing the findings.
 - **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
+- **Malformed hook events.** A deployed hook config (for example `.claude/settings.json`) whose event is not a list of entries, such as `"PreToolUse": null`, is left as written. When a package must merge hooks into that event, install fails naming the file and the event; fix or remove the event, then run `apm install` again.
 - **Unresolved hook roots.** A hook command that leaves a supported `${PLUGIN_ROOT}` alias unresolved emits a warning naming the package and a concrete repair. Balance quotes around the complete package-relative path, keep it inside the package, then run `apm install` again. See [Hooks and commands](../../../producer/write-primitives/#hooks-and-commands) for accepted quoting forms.
 - **Declared plugin components.** Every path explicitly listed under a recognized plugin manifest's `agents`, `skills`, `commands`, or `hooks` field must resolve inside that plugin root. A missing or escaping path fails before deployment and lockfile commit; remove the declaration or add the component, then reinstall. Omitted fields and empty lists remain valid.
 - **Default registry routing.** When a default registry is configured (project `registries.default` in `apm.yml` or `registry.<name>.default true` in `$APM_HOME/config.json`), unscoped `owner/repo#ref` shorthand deps passed to `apm install` route to the registry instead of GitHub. A `#<version>` selector is required; omitting it exits `1`. The selector may be a semver range (`^1.0.0`), an exact version (`1.2.3`), or a non-semver label (`main`, `stable`, `v1.4.2`) -- the registry exact-matches non-semver selectors against its published version list. GitHub probe is skipped for these deps; use the `git:` URL form in `apm.yml` to force the GitHub path (e.g., `- git: https://github.com/owner/repo.git`).

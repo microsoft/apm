@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import tempfile
@@ -42,8 +43,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
+from apm_cli.install import journal_modes as _modes
 from apm_cli.install.deploy_state import ABSENT as _ABSENT
 from apm_cli.install.deploy_state import OTHER as _OTHER
+from apm_cli.install.deploy_state import ensure_listable as _ensure_listable
 from apm_cli.install.deploy_state import entry_state as _entry
 from apm_cli.install.deploy_state import path_state as _state
 from apm_cli.install.deploy_state import tree_hashes as _tree_hashes
@@ -61,7 +64,7 @@ _RETAINED_PREFIX = "retained-"
 _RETAINED_MARKER = "RETAINED"
 _MANIFEST = "journal.jsonl"
 _FORMAT = "apm-deploy-journal"
-_VERSION = 1
+_VERSION = 2  # 2 records modes (#5111); version 1 readers refuse it
 _KINDS = ("absent", "file", "dir", "symlink")
 _COPY_NAME = re.compile(r"[0-9]+")
 # APM-home metadata the journal may restore: deployment receipts, files only.
@@ -186,6 +189,8 @@ class DeployJournal:
         }
         # The unit line also opens the first write: what it will leave there.
         line["expected"] = expected
+        if unit.copy is not None:
+            line["mode"] = _modes.recorded_mode(unit.copy, unit.kind)  # never the copy's later bits
         if unit.kind == "file" and unit.copy is not None:
             line["hash"] = compute_file_hash(unit.copy)
         if unit.kind == "dir" and unit.copy is not None:
@@ -394,6 +399,8 @@ class _Replay:
     events: Mapping[str, Any] = field(default_factory=dict)
     # The state replay puts back: the journaled copy's, or nothing.
     prior: dict[str, Any] = field(default_factory=lambda: dict(_ABSENT))
+    # The verified recorded mode replay gives the restored path (#5111).
+    mode: int | dict[str, int] | None = None
 
 
 def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
@@ -573,7 +580,11 @@ def _validate_unit(
         except _Unproven:
             if not _shared_config_vouched(rel, path, kind, copy, events, ledger):
                 raise
-    return _Replay(rel, path, kind, copy, expected, ancestors, prior=_state(copy))
+    mode = _modes.verified_mode(line.get("mode"), kind, copy)
+    if mode is None:
+        raise _Unproven(rel, "the journal does not record a verifiable mode")
+    prior = _modes.with_recorded_mode(_state(copy), mode)
+    return _Replay(rel, path, kind, copy, expected, ancestors, prior=prior, mode=mode)
 
 
 def _check_vouched(
@@ -706,22 +717,21 @@ def _apply(unit: _Replay) -> None:
     if unit.copy is None:
         raise OSError("no journal copy to restore from")
     path.parent.mkdir(parents=True, exist_ok=True)
-    staged = Path(tempfile.mkdtemp(prefix=".apm-replay-", dir=path.parent)) / "staged"
+    # Beside its destination, so it gets every recorded mode before the rename.
+    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"
     try:
-        if unit.kind == "file":
-            staged.write_bytes(_read_no_follow(unit.copy))
-            shutil.copystat(unit.copy, staged, follow_symlinks=False)
-            written = {"": compute_file_hash(staged)}
-        else:
-            shutil.copytree(unit.copy, staged, symlinks=True)
-            written = _tree_hashes(staged)
-        if written != unit.expected:
+        _modes.stage_private(unit.copy, staged, unit.kind, _read_no_follow)
+        written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
+        if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
+        _modes.apply_entry_modes(staged, unit.mode)
+        _modes.apply_own_mode(staged, unit.mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)
     finally:
-        robust_rmtree(staged.parent)
+        if os.path.lexists(staged):
+            _remove(staged)
 
 
 def _keep(store: Path) -> Path:
@@ -740,6 +750,8 @@ def _keep(store: Path) -> Path:
 
 
 _KEEP_CHANGED = "it changed after the interrupted install"
+_KEEP_WIDER = "its recorded mode is wider than it has now"
+_KEEP_ACL = "it carries a POSIX ACL"
 
 
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
@@ -759,10 +771,16 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
             ours = _holds_apm_state(unit)
         except OSError:
             ours = False  # unreadable now: never destroy what cannot be inspected
-        if ours:
-            apply.append(unit)
-        else:
+        if not ours:
             kept.append((unit.rel, _KEEP_CHANGED))
+        elif unit.copy is not None and _modes.carries_acl(unit.path, unit.copy):
+            kept.append((unit.rel, _KEEP_ACL))
+        elif unit.copy is not None and not _modes.never_wider(
+            unit.path, unit.copy, unit.kind, unit.mode
+        ):
+            kept.append((unit.rel, _KEEP_WIDER))  # never widen beyond what is there (#5134)
+        else:
+            apply.append(unit)
     return apply, kept
 
 
@@ -789,22 +807,6 @@ def _holds_apm_state(unit: _Replay) -> bool:
 
 
 _ABSENT_EXPECTED = "absent"
-
-
-def _ensure_listable(path: Path) -> None:
-    """Raise ``OSError`` when a directory below *path* cannot be listed.
-
-    ``Path.rglob`` skips such a subtree silently, so its fingerprint would
-    omit entries a user may have changed.
-    """
-    if not path.is_dir() or path.is_symlink():
-        return
-
-    def fail(exc: OSError) -> None:
-        raise exc
-
-    for _ in os.walk(path, onerror=fail):
-        pass
 
 
 def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
@@ -927,14 +929,23 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     return None
 
 
-def has_abandoned_journals(store_parent: Path) -> bool:
-    """Whether a killed install left a journal the next full install must handle."""
+def has_abandoned_journals(store_parent: Path, root: Any = None, workspace: Any = None) -> bool:
+    """Whether a killed install left a journal the next full install of *root* must handle."""
     with contextlib.suppress(OSError):
         return any(
-            store.is_dir() and not os.path.lexists(store / _RETAINED_MARKER)
+            store.is_dir()
+            and not os.path.lexists(store / _RETAINED_MARKER)
+            and (root is None or _replays_for(store, root, workspace))  # else any (#5064)
             for store in store_parent.glob(f"{_STORE_PREFIX}*")
         )
     return False
+
+
+def _replays_for(store: Path, root: Path, workspace: Path | None) -> bool:
+    """Replay for *root* handles *store*: no manifest, an unreadable identity, or its own."""
+    named = _store_identity(store) if os.path.lexists(store / _MANIFEST) else None
+    root = Path(os.path.abspath(root))
+    return named is None or named == (os.path.realpath(root), os.path.realpath(workspace or root))
 
 
 def replay_abandoned_journals(
@@ -963,7 +974,6 @@ def replay_abandoned_journals(
     replayed, after keeping it.
     """
     root = Path(os.path.abspath(root))
-    identity = (os.path.realpath(root), os.path.realpath(workspace or root))
     bases = _Bases(root, Path(os.path.abspath(receipts)))
     ledger, committed = functools.cache(ledger), functools.cache(committed)
     stores: list[Path] = []
@@ -978,8 +988,7 @@ def replay_abandoned_journals(
             # nothing replay can prove: reclaim it, as every install did before.
             shutil.rmtree(store, ignore_errors=True)
             continue
-        named = _store_identity(store)
-        if named is not None and named != identity:
+        if not _replays_for(store, root, workspace):
             continue
         outcome = _replay_store(store, bases, ledger, committed)
         restored += outcome.restored

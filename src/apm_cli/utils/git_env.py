@@ -26,13 +26,13 @@ import shutil
 import subprocess
 import sys
 import threading
-import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.utils.path_security import filesystem_containment
 from apm_cli.utils.subprocess_env import external_process_env
 
 # Module-level cached git executable path (successful resolutions only).
@@ -295,37 +295,9 @@ def _executable_exclusion_root() -> Path:
     return cwd
 
 
-def _within(path: Path, root: Path) -> bool:
-    """Whether *path* is *root* or lies under it, under the file system's case rules.
-
-    ``normcase`` folds case where the platform does (Windows). Elsewhere a
-    case-insensitive volume (default macOS) gives one directory several
-    spellings, so the ancestor spelled like *root* up to case and Unicode form
-    is asked whether it is the same directory; if that can't be checked, it
-    counts as the same.
-    """
-    if path == root or path.is_relative_to(root):
-        return True
-    folded, base = os.path.normcase(path), os.path.normcase(root)
-    if folded == base or folded.startswith(os.path.join(base, "")):
-        return True
-    spelled = _caseless(root)
-    for ancestor in (path, *path.parents):
-        if _caseless(ancestor) == spelled:
-            try:
-                return os.path.samefile(ancestor, root)
-            except OSError:
-                return True
-    return False
-
-
-def _caseless(path: Path) -> str:
-    """Return *path* folded for a caseless compare (NFC and NFD spellings agree).
-
-    Decomposing first and recomposing after matches Unicode canonical caseless
-    matching: folding can undo a composition the input had.
-    """
-    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", str(path)).casefold())
+def _inside_project(path: Path, root: Path) -> bool:
+    """Exclusion policy: a path whose containment can't be verified counts as inside."""
+    return filesystem_containment(path, root) is not False
 
 
 def _resolve_trusted_executable(name: str) -> str:
@@ -336,7 +308,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         directory = Path(entry).expanduser().resolve()
         try:
-            if _within(directory, exclusion_root):
+            if _inside_project(directory, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -357,7 +329,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         resolved = Path(candidate).resolve()
         try:
-            if _within(resolved, exclusion_root):
+            if _inside_project(resolved, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -418,7 +390,7 @@ def _links_into(directory: Path, root: Path) -> bool:
             target = entry.resolve()
         except (OSError, RuntimeError):
             continue
-        if _within(target, root):
+        if _inside_project(target, root):
             return True
     return False
 
@@ -449,7 +421,7 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
                 continue
             try:
                 directory = expanded.resolve(strict=True)
-                if _within(directory, exclusion_root):
+                if _inside_project(directory, exclusion_root):
                     continue
                 if _links_into(directory, exclusion_root):
                     continue
