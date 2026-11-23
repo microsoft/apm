@@ -5916,7 +5916,7 @@ def test_manifest_target_declaration_guard_rejects_raw_readers(
     [
         pytest.param(
             "src/apm_cli/models/manifest_io.py",
-            "    reject_manifest_anchors(manifest_path, text)\n",
+            "        reject_manifest_anchors(manifest_path, text)\n",
             "",
             id="read-owner-stops-rejecting-anchors",
         ),

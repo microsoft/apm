@@ -425,42 +425,31 @@ def _commit(
     output renders. Any failure restores all of it, so the tree returns to its
     pre-run state, and the full pipeline runs.
     """
-    from apm_cli.core.scope import get_apm_home
-    from apm_cli.install.deploy_snapshot import DeployJournal
     from apm_cli.install.fast_output import quiet
-    from apm_cli.integration import write_seam
+    from apm_cli.install.transaction import journaled_apply
 
-    journal = DeployJournal(get_apm_home() / "install-snapshots")
-
-    def seam(path: Path, contents: bool) -> None:
-        journal.record(path, contents=contents)
-
-    write_seam.listen(seam)
     try:
-        for staging, install_path in staged:
-            journal.record(install_path)
-            _commit_package(staging, install_path)
-        for path, data, _digest, _owner in files:
-            journal.record(path)
-            _write(path, data)
-        if recheck:
-            with quiet():
-                _audit_passes(project_root, fetch, content_integrity=False)
-        by_owner: dict[str, dict[Path, str]] = {}
-        for path, _data, digest, owner in files:
-            by_owner.setdefault(owner, {})[path] = digest
-        for owner, written in by_owner.items():
-            session.record(written, targets, owner)
-        session.flush()
-        render()
-    except BaseException as exc:
-        write_seam.stop_listening(seam)
-        journal.restore()
-        if isinstance(exc, Decline):
-            raise
+        with journaled_apply() as journal:
+            for staging, install_path in staged:
+                journal.record(install_path)
+                _commit_package(staging, install_path)
+            for path, data, _digest, _owner in files:
+                journal.record(path)
+                _write(path, data)
+            if recheck:
+                with quiet():
+                    _audit_passes(project_root, fetch, content_integrity=False)
+            by_owner: dict[str, dict[Path, str]] = {}
+            for path, _data, digest, owner in files:
+                by_owner.setdefault(owner, {})[path] = digest
+            for owner, written in by_owner.items():
+                session.record(written, targets, owner)
+            session.flush()
+            render()
+    except Decline:
+        raise
+    except Exception as exc:  # an interrupt still restores, then propagates
         raise Decline(f"write failed ({type(exc).__name__})") from exc
-    write_seam.stop_listening(seam)
-    journal.discard()
 
 
 def try_apply(

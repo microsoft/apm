@@ -7,7 +7,7 @@ import os
 import tempfile
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -21,6 +21,34 @@ from apm_cli.models.results import InstallDisposition, InstallResult
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
     from apm_cli.install.deploy_snapshot import DeployJournal
+
+
+@contextlib.contextmanager
+def journaled_apply() -> Iterator[DeployJournal]:
+    """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
+
+    The caller records each path it creates; every path written at the
+    integrator write seam inside the block is recorded too. If the block
+    raises, every recorded path is restored before the exception propagates.
+    """
+    from apm_cli.core.scope import get_apm_home
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration import write_seam
+
+    journal = DeployJournal(get_apm_home() / "install-snapshots")
+
+    def seam(path: Path, contents: bool) -> None:
+        journal.record(path, contents=contents)
+
+    write_seam.listen(seam)
+    try:
+        yield journal
+    except BaseException:
+        write_seam.stop_listening(seam)
+        journal.restore()
+        raise
+    write_seam.stop_listening(seam)
+    journal.discard()
 
 
 def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:

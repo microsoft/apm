@@ -1470,7 +1470,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
         "src/apm_cli/install/diff_apply.py": (
             "DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)",
             "session.record(written, targets, owner)",
-            "journal.restore()",
+            "with journaled_apply() as journal:",
             "session.flush()",
         ),
         # MCP write evidence (#4737) borrows the session's binding and paths only.
