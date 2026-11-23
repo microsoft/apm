@@ -37,13 +37,14 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 import pytest
 from hypothesis import strategies as st
 from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
+from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle.generator.rules import FIRST_PARTY_MCP_CELL
 from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.machines._kit import (
@@ -109,7 +110,17 @@ pytestmark = [
     ),
 ]
 
-OPS = ("install", "update", "uninstall", "prune", "compile", "lock", "marketplace")
+OPS = (
+    "install",
+    "update",
+    "uninstall",
+    "prune",
+    "compile",
+    "lock",
+    "marketplace",
+    "audit",
+    "approve-deny",
+)
 FORMS = (
     "shorthand",
     "git-object",
@@ -154,9 +165,13 @@ _MCP_NAMES = {
     INLINE_SERVER: frozenset({INLINE_SERVER}),
 }
 _CLOSED_PROXY = "http://127.0.0.1:9"
-_NO_DRY_RUN = frozenset({"lock", "marketplace"})
+_NO_DRY_RUN = frozenset({"lock", "marketplace", "approve-deny"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
 _KEEPING = frozenset({"lock", "compile", "marketplace"})
+# Ops that act with a local bundle in place: they keep it (keeps_local_bundles).
+_BUNDLE_OPS = frozenset({"lock", "compile"})
+# A local package that ships only an instruction (author_doc).
+DOC_PACKAGE = "p-doc"
 # Forms a marketplace catalog declares: ``apm marketplace update`` acts on their source.
 # Local catalogs: a directory (marketplace-local) and a direct marketplace.json file
 # (marketplace-file); each lists one plugin carrying every observable primitive.
@@ -221,17 +236,53 @@ CHOICES = (
     Choice("local-path", "p-canvas", frozenset({"canvas"})),
     Choice("native", "p-native-claude", _NATIVE, frozenset({"skill", "mcp"})),
     Choice("native", "p-native-claude-bin", _NATIVE, frozenset({"skill", "bin"})),
+    Choice("native", "p-native-claude-exec", _NATIVE, frozenset({"skill", "hook", "lsp"})),
+    Choice("local-path", DOC_PACKAGE, frozenset({"other-file"})),
     Choice("pkg-registry", "p-skill", _SKILL),
     Choice("pkg-registry", "p-exec", _EXEC),
     Choice("mcp-registry", "p-registry", frozenset({"mcp"})),
     *(
-        Choice(form, package, frozenset({"skill", "hook", "bin", "mcp", "lsp", "canvas"}))
+        Choice(
+            form,
+            package,
+            frozenset({"skill", "hook", "bin", "mcp", "lsp", "canvas", "other-file"}),
+        )
         for form, (_, package) in LOCAL_CATALOGS.items()
     ),
     Choice("inline-mcp", INLINE_SERVER, frozenset({"mcp"})),
+    # The LSP and canvas packages from git, from the world's git catalog and from the
+    # package registry (one identity with the local package: declaring any of them
+    # replaces it; see remote_source_pass).
+    *(
+        Choice(form, package, frozenset({kind}))
+        for package, kind in (("p-lsp", "lsp"), ("p-canvas", "canvas"))
+        for form in ("shorthand", "marketplace-object", "pkg-registry")
+    ),
+    # The native plugin with bin/ from the world's git catalog (a skill next to an
+    # executable, so approve decides it).
+    Choice("marketplace-object", "p-native-claude-bin", _NATIVE, frozenset({"skill", "bin"})),
 )
-_BY_FORM = {choice.form: choice for choice in CHOICES}
-_REGISTRY_SKILL, _REGISTRY_EXEC = (c for c in CHOICES if c.form == "pkg-registry")
+_BY_FORM: dict[str, Choice] = {}
+for _choice in CHOICES:
+    _BY_FORM.setdefault(_choice.form, _choice)
+_SWAPPED = ("p-lsp", "p-canvas", "p-native-claude-bin")
+_LOCAL_FORMS = frozenset({"local-path", "native"})
+_REMOTE_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form not in _LOCAL_FORMS)
+_LOCAL_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form in _LOCAL_FORMS)
+_REMOTE_FORMS = frozenset(
+    {
+        "shorthand",
+        "git-object",
+        "marketplace-object",
+        "plugin-at-mkt",
+        "pkg-registry",
+        "mcp-registry",
+    }
+)
+_REGISTRY_SKILL, _REGISTRY_EXEC = (
+    next(c for c in CHOICES if c.form == "pkg-registry" and c.package == name)
+    for name in ("p-skill", "p-exec")
+)
 _MCP_FORMS = frozenset({"mcp-registry", "inline-mcp"})
 _CLI_FORMS = frozenset({"plugin-at-mkt", "bundle", *_MCP_FORMS})
 _DIAMOND = frozenset({"p-parent", "p-parent2"})
@@ -258,13 +309,44 @@ _EXPECTED_KINDS: Mapping[str, frozenset[str]] = {
 _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
 
+# The p-lsp bundle's LSP server shares the name of the local p-lsp package's: once the
+# bundle is approved and installed it owns the server, and the manifest install of p-lsp
+# is refused (an installed bundle owner never transfers). The spine leaves it parked.
+_PARKED_BUNDLES = frozenset({"p-lsp-bundle"})
+
+
+def decides(choice: Choice) -> bool:
+    """Whether ``apm approve``/``apm deny`` decide *choice*: a package with executables.
+
+    A root-declared MCP server is first-party: the gate never governs it and
+    ``approve`` finds no installed package to decide (U-FIRST-PARTY-MCP).
+    """
+    return (
+        choice.form not in _MCP_FORMS
+        and choice.package not in _PARKED_BUNDLES
+        and bool(choice.prims - UNGATED_KINDS)
+    )
+
+
+_DECIDED_FORMS = frozenset(c.form for c in CHOICES if decides(c))
+
+
 def applies(op: str, form: str) -> bool:
     """Whether *op* acts on a dependency of *form* (see the module docstring)."""
     if op == "marketplace":
         return form in _MARKET_FORMS
+    if op == "audit":
+        return True  # audit scans every deployed package, local bundles included
+    if op == "approve-deny":
+        return form in _DECIDED_FORMS
     if form == "bundle":
-        return op == "install"
+        return op == "install" or op in _BUNDLE_OPS
     return not (form in _MCP_FORMS and op == "uninstall")
+
+
+def acts(op: str, choice: Choice) -> bool:
+    """Whether *op* acts on the package of *choice* (its T3 cells)."""
+    return applies(op, choice.form) and (op != "approve-deny" or decides(choice))
 
 
 def t3_cells() -> frozenset[str]:
@@ -273,7 +355,7 @@ def t3_cells() -> frozenset[str]:
         f"T3|{op}|{choice.form}|{kind}"
         for op in OPS
         for choice in CHOICES
-        if applies(op, choice.form)
+        if acts(op, choice)
         for kind in choice.prims
     )
 
@@ -299,6 +381,10 @@ _COMMON = (
     "UPDATE=on",
 )
 _UNAPPROVED = "GATE=unapproved-exec"
+# ModelState decision -> its GATE factor value.
+_GATE_LEVEL = {"denied": "denied-executable"}
+# Executable-gate levels decide_pass drives each package with executables through.
+_DECIDED = ("GATE=allowed", "GATE=denied-executable", "GATE=revoked-after-deploy")
 # GATE=none: the gate-off pass (no ``executables`` block, the default user path).
 _MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "GATE=none", "FROZEN=on")
 # A root-declared MCP server has no executable-gate level (first-party, never parked).
@@ -341,6 +427,17 @@ X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
     **{(op, "shorthand"): _hostid("proxy-logical", lock) for op, lock in _HOST_LOCKS},
     ("update", "pkg-registry"): ("DEPLOYED=clean",),
     **{("install", form): (*_MANIFEST_CONTEXT, "DEPLOYED=clean") for form in LOCAL_CATALOGS},
+}
+# decide_pass: each package with executables is installed at every decided gate level;
+# a local bundle is installed again once approved.
+X_CONTEXT = {
+    **X_CONTEXT,
+    **{
+        ("install", form): (*X_CONTEXT[("install", form)], *_DECIDED)
+        for form in ("plugin-at-mkt", "native", "pkg-registry", *LOCAL_CATALOGS)
+    },
+    ("install", "bundle"): (*X_CONTEXT[("install", "bundle")], "GATE=allowed"),
+    ("marketplace", "plugin-at-mkt"): (*X_CONTEXT[("marketplace", "plugin-at-mkt")], *_DECIDED),
 }
 _FLAG_CONTEXT = {
     "--force": "FORCE=on",
@@ -419,8 +516,14 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
 KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
+def _instruction_text(package: str) -> str:
+    # A file-type glob keeps a per-file rule on every deployed target; Claude routes
+    # '**' instructions to AGENTS.md through compile instead (#3939, #4005).
+    return f'---\napplyTo: "**/*.py"\n---\n\nFollow the {package} conventions.\n'
+
+
 def author_catalog(root: Path, name: str, package: str, *, as_file: bool) -> Path:
-    """A local catalog listing one plugin that carries skill, hook, bin, MCP, LSP and canvas.
+    """A local catalog listing one plugin: skill, hook, bin, MCP, LSP, canvas and an instruction.
 
     Returns the source ``apm marketplace add`` takes: the catalog directory, or (with
     *as_file*) its ``marketplace.json``, whose relative plugin sources resolve from
@@ -449,6 +552,7 @@ def author_catalog(root: Path, name: str, package: str, *, as_file: bool) -> Pat
         ],
     )
     factory.add_skill(plugin, package, skill_text(package, f"Use {package}."))
+    factory.add_instruction(plugin, package, _instruction_text(package))
     factory.add_hook(plugin, "session", SESSION_HOOK)
     factory.add_canvas(plugin, package, CANVAS, assets={PurePosixPath("icon.txt"): b"c\n"})
     script = plugin.root / "bin" / package
@@ -492,6 +596,10 @@ class SourceMachine(MachineBase):
         self.proxy = False
         # Local catalog form -> its marketplace.json (the file ``marketplace update`` reads).
         self.catalogs: dict[str, Path] = {}
+        # A dependency left apm_modules/ (undeclared, or moved between a local path and a
+        # remote checkout): install drops its files and lock rows and keeps the checkout,
+        # which ``apm prune`` then removes (docs: reference/cli/install.md, stale files).
+        self.prune_pending = False
 
     # -- model -----------------------------------------------------------------
 
@@ -502,11 +610,15 @@ class SourceMachine(MachineBase):
         if names & _DIAMOND:
             names.add("p-child")
         return ModelState(
-            declared=frozenset(names), targets=self.model.targets, exec_gate=self.model.exec_gate
+            declared=frozenset(names),
+            decisions=self.model.decisions,
+            revoked=self.model.revoked,
+            targets=self.model.targets,
+            exec_gate=self.model.exec_gate,
         )
 
     def remote(self) -> bool:
-        return bool({"remote-skill", "remote-exec", "p-registry"} & set(self.slots))
+        return any(choice.form in _REMOTE_FORMS for choice in self.slots.values())
 
     def exits(self, op: str, *, dry_run: bool = False) -> frozenset[int]:
         if op == "compile" and not self.bench.lock_path.is_file():
@@ -518,7 +630,7 @@ class SourceMachine(MachineBase):
     def cells(self, op: str, mode: str, choices: Collection[Choice]) -> list[str]:
         cells = []
         for choice in choices:
-            if not applies(op, choice.form):
+            if not acts(op, choice):
                 continue
             cells.append(f"T5|{mode}|{op}|{choice.form}")
             cells += [f"T3|{op}|{choice.form}|{kind}" for kind in choice.prims]
@@ -542,7 +654,8 @@ class SourceMachine(MachineBase):
         elif choice.form not in _MCP_FORMS:
             # The project's own MCP servers are first-party: the gate never parks them.
             gated = choice.kinds - UNGATED_KINDS
-            found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
+            levels = {self.model.gate(choice.package, kind) for kind in gated}
+            found |= {f"GATE={_GATE_LEVEL.get(level, level)}" for level in levels}
         if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
             found.add("DEPLOYED=clean")
         hostid = None
@@ -559,11 +672,11 @@ class SourceMachine(MachineBase):
     def entry(self, choice: Choice) -> object:
         packages = self.bench.world.packages
         if choice.form == "shorthand":
-            return f"lifecycle/p-skill#{REF}"
+            return f"lifecycle/{choice.package}#{REF}"
         if choice.form == "git-object":
-            return {"git": f"{self.host_url()}/p-skill.git", "ref": REF}
+            return {"git": f"{self.host_url()}/{choice.package}.git", "ref": REF}
         if choice.form == "marketplace-object":
-            return {"name": "p-skill", "marketplace": MARKET}
+            return {"name": choice.package, "marketplace": MARKET}
         if choice.form in LOCAL_CATALOGS:
             return {"name": choice.package, "marketplace": LOCAL_CATALOGS[choice.form][0]}
         if choice.form == "pkg-registry":
@@ -572,6 +685,8 @@ class SourceMachine(MachineBase):
                 "id": f"lifecycle/{choice.package}",
                 "version": "1.0.0",
             }
+        if choice.package == DOC_PACKAGE:
+            return str(self.author_doc())
         return packages[choice.package].spec
 
     def host_url(self) -> str:
@@ -657,6 +772,7 @@ class SourceMachine(MachineBase):
         allowed = requested if op not in _KEEPING else self._keeping(requested)
         preview = self.preview(op, args, choices) if dry_run and op not in _NO_DRY_RUN else None
         converged = self.converged and self.network != "offline" and op != "uninstall"
+        converged = converged and not (op == "prune" and self.prune_pending)
         step = self.step(
             (op, *args),
             exits=self.exits(op),
@@ -669,6 +785,8 @@ class SourceMachine(MachineBase):
         if step.result.returncode == 0:
             if verify is not None:
                 verify(step)
+            if op == "prune":
+                self.prune_pending = False
             self.credit(step, op, args, choices, preview)
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
@@ -716,6 +834,7 @@ class SourceMachine(MachineBase):
             if "*incomplete" not in named:
                 unnamed |= removed - named
             observed, expected = sorted(unnamed), []
+        self.instructions_witnessed(step, op, choices)
         cells = self.cells(op, "real", choices)
         for choice in choices:
             if applies(op, choice.form):
@@ -736,6 +855,34 @@ class SourceMachine(MachineBase):
                     observed=observed,
                 ),
             )
+
+    def instructions_witnessed(self, step: Step, op: str, choices: Collection[Choice]) -> None:
+        """An other-file credit needs its evidence: each package's instruction under every
+        current target that deploys instructions, with its text, recorded in the lock."""
+        docs = [c for c in choices if "other-file" in c.prims and acts(op, c)]
+        if not docs or op == "uninstall":
+            return
+        lock = step.after.lock
+        recorded = (
+            {path for dep in lock.get_package_dependencies() for path in dep.deployed_files}
+            if lock is not None
+            else set()
+        )
+        for choice in docs:
+            for target in sorted(self.model.targets):
+                mapping = KNOWN_TARGETS[target].primitives.get("instructions")
+                if mapping is None:
+                    continue
+                relative = (
+                    f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/"
+                    f"{choice.package}{mapping.extension}"
+                )
+                path = step.after.deploy_root / relative
+                where = f"{op} {choice.form} {choice.package}: {relative}"
+                assert path.is_file(), f"{where} is not deployed"
+                text = path.read_text(encoding="utf-8")
+                assert f"Follow the {choice.package} conventions." in text, f"{where}: {text!r}"
+                assert relative in recorded, f"{where} is not recorded in the lock"
 
     def egress(self, step: Step) -> None:
         """Proxy-only law: online, every request reaches a world host through the proxy."""
@@ -864,7 +1011,10 @@ class SourceMachine(MachineBase):
         def change() -> None:
             self.write_slot(choice.slot, entry)
 
+        had = self.slots.get(choice.slot)
         self.edit(f"declare-{choice.form}", change)
+        if had is not None and had.form != choice.form and _LOCAL_FORMS & {had.form, choice.form}:
+            self.prune_pending = True  # the checkout moves between _local/ and a remote path
         self.entries[choice.slot] = entry
         self.slots[choice.slot] = choice
         self.converged = False
@@ -903,6 +1053,7 @@ class SourceMachine(MachineBase):
         if slot not in self.slots:
             return
         self.edit(f"undeclare-{self.slots[slot].form}", lambda: self.write_slot(slot, None))
+        self.prune_pending = True
         self.slots.pop(slot)
         self.entries.pop(slot, None)
         self.converged = False
@@ -912,8 +1063,36 @@ class SourceMachine(MachineBase):
     )
     def reconcile(self, op: str, dry_run: bool) -> None:
         args = ("--yes",) if op == "update" else ()
-        choices = [c for c in self._choices() if c.form != "bundle"]
-        self.command(op, args, choices, dry_run)
+        choices = [c for c in self._choices() if applies(op, c.form)]
+        bundles = op in _BUNDLE_OPS and any(c.form == "bundle" for c in choices)
+        self.command(
+            op, args, choices, dry_run, verify=self.keeps_local_bundles if bundles else None
+        )
+
+    def keeps_local_bundles(self, step: Step) -> None:
+        """lock and compile keep every local bundle's deployment-ledger record (a bundle has no
+        manifest entry, so nothing may resolve it away)."""
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        def bundles(observation: Observation) -> frozenset[str]:
+            lock = observation.lock
+            if lock is None:
+                return frozenset()
+            return DeploymentLedgerCodec.local_bundle_values(
+                DeploymentLedgerCodec.from_lockfile(lock)
+            )
+
+        recorded, kept = bundles(step.before), bundles(step.after)
+        assert kept == recorded, f"{step.op.name}: {sorted(recorded)} -> {sorted(kept)}"
+
+    def author_doc(self) -> Path:
+        """A local package that ships only an instruction (other-file), authored once."""
+        root = self.bench.world.root / "authored" / DOC_PACKAGE
+        if not root.exists():
+            factory = LocalPackageFactory(root.parent)
+            package = factory.create(DOC_PACKAGE, version="1.0.0")
+            factory.add_instruction(package, DOC_PACKAGE, _instruction_text(DOC_PACKAGE))
+        return root
 
     def gate_off_pass(self) -> None:
         """No executables gate: every declared form deploys without approval (GATE=none).
@@ -944,6 +1123,183 @@ class SourceMachine(MachineBase):
         self.model = self.model.with_exec_gate(True)
         self.converged = False
         self.command("install", (), manifest, False, verify=self.gate_on_keeps_first_party_mcp)
+
+    def audit_pass(self) -> None:
+        """``apm audit --dry-run`` then ``apm audit`` on the converged project.
+
+        Read-only for every declared form, local bundles included; without ``--strip``
+        the dry run audits the same way and changes nothing.
+        """
+        choices = [c for c in self._choices() if acts("audit", c)]
+        for mode, args in (("dry-run", ("audit", "--dry-run")), ("real", ("audit",))):
+            cells = self.cells("audit", mode, choices)
+            step = self.step(
+                args,
+                exits={0},
+                cells=cells,
+                read_only=True,
+                mutating=False,
+                allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE)},
+            )
+            self.egress(step)
+            credited = cells if mode == "real" else [c for c in cells if c.startswith("T5|")]
+            for cell in dict.fromkeys(credited):
+                check_obligation(
+                    cell,
+                    strength="e2e-evidence",
+                    before=step.before,
+                    after=step.after,
+                    result=step.result,
+                    evidence=Evidence(unchanged=_DURABLE, exit=0),
+                )
+
+    def decide(self, args: tuple[str, ...], choices: Collection[Choice], says: str) -> Step:
+        """One ``apm approve`` / ``apm deny`` step: it writes only the project's apm.yml.
+
+        *says* is the line each decided package must print (``{name}`` is its name).
+        """
+        cells = self.cells("approve-deny", "real", choices)
+        step = self.step(
+            args,
+            exits={0},
+            cells=cells,
+            mutating=True,
+            forbidden={"project": ("*",), "outside": ("*",)},
+            allowed={"project": ("apm.yml",), "home": _PROJECT_HOME_ALLOWED},
+        )
+        self.egress(step)
+        lines = [says.format(name=re.escape(c.package.removesuffix("-bundle"))) for c in choices]
+        for cell in dict.fromkeys(cells):
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=Evidence(
+                    unchanged={"project": ("apm.lock.yaml",), "outside": ("*",)},
+                    exit=0,
+                    output_matches=lines,
+                ),
+            )
+        return step
+
+    def _decided(self, verdict: str, choices: Collection[Choice]) -> ModelState:
+        model = self.model
+        for choice in choices:
+            kinds = KINDS.get(choice.package, choice.prims)
+            model = getattr(model, verdict)(choice.package, kinds)
+        return model
+
+    def reinstall(self, manifest: list[Choice], *, refresh: bool) -> None:
+        """``apm install`` under the current gate decisions (I4), then the catalog refresh."""
+        self.converged = False
+        self.command("install", (), manifest, False, verify=self.deploys_what_the_model_allows)
+        if refresh:
+            self.refresh_marketplace(every=True)
+
+    def decide_pass(self, *, refresh: bool = True) -> None:
+        """``apm approve`` / ``apm deny`` on the converged project, every hint executed.
+
+        Each package with executables goes through every executable-gate level, and an
+        install (and, with *refresh*, ``marketplace update``) runs at each one:
+
+        - allowed: ``approve --all`` pins them (never a root-declared MCP server: R5,
+          U-FIRST-PARTY-MCP);
+        - denied-executable: ``deny`` of every one, then the ``apm install`` its hint
+          names retires their executables (I4);
+        - revoked-after-deploy: approved again, with each local bundle approved by the
+          content key ``approve --pending`` prints and installed again as that hint
+          says (after the deny: the p-exec bundle's hook file shares the p-exec
+          package's name), then the approvals are withdrawn from apm.yml; the
+          install retires what they allowed.
+        """
+        saved = self.bench.manifest().get("executables")
+        decisions = self.model.decisions
+        manifest = [c for c in self._choices() if c.form != "bundle"]
+        packages = [c for c in manifest if acts("approve-deny", c)]
+        approved = r"\[\+\] Approved \S*{name} at these exact"
+        step = self.decide(("approve", "--all"), packages, approved)
+        ids = re.findall(r"^\[\+\] Approved (\S+) at these exact", step.result.stdout, re.M)
+        self.model = self._decided("approve", packages)
+        self.reinstall(manifest, refresh=refresh)
+
+        step = self.decide(("deny", *ids), packages, r"\[i\] Denied \S*{name}")
+        hint = "Run 'apm install' to remove executables already deployed"
+        assert hint in step.result.stdout, step.result.stdout
+        self.model = self._decided("deny", packages)
+        self.reinstall(manifest, refresh=refresh)
+
+        self.decide(("approve", *ids), packages, approved)
+        self.model = self._decided("approve", packages)
+        bundles = [c for c in self._choices() if c.form == "bundle" and decides(c)]
+        if bundles:
+            pending = self.step(
+                ("approve", "--pending"),
+                exits={0},
+                read_only=True,
+                mutating=False,
+                allowed={"home": _PROJECT_HOME_ALLOWED},
+            )
+            keys = re.findall(r"^\s*apm approve '([^']+)'\s*$", pending.result.stdout, re.M)
+            for choice in bundles:
+                source = choice.package.removesuffix("-bundle")
+                key = next(k for k in keys if k.startswith(f"{source}#"))
+                self.decide(("approve", key), [choice], "{name}")
+                self.model = self._decided("approve", [choice])
+                self.declare_by_cli(choice, False)  # the hint: install the bundle again
+        self.reinstall(manifest, refresh=False)
+
+        def restore() -> None:
+            data = self.bench.manifest()
+            data.pop("executables", None)
+            if saved is not None:
+                data["executables"] = saved
+            self.bench.write_manifest(data)
+
+        self.edit("executables-revoke", restore)
+        self.model = self._decided("revoke", [*packages, *bundles])
+        self.reinstall(manifest, refresh=refresh)
+        self.model = replace(self.model, decisions=decisions, revoked=frozenset())
+
+    def remote_source_pass(self) -> None:
+        """The LSP and canvas packages from git, the git catalog and the registry.
+
+        Each remote form replaces the local package (one identity), is reconciled,
+        audited, approved by name and installed (allowed), has that approval withdrawn
+        and is installed again (revoked-after-deploy, I4), then is uninstalled; the
+        local packages are declared again.
+        """
+        approved = r"\[\+\] Approved \S*{name} at these exact"
+        for choice in _REMOTE_SWAPS:
+            self.declare(choice, False)
+            for op in ("install", "update", "prune", "compile", "lock"):
+                self.reconcile(op, False)
+            self.audit_pass()
+            if choice.form in _MARKET_FORMS:
+                self.refresh_marketplace()
+            saved = self.bench.manifest().get("executables")
+            decisions = self.model.decisions
+            manifest = [c for c in self._choices() if c.form != "bundle"]
+            self.decide(("approve", choice.package), [choice], approved)
+            self.model = self._decided("approve", [choice])
+            self.reinstall(manifest, refresh=False)
+
+            def restore(saved: object = saved) -> None:
+                data = self.bench.manifest()
+                data.pop("executables", None)
+                if saved is not None:
+                    data["executables"] = saved
+                self.bench.write_manifest(data)
+
+            self.edit("executables-revoke", restore)
+            self.model = self._decided("revoke", [choice])
+            self.reinstall(manifest, refresh=False)
+            self.model = replace(self.model, decisions=decisions, revoked=frozenset())
+            self.uninstall(choice.slot, True)
+        for choice in _LOCAL_SWAPS:
+            self.declare(choice, False)
+        self.reconcile("install", False)
 
     def deploys_what_the_model_allows(self, step: Step) -> None:
         """A resolving step deploys exactly the observable surfaces the model allows."""
@@ -1147,11 +1503,14 @@ def replay_spine(machine: SourceMachine) -> None:
         machine.declare(choice, False)
         for op in ("install", "update", "prune", "compile", "lock"):
             machine.reconcile(op, True)
+        machine.audit_pass()
         if choice.form == "marketplace-object":
             machine.refresh_marketplace()
         if choice is _REGISTRY_SKILL:
             machine.context_pass()
             machine.gate_off_pass()
+            machine.decide_pass()
+    machine.remote_source_pass()
     # p-lsp still survives this uninstall (#4214).
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
@@ -1159,13 +1518,22 @@ def replay_spine(machine: SourceMachine) -> None:
     machine.declare(_REGISTRY_EXEC, False)
     for op in ("install", "update", "prune", "compile", "lock"):
         machine.reconcile(op, True)
+    machine.decide_pass(refresh=False)
+    machine.audit_pass()
     machine.uninstall("remote-exec", True)
     for choice in remote_skills:
         machine.declare(choice, False)
         machine.reconcile("install", False)
         machine.uninstall("remote-skill", True)
     machine.uninstall_together([c for c in CHOICES if c.form in LOCAL_CATALOGS], True)
-    for slot in ("p-parent", "p-canvas", "p-native-claude", "p-native-claude-bin"):
+    for slot in (
+        "p-parent",
+        "p-canvas",
+        "p-native-claude",
+        "p-native-claude-bin",
+        "p-native-claude-exec",
+        DOC_PACKAGE,
+    ):
         machine.uninstall(slot, True)
     for slot in _MCP_SERVERS:
         machine.undeclare(slot)

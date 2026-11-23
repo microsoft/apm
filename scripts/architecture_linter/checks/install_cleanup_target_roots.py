@@ -26,6 +26,9 @@ _DIRECTORY_REMOVALS = frozenset(
         (_OWNER, "cleanup_empty_parents"),
         # A retired skill's own directory, never its skills root.
         ("src/apm_cli/integration/cleanup.py", "_safe_remove_skill_directory"),
+        # The same directory emptied under --trust-lockfile consent, bottom-up,
+        # never recursively (#4295).
+        ("src/apm_cli/integration/cleanup.py", "_remove_empty_directory"),
         # LSP config directories the server spec created for its config file.
         ("src/apm_cli/integration/lsp_integrator.py", "_clean_target_config"),
         # The deploy write seam's wrapper (#4282); each caller of
