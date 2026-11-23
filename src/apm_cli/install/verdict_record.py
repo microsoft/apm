@@ -110,6 +110,18 @@ ENV_NOT_VERDICT = (
     "APM_INSTALL_FAST_PATH",
     "APM_TEST_FAIL_LOCK_REPLACE",
     "APM_TEST_LOCK_COMMIT",
+    # CI detection for the record only: CI never hits or records (QL D2).
+    "TF_BUILD",
+    "JENKINS_URL",
+    "BUILD_ID",
+    "TEAMCITY_VERSION",
+    "CODEBUILD_BUILD_ID",
+    "GITLAB_CI",
+    "BUILDKITE",
+    "CIRCLECI",
+    "BITBUCKET_BUILD_NUMBER",
+    "APPVEYOR",
+    "DRONE",
 )
 # A run with any of these set never hits (and never records): the full
 # pipeline owns source routing through a registry proxy, and CI commonly
@@ -117,6 +129,17 @@ ENV_NOT_VERDICT = (
 _NO_HIT_ENV = (
     "CI",
     "GITHUB_ACTIONS",
+    "TF_BUILD",
+    "JENKINS_URL",
+    "BUILD_ID",
+    "TEAMCITY_VERSION",
+    "CODEBUILD_BUILD_ID",
+    "GITLAB_CI",
+    "BUILDKITE",
+    "CIRCLECI",
+    "BITBUCKET_BUILD_NUMBER",
+    "APPVEYOR",
+    "DRONE",
     "PROXY_REGISTRY_URL",
     "PROXY_REGISTRY_ONLY",
     "ARTIFACTORY_BASE_URL",
@@ -180,6 +203,18 @@ def _served(argv: list[str]) -> bool:
     return tuple(argv) in SERVED_ARGV
 
 
+def _location_trusted(root: Path) -> bool:
+    """The key and records live outside the project and the cache root (W3d B-c, QL D2)."""
+    home = Path(os.path.realpath(_apm_home()))
+    for base in (Path(os.path.realpath(root)), _cache_root()):
+        if base is None:
+            continue
+        base = Path(os.path.realpath(base))
+        if home == base or base in home.parents:
+            return False
+    return True
+
+
 def _hits_allowed() -> bool:
     if (_env("APM_INSTALL_FAST_PATH") or "").strip().lower() in _KILL_VALUES:
         return False  # the documented fast-path kill switch also disables the record
@@ -207,16 +242,22 @@ def _record_path(root: Path) -> Path:
 
 
 def _read_nofollow(path: Path) -> bytes | None:
-    """Bytes of a regular file opened without following a final symlink; None if absent."""
+    """Bytes of a regular file opened no-follow, non-blocking, judged by fstat; None if absent."""
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
     try:
-        st = os.lstat(path)
+        fd = os.open(path, flags)
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(st.st_mode):
-        raise OSError(f"not a regular file: {path}")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags)
     with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(f"not a regular file: {path}")
+        if os.name == "nt" and os.path.islink(path):
+            raise OSError(f"linked file: {path}")
         return handle.read()
 
 
@@ -230,6 +271,7 @@ class _Digest:
     """Length-prefixed HMAC over tagged inputs (QL C7)."""
 
     def __init__(self, key: bytes) -> None:
+        self._key = key
         self._mac = hmac.new(key, digestmod=hashlib.sha256)
         self.tags: list[tuple[str, str]] = []
 
@@ -237,7 +279,8 @@ class _Digest:
         encoded = tag.encode("utf-8", "surrogateescape")
         self._mac.update(len(encoded).to_bytes(4, "little") + encoded)
         self._mac.update(len(data).to_bytes(8, "little") + data)
-        self.tags.append((tag, hashlib.sha256(data).hexdigest()[:16]))
+        # Keyed per-input digests (diagnostics only): a secret value never leaves unkeyed.
+        self.tags.append((tag, hmac.new(self._key, data, hashlib.sha256).hexdigest()[:16]))
 
     def file(self, tag: str, path: Path) -> None:
         data = _read_nofollow(path)
@@ -306,6 +349,31 @@ def _inputs(digest: _Digest, root: Path, argv: list[str], lock_text: bytes) -> N
             digest.put(f"listing:{rel}", "\x00".join(listing).encode("utf-8", "surrogateescape"))
 
 
+# A record expires within a day, and within the code-capped policy TTL of its
+# oldest cached policy, so a new org policy always reaches a hit (W3d R2).
+_RECORD_MAX_AGE = 24 * 3600
+_POLICY_TTL_CAP = 3600  # policy/discovery.DEFAULT_CACHE_TTL (asserted equal in the cells)
+_CLOCK_SKEW = 300
+
+
+def _expiry(issued: float) -> float:
+    expiry = issued + _RECORD_MAX_AGE
+    cache = _cache_root()
+    if cache is not None:
+        for path in _walk_files(cache / "policy_v1"):
+            if path.name.endswith(".meta.json"):
+                raw = _read_nofollow(path)
+                cached_at = json.loads(raw or b"{}").get("cached_at", 0)
+                expiry = min(expiry, float(cached_at) + _POLICY_TTL_CAP)
+    return expiry
+
+
+def _body(digest: _Digest, record: dict) -> None:
+    """The replayed bytes and their validity window are authenticated too (W3d R1)."""
+    for field in ("stdout", "stderr", "exit", "issued_at", "expires_at"):
+        digest.put(f"body:{field}", repr(record.get(field)).encode("utf-8", "surrogateescape"))
+
+
 def _deployed_intact(root: Path, lock: dict) -> bool:
     """Every deployed file and package copy, re-hashed no-follow (QL D5)."""
     for dep in lock.get("dependencies") or []:
@@ -318,15 +386,30 @@ def _deployed_intact(root: Path, lock: dict) -> bool:
             if "sha256:" + hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest() != expected:
                 return False
         repo = str(dep.get("repo_url", ""))
-        if not repo or ".." in repo.split("/"):
-            return False
+        expected = dep.get("content_hash")
+        if not repo or ".." in repo.split("/") or not expected or dep.get("virtual_path"):
+            return False  # no locked content hash: the copy cannot be proven (W3d R3)
         package = root / "apm_modules" / Path(*repo.split("/"))
-        if package.is_symlink():
+        if package.is_symlink() or not package.is_dir():
             return False
-        for path in _walk_files(package, skip=(".git",)):
-            if _read_nofollow(path) is None:
-                return False
+        from apm_cli.deps.carried_license import carried_license_paths
+        from apm_cli.utils.content_hash import verify_package_hash
+
+        exclude = carried_license_paths([_Row(item) for item in dep.get("carried_licenses") or ()])
+        framed = bool(dep.get("content_hash_framed", True))
+        if not verify_package_hash(package, str(expected), exclude=exclude, framed=framed):
+            return False
     return True
+
+
+class _Row:
+    """Attribute view of a lock mapping, for owners that read lock rows by attribute."""
+
+    def __init__(self, data: Any) -> None:
+        self._data = data if isinstance(data, dict) else {}
+
+    def __getattr__(self, name: str) -> Any:
+        return self._data.get(name)
 
 
 def _trace(message: str) -> None:
@@ -340,6 +423,8 @@ def replay(argv: list[str]) -> bool:
     if not _served(argv) or not _hits_allowed():
         return False
     root = Path.cwd()
+    if not _location_trusted(root):
+        return False
     try:
         record_path = _record_path(root)
         raw = _read_nofollow(record_path)
@@ -355,6 +440,12 @@ def replay(argv: list[str]) -> bool:
             return False
         digest = _Digest(key)
         _inputs(digest, root, argv, lock_text)
+        _body(digest, record)
+        now = time.time()
+        issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
+        if now > expires or now < issued - _CLOCK_SKEW:
+            _trace("miss (expired)")
+            return False
         if not hmac.compare_digest(digest.hexdigest(), str(record.get("mac", ""))):
             old = dict(record.get("tags") or [])
             changed = sorted(t for t, h in digest.tags if old.get(t) != h)
@@ -417,6 +508,8 @@ def recording(argv: list[str]) -> Iterator[None]:
 def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
     root = Path.cwd()
     try:
+        if not _location_trusted(root):
+            return  # never create a key or record inside the project or cache
         key = _key(create=True)
         lock_text = _read_nofollow(root / "apm.lock.yaml")
         if key is None or lock_text is None:
@@ -431,20 +524,29 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
             for line in stderr_text.splitlines(keepends=True)
             if "install fast path:" not in line
         )
+        issued = time.time()
         record = {
             "v": RECORD_VERSION,
-            "mac": digest.hexdigest(),
-            "tags": digest.tags,
             "stdout": stdout_text,
             "stderr": stderr_kept,
             "exit": 0,
+            "issued_at": issued,
+            "expires_at": _expiry(issued),
         }
+        _body(digest, record)
+        record["mac"] = digest.hexdigest()
+        record["tags"] = digest.tags
+        import tempfile
+
         path = _record_path(root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(record, handle)
-        os.replace(tmp, path)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".record-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(record, handle)
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
     except (OSError, ValueError, TypeError):
         return

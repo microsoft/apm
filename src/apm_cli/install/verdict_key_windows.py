@@ -18,7 +18,11 @@ _SE_FILE_OBJECT = 1
 _TOKEN_QUERY = 0x0008
 _TOKEN_USER = 1
 _ACCESS_ALLOWED_ACE_TYPE = 0
-_ACCESS_ALLOWED_OBJECT_ACE_TYPE = 5
+# ACCESS_ALLOWED (SID-checked), ACCESS_DENIED, SYSTEM_AUDIT, SYSTEM_ALARM, MANDATORY_LABEL.
+_ACE_TYPES_KNOWN = frozenset({0, 1, 2, 3, 0x11})
+_PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+_ACL_REVISION = 2
+_FILE_ALL_ACCESS = 0x001F01FF
 _WIN_LOCAL_SYSTEM_SID = 22
 _WIN_BUILTIN_ADMINISTRATORS_SID = 26
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -113,10 +117,10 @@ def private_to_current_user(path: Path) -> bool:  # pragma: no cover - Windows o
             if not advapi.GetAce(dacl, index, ctypes.byref(ace)) or not ace.value:
                 return False
             ace_type = ctypes.c_ubyte.from_address(ace.value).value
-            if ace_type == _ACCESS_ALLOWED_OBJECT_ACE_TYPE:
-                return False  # unexpected on a file: refuse rather than parse
+            if ace_type not in _ACE_TYPES_KNOWN:
+                return False  # callback, compound or object ACEs may grant access: refuse
             if ace_type != _ACCESS_ALLOWED_ACE_TYPE:
-                continue  # deny and audit ACEs never widen access
+                continue  # deny, audit, alarm and label ACEs never widen access
             sid = ctypes.c_void_p(ace.value + 8)  # ACE_HEADER (4) + ACCESS_MASK (4)
             if not advapi.IsValidSid(sid):
                 return False
@@ -131,33 +135,54 @@ def private_to_current_user(path: Path) -> bool:  # pragma: no cover - Windows o
         kernel.LocalFree(descriptor)
 
 
-def _current_user_sid_string() -> str | None:  # pragma: no cover - Windows only
+def restrict_to_current_user(path: Path) -> bool:  # pragma: no cover - Windows only
+    """Own *path* as the token user with a protected DACL granting only that user.
+
+    Done through the Windows security API (no child process): a fresh ACL with
+    one ACCESS_ALLOWED ACE for the token user's SID, set with
+    PROTECTED_DACL_SECURITY_INFORMATION so nothing is inherited.
+    """
     try:
         ctypes, wintypes, advapi, kernel = _api()
     except (OSError, AttributeError):
-        return None
+        return False
     user, _keepalive = _current_user_sid(ctypes, wintypes, advapi, kernel)
     if not user:
-        return None
-    advapi.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
-    text = wintypes.LPWSTR()
-    if not advapi.ConvertSidToStringSidW(ctypes.c_void_p(user), ctypes.byref(text)):
-        return None
-    try:
-        return text.value
-    finally:
-        kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
-
-
-def restrict_to_current_user(path: Path) -> None:  # pragma: no cover - Windows only
-    """Strip inherited ACEs and grant only the current user's SID (icacls, once, at creation)."""
-    import subprocess
-
-    sid = _current_user_sid_string()
-    if sid is None:
-        return  # the privacy check then refuses the key
-    subprocess.run(
-        ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:F"],
-        capture_output=True,
-        check=False,
+        return False
+    advapi.GetLengthSid.argtypes = [ctypes.c_void_p]
+    advapi.GetLengthSid.restype = wintypes.DWORD
+    advapi.InitializeAcl.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD]
+    advapi.AddAccessAllowedAce.argtypes = [
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    advapi.SetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR,
+        ctypes.c_int,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+    ]
+    advapi.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    size = 8 + 8 + advapi.GetLengthSid(ctypes.c_void_p(user)) + 16  # ACL + ACE header/mask + SID
+    acl = ctypes.create_string_buffer(size)
+    if not advapi.InitializeAcl(acl, size, _ACL_REVISION):
+        return False
+    if not advapi.AddAccessAllowedAce(acl, _ACL_REVISION, _FILE_ALL_ACCESS, ctypes.c_void_p(user)):
+        return False
+    status = advapi.SetNamedSecurityInfoW(
+        str(path),
+        _SE_FILE_OBJECT,
+        _OWNER_SECURITY_INFORMATION
+        | _DACL_SECURITY_INFORMATION
+        | _PROTECTED_DACL_SECURITY_INFORMATION,
+        ctypes.c_void_p(user),
+        None,
+        ctypes.cast(acl, ctypes.c_void_p),
+        None,
     )
+    return status == 0

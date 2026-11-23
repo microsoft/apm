@@ -42,9 +42,13 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (root / "apm_modules" / "o" / "p").mkdir(parents=True)
     (root / "apm_modules" / "o" / "p" / "apm.yml").write_text("name: p\n", encoding="utf-8")
     (root / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+    from apm_cli.utils.content_hash import compute_package_hash
+
     digest = "sha256:" + hashlib.sha256(_BODY).hexdigest()
+    package_hash = compute_package_hash(root / "apm_modules" / "o" / "p", framed=True)
     (root / "apm.lock.yaml").write_text(
         "lockfile_version: '1'\ndependencies:\n- repo_url: o/p\n"
+        f"  content_hash: {package_hash}\n  content_hash_framed: true\n"
         f"  deployed_file_hashes:\n    {_REL}: {digest}\n",
         encoding="utf-8",
     )
@@ -108,6 +112,7 @@ def test_output_with_another_clock_token_is_never_recorded(project: Path, capsys
         "manifest",
         "lock",
         "deployed bytes",
+        "package copy",
         "unmanaged file",
         "approvals",
         "policy cache",
@@ -126,6 +131,8 @@ def test_any_verdict_input_change_misses(
             handle.write("# edited\n")
     elif change == "deployed bytes":
         (project / _REL).write_bytes(b"# tampered\n")
+    elif change == "package copy":
+        (project / "apm_modules" / "o" / "p" / "apm.yml").write_text("name: q\n", encoding="utf-8")
     elif change == "unmanaged file":
         (project / ".github" / "prompts" / "extra.prompt.md").write_text("x\n", encoding="utf-8")
     elif change == "approvals":
@@ -263,3 +270,30 @@ def test_a_windows_key_created_by_apm_is_private(project: Path) -> None:
     key = _home(project) / verdict_record.KEY_FILE
     assert verdict_key_windows.private_to_current_user(key)
     assert key.stat().st_size == 32
+
+
+def test_an_expired_record_misses(project: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """A record is valid for a day at most, so a new org policy always reaches a hit."""
+    monkeypatch.setattr(verdict_record, "_RECORD_MAX_AGE", -1)
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_the_policy_ttl_cap_is_the_policy_owner_s() -> None:
+    from apm_cli.policy import discovery
+
+    assert verdict_record._POLICY_TTL_CAP == discovery.DEFAULT_CACHE_TTL
+
+
+def test_a_home_inside_the_project_never_records_or_hits(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A key or record shipped in a checkout must never authenticate anything (D2)."""
+    monkeypatch.setenv("APM_HOME", str(project / ".apm-home"))
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+    assert not (project / ".apm-home" / "verdicts").exists()
