@@ -213,13 +213,7 @@ def prune(ctx, dry_run):
         orphaned_packages = list(decision.removed_paths)
         for package in decision.retained_paths:
             logger.progress(f"Retained {package}: required package content.")
-        for dep_key, reason in decision.unverified_keys.items():
-            locked = lockfile.dependencies.get(dep_key) if lockfile is not None else None
-            logger.warning(
-                f"Retained {locked.repo_url if locked is not None else dep_key}: the dependency "
-                "graph could not be read completely, so prune cannot prove no package "
-                f"still needs it ({reason}). Restore the unreadable package, then prune again."
-            )
+        _warn_retained_rows(decision, lockfile, logger)
         missing_orphaned_keys = list(decision.stale_keys)
         deployment_ledger = (
             DeploymentLedgerCodec.from_lockfile(lockfile) if lockfile is not None else None
@@ -544,6 +538,23 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _warn_retained_rows(decision, lockfile, logger) -> None:
+    """Name every row prune keeps because it cannot prove removal safe (#4989)."""
+
+    def name(dep_key: str) -> str:
+        locked = lockfile.dependencies.get(dep_key) if lockfile is not None else None
+        return locked.repo_url if locked is not None else dep_key
+
+    for dep_key, reason in decision.anchored_keys.items():
+        logger.warning(f"Retained {name(dep_key)}: {reason}.")
+    for dep_key, reason in decision.unverified_keys.items():
+        logger.warning(
+            f"Retained {name(dep_key)}: the dependency graph could not be read completely, "
+            f"so prune cannot prove no package still needs it ({reason}). Restore the "
+            "unreadable package, then prune again."
+        )
 
 
 def _reparent_survivors(lockfile, decision) -> None:

@@ -120,7 +120,8 @@ class OrphanRemovalDecision:
     status every row the walk reaches from those roots takes, as a fresh
     install records them (#4833). ``unverified_keys`` names each lock row
     prune kept only because the graph could not prove it unreachable, with
-    the reason (#4989).
+    the reason (#4989); ``anchored_keys`` names each removed row prune keeps
+    because a survivor still resolves through it under another identity.
     """
 
     operation: OrphanOperation
@@ -141,6 +142,7 @@ class OrphanRemovalDecision:
     stale_keys: tuple[str, ...] = ()
     expected_paths: frozenset[str] = frozenset()
     unverified_keys: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    anchored_keys: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     superseded_roots: tuple[tuple[str, frozenset[str]], ...] = ()
     repairs: Mapping[str, tuple[str, str | None, bool]] = field(
         default_factory=lambda: MappingProxyType({})
@@ -529,6 +531,16 @@ def _decide_installed_paths(
     for keys in path_keys.values():
         removed_keys.update(keys)
     walk = walks[0] if walks and walks[0].complete else None
+    anchors = _alias_anchors(lockfile, removed_keys, retained, walk)
+    if anchors:
+        removed_keys -= set(anchors)
+        stale_keys = tuple(key for key in stale_keys if key not in anchors)
+        path_keys = {
+            path: kept
+            for path, keys in path_keys.items()
+            if (kept := tuple(key for key in keys if key not in anchors))
+        }
+        removed_paths = tuple(path for path in removed_paths if path in path_keys)
     reparented = _reparented_survivors(lockfile, removed_keys, retained, walk)
     return OrphanRemovalDecision(
         operation=operation,
@@ -540,6 +552,7 @@ def _decide_installed_paths(
         stale_keys=stale_keys,
         expected_paths=frozenset(expected),
         unverified_keys=MappingProxyType(dict(sorted(unverified.items()))),
+        anchored_keys=MappingProxyType(dict(sorted(anchors.items()))),
         rescued_parents=MappingProxyType(
             {key: walk.reachable_via[key] for key in reparented} if walk else {}
         ),
@@ -548,6 +561,48 @@ def _decide_installed_paths(
         ),
         reachability=walk,
     )
+
+
+def _alias_anchors(lockfile, removed_keys, retained, walk) -> dict[str, str]:
+    """Removed rows prune keeps because a survivor would change identity (#4989).
+
+    When the surviving edge spells a local survivor under another identity (a
+    symlink alias), install would re-record and relocate it; prune does not
+    re-key packages, so it keeps the survivor's recorded parent chain instead.
+    """
+    if walk is None or lockfile is None or not removed_keys:
+        return {}
+    gone = {
+        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements): key
+        for key in removed_keys
+        if key in lockfile.dependencies
+    }
+    anchors: dict[str, str] = {}
+    for key in sorted(retained):
+        row = lockfile.dependencies.get(key)
+        if row is None or row.source != "local" or row.replacement is not None:
+            continue
+        if row.resolved_by not in gone or key not in walk.depths:
+            continue
+        depth = walk.depths[key]
+        nearest = [
+            parent
+            for parent in walk.declaring_edges.get(key, {})
+            if walk.depths.get(parent) == depth - 1
+        ]
+        declared = (
+            walk.local_edge_repos.get((key, nearest[0]), (None, None))[0] if nearest else None
+        )
+        if declared in (None, row.repo_url):
+            continue
+        parent = gone.get(row.resolved_by)
+        while parent is not None and parent not in anchors:
+            anchors[parent] = (
+                f"{row.repo_url} still resolves through it, and the package that still "
+                f"needs {row.repo_url} declares it as {declared}"
+            )
+            parent = gone.get(lockfile.dependencies[parent].resolved_by)
+    return anchors
 
 
 def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:

@@ -390,10 +390,16 @@ def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
-def test_prune_reparents_under_the_locked_row_of_an_aliased_parent(
+def test_prune_keeps_the_parent_of_a_survivor_reached_through_an_alias(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """g's surviving parent f is reached through a symlink alias; it records f's own row."""
+    """f survives only through z -> ../f-link, an alias install would re-record and move.
+
+    Prune does not re-key packages, so it keeps f's recorded parent chain and
+    names it; frozen replay passes and a second prune changes no bytes. A
+    following --no-frozen install still re-records f under the alias spelling
+    once d left apm.yml, with or without prune (alias re-key tracked in #5126).
+    """
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"
     for name, deps in (
@@ -410,47 +416,20 @@ def test_prune_reparents_under_the_locked_row_of_an_aliased_parent(
     (world.project / ".claude").mkdir()
     world.apm("install")
     _manifest(world, ["./vendor/a"])
+    f_row = _row_named(world, "f")
 
-    world.apm("prune")
+    pruned = _output(world.apm("prune"))
 
+    assert "Retained _local/e:" in pruned, pruned
     rows = _rows(world)
-    # Diagnostic (temporary): the lock rows and on-disk hashes before the frozen replay.
-    from apm_cli.deps.lockfile import LockFile
-    from apm_cli.deps.path_anchoring import resolve_local_dep_dirs
-    from apm_cli.install.phases.local_content import compute_local_package_hash
-
-    locked = LockFile.read(world.project / "apm.lock.yaml")
-    for key, directory in sorted(resolve_local_dep_dirs(locked, world.project).items()):
-        row = locked.dependencies[key]
-        print(
-            "DIAG",
-            key,
-            row.repo_url,
-            row.local_path,
-            row.declaring_parent,
-            row.anchored_local_path,
-            row.resolved_by,
-            row.content_hash,
-            directory,
-            compute_local_package_hash(directory),
-        )
-    frozen = world.apm("install", "--frozen", expect=None)
-    print("DIAG frozen", frozen.returncode, frozen.stdout, frozen.stderr)
-    pruned_rows = _rows(world)
-    world.apm("install", "--no-frozen")
-    for key, row in sorted(_rows(world).items()):
-        before = pruned_rows.get(key, {})
-        changed = {
-            field: (before.get(field), row.get(field))
-            for field in sorted(set(row) | set(before))
-            if before.get(field) != row.get(field)
-        }
-        print("DIAG no-frozen", key, changed)
-    assert False, "diagnostic"
-    assert "_local/e" not in rows, sorted(rows)
-    assert _row_named(world, "g")[1]["resolved_by"] in rows
-    assert (world.project / ".claude/skills/g-skill/SKILL.md").is_file()
-    _assert_frozen_then_no_frozen_converge(world)
+    assert "_local/e" in rows, sorted(rows)
+    assert _row_named(world, "f") == f_row
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    world.apm("install", "--frozen")
+    settled = lock_bytes(world.project)
+    world.apm("prune")
+    assert lock_bytes(world.project) == settled
 
 
 @pytest.mark.xfail(
