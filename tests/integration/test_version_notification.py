@@ -2,10 +2,14 @@
 
 import os  # noqa: F401
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import click
 from click.testing import CliRunner
+
+# One HOME is shared by every test in a process or xdist worker (tests/conftest.py).
+_WORKER_HOME = Path.home()
 
 
 class TestVersionNotificationIntegration(unittest.TestCase):
@@ -31,6 +35,28 @@ class TestVersionNotificationIntegration(unittest.TestCase):
             self.assertIn("A new version", result.output)
             self.assertIn("0.7.0", result.output)
             self.assertIn("apm self-update", result.output)
+
+    @patch("apm_cli.commands._helpers.check_for_updates")
+    @patch.dict("os.environ", {"APM_E2E_TESTS": ""}, clear=False)
+    def test_notification_ignores_a_daily_stamp_another_test_left(self, mock_check):
+        """A daily-check stamp an earlier test on this worker wrote must not hide the notice."""
+        mock_check.return_value = "0.7.0"
+        stamp = _WORKER_HOME / ".cache" / "apm" / "last_version_check"
+        existed = stamp.exists()
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+        try:
+            from apm_cli.cli import cli
+
+            with self.runner.isolated_filesystem():
+                result = self.runner.invoke(cli, ["init", "test-project", "--yes"])
+        finally:
+            if not existed:
+                stamp.unlink()
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("A new version", result.output)
+        self.assertIn("0.7.0", result.output)
 
     @patch("apm_cli.commands._helpers.check_for_updates")
     def test_no_notification_when_up_to_date(self, mock_check):
