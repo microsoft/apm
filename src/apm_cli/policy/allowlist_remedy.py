@@ -290,11 +290,12 @@ def _uninstall_clears(
         direct_refs=tuple(production),
         dev_refs=tuple(development),
     )
-    paths = {
-        key: portable_relpath(ref.get_install_path(project.modules_dir), project.modules_dir)
-        for key, ref in roots.items()
-    }
     try:
+        # A checkout outside apm_modules (a symlink) fails containment: no advice.
+        paths = {
+            key: portable_relpath(ref.get_install_path(project.modules_dir), project.modules_dir)
+            for key, ref in roots.items()
+        }
         transitive = decide_orphan_removal(
             operation=OrphanOperation.UNINSTALL,
             roots=removed,
