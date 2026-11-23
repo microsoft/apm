@@ -99,6 +99,10 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("decide", "hook", "approve"),
     ("install", "plain"),
     ("set_policy", "org-deny"),
+    # A new approval under the org deny is refused, names the org layer (#4919), and
+    # still writes the grant (strict #4923).
+    ("decide", "hook", "revoke"),
+    ("decide", "hook", "approve"),
     ("install", "frozen"),
     ("install", "plain"),
     ("install", "plain"),

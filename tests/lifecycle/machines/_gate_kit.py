@@ -193,9 +193,35 @@ def _recorded(observation: Observation) -> frozenset[str]:
     return frozenset(keys)
 
 
+def _approve_under_org_deny(machine, op, before, after, result) -> bool:
+    """A new approval of an installed package an org deny still blocks (exit 1)."""
+    return (
+        op.name == "approve"
+        and result is not None
+        and result.returncode == 1
+        and any(
+            machine.gate_state(surface) in {"org-deny", "org-deny-all"}
+            and machine._locked(surface)
+            and machine.store_state.get(surface) != "allow"
+            for surface in op.cell_kinds
+        )
+    )
+
+
 # gate-cell-c-lock (#4043) is fixed: install --frozen refuses a tightened gate
 # before any write, so no recorded hook goes missing (RA-024).
-KNOWN_CELLS: tuple[KnownCell, ...] = ()
+KNOWN_CELLS: tuple[KnownCell, ...] = (
+    # approve records the grant in apm.yml, then exits 1 because the org deny still
+    # blocks the package: a failed command changed durable state (I7).
+    KnownCell(
+        "G|approve|org-deny|project",
+        "I7",
+        "#4923",
+        _approve_under_org_deny,
+        r"failed approve changed the manifest",
+        scopes=("project",),
+    ),
+)
 
 
 @dataclass
