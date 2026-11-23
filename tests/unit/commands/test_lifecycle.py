@@ -117,7 +117,13 @@ class TestLifecycleTest:
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
         _write_yaml(
             tmp_path / "apm.yml",
-            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo ceiling-ok"}]}},
+            {
+                "lifecycle": {
+                    "post-install": [
+                        {"type": "command", "bash": "echo ceiling-ok", "command": "echo ceiling-ok"}
+                    ]
+                }
+            },
         )
         assert cli_runner.invoke(lifecycle, ["trust"]).exit_code == 0
         policy = None
@@ -144,7 +150,13 @@ class TestLifecycleTest:
         assert "(1 script(s))" in result.output
         assert "fired" in result.output.lower()
         log = (tmp_path / "home" / "logs" / "scripts.log").read_text(encoding="utf-8")
-        assert "ceiling-ok" in log
+        entries = [line.strip() for line in log.splitlines() if line.strip()]
+        assert len(entries) == 2
+        header = dict(tok.split("=", 1) for tok in entries[0].split() if "=" in tok)
+        assert header["event"] == "post-install"
+        assert header["status"] == "ok"
+        assert header["exit_code"] == "0"
+        assert entries[1] == "stdout: ceiling-ok"
 
 
 class TestLifecycleInit:
