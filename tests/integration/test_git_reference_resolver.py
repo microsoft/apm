@@ -523,4 +523,3 @@ class TestResolveArtifactoryShortCircuit:
         sha = "abc1234"  # short SHA still matches commit-shaped regex
         result = GitReferenceResolver(host).resolve(_dep(artifactory=True, reference=sha))
         assert result.ref_name == sha
-

@@ -162,6 +162,8 @@ def test_plain_urls_keep_owner_and_repo():
         "SSL_CERT_DIR",
         "GIT_CONFIG_PARAMETERS",
         "GIT_PROXY_COMMAND",
+        "GIT_SSL_CERT",
+        "GIT_SSL_KEY",
     ],
 )
 def test_env_that_changes_gits_request_falls_back(name):
@@ -181,6 +183,8 @@ def test_proxy_follows_libcurl_precedence_and_no_proxy():
     assert arl._proxy({"HTTPS_PROXY": "http://q:2", "no_proxy": "*"}) is None
     with pytest.raises(arl._Fallback):
         arl._proxy({"HTTPS_PROXY": "socks5://q:2"})
+    with pytest.raises(arl._Fallback):
+        arl._proxy({"HTTPS_PROXY": "https://q:2"})
     with pytest.raises(arl._Fallback):
         arl._proxy({"HTTPS_PROXY": "http://user:pw@q:2"})
 
@@ -255,6 +259,10 @@ def test_config_that_cannot_touch_an_https_fetch_stays_eligible():
         ("http.extraheader", "X-Token: 1"),
         ("http.https://github.com/.extraheader", "X-Token: 1"),
         ("credential.https://github.com.helper", "store"),
+        ("http.sslcapath", "/certs"),
+        ("http.sslcert", "/client.pem"),
+        ("http.sslkey", "/client.key"),
+        ("http.https://github.com/.sslcainfo", "/ca.pem"),
     ],
 )
 def test_config_that_changes_gits_request_falls_back(pair):
@@ -431,9 +439,42 @@ def test_trust_context_holds_only_gits_ca():
 
     from apm_cli.core import tls_trust
 
-    context = arl._git_trust_context(certifi.where())
+    ca = certifi.where()
+    with open(ca, encoding="ascii") as bundle:
+        in_bundle = bundle.read().count("-----BEGIN CERTIFICATE-----")
+
+    context = arl._git_trust_context(ca)
 
     assert type(context) is tls_trust._STDLIB_SSL_CONTEXT
     assert context.verify_mode == arl.ssl.CERT_REQUIRED
     assert context.check_hostname is True
-    assert context.cert_store_stats()["x509_ca"] > 0
+    # Exactly the bundle git would use: no OS-store or APM_EXTRA_CA_BUNDLE roots.
+    assert len(context.get_ca_certs()) == in_bundle
+
+
+def test_proxied_tls_uses_the_same_git_only_context():
+    import certifi
+
+    adapter = arl._session_for_refs(certifi.where()).get_adapter("https://github.com/")
+    direct = adapter.poolmanager.connection_pool_kw["ssl_context"]
+
+    proxied = adapter.proxy_manager_for("http://proxy.invalid:3128")
+
+    assert proxied.connection_pool_kw["ssl_context"] is direct
+
+
+class _WorkerAbort(BaseException):
+    """Not an Exception: ends the worker without a result."""
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_worker_ending_without_a_result_falls_back(monkeypatch):
+    ca = _eligible(monkeypatch)
+
+    def abort(*_args, **_kwargs):
+        raise _WorkerAbort
+
+    monkeypatch.setattr(_REQUEST, abort)
+
+    with pytest.raises(arl._Fallback, match="without a result"):
+        arl._fetch_within_deadline("https://github.com/o/r/info/refs", None, ca)

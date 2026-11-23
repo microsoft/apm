@@ -184,8 +184,9 @@ def _proxy(env: Mapping[str, str]) -> str | None:
     if no_proxy and _bypasses_proxy(no_proxy):
         return None
     parsed = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
-    if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
-        raise _Fallback("proxy is not a plain http(s) proxy")
+    if parsed.scheme != "http" or parsed.username or parsed.password:
+        # An https:// proxy hop would be verified with APM's process trust, not git's.
+        raise _Fallback("proxy is not a plain http proxy")
     if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
         raise _Fallback("proxy URL carries a path")
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
@@ -448,6 +449,8 @@ def _fetch_within_deadline(
         raise error
     if error is not None:
         raise _Fallback(type(error).__name__)
+    if "data" not in holder:
+        raise _Fallback("worker ended without a result")
     return holder["data"]
 
 
