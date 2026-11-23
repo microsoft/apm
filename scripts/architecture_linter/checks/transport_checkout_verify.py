@@ -20,7 +20,7 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
         'raise CheckoutVerificationError(f"{missing[0]} is missing from the checkout")',
         "any(state.get(name) not in (None, False) for name in _TRANSFORMS)",
         "_check_mode(rel, info, want[1])",
-        "env=cached_repo_env(dict(os.environ if env is None else env), offline=True),",
+        "env=cached_repo_env(git_subprocess_env(env), offline=True),",
     ),
     "src/apm_cli/cache/git_cache.py": (
         "if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):",

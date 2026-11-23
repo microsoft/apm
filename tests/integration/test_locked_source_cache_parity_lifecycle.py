@@ -270,6 +270,7 @@ def test_every_copy_differs_converges_without_a_remedy(
     assert not _rebuilt(again), _evidence(again)
     assert _mismatch_count(again) == 0, _evidence(again)
     clean = world.apm("audit", "--ci")
+    assert clean.returncode == 0, _evidence(clean)
     assert _mismatch_count(clean) == 0, _evidence(clean)
 
 

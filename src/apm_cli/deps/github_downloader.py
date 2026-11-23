@@ -1664,15 +1664,10 @@ class GitHubPackageDownloader:
 
             # Copy subdirectory contents to target (retry on transient
             # file-lock errors caused by antivirus scanning on Windows).
-            from ..utils.file_ops import robust_copy2, robust_copytree
+            from ..utils.file_ops import robust_copy_entry
 
             for item in source_subdir.iterdir():
-                src = source_subdir / item.name
-                dst = target_path / item.name
-                if src.is_dir():
-                    robust_copytree(src, dst)
-                else:
-                    robust_copy2(src, dst)
+                robust_copy_entry(source_subdir / item.name, target_path / item.name)
             require_verified_copy(
                 target_path, temp_clone_path, _ws2_resolved_commit, subdir_path, _env
             )
@@ -1914,17 +1909,12 @@ class GitHubPackageDownloader:
                 # A shard keeps unresolvable links as text; the clone path
                 # below then raises the strict diagnostic (#3457).
                 validate_cached_links(_cached, None, self._git_env_dict())
-                from ..utils.file_ops import robust_copy2, robust_copytree
+                from ..utils.file_ops import robust_copy_entry
 
                 for item in _cached.iterdir():
                     if item.name == ".git":
                         continue
-                    src = _cached / item.name
-                    dst = target_path / item.name
-                    if src.is_dir():
-                        robust_copytree(src, dst)
-                    else:
-                        robust_copy2(src, dst)
+                    robust_copy_entry(_cached / item.name, target_path / item.name)
                 require_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.

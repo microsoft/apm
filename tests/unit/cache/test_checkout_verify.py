@@ -289,6 +289,7 @@ def test_a_copy_is_checked_against_the_bytes_verification_accepted(tmp_path: Pat
 def _forge_loose(git_dir: Path, oid: str, kind: str, data: bytes) -> None:
     """Replace one loose object with other content under the same id (never in place)."""
     path = git_dir / "objects" / oid[:2] / oid[2:]
+    os.chmod(path, stat.S_IWUSR | stat.S_IRUSR)  # Git writes objects read-only
     path.unlink()
     path.write_bytes(zlib.compress(f"{kind} {len(data)}\0".encode() + data))
 
@@ -385,6 +386,7 @@ def test_a_scope_that_is_itself_a_directory_link_verifies(tmp_path: Path) -> Non
 
     shared = {k[len("shared/") :]: v for k, v in EXPECTED_PKG.items() if k.startswith("shared/")}
     assert tree_bytes(checkout / "pkg" / "shared") == shared
+    assert verify_checkout(checkout, sha, paths=["pkg/shared"], cone=True, env=neutral_git_env())
 
 
 def test_ambient_git_location_variables_do_not_redirect_verification(
@@ -396,3 +398,28 @@ def test_ambient_git_location_variables_do_not_redirect_verification(
     monkeypatch.setenv("GIT_OBJECT_DIRECTORY", str(other / ".git" / "objects"))
 
     assert verify_checkout(repo, sha)
+
+
+@_POSIX_ONLY
+def test_a_link_swapped_in_after_verification_is_copied_as_a_link_and_refused(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.utils.file_ops import robust_copy_entry
+
+    repo, sha = _plain_repo(tmp_path)
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "AGENTS.md").write_bytes(b"not from the commit\n")
+    shutil.rmtree(repo / "pkg")
+    (repo / "pkg").symlink_to(outside, target_is_directory=True)
+
+    target = tmp_path / "target"
+    target.mkdir()
+    for item in repo.iterdir():
+        if item.name != ".git":
+            robust_copy_entry(item, target / item.name)
+
+    assert (target / "pkg").is_symlink()
+    with pytest.raises(CheckoutVerificationError):
+        require_verified_copy(target, repo, sha)
