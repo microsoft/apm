@@ -6,7 +6,7 @@ import os
 from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.install.deployed_paths import deployed_path_entry
@@ -17,7 +17,7 @@ from apm_cli.integration.hook_native_formats import (
     is_hook_module_type_metadata,
     node_module_type,
 )
-from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.utils.content_hash import content_hash_of_bytes
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -34,8 +34,8 @@ def hook_bundle_deploys_json(target_name: str) -> bool:
 
 
 def is_deployed_hook_module_metadata(
-    path: Path,
-    document: object,
+    path: PurePath,
+    text: str,
     *,
     target_name: str,
     recorded_hash: str | None,
@@ -44,17 +44,21 @@ def is_deployed_hook_module_metadata(
 
     Hook bundle deploy writes a module-type ``package.json`` beside JavaScript
     hooks and deploys nested copies with their scripts (#2950). Neither defines
-    hooks. Only a ``package.json`` holding just a Node module type, on a target
-    whose bundle deploys it, whose bytes still match the hash recorded at
-    deploy, qualifies; anything else stays a hook candidate.
+    hooks. Only a ``package.json`` whose *text* holds just a Node module type,
+    on a target whose bundle deploys it, and still hashes to the value recorded
+    at deploy, qualifies; anything else stays a hook candidate.
     """
-    return (
-        path.name == "package.json"
-        and hook_bundle_deploys_json(target_name)
-        and is_hook_module_type_metadata(document)
-        and recorded_hash is not None
-        and compute_file_hash(path) == recorded_hash
-    )
+    if (
+        path.name != "package.json"
+        or recorded_hash is None
+        or not hook_bundle_deploys_json(target_name)
+        or content_hash_of_bytes(text.encode("utf-8")) != recorded_hash
+    ):
+        return False
+    try:
+        return is_hook_module_type_metadata(json.loads(text))
+    except ValueError:
+        return False
 
 
 @dataclass

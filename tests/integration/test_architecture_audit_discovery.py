@@ -54,18 +54,18 @@ def test_guard_rejects_discovery_applicability_or_containment_bypass(old: str, n
         ),
         (
             "src/apm_cli/integration/hook_bundle.py",
-            "and compute_file_hash(path) == recorded_hash",
+            'or content_hash_of_bytes(text.encode("utf-8")) != recorded_hash',
             "",
         ),
         (
             "src/apm_cli/integration/hook_bundle.py",
-            "and hook_bundle_deploys_json(target_name)",
+            "or not hook_bundle_deploys_json(target_name)",
             "",
         ),
         (
             _SCANNER,
             "if is_deployed_hook_module_metadata(\n"
-            "            path, document, target_name=surface.target, recorded_hash=recorded_hash\n"
+            "            path, text, target_name=surface.target, recorded_hash=recorded_hash\n"
             "        ):",
             'if document in ({"type": "commonjs"}, {"type": "module"}):',
         ),

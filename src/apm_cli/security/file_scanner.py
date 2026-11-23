@@ -183,7 +183,7 @@ def _content_entries(
         config = native_hook_config(surface.target)
         document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
         if is_deployed_hook_module_metadata(
-            path, document, target_name=surface.target, recorded_hash=recorded_hash
+            path, text, target_name=surface.target, recorded_hash=recorded_hash
         ):
             return (HookContentEntry(""),)
         return inspect_native_hooks(

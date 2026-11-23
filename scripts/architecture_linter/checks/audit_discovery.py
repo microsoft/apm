@@ -47,7 +47,7 @@ _REQUIRED = {
         "is_deployed_hook_module_metadata": {
             "hook_bundle_deploys_json",
             "is_hook_module_type_metadata",
-            "compute_file_hash",
+            "content_hash_of_bytes",
         },
     },
     "src/apm_cli/integration/hook_source_selection.py": {
