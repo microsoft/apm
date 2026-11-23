@@ -121,6 +121,9 @@ class ReplayConfig:
     policy_provider: Callable[[], Any] | None = None
     # Cleanup evidence (#3701) also renders targets the lock recorded.
     include_recorded_targets: bool = False
+    # Cleanup evidence renders each dependency on the route the lock recorded,
+    # not the one apm.yml now declares (#4995).
+    route_from_lock: bool = False
 
 
 @dataclass(frozen=True)
@@ -518,15 +521,26 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def _route_manifest(root: Path) -> Any:
-    """The root manifest's native route choices the replay decides by (#4995).
+def _route_manifest(config: ReplayConfig, root: Path, lock: Any, targets: list) -> Any:
+    """The native route choices the replay decides by (#4995).
 
-    Only the route keys are read; an invalid ``native`` or ``native_plugins``
-    value raises (fail closed), other manifest problems leave routes automatic.
+    Only the root manifest's route keys are read; an invalid ``native`` or
+    ``native_plugins`` value raises (fail closed), other manifest problems
+    leave routes automatic. A previous-lock replay keeps each dependency on
+    the route that lock rendered it with.
     """
-    from apm_cli.native_plugins.route import load_route_manifest
+    from apm_cli.native_plugins.route import load_route_manifest, locked_route_manifest
 
-    return load_route_manifest(manifest_file(root))
+    manifest = load_route_manifest(manifest_file(root))
+    if not config.route_from_lock:
+        return manifest
+    from apm_cli.install.target_governance import install_governance, is_governed_by_install
+    from apm_cli.native_plugins.scopes import CLAUDE, COPILOT
+
+    prefixes, schemes = install_governance([t for t in targets if t.name in (CLAUDE, COPILOT)])
+    return locked_route_manifest(
+        lock, manifest, lambda path: is_governed_by_install(path, prefixes, schemes)
+    )
 
 
 def _dependency_package_info(lock_dep: Any, install_path: Path, deployment_modules_dir: Path):
@@ -598,7 +612,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         else project_root / "apm_modules"
     )
     live_modules_dir = project_root / "apm_modules"
-    route_manifest = _route_manifest(self_source_root)
     deployment_modules_dir, deployment_frame = replay_deployment_frame(
         scratch_root, project_root, user_scope=config.user_scope
     )
@@ -611,6 +624,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
+    route_manifest = _route_manifest(config, self_source_root, lock, live_targets)
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None

@@ -8,6 +8,7 @@ before native plugins existed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,16 +19,17 @@ def _declared_native(dep: Any, manifest: Any) -> bool | None:
     """The ``native:`` key on *manifest*'s own declarations of *dep*, if any.
 
     Declarations that disagree resolve to ``False`` whatever their order.
+    Only declarations carrying ``native`` are keyed, so a manifest without
+    the key costs one attribute read per declaration.
     """
     getter = getattr(manifest, "get_all_apm_dependencies", None)
     if dep is None or getter is None:
         return None
+    flagged = [d for d in getter() if getattr(d, "native", None) is not None]
+    if not flagged:
+        return None
     key = dep.get_unique_key()
-    values = {
-        getattr(declared, "native", None)
-        for declared in getter()
-        if declared.get_unique_key() == key
-    } - {None}
+    values = {d.native for d in flagged if d.get_unique_key() == key}
     return None if not values else all(values)
 
 
@@ -193,3 +195,27 @@ def load_route_manifest(manifest_path: Path) -> Any:
             declared.native = native
             declarations.append(declared)
     return _RouteView(native_plugins, declarations)
+
+
+def locked_route_manifest(
+    lockfile: Any, current: Any, native_harness_path: Callable[[str], bool]
+) -> Any:
+    """The routes a previous *lockfile* rendered with, for replaying it (#4995).
+
+    A dependency the lock holds loose files for under a harness that loads
+    plugins natively (*native_harness_path*), with no native registration
+    record, rendered loose whatever apm.yml says now. Every other dependency
+    follows *current*.
+    """
+    loose = []
+    for key, locked in sorted(getattr(lockfile, "dependencies", {}).items()):
+        if key == "." or getattr(locked, "native_plugin", None) is not None:
+            continue
+        if any(native_harness_path(path) for path in locked.deployed_files or ()):
+            ref = locked.to_dependency_ref()
+            ref.native = False
+            loose.append(ref)
+    if not loose:
+        return current
+    declared = current.get_all_apm_dependencies() if current is not None else []
+    return _RouteView(getattr(current, "native_plugins", None), [*declared, *loose])

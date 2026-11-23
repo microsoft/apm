@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -184,6 +185,27 @@ def test_flipping_the_route_moves_the_plugin_and_keeps_user_entries(
     assert not (world.project / ".claude/skills/alpha").exists()
     assert not (world.project / ".claude/commands/dn-go.md").exists()
     assert json.loads(settings_path.read_text("utf-8"))["enabledPlugins"][_USER_ENTRY] is True
+
+
+def test_returning_to_native_without_receipts_removes_the_loose_files(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """(3b) loose -> native on a receipt-less machine: cleanup proves the loose bytes."""
+    world = _World(tmp_path, apm_binary_path)
+    plugin = world.plugin("dn")
+    world.manifest([{"path": plugin.as_posix(), "native": "false"}])
+    world.ok("install", "--no-policy")
+    _assert_loose(world, "dn")
+    receipts = world.isolated.home / ".apm" / "deployment-receipts"
+    assert receipts.is_dir()
+    shutil.rmtree(receipts)
+
+    world.manifest([plugin.as_posix()])
+    world.ok("install", "--no-policy")
+
+    _assert_native(world, "dn")
+    assert not (world.project / ".claude/skills/alpha").exists()
+    assert not (world.project / ".claude/commands/dn-go.md").exists()
 
 
 def test_a_skill_a_later_version_adds_deploys_loose_without_a_manifest_change(

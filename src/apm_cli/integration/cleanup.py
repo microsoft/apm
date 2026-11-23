@@ -771,6 +771,7 @@ def _render_locked(
         modules_root=scratch / "apm_modules",
         user_scope=user_scope,
         include_recorded_targets=True,
+        route_from_lock=True,
     )
     try:
         snapshot.parent.mkdir()  # write-seam-exempt: private scratch tree
