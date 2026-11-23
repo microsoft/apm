@@ -303,9 +303,12 @@ def compute_file_hash(file_path: Path) -> str:
     """
     if not file_path.is_file() or file_path.is_symlink():
         return _EMPTY_HASH
-    hasher = hashlib.sha256()
-    hasher.update(_canonical_hash_bytes(file_path.read_bytes()))
-    return f"sha256:{hasher.hexdigest()}"
+    return f"sha256:{canonical_digest(file_path.read_bytes())}"
+
+
+def canonical_digest(raw: bytes) -> str:
+    """Return the hex digest :func:`compute_file_hash` records for *raw* bytes."""
+    return hashlib.sha256(_canonical_hash_bytes(raw)).hexdigest()
 
 
 def verify_package_hash(

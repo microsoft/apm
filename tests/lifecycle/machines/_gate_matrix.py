@@ -57,8 +57,9 @@ OBSERVED: Mapping[str, frozenset[str]] = {
     name: kinds - {"other-file"} for name, kinds in KINDS.items()
 }
 # Kinds no spine step observes an outcome for, so the matrix credits none:
-# bin/ deploys only for a Claude marketplace plugin at user scope (U-BIN,
-# install/exec_gate.py plugin_bin_deployable); the p-mixed instruction
+# loose bin/ deploys only for a Claude marketplace plugin at user scope
+# (install/exec_gate.py plugin_bin_deployable; a whole plugin's bin/ at project
+# scope is the plugin bin spine's, U-BIN); the p-mixed instruction
 # (other-file) is observed only by ``render`` (compile deduplicates it for
 # copilot unless --force-instructions writes it into AGENTS.md).
 _UNOBSERVED = frozenset({"bin", "other-file"})
@@ -188,6 +189,11 @@ class GateMatrix(StepRunner):
                 for package in command.packages
                 if package == MIXED
             )
+        if self.state.denied_by_policy and command.exits == frozenset({1}):
+            # A refusal under the org deny names the denied packages and changes
+            # nothing (AGENTS.md included), so it holds for every primitive they
+            # ship: p-exec's bin/ and p-mixed's instruction too.
+            unobserved = frozenset()
         if command.op == "mcp-install" and self.state.gate("p-exec", "mcp") not in _MCP_LEVELS:
             # U7 credits the collateral primitives only: a first-party server
             # requested by name is never gated (U-FIRST-PARTY-MCP).
@@ -329,7 +335,7 @@ class GateMatrix(StepRunner):
             # A catalog command leaves every project byte, deployed or locked, alone.
             unchanged["project"] = ("*",)
         elif exit_code != 0:
-            unchanged["project"] = _DURABLE
+            unchanged["project"] = (*_DURABLE, _AGENTS_MD)
         elif command.op == "mcp-install":
             unchanged["project"] = _NON_MCP
         if command.args == _RENDER and exit_code == 0:
