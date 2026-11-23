@@ -101,6 +101,7 @@ LIFECYCLE_SMOKE_SHARD_JOBS = (
     "lifecycle-smoke-shard-2",
     "lifecycle-smoke-shard-3",
     "lifecycle-smoke-shard-4",
+    "lifecycle-smoke-shard-5",
 )
 LIFECYCLE_SMOKE_SHARDS = tuple(range(1, len(LIFECYCLE_SMOKE_SHARD_JOBS) + 1))
 # The aggregate also requires the cross-shard GATE cell coverage check (#4031).
@@ -1406,9 +1407,9 @@ def test_lifecycle_shards_fit_their_timeout() -> None:
 @pytest.mark.parametrize(
     ("shards", "timeout_minutes"),
     [
-        ([(2400.0, 0.0)] * 4, 15),
-        ([(1600.0, 0.0)] * 3 + [(4000.0, 0.0)], 20),
-        ([(2400.0, 0.0)] * 3 + [(2400.0, 700.0)], 20),
+        ([(2400.0, 0.0)] * 5, 15),
+        ([(1600.0, 0.0)] * 4 + [(4000.0, 0.0)], 20),
+        ([(1900.0, 0.0)] * 4 + [(1900.0, 700.0)], 20),
     ],
 )
 def test_lifecycle_shard_budget_overrun_fails(
@@ -1428,16 +1429,16 @@ def test_largest_serial_unit_counts_tests_and_whole_xdist_groups() -> None:
 @pytest.mark.parametrize(
     "shards",
     [
-        [[], ["a"], ["b"], ["c"]],
-        [["a"], ["a"], ["b"], ["c"]],
-        [["a", "a"], ["b"], ["c"], ["d"]],
-        [["a"], ["b"], ["c"], ["e"]],
-        [["a"], ["b"], ["c", "d"]],
+        [[], ["a"], ["b"], ["c"], ["d"]],
+        [["a"], ["a"], ["b"], ["c"], ["d"]],
+        [["a", "a"], ["b"], ["c"], ["d"], ["e"]],
+        [["a"], ["b"], ["c"], ["d"], ["f"]],
+        [["a"], ["b"], ["c"], ["d", "e"]],
     ],
 )
 def test_lifecycle_shard_partition_drift_fails(shards: list[list[str]]) -> None:
     with pytest.raises(AssertionError):
-        _assert_lifecycle_shard_partition(["a", "b", "c", "d"], shards)
+        _assert_lifecycle_shard_partition(["a", "b", "c", "d", "e"], shards)
 
 
 @pytest.mark.parametrize("missing_job", LIFECYCLE_SMOKE_AGGREGATE_NEEDS)
@@ -1512,9 +1513,9 @@ def test_lifecycle_shard_binding_drift_fails(
         ("python -m pytest", "pytest"),
         ('--shard-index "$LIFECYCLE_SHARD"', ""),
         (f"@{SHARD_FILE_LIST}", " ".join(LIFECYCLE_SMOKE_ROOTS)),
-        ("--durations=20", "--durations=20 -p scripts.ci_sharding --shard-count 4"),
+        ("--durations=20", "--durations=20 -p scripts.ci_sharding --shard-count 5"),
         ('--shard-index "$LIFECYCLE_SHARD"', "--shard-index 1"),
-        ("--shard-count 4", "--shard-count 3"),
+        ("--shard-count 5", "--shard-count 4"),
         (f"--shard-durations {LIFECYCLE_SMOKE_DURATIONS}", ""),
         ("--durations=20", "--durations=20 --splits 2 --group 1"),
         ("--durations=20", "--durations=20 -k partial"),

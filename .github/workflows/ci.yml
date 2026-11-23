@@ -777,12 +777,12 @@ jobs:
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
   # matching the merge-group integration scheduler. The cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
-  # scripts/ci_sharding.py balances the four shards by the measured
+  # scripts/ci_sharding.py balances the five shards by the measured
   # lifecycle smoke durations in .github/ci-durations/lifecycle-smoke.json
   # (weights, not an allowlist; #4943) and writes each shard's disjoint test
   # file list; the drift guard below compares them with a full collect.
-  # A balanced shard is expected to take about 11 minutes; the 20-minute cap
-  # keeps that under 60 percent so a slow runner does not cancel a shard.
+  # A balanced shard is expected to take about 9-10 minutes; the 20-minute
+  # cap keeps that under 60 percent so a slow runner does not cancel a shard.
   # The required aggregate checks every explicit job result independently.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
@@ -828,7 +828,7 @@ jobs:
     - name: Select shard test files
       run: |
         uv run --extra dev python -m scripts.ci_sharding files \
-          --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
+          --shard-count 5 --shard-index "$LIFECYCLE_SHARD" \
           --shard-durations .github/ci-durations/lifecycle-smoke.json \
           -m 'lifecycle_smoke and not lifecycle_merge_group' --out shard-files.txt \
           tests/integration tests/lifecycle
@@ -884,11 +884,21 @@ jobs:
       LIFECYCLE_SHARD: "4"
     steps: *lifecycle-smoke-steps
 
+  lifecycle-smoke-shard-5:
+    name: Lifecycle Smoke Shard 5 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      LIFECYCLE_SHARD: "5"
+    steps: *lifecycle-smoke-steps
+
   # M-GATE (#4031): the union of every lifecycle shard's visited cells must
   # include both scope spines and cover tests/quality/gate_cell_obligations.json.
   gate-cell-coverage:
     name: GATE Cell Coverage (Linux)
-    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4]
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4, lifecycle-smoke-shard-5]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -926,7 +936,7 @@ jobs:
 
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
-    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4, gate-cell-coverage]
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4, lifecycle-smoke-shard-5, gate-cell-coverage]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -938,10 +948,11 @@ jobs:
         SHARD_2_RESULT: ${{ needs.lifecycle-smoke-shard-2.result }}
         SHARD_3_RESULT: ${{ needs.lifecycle-smoke-shard-3.result }}
         SHARD_4_RESULT: ${{ needs.lifecycle-smoke-shard-4.result }}
+        SHARD_5_RESULT: ${{ needs.lifecycle-smoke-shard-5.result }}
         GATE_COVERAGE_RESULT: ${{ needs.gate-cell-coverage.result }}
       run: |
-        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ] || [ "$SHARD_4_RESULT" != success ]; then
-          echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT', '$SHARD_3_RESULT' and '$SHARD_4_RESULT'."
+        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ] || [ "$SHARD_4_RESULT" != success ] || [ "$SHARD_5_RESULT" != success ]; then
+          echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT', '$SHARD_3_RESULT', '$SHARD_4_RESULT' and '$SHARD_5_RESULT'."
           exit 1
         fi
         if [ "$GATE_COVERAGE_RESULT" != success ]; then
