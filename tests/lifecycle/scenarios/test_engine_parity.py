@@ -30,6 +30,8 @@ command fails the cell even at main.
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import re
 import shutil
 import sys
@@ -172,6 +174,17 @@ def _normalized(world: World, text: str) -> list[str]:
     return lines
 
 
+def _modes(world: World) -> dict[str, str]:
+    """``st_mode`` permission bits of every project file and directory (apm_modules included)."""
+    root = world.project
+    return {
+        path.relative_to(root).as_posix(): oct(path.lstat().st_mode & 0o7777)
+        for path in sorted(root.rglob("*"))
+        if not path.relative_to(root).as_posix().startswith((".git/", ".apm-local"))
+        and path.relative_to(root).as_posix() != ".git"
+    }
+
+
 # -- the twin -------------------------------------------------------------------
 
 
@@ -218,6 +231,12 @@ class Twin:
         )
         assert not problems, f"{label}: state differs from the full pipeline\n" + "\n".join(
             problems
+        )
+        modes = [_modes(world) for world in self.worlds]
+        assert modes[0] == modes[1], f"{label}: file modes differ: " + ", ".join(
+            f"{rel} fast={modes[0].get(rel)} full={modes[1].get(rel)}"
+            for rel in sorted(modes[0].keys() | modes[1].keys())
+            if modes[0].get(rel) != modes[1].get(rel)
         )
         self.codes.append(fast.returncode)
         self.evidence = evidence
@@ -762,3 +781,104 @@ def test_declined_fast_path_writes_nothing(twin: Twin, trigger: str) -> None:
     assert evidence.isascii(), "I6: decide output is not ASCII"
     problems = diff(before, comparable(world), (world, world), ("before", "after"))
     assert not problems, f"{trigger}: the declined fast path wrote\n" + "\n".join(problems)
+
+
+# -- review-fix cells (must pass once the engine lands) -----------------------------
+
+_WRITE_FAULT = """import os
+
+_at = int(os.environ.get("APM_TEST_WRITE_FAULT_AT", "0"))
+if _at:
+    try:
+        import apm_cli.install.diff_apply as _engine
+    except Exception:
+        _engine = None
+    if _engine is not None and hasattr(_engine, "_write"):
+        _original, _calls = _engine._write, [0]
+
+        def _write(*args, **kwargs):
+            _calls[0] += 1
+            if _calls[0] == _at:
+                raise OSError("injected write fault")
+            return _original(*args, **kwargs)
+
+        _engine._write = _write
+"""
+
+
+@NEEDS_DIFF
+def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) -> None:
+    """A fault on the commit's 2nd write: the engine declines and the full run's tree wins.
+
+    The fault is injected through a ``sitecustomize`` on the fast world's PYTHONPATH,
+    so the tree must equal the full world's (never a mix of both).
+    """
+    if os.environ.get("APM_LIFECYCLE_DRIVER") == "binary":
+        pytest.skip("the fault hook loads only under the engine driver")
+    _converge(twin, *BOTH)
+    twin.each(_remove_deployed)
+    hook = twin.fast.root / "fault-hook"
+    hook.mkdir()
+    (hook / "sitecustomize.py").write_text(_WRITE_FAULT, encoding="ascii")
+    path = [str(hook), twin.fast.env.get("PYTHONPATH", "")]
+    twin.fast.env["PYTHONPATH"] = os.pathsep.join(p for p in path if p)
+    twin.fast.env["APM_TEST_WRITE_FAULT_AT"] = "2"
+    try:
+        decision = twin.ok("install")
+    finally:
+        twin.fast.env.pop("APM_TEST_WRITE_FAULT_AT", None)
+    _assert_decision(decision, FULL)
+    assert "write failed" in decision, decision
+
+
+def _lifecycle_scripts(world: World, tier: str) -> None:
+    manifest = (world.project if tier == "project" else world.apm_home) / "apm.yml"
+    exists = manifest.is_file()
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8")) if exists else None
+    data = data or {"name": "user-scope", "version": "0.0.0"}
+    log = f"echo {tier} >> lifecycle-{tier}.log"
+    data["lifecycle"] = {
+        "pre-install": [{"type": "command", "command": log}],
+        "post-install": [{"type": "command", "command": log}],
+    }
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "tier", [pytest.param(t, marks=NEEDS_ANY.marks) for t in ("project", "user")]
+)
+def test_lifecycle_scripts_decline_to_the_full_pipeline(twin: Twin, tier: str) -> None:
+    """Scripts fire around the full pipeline only, so their presence must decline."""
+    twin.each(lambda w: _lifecycle_scripts(w, tier))
+    _converge(twin, "p-skill:git")
+    decision = twin.ok("install")
+    _assert_decision(decision, FULL)
+    assert "lifecycle scripts" in decision, decision
+
+
+@NEEDS_ANY
+def test_escaped_hidden_unicode_in_a_deployed_hook_declines(twin: Twin) -> None:
+    """A JSON hook carrying a literal backslash-u202e escape decodes to a bidi override."""
+    hook = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo p-exec"}]}]}}
+    hook["hooks"]["SessionStart"][0]["hooks"][0]["command"] = "echo p-exec\u202e"
+    text = json.dumps(hook, indent=2, ensure_ascii=True) + "\n"
+    assert "\\u202e" in text and text.isascii()
+    twin.fast.services.publish_revision(
+        f"{ORG}/p-exec", {".apm/hooks/session.json": text}, tag="v1.0.0"
+    )
+    twin.each(lambda w: _declare(w, *BOTH))
+    for argv in (("install",), ("approve", f"{ORG}/p-exec"), ("install",)):
+        twin.run(*argv)  # a scanner finding may block: parity holds either way
+    decision = twin.run("install")
+    _assert_decision(decision, FULL)
+    assert "non-ASCII deployed content" in decision, decision
+
+
+@NEEDS_ANY
+def test_revoked_approval_with_apm_modules_absent_declines(twin: Twin) -> None:
+    """Fresh-checkout shape (lock kept, apm_modules and deployed tree gone) + a revoked grant."""
+    _converge_exec_user_approved(twin)
+    twin.each(_remove_deployed)
+    twin.each(revoke_user_approval)
+    _assert_decision(twin.ok("install"), FULL)
