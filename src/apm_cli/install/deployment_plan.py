@@ -452,6 +452,9 @@ def _replay_frame(
     from apm_cli.install.audit_target_roots import external_replay_root
 
     if Path(value).is_absolute():
+        # Nested roots (CLAUDE_CONFIG_DIR inside HERMES_HOME): the deepest
+        # enclosing root is the claim's own harness, whatever the target order.
+        frames = []
         for target in live_targets:
             root = target.managed_deploy_root
             if root is None:
@@ -460,6 +463,9 @@ def _replay_frame(
                 relative = Path(value).relative_to(root)
             except ValueError:
                 continue
-            return root, external_replay_root(scratch_root, target), relative.as_posix()
-        raise PathTraversalError(f"kept lock claim {value!r} is outside every target root")
+            frames.append((len(root.parts), root, target, relative))
+        if not frames:
+            raise PathTraversalError(f"kept lock claim {value!r} is outside every target root")
+        _depth, root, target, relative = max(frames, key=lambda frame: frame[0])
+        return root, external_replay_root(scratch_root, target), relative.as_posix()
     return deploy_root, scratch_root, value
