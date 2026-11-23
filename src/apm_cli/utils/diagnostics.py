@@ -310,6 +310,25 @@ class DiagnosticCollector:
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_DRIFT)
 
     @property
+    def failed_package_count(self) -> int:
+        """Packages that failed, counted as the error summary counts them (#4703).
+
+        Each attributed package counts once, however many errors or critical
+        security findings it has (a package blocked for critical hidden
+        characters is recorded as a security finding, not an error, but it
+        was not deployed); each unattributed error counts on its own.
+        """
+        failed = [
+            d
+            for d in self._diagnostics
+            if d.category == CATEGORY_ERROR
+            or (d.category == CATEGORY_SECURITY and d.severity == "critical")
+        ]
+        return len({d.package for d in failed if d.package}) + sum(
+            1 for d in failed if not d.package and d.category == CATEGORY_ERROR
+        )
+
+    @property
     def has_critical_security(self) -> bool:
         """Return True if any critical-severity security finding exists."""
         return any(

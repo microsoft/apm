@@ -1466,6 +1466,13 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "finally:",
             "project_root, removed_skill_paths, user_scope=user_scope",
         ),
+        # The locked fast path records the outputs it wrote, as a live install does.
+        "src/apm_cli/install/diff_apply.py": (
+            "DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)",
+            "session.record(written, targets, owner)",
+            "journaled_apply() as journal:",
+            "session.flush()",
+        ),
         # MCP write evidence (#4737) borrows the session's binding and paths only.
         "src/apm_cli/install/mcp/write_receipts.py": (
             "session = DeploymentMaterializationSession(Path(project_root), scope, None)",

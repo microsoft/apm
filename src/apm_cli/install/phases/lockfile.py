@@ -26,7 +26,10 @@ from apm_cli.install.phases.lockfile_cache_pins import (
     sync_cache_pin_markers_from_disk,
     sync_cache_pin_markers_from_existing,
 )
-from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.install.phases.lockfile_deploy_records import (
+    stage_deployed_file,
+    stage_package_records,
+)
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -74,10 +77,11 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
         else:
             _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
-            try:  # noqa: SIM105
-                out[_rel] = compute_file_hash(_full)
-            except Exception:
-                pass
+            try:
+                data = _full.read_bytes()
+            except OSError:
+                continue
+            out[_rel] = f"sha256:{stage_deployed_file(_full, data)}"
     return out
 
 
@@ -142,11 +146,9 @@ class LockfileBuilder:
             and not self._has_orphan_lockfile_entries()
             and not self._replacement_table_changed()
         ):
-            # Even with nothing newly installed, a pre-existing
-            # lockfile may need its cache pin markers refreshed --
-            # e.g. user upgraded APM and their cache pre-dates the
-            # marker contract. Sync best-effort against the on-disk
-            # lockfile.
+            # Even with nothing newly installed, a pre-existing lockfile may need
+            # its cache pin markers refreshed (e.g. a cache that pre-dates the
+            # marker contract after an upgrade): sync best-effort against it.
             #
             # In lockfile_only mode (``apm lock``) we deliberately fall
             # through even with zero dependencies: the command's core
@@ -186,6 +188,8 @@ class LockfileBuilder:
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
+            # Bind this run's deployed bytes to each verified package (committed later).
+            stage_package_records(self.ctx, lockfile)
             # Intact native plugins deployed for their dependency (#3191); after
             # content hashes, which decide whether an existing record carries over.
             self._attach_native_plugins(lockfile)

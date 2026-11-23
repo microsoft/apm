@@ -167,8 +167,8 @@ def test_frontmatter_authority_guard_rejects_split_owners(
         integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
         integrator.write_text(
             integrator.read_text(encoding="utf-8").replace(
-                "        if verdict.should_block:\n",
-                "        if False:\n",
+                "        return verdict.should_block\n",
+                "        return False\n",
                 1,
             ),
             encoding="utf-8",
@@ -177,8 +177,8 @@ def test_frontmatter_authority_guard_rejects_split_owners(
         integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
         integrator.write_text(
             integrator.read_text(encoding="utf-8").replace(
-                "            force=force,\n",
-                "            force=False,\n",
+                "            policy=BLOCK_POLICY,\n            force=force,\n",
+                "            policy=BLOCK_POLICY,\n            force=False,\n",
                 1,
             ),
             encoding="utf-8",

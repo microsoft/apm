@@ -287,12 +287,23 @@ def _report_uninstall_outcome(
     mcp_cleanup_fatal: bool,
     consented_deletions: Iterable[str] = (),
 ) -> bool:
-    """Render the final summary and return whether cleanup was incomplete."""
+    """Render the final summary and return whether cleanup was incomplete.
+
+    A reported package failure leaves the uninstall incomplete, so the command
+    exits non-zero instead of claiming success (#4703).
+    """
     _report_consented_deletions(logger, consented_deletions)
     # Cleanup evidence warnings (#3701) name kept files before the outcome.
     logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
-    if not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
+    diagnostics = getattr(logger, "diagnostics", None)
+    package_failures = (
+        diagnostics.failed_package_count if diagnostics is not None else 0
+    ) + integration_cleanup.package_failures
+    if package_failures:
+        noun = "package" if package_failures == 1 else "packages"
+        logger.error(f"Uninstall incomplete: {package_failures} {noun} failed (see above).")
+    elif not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
         if integration_cleanup_error is None:
             logger.success(f"Uninstall complete: {summary}")
         else:
@@ -300,7 +311,8 @@ def _report_uninstall_outcome(
     elif integration_incomplete:
         logger.warning("Package removal finished, but managed hook cleanup is incomplete.")
     return (
-        mcp_cleanup_fatal
+        package_failures > 0
+        or mcp_cleanup_fatal
         or lsp_cleanup_error is not None
         or integration_incomplete
         or integration_cleanup_error is not None
@@ -324,12 +336,26 @@ def _collect_deployed_cleanup_state(
     lockfile,
     dependency_keys: set[str],
 ) -> tuple[set[str], dict[str, str]]:
-    """Snapshot selected deployment paths and hashes before lockfile mutation."""
+    """Snapshot selected deployment paths and hashes before lockfile mutation.
+
+    Unless the project-local owner (``.``) is selected, paths it still holds
+    (local content and local bundles) are not cleanup claims: uninstall keeps
+    them on disk, as the lockfile keeps recording them (#4703).
+    """
     from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...deps.lockfile import _SELF_KEY
     from ...integration.base_integrator import BaseIntegrator
 
     snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
-    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
+    paths = BaseIntegrator.normalize_managed_files(snapshot.paths) or set()
+    hashes = snapshot.hashes
+    if _SELF_KEY not in dependency_keys:
+        held = BaseIntegrator.normalize_managed_files(set(lockfile.local_deployed_files)) or set()
+        paths -= held
+        hashes = {
+            path: value for path, value in hashes.items() if path.replace("\\", "/") not in held
+        }
+    return paths, hashes
 
 
 @dataclass(frozen=True)
@@ -715,27 +741,29 @@ def _abort_if_retained_target_cleanup_paths(
     what is still on disk; apm.yml keeps the package for the retry (#3656).
     Files ``--trust-lockfile`` kept for lack of evidence (at preflight or at
     the deletion recheck), and the skill directories holding them, do not stop
-    the uninstall (#4295); its deletions are named first, before any exit.
+    the uninstall (#4295); its deletions are named first, before any exit. A
+    path cleanup failed on or its safety gates rejected always stops it (#4815).
     """
     from ...integration.cleanup import _claim_key
 
     if evidence is not None:
         _report_consented_deletions(logger, evidence.take_consented_deletions())
         consent_kept = consent_kept | evidence.kept_under_consent()
+    rejected = getattr(outcome, "rejected_paths", {})
+    # Only evidence-based retention is waived; a failed or rejected path stays.
+    blocking = {_claim_key(path) for path in (*getattr(outcome, "failed_paths", ()), *rejected)}
     # One spelling per file, as consent records it (#4295).
-    consent_kept = {_claim_key(kept) for kept in consent_kept}
+    consent_kept = {_claim_key(kept) for kept in consent_kept} - blocking
     # Every ancestor directory of a kept file, built once: lookups stay O(1).
     kept_dirs = {
         "/".join(parts[:index])
         for parts in (kept.split("/") for kept in consent_kept)
         for index in range(1, len(parts))
     }
-    # Only evidence-based retention is waived; a path cleanup failed on stays.
-    failed = {_claim_key(path) for path in getattr(outcome, "failed_paths", set())}
     outcome.retained_paths -= {
         path
         for path in outcome.retained_paths
-        if (key := _claim_key(path)) not in failed and (key in consent_kept or key in kept_dirs)
+        if (key := _claim_key(path)) not in blocking and (key in consent_kept or key in kept_dirs)
     }
     if not outcome.retained_paths:
         return
@@ -753,7 +781,8 @@ def _abort_if_retained_target_cleanup_paths(
         f"package and {lock_state}. Package directories may already have been removed."
     )
     for path in sorted(outcome.retained_paths):
-        logger.error(f"  - {path}")
+        reason = rejected.get(path)
+        logger.error(f"  - {path}: refused, {reason}" if reason else f"  - {path}")
     logger.error("Resolve or remove the listed files, then retry uninstall.")
     sys.exit(1)
 
@@ -840,7 +869,11 @@ def _refuse_uninstall_without_evidence(
         # A path another shrinking survivor keeps deploying is not deleted.
         retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
         candidates |= retired - others - builtins.set(other_hashes) - retained
-    candidates -= builtins.set(lockfile.local_deployed_files)
+    # Neither survivor snapshot covers project-local claims; a local bundle keeps them (#4703).
+    candidates -= (
+        BaseIntegrator.normalize_managed_files(builtins.set(lockfile.local_deployed_files))
+        or builtins.set()
+    )
     candidates -= builtins.set(preserved_values or ())
     refused = evidence.refusals(sorted(candidates))
     if not refused or trust_lockfile:
