@@ -410,3 +410,28 @@ def test_the_shared_discovery_keeps_only_answers_a_command_reuses(
     assert fetch().outcome == outcome
     assert fetch().outcome == outcome
     assert len(calls) == discoveries
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "https://example.com/a",
+        "http://h",
+        "https://",
+        "http:rel/path",
+        " https://h/x ",
+        "ftp://h/f",
+        "javascript:alert",
+        "../a.md",
+        "/abs/b.context.md",
+        "#anchor",
+    ],
+)
+def test_the_live_link_rule_is_the_resolver_rule(tmp_path: Path, target: str) -> None:
+    from apm_cli.compilation.link_resolver import UnifiedLinkResolver
+    from apm_cli.install.drift_records import _may_rewrite_links
+
+    resolver = UnifiedLinkResolver(tmp_path)
+    data = f"[x]({target})".encode()
+
+    assert _may_rewrite_links(data) is not resolver._is_external_url(target)

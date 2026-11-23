@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from tests.utils.apm_lifecycle_runner import _audit_parity_applies, _without_temp_names
+from tests.utils.apm_lifecycle_runner import (
+    _audit_parity_applies,
+    _diagnostics,
+    _without_temp_names,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-ci-audit-scratch-materialization")]
 
@@ -35,3 +39,10 @@ def test_fresh_scratch_names_are_not_an_audit_difference() -> None:
 
     assert _without_temp_names(served) == _without_temp_names(live)
     assert _without_temp_names("/t/apm_drift_a9cr8vut/a") != _without_temp_names("/t/other/a")
+
+
+def test_replay_telemetry_is_not_an_audit_difference() -> None:
+    served = "[i] drift replay peak memory: 12.5 MB\n[i] drift replay: 3 package(s) from records, 2 live\n[x] drift\n"
+    live = "[i] drift replay peak memory: 40.1 MB\n[x] drift\n"
+
+    assert _diagnostics(served) == _diagnostics(live) == ["[x] drift"]

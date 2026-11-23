@@ -1006,6 +1006,10 @@ def _record_serving_findings(provider: FactsProvider, rule_id: str, drift: objec
     findings = _unique_definitions(
         provider, rule_id, _RECORDS_OWNER, ("served_outputs", "ReplayRecords")
     )
+    # Whether a link stays unrewritten has one owner, shared with the renderer.
+    findings.extend(
+        _unique_definitions(provider, rule_id, _LINK_RESOLVER_OWNER, ("is_external_url",))
+    )
     records, records_fail = _facts_for(provider, _RECORDS_OWNER, rule_id)
     findings.extend(records_fail)
     if records_fail:
@@ -1013,6 +1017,7 @@ def _record_serving_findings(provider: FactsProvider, rule_id: str, drift: objec
     if not (
         _present(drift, "if served.serve(lock_dep, install_path, package_info, selection):")
         and "served_outputs" in _name_calls_in(records, "serve")
+        and "is_external_url" in _name_calls_in(records, "_may_rewrite_links")
     ):
         findings.append(
             _summary(

@@ -195,20 +195,13 @@ def _may_rewrite_links(data: bytes) -> bool:
     Link rewriting depends on files outside the package bytes (context files,
     sibling assets), so such a file replays live.
     """
-    from urllib.parse import urlparse
-
-    from apm_cli.compilation.link_resolver import UnifiedLinkResolver
+    from apm_cli.compilation.link_resolver import UnifiedLinkResolver, is_external_url
 
     text = data.decode("utf-8", errors="replace")
-    for match in UnifiedLinkResolver.LINK_PATTERN.finditer(text):
-        try:
-            target = urlparse(match.group(2).strip())
-        except ValueError:
-            return True
-        # Only an http(s) URL with a host is left alone, as the resolver does.
-        if target.scheme not in ("http", "https") or not target.netloc:
-            return True
-    return False
+    return any(
+        not is_external_url(match.group(2))
+        for match in UnifiedLinkResolver.LINK_PATTERN.finditer(text)
+    )
 
 
 def _plain_shape(lock_dep: Any, selection: Any) -> bool:
@@ -363,7 +356,8 @@ class ReplayRecords:
         self._policy_fetch = policy_fetch
         self._fingerprint: str | None = None
         self._fingerprinted = False
-        self._served: dict[str, bytes] = {}
+        # Each served destination's sha256, not its bytes: memory stays flat.
+        self._served: dict[str, str] = {}
         self.served_packages = 0
         self._claims: dict[str, int] = {}
         for dep in lock.get_all_dependencies() if self._enabled else ():
@@ -409,7 +403,7 @@ class ReplayRecords:
             path = self._scratch_root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-        self._served.update(served)
+            self._served[rel] = hashlib.sha256(data).hexdigest()
         self.served_packages += 1
         return True
 
@@ -424,10 +418,11 @@ class ReplayRecords:
 
     def intact(self) -> bool:
         """Every served destination still holds exactly the bytes served to it."""
-        for rel, data in self._served.items():
+        for rel, digest in self._served.items():
             try:
-                if (self._scratch_root / rel).read_bytes() != data:
-                    return False
+                with open(self._scratch_root / rel, "rb") as handle:
+                    if hashlib.file_digest(handle, "sha256").hexdigest() != digest:
+                        return False
             except OSError:
                 return False
         return True

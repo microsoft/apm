@@ -226,9 +226,7 @@ class ApmLifecycleRunner:
 # Drift replay served from render records must never change an audit (#4940):
 # every read-only ``apm audit`` a lifecycle test runs is replayed fully live too.
 _RECORDS_SWITCH = "APM_AUDIT_RECORDS"
-_RECORDS_SUMMARY = re.compile(
-    r"^\[i\] drift replay: \d+ package\(s\) from records, \d+ live\n?", re.M
-)
+_RECORDS_SUMMARY = re.compile(r"^\[i\] drift replay(?: peak memory)?: .*\n?", re.M)
 # Flags that write: a second run would read what the first one wrote.
 _MUTATING_AUDIT_FLAGS = frozenset({"--strip", "--output", "-o"})
 
