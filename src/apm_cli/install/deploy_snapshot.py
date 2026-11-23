@@ -38,7 +38,7 @@ import stat
 import tempfile
 import threading
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
@@ -218,13 +218,14 @@ class DeployJournal:
             for index, unit in enumerate(self._units):
                 self._append_line({"sealed": index, "state": _state(unit.path)})
 
-    def mark_commit(self, lockfile_identity: str) -> None:
+    def mark_commit(self, lockfile_identity: str, *, seal: bool = True) -> None:
         """Seal, then name the lockfile this install is about to commit.
 
         A journal killed after that lockfile reached disk recorded a committed
         install: replay settles it instead of rolling the deployment back.
         """
-        self.seal()
+        if seal:
+            self.seal()
         with self._lock:
             if self.root is not None and self.store is not None:
                 self._append_line({"commit": lockfile_identity})
@@ -305,22 +306,51 @@ def _tree_hashes(directory: Path) -> dict[str, str]:
 
 
 def _state(path: Path) -> dict[str, Any]:
-    """What is at *path* now, in the form a seal records and replay compares."""
+    """What is at *path* now: content, modes and entries, as seals record it.
+
+    Broader than the ledger's content hashes: an empty directory or a mode a
+    user added after a kill changes it, so replay keeps that path.
+    """
     if path.is_symlink():
         return {"link": os.readlink(path)}
     if path.is_file():
-        return {"file": compute_file_hash(path)}
+        return {"file": compute_file_hash(path), "mode": _mode(path)}
     if path.is_dir():
-        return {"dir": _tree_hashes(path)}
+        entries = {}
+        for entry in sorted(path.rglob("*")):
+            rel = entry.relative_to(path).as_posix()
+            if entry.is_symlink():
+                entries[rel] = f"link:{os.readlink(entry)}"
+            elif entry.is_file():
+                entries[rel] = f"{compute_file_hash(entry)}:{_mode(entry)}"
+            else:
+                entries[rel] = f"dir:{_mode(entry)}"
+        return {"dir": entries, "mode": _mode(path)}
     return {"other": True} if os.path.lexists(path) else {"absent": True}
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.lstat().st_mode)
 
 
 _ABSENT: dict[str, Any] = {"absent": True}
 
 
 def lockfile_identity(text: str) -> str:
-    """Identify a lockfile document independent of its line endings."""
-    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+    """Identify a lockfile document by its content, not its formatting.
+
+    A staged document the commit skipped as unchanged, or wrote with other
+    line endings, has the identity of the lockfile on disk.
+    """
+    import yaml
+
+    from apm_cli.utils.yaml_io import load_yaml_str
+
+    try:
+        canonical = json.dumps(load_yaml_str(text), sort_keys=True, default=str)
+    except (yaml.YAMLError, ValueError, TypeError, RecursionError):
+        canonical = text.replace("\r\n", "\n")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -361,15 +391,8 @@ class _Replay:
     expected: Mapping[str, str]
     ancestors: tuple[Path, ...]
     written: dict[str, Any] | None = None
-
-    @property
-    def prior(self) -> dict[str, Any]:
-        """The state replay puts back."""
-        if self.kind == "absent":
-            return _ABSENT
-        if self.kind == "file":
-            return {"file": self.expected[""]}
-        return {"dir": dict(self.expected)}
+    # The state replay puts back: the journaled copy's, or nothing.
+    prior: dict[str, Any] = field(default_factory=lambda: dict(_ABSENT))
 
 
 def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
@@ -420,7 +443,7 @@ def _inside(rel: Any, root: Path) -> Path:
     if not isinstance(rel, str) or not rel:
         raise PathTraversalError(f"journal path {rel!r} is not a relative path")
     posix, windows = PurePosixPath(rel), PureWindowsPath(rel)
-    if posix.is_absolute() or windows.drive or windows.root or ".." in posix.parts:
+    if "\\" in rel or posix.is_absolute() or windows.drive or windows.root or ".." in posix.parts:
         raise PathTraversalError(f"journal path {rel!r} escapes the deploy root")
     # One spelling per path: no "./", "//", trailing "/" or "." naming the base.
     if not posix.parts or posix.as_posix() != rel:
@@ -432,7 +455,7 @@ def _inside(rel: Any, root: Path) -> Path:
 
 def _under(rel: Any, directory: str) -> str:
     """*rel* (``<directory>[/<rest>]``) as ``<rest>`` (``""`` for the directory itself)."""
-    parts = PurePosixPath(rel).parts if isinstance(rel, str) else ()
+    parts = PurePosixPath(rel).parts if isinstance(rel, str) and "\\" not in rel else ()
     prefix = PurePosixPath(directory).parts
     if len(parts) < len(prefix) or parts[: len(prefix)] != prefix:
         raise PathTraversalError(f"journal path {rel!r} is outside {directory}")
@@ -500,9 +523,9 @@ def _validate_unit(
         try:
             _check_vouched(rel, kind, expected, ledger)
         except _Unproven:
-            if not _shared_config_vouched(rel, path, kind, expected, written, ledger):
+            if not _shared_config_vouched(rel, path, kind, copy, written, ledger):
                 raise
-    return _Replay(rel, path, kind, copy, expected, ancestors)
+    return _Replay(rel, path, kind, copy, expected, ancestors, prior=_state(copy))
 
 
 def _check_vouched(
@@ -520,7 +543,7 @@ def _shared_config_vouched(
     rel: str,
     path: Path,
     kind: str,
-    expected: Mapping[str, str],
+    copy: Path,
     written: Mapping[str, Any] | None,
     ledger: Mapping[str, str | None],
 ) -> bool:
@@ -535,7 +558,7 @@ def _shared_config_vouched(
     if kind != "file" or rel in ledger or path.is_symlink():
         return False
     current = _state(path)
-    if current == {"file": expected[""]}:
+    if current == _state(copy):
         return True
     return written is not None and current == written and vouches_for_current_bytes(path)
 
@@ -591,9 +614,14 @@ def _unit_paths(
             raise PathTraversalError("a deployment receipt path crosses a symbolic link")
     else:
         paths = [_inside(rel, bases.root) for rel in rels]
+        # A link inside the root is another spelling of a path the ledger keys.
+        if any(has_symlink_component(bases.root, path) for path in paths):
+            raise PathTraversalError("a journal path crosses a symbolic link")
     for path in paths:
         if path == snapshots or snapshots in path.parents:
             raise PathTraversalError(f"journal path {path} names the journal stores")
+    if any(ancestor not in paths[0].parents for ancestor in paths[1:]):
+        raise PathTraversalError("a journal ancestor is not an ancestor of its path")
     return paths[0], tuple(paths[1:])
 
 
@@ -656,31 +684,21 @@ _KEEP_CHANGED = "it changed after the interrupted install"
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
     """Split *units* into those to restore and those holding data a user wrote.
 
-    A path still holding its prior state, nothing, or what the last seal
-    recorded is restored. A path holding something else is kept: after a
-    seal it is a later write (``_KEEP_CHANGED``); with no seal, replay cannot
-    tell the killed install's bytes from a user's, so it proves nothing.
+    A unit is sealed when it is journaled: its manifest line, and any
+    hash-checked copy, reach the store before its first write. A gate-time
+    seal (:meth:`DeployJournal.seal`) can only keep a path, never force one:
+    a path holding neither its prior state, nothing, nor what the last such
+    seal recorded is a later write (a user's file) and is kept.
     """
     apply: list[_Replay] = []
     kept: list[tuple[str, str]] = []
-    unsealed: list[tuple[str, str]] = []
     for unit in units:
-        current = _state(unit.path)
-        if current in (_ABSENT, unit.prior) or current == unit.written:
-            apply.append(unit)
-        elif unit.written is None:
-            unsealed.append((unit.rel, "no seal records what the interrupted install wrote here"))
-        else:
+        held = (_ABSENT, unit.prior, unit.written)
+        if unit.written is not None and _state(unit.path) not in held:
             kept.append((unit.rel, _KEEP_CHANGED))
-    if unsealed:
-        raise _Unsealed(unsealed)
+        else:
+            apply.append(unit)
     return apply, kept
-
-
-class _Unsealed(Exception):
-    def __init__(self, issues: list[tuple[str, str]]) -> None:
-        super().__init__("unsealed journal units")
-        self.issues = issues
 
 
 def _replay_store(
@@ -703,12 +721,9 @@ def _replay_store(
     except LedgerUnavailable as exc:
         raise JournalReplayError(_keep(store), [exc.issue], applied=False) from None
     units, issues = _validated(lines, seals, store, bases, vouched)
-    try:
-        if issues:
-            raise _Unsealed(issues)
-        apply, kept = _decide(units)
-    except _Unsealed as exc:
-        raise JournalReplayError(_keep(store), exc.issues, applied=False) from None
+    if issues:
+        raise JournalReplayError(_keep(store), issues, applied=False)
+    apply, kept = _decide(units)
     for unit in reversed(apply):
         try:
             _apply(unit)

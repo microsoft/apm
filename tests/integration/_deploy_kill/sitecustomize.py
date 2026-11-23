@@ -11,6 +11,9 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
   exempts local rows, so that refusal cannot be produced from inputs alone.
 * ``settle+kill``: exit when the journal is discarded, right after the
   lockfile reached disk, so the journal records a committed install.
+* ``deploy+kill``: exit mid-deploy, before the next journal record once
+  ``APM_TEST_DEPLOY_KILL_AFTER`` paths were journaled and written, before
+  any gate seals the journal.
 
 Python runs only the first ``sitecustomize`` on its path, so this one runs
 the next one (the isolated environment's network guard) before anything else.
@@ -39,6 +42,17 @@ if _FAULT:
     faults = _FAULT.split("+")
     if "settle" in faults:
         deploy_snapshot.DeployJournal.discard = _killed
+    elif "deploy" in faults:
+        _after = int(os.environ["APM_TEST_DEPLOY_KILL_AFTER"])
+        _record = deploy_snapshot.DeployJournal.record
+
+        def _record_or_kill(self, path, **kwargs):
+            # Every recorded path before this call has also been written.
+            if len(self.units) >= _after:
+                os._exit(_KILLED_EXIT)
+            return _record(self, path, **kwargs)
+
+        deploy_snapshot.DeployJournal.record = _record_or_kill
     else:
         deploy_snapshot.DeployJournal.restore = _killed
 

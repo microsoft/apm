@@ -240,8 +240,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   configuration write or a refused `--frozen` install restores them the same
   way. An MCP connection collision found before any write changes nothing;
   one found at the MCP write keeps the deployed files the lockfile records. A killed process (SIGKILL, power loss)
-  cannot restore itself: the next `apm install` in that project restores every
-  file first and prints `Restored N deployed path(s) left by an interrupted
+  cannot restore itself: the next `apm install` in that project (including
+  `--mcp` and local-bundle installs) restores every file first and prints `Restored N deployed path(s) left by an interrupted
   install.` It restores only bytes that `apm.lock.yaml` records for the path.
   A shared config file the lockfile does not record (hook settings such as
   `.claude/settings.json`, the `apm-hooks.json` sidecar, an MCP config file) is

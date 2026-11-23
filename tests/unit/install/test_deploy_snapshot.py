@@ -430,22 +430,18 @@ def test_a_receipts_directory_the_killed_install_created_is_removed(
     assert not receipts.exists()
 
 
-def test_an_unsealed_changed_path_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
-    """Killed before any seal: the bytes there may be a user's, so nothing is applied."""
-    from apm_cli.install.deploy_snapshot import JournalReplayError
-
+def test_a_path_journaled_before_its_write_restores_without_a_gate_seal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Killed before any gate seal: the journal line itself seals the path."""
     project = tmp_path / "project"
     created = project / "a.md"
     _killed_journal(apm_home, project, created, seal=False)
 
-    with pytest.raises(JournalReplayError) as kept:
-        _replay(apm_home, project)
+    outcome = _replay(apm_home, project)
 
-    assert kept.value.issues == [
-        ("a.md", "no seal records what the interrupted install wrote here")
-    ]
-    assert created.read_bytes() == b"killed\n"
-    assert not kept.value.applied
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert not created.exists()
 
 
 def test_an_unreadable_ledger_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
@@ -501,9 +497,20 @@ def test_a_directory_restores_only_when_the_ledger_records_all_its_files(
         {"path": "x//a.md"},
         {"ancestors": 1},
         {"ancestors": [3]},
-        {"copy": ["0"]},
+        {"kind": "file", "copy": ["0"], "hash": "sha256:0"},
+        {"path": "x\\a.md"},
+        {"ancestors": ["other"]},
     ],
-    ids=["dot-slash", "dot", "double-slash", "ancestors-int", "ancestor-int", "copy-list"],
+    ids=[
+        "dot-slash",
+        "dot",
+        "double-slash",
+        "ancestors-int",
+        "ancestor-int",
+        "copy-list",
+        "backslash",
+        "unrelated-ancestor",
+    ],
 )
 def test_a_malformed_unit_keeps_the_journal(tmp_path: Path, apm_home: Path, mutation: dict) -> None:
     import json
@@ -519,9 +526,10 @@ def test_a_malformed_unit_keeps_the_journal(tmp_path: Path, apm_home: Path, muta
     manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
 
     with pytest.raises(JournalReplayError) as kept:
-        _replay(apm_home, project, lambda: {"a.md": None})
+        _replay(apm_home, project)
 
-    assert len(kept.value.issues) == 1, kept.value.issues
+    [(_path, reason)] = kept.value.issues
+    assert "ledger" not in reason, reason
     assert not kept.value.applied
     assert created.read_bytes() == b"killed\n"
 
@@ -546,6 +554,49 @@ def test_a_symlinked_receipts_directory_is_refused(tmp_path: Path, apm_home: Pat
         ("deployment-receipts/r.json", "journal path escapes the deploy root")
     ]
     assert (outside / "r.json").read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_mode_changed_after_the_kill_keeps_the_file(tmp_path: Path, apm_home: Path) -> None:
+    """A seal fingerprints modes too: a chmod after the kill is a user's change."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    script = project / "run.sh"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(b"prior\n")
+    ledger = {"run.sh": compute_file_hash(script)}
+    _killed_journal(apm_home, project, script)
+    script.chmod(0o700)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == (("run.sh", "it changed after the interrupted install"),)
+    assert script.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_journal_path_through_a_symlink_alias_is_refused(tmp_path: Path, apm_home: Path) -> None:
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    claimed = project / ".kiro" / "claimed.md"
+    claimed.parent.mkdir(parents=True)
+    claimed.write_bytes(b"committed\n")
+    (project / "alias").symlink_to(project / ".kiro", target_is_directory=True)
+    store = _killed_journal(apm_home, project, project / "new.md")
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text().splitlines()]
+    lines[1]["path"] = "alias/claimed.md"
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: {".kiro/claimed.md": None})
+
+    assert kept.value.issues == [("alias/claimed.md", "journal path escapes the deploy root")]
+    assert claimed.read_bytes() == b"committed\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
