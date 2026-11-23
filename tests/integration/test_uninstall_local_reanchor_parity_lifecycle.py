@@ -197,3 +197,32 @@ def test_a_reparented_descendant_under_another_alias_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "under another name (new-f)" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def test_a_retained_descendant_without_its_apm_modules_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """e -> f direct, dev d -> e; f's copy is gone: install would recreate it, so refuse."""
+    import shutil
+
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _world(
+        tmp_path,
+        apm_binary_path,
+        (("f", ()), ("e", ("../f",)), ("d", ("../e",))),
+        {"dependencies": {"apm": ["./vendor/e"]}, "devDependencies": {"apm": ["./vendor/d"]}},
+    )
+    (copy,) = (
+        path.parent
+        for path in (world.project / "apm_modules").rglob("apm.yml")
+        if path.read_text(encoding="utf-8").startswith("name: f\n")
+    )
+    shutil.rmtree(copy)
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "is missing" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before

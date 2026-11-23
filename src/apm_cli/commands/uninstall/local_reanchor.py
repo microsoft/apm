@@ -200,8 +200,11 @@ def plan_local_reanchor(
         resolved_by[key] = edges[min(nearest, key=lambda parent: renames.get(parent, parent))][0]
         row = lockfile.get_dependency(key)
         if row is not None and row.source == "local" and key not in nodes:
-            # A re-parented descendant must still install where its row says.
+            # A re-parented descendant must still install where its row says, from a copy.
             _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
+            _require_copy(
+                row.to_dependency_ref().get_install_path(modules_dir), key, label, modules_dir
+            )
         if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
@@ -225,12 +228,7 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
     for key, node in nodes.items():
         current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
         target = node.get_install_path(modules_dir)
-        if current.is_symlink() or not current.is_dir():
-            raise LocalReanchorRefused(
-                f"{label(key)} stays, but its apm_modules copy "
-                f"{current.relative_to(modules_dir).as_posix()} is missing, so it cannot move "
-                "with the re-anchor"
-            )
+        _require_copy(current, key, label, modules_dir)
         if current == target:
             continue
         if target.exists():
@@ -240,6 +238,16 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
             )
         moves.append((current, target))
     return tuple(moves)
+
+
+def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
+    """Refuse a kept package whose apm_modules copy is gone: install would recreate it."""
+    if path.is_symlink() or not path.is_dir():
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but its apm_modules copy "
+            f"{path.relative_to(modules_dir).as_posix()} is missing, so the re-anchor cannot "
+            "keep it as a fresh install would"
+        )
 
 
 def move_materializations(
@@ -271,8 +279,12 @@ def move_materializations(
             target.parent.mkdir(parents=True, exist_ok=True)
             current.rename(target)
         except BaseException:
-            # A failed or interrupted (Ctrl-C) move leaves apm_modules as it was.
-            _remove_created(created)
+            # A failed or interrupted (Ctrl-C) move leaves apm_modules as it was;
+            # a rename that completed before the interrupt is moved back too.
+            if target.is_dir() and not current.exists():
+                done.append((current, target, created))
+            else:
+                _remove_created(created)
             restore_materializations(tuple(done), root)
             raise
         done.append((current, target, created))

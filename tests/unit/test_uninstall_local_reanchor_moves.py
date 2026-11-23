@@ -340,3 +340,25 @@ def test_a_missing_copy_refuses_even_when_the_install_path_does_not_change(
 
     with pytest.raises(LocalReanchorRefused, match="is missing"):
         _materialization_moves(lockfile, {"./vendor/e": ref}, modules, lambda key: key)
+
+
+class _InterruptedAfterRename(type(Path())):
+    """The rename completes, then Ctrl-C arrives before the journal records it."""
+
+    def rename(self, target):
+        Path(self).rename(target)
+        raise KeyboardInterrupt
+
+
+def test_an_interrupt_right_after_a_rename_still_moves_it_back(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    first = _package(modules, "a")
+    before = _tree(modules)
+
+    with pytest.raises(KeyboardInterrupt):
+        move_materializations(
+            ((_InterruptedAfterRename(first), modules / "_local" / "h1" / "a"),), modules
+        )
+
+    assert _tree(modules) == before
+    assert not (modules / "_local" / "h1").exists()
