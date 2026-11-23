@@ -387,7 +387,8 @@ class GitCache:
 
                 _rich_warning(
                     f"Cached copy of {_sanitize_url(url)} @ {sha[:12]} failed verification "
-                    "against its commit; rebuilding it from a fresh fetch."
+                    "against its commit; rebuilding it from a fresh fetch.",
+                    symbol="warning",
                 )
             self._discard_shard(checkout, url, partial=bool(sparse_paths))
         raise RuntimeError(

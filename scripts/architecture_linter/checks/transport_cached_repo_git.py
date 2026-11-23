@@ -184,7 +184,7 @@ _GATED = ("_bare_has_sha", "_fetch_into_bare_locked", "bare_ref_sha")
 _GATE = "self._bare_trusted"
 # Entry points that open a cached checkout, and the trust check each must call.
 _CHECKOUT_GATES = {
-    "get_checkout": "self._checkout_trusted",
+    "_get_checkout": "self._checkout_trusted",
     "_read_only_checkout": "self._checkout_trusted",
     "_create_checkout": "self._checkout_trusted_or_evicted",
 }

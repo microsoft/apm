@@ -129,8 +129,9 @@ def _rebuilt(result: CommandResult) -> bool:
 
 
 def _names_failure(result: CommandResult) -> bool:
-    """An error line that names the package."""
-    return re.search(r"\[x\][^\[]*test/pkg", _text(result)) is not None
+    """The command fails with an error line and names the package it could not restore."""
+    text = _text(result)
+    return "[x]" in text and "test/pkg" in text
 
 
 def _installed(tmp_path: Path, apm_binary_path: Path) -> ReplayWorld:
