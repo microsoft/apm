@@ -143,9 +143,12 @@ class _Store:
         if key in self.files:
             return key, self.files[key]
         if os.path.lexists(path):
+            # Another spelling (case, Unicode form) or hard link of this existing file.
+            # Callers never look up a file APM is about to create, so a new config
+            # costs no identity checks however many records the machine holds.
             for other, row in self.files.items():
                 try:
-                    if os.path.samefile(other, path):  # case-insensitive or NFD file system
+                    if os.path.samefile(other, path):
                         return other, row
                 except OSError:
                     continue
@@ -257,21 +260,25 @@ def _origin_before_write(
     return key, _unrecorded_origin(manifest_root, before)
 
 
-def _secure_users_file(path: Path, before: bytes | None, manifest_root: Path | None) -> None:
-    """Before APM writes a file that is the user's, make that record durable.
+def _plan_write(path: Path, before: bytes | None, manifest_root: Path | None) -> Origin | None:
+    """The origin APM's write gives *path*, decided before the write (``None``: unrecorded).
 
-    Without it the file would later look like a pre-record APM file and could be
-    deleted, so a record that cannot be saved refuses the write.
+    Decided once, before the write: an atomic rewrite can break a hard link the
+    lookup followed, so a post-write lookup could miss the user's record. A file
+    that will be the user's has that record saved first; when it cannot be, the
+    write is refused, since without it the file could later look like a
+    pre-record APM file and be deleted.
     """
     if before is None:
-        return
+        return Origin.CREATED
     try:
         store = _Store.load()
-        key, origin = _origin_before_write(store, path, before, manifest_root)
-        if origin is not Origin.PREEXISTING or _origin(store.files.get(key)) is origin:
-            return
-        store.files[key] = {"origin": origin.value, "hash": _digest(before)}
-        store.save()
+        origin = _origin_before_write(store, path, before, manifest_root)[1]
+        key = config_file_key(path)
+        if origin is Origin.PREEXISTING and _origin(store.files.get(key)) is not origin:
+            store.files[key] = {"origin": origin.value, "hash": _digest(before)}
+            store.save()
+        return origin
     except (OSError, ValueError) as exc:
         raise OSError(
             f"Could not record that {path} existed before APM wrote to it ({exc}); "
@@ -280,14 +287,12 @@ def _secure_users_file(path: Path, before: bytes | None, manifest_root: Path | N
         ) from exc
 
 
-def _note(path: Path, before: bytes | None, after: bytes, manifest_root: Path | None) -> None:
-    if before == after:
-        return  # nothing written: a converged install records nothing (I2)
+def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None) -> None:
+    """Record *origin* and the bytes APM wrote under *path*'s own key."""
+    if before == after or origin is None:
+        return  # nothing written (a converged install records nothing, I2), or unrecorded
     store = _Store.load()
-    key, origin = _origin_before_write(store, path, before, manifest_root)
-    if origin is None:
-        return
-    store.files[key] = {"origin": origin.value, "hash": _digest(after)}
+    store.files[config_file_key(path)] = {"origin": origin.value, "hash": _digest(after)}
     store.save()
 
 
@@ -312,15 +317,16 @@ def recorded_config_write(
         before = None if linked else _regular_bytes(path)
     except OSError:
         linked = True
+    origin = None
     if not linked:
-        _secure_users_file(path, before, Path(manifest_root) if manifest_root else None)
+        origin = _plan_write(path, before, Path(manifest_root) if manifest_root else None)
     yield
     if linked:
         return
     try:
         after = _regular_bytes(path)
         if after is not None:
-            _note(path, before, after, Path(manifest_root) if manifest_root else None)
+            _note(path, before, after, origin)
     except (OSError, ValueError):
         _log.debug("Could not record the creation of %s", path, exc_info=True)
 
