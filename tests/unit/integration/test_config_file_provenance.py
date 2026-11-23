@@ -846,3 +846,37 @@ def test_a_record_turned_into_a_symlink_loop_never_breaks_another_lookup(
 
     assert config_file_origin(other) is not Origin.CREATED
     assert recorded.is_symlink() and other.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_two_first_writers_keep_each_others_records(tmp_path, apm_home) -> None:
+    """Two installs that both find no store yet: neither drops the other's record file."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    first_config = tmp_path / "a" / ".mcp.json"
+    second_config = tmp_path / "b" / ".mcp.json"
+    first, second = _Store.load(), _Store.load()  # both see no store yet
+    first.files[config_file_key(first_config)] = {"origin": "preexisting", "hash": "sha256:1"}
+    first.save()
+    second.files[config_file_key(second_config)] = {"origin": "preexisting", "hash": "sha256:2"}
+    second.save()
+
+    assert config_file_origin(first_config) is Origin.PREEXISTING
+    assert config_file_origin(second_config) is Origin.PREEXISTING
+    held = [path.read_text(encoding="utf-8") for path in _store_files(apm_home)]
+    assert any(config_file_key(first_config) in text for text in held), held
+
+
+def test_record_files_left_by_a_removed_store_are_never_read(tmp_path, apm_home) -> None:
+    """A store removed by hand (its index gone) starts empty: leftover record files are
+    another generation's and prove nothing."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(config, _WITH_ENTRY, manifest_root=config.parent)
+    assert config_file_origin(config) is Origin.PREEXISTING
+    (apm_home / "deployment-receipts" / "config-files" / "records.json").unlink()
+
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)
+
+    assert config_file_origin(config) is None
+    assert config.read_text(encoding="utf-8") == _WITH_ENTRY
