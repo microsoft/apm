@@ -711,11 +711,15 @@ class LockfileBuilder:
                     if dep_key in decision.rescued_keys:
                         # Preserve: package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
-                    elif dep_key in decision.retained_keys and (
-                        retained := retained_orphans.get(dep_key)
-                    ):
+                    elif dep_key in decision.retained_keys and dep_key in retained_orphans:
+                        # Membership, not file claims: a row kept only for a
+                        # hook config it could not rewrite claims no file (#5057).
                         self._keep_retained_orphan(
-                            lockfile, dep_key, dep, retained, self.ctx.existing_lockfile
+                            lockfile,
+                            dep_key,
+                            dep,
+                            retained_orphans[dep_key],
+                            self.ctx.existing_lockfile,
                         )
                     # else: orphan -- package was in lockfile but is no longer in
                     # the manifest (full install only). Don't preserve so the

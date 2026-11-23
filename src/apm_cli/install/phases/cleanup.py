@@ -37,6 +37,7 @@ from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
+from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -442,19 +443,96 @@ def _orphan_decision(
     )
 
 
+def _orphan_hook_targets(ctx: InstallContext) -> list:
+    """Hook targets an undeclared dependency may have merged into (#5057).
+
+    The active targets plus every declared one: a run narrowed by
+    ``--target`` still retires the entries in a declared runtime it skips.
+    """
+    from apm_cli.install.phases.targets import declared_target_profiles
+
+    found: dict[str, Any] = {}
+    for target in [*(ctx.targets or ()), *(declared_target_profiles(ctx) or ())]:
+        if target.supports("hooks"):
+            found.setdefault(target.name, target)
+    return list(found.values())
+
+
+def _unsafe_hook_config(target, project_root: Path) -> str | None:
+    """The merged hook config of *target* when its path is linked or escapes; else None."""
+    from apm_cli.integration.hook_bundle import hook_cleanup_root
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
+    from apm_cli.utils.path_security import has_symlink_component
+
+    config = _MERGE_HOOK_TARGETS.get(target.name)
+    if config is None:
+        return None
+    json_path = project_root / target.root_dir / config.config_filename
+    root = hook_cleanup_root(target, project_root)
+    for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
+        if root is None or not path.is_relative_to(root) or has_symlink_component(root, path):
+            return portable_relpath(json_path, project_root)
+    return None
+
+
+def _edited_hook_configs(target, project_root: Path, marker: str) -> list[str]:
+    """Merged configs holding an entry *marker* recorded that no longer matches (edited)."""
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
+    from apm_cli.integration.hook_ownership import (
+        read_hook_object,
+        reinject_apm_source_from_sidecar,
+    )
+
+    config = _MERGE_HOOK_TARGETS.get(target.name)
+    if config is None:
+        return []
+    json_path = project_root / target.root_dir / config.config_filename
+    try:
+        hooks = read_hook_object(json_path).get(config.event_container_key)
+        sidecar = read_hook_object(json_path.parent / _APM_HOOKS_SIDECAR)
+    except (OSError, ValueError, TypeError):
+        return []
+    if not isinstance(hooks, dict) or not isinstance(sidecar, dict):
+        return []
+    recorded = sum(
+        1
+        for entries in sidecar.values()
+        if isinstance(entries, list)
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("_apm_source") == marker
+    )
+    reinject_apm_source_from_sidecar(hooks, sidecar)
+    matched = sum(
+        1
+        for entries in hooks.values()
+        if isinstance(entries, list)
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("_apm_source") == marker
+    )
+    return [portable_relpath(json_path, project_root)] if recorded > matched else []
+
+
+def _warn_kept_hook(ctx: InstallContext, dependency, subject: str, reason: str, step: str) -> None:
+    key = dependency.get_unique_key()
+    ctx.diagnostics.warn(kept_note(f"{subject} of {key}", reason, step), package=key)
+
+
 def _retire_orphan_hooks(ctx: InstallContext, dependency) -> bool:
     """Retire the merged hook entries APM recorded for an undeclared dependency (#5057).
 
     The hook owner removes only entries carrying the dependency's ownership
-    marker, as ``apm uninstall`` does; an entry APM did not write, or one the
-    user edited, stays. Returns False when a hook config could not be rewritten.
+    marker, as ``apm uninstall`` does; an entry APM did not write stays, and
+    one the user edited stays with a warning. A linked or escaping hook
+    config is never read or written. Returns False when a config could not be
+    retired, so the lock row stays for the next install to retry.
     """
     from types import SimpleNamespace
 
     from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.hook_ownership import dependency_hook_source_marker
 
     apm_modules_dir = ctx.apm_modules_dir
-    targets = [target for target in ctx.targets or () if target.supports("hooks")]
+    targets = _orphan_hook_targets(ctx)
     if not targets or not isinstance(apm_modules_dir, Path):
         return True
     try:
@@ -462,29 +540,42 @@ def _retire_orphan_hooks(ctx: InstallContext, dependency) -> bool:
         package = SimpleNamespace(
             install_path=ref.get_install_path(apm_modules_dir), dependency_ref=ref
         )
+        marker = dependency_hook_source_marker(ref)
     except (ValueError, TypeError) as exc:
-        ctx.diagnostics.warn(
-            kept_note(
-                f"hook entries of {dependency.get_unique_key()}",
-                f"its install path could not be computed ({exc})",
-                "Repair its lockfile entry; the next install retries the removal.",
-            ),
-            package=dependency.get_unique_key(),
+        _warn_kept_hook(
+            ctx,
+            dependency,
+            "hook entries",
+            f"its install path could not be computed ({exc})",
+            "Repair its lockfile entry; the next install retries the removal.",
         )
         return False
-    stats = HookIntegrator().reconcile_package_target_restriction(
-        package, ctx.project_root, targets
-    )
-    for path in stats["failed_paths"]:
-        ctx.diagnostics.warn(
-            kept_note(
-                f"hook entries of {dependency.get_unique_key()} in {path}",
-                "the file could not be rewritten",
-                "Repair the file; the next install retries the removal.",
-            ),
-            package=dependency.get_unique_key(),
+    project_root = ctx.project_root
+    safe = []
+    unsafe = []
+    for target in targets:
+        path = _unsafe_hook_config(target, project_root)
+        (unsafe if path else safe).append(path or target)
+    for target in safe:
+        for path in _edited_hook_configs(target, project_root, marker):
+            _warn_kept_hook(
+                ctx,
+                dependency,
+                f"an edited hook entry in {path}",
+                "it no longer matches what APM deployed",
+                "Remove the entry manually if it is no longer needed.",
+            )
+    stats = HookIntegrator().reconcile_package_target_restriction(package, project_root, safe)
+    failed = [*unsafe, *stats["failed_paths"]]
+    for path in failed:
+        _warn_kept_hook(
+            ctx,
+            dependency,
+            f"hook entries in {path}",
+            "the file could not be rewritten safely",
+            "Repair the file or its linked parent; the next install retries the removal.",
         )
-    return not stats["failed_paths"]
+    return not failed
 
 
 def _remove_dropped_package_dirs(ctx: InstallContext, decision) -> None:
