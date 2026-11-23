@@ -167,7 +167,7 @@ def _verify_hash_pin(
 POLICY_CACHE_DIR = "policy_v1"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "6"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "7"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -1804,7 +1804,7 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
             policy.mcp.allow is not None,
             policy.mcp.transport.allow is not None,
             policy.mcp.self_defined != "warn",
-            policy.mcp.trust_transitive,
+            policy.mcp.trust_transitive is not None,
             policy.compilation.target.allow is not None,
             policy.compilation.target.enforce is not None,
             policy.compilation.strategy.enforce is not None,

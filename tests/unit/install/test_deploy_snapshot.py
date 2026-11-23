@@ -353,3 +353,28 @@ def test_deploy_store_evidence_waits_for_the_install_transaction(
             transaction.complete(result)
 
     assert entry.exists() is (outcome != "rolled-back")
+
+
+@pytest.mark.parametrize("outcome", ["rollback", "commit"])
+def test_a_legacy_lockfile_migrated_by_the_attempt_follows_its_outcome(
+    tmp_path: Path, apm_home: Path, outcome: str
+) -> None:
+    from apm_cli.deps.lockfile import migrate_lockfile_if_needed
+    from apm_cli.models.results import InstallResult
+
+    project = tmp_path / "project"
+    project.mkdir()
+    legacy, current = project / "apm.lock", project / "apm.lock.yaml"
+    legacy.write_bytes(b"lockfile_version: '1'\n")
+    transaction = _transaction(project)
+
+    migrate_lockfile_if_needed(project)
+    transaction.undo_lockfile_migration_on_rollback(project)
+    if outcome == "rollback":
+        transaction.rollback()
+    else:
+        transaction.commit(InstallResult())
+
+    kept, gone = (legacy, current) if outcome == "rollback" else (current, legacy)
+    assert kept.read_bytes() == b"lockfile_version: '1'\n"
+    assert not gone.exists()

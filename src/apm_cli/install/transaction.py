@@ -180,6 +180,7 @@ class InstallTransaction:
         self._journal_released = False
         self._journal_held_until_commit = False
         self._created_target_roots: list[Path] = []
+        self._migrated_lockfile: tuple[Path, Path, bytes] | None = None
         self.committed = False
         self._completed = False
         self._rolled_back = False
@@ -339,6 +340,25 @@ class InstallTransaction:
         if journal is not None:
             journal.record(path, contents=contents)
 
+    def undo_lockfile_migration_on_rollback(self, apm_dir: Path) -> None:
+        """A rollback moves the ``apm.lock.yaml`` just migrated back to ``apm.lock`` (#4826)."""
+        from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, get_lockfile_path
+
+        current = get_lockfile_path(apm_dir)
+        with contextlib.suppress(OSError):
+            legacy = Path(apm_dir) / LEGACY_LOCKFILE_NAME
+            self._migrated_lockfile = (current, legacy, current.read_bytes())
+
+    def _undo_lockfile_migration(self) -> None:
+        """Put the legacy lockfile back when this attempt left its bytes unchanged."""
+        migrated, self._migrated_lockfile = self._migrated_lockfile, None
+        if migrated is None:
+            return
+        current, legacy, snapshot = migrated
+        with contextlib.suppress(OSError):
+            if not legacy.exists() and current.read_bytes() == snapshot:
+                current.rename(legacy)
+
     def track_created_target_roots(self, roots: list[Path]) -> None:
         """Follow the target roots this attempt creates; rollback removes empty ones."""
         self._created_target_roots = roots
@@ -449,6 +469,7 @@ class InstallTransaction:
                         self._report_resolution_cleanup_issues(cleanup_issues)
                     finally:
                         self._restore_manifest()
+                        self._undo_lockfile_migration()
                 self._rolled_back = True
                 self._completed = True
             finally:

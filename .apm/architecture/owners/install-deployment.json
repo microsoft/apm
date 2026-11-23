@@ -150,7 +150,8 @@
         "src/apm_cli/install/deploy_snapshot.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",
-        "src/apm_cli/integration/write_seam.py"
+        "src/apm_cli/integration/write_seam.py",
+        "src/apm_cli/policy/depth_check.py"
       ],
       "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
     },

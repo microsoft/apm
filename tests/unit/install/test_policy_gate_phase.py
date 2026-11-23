@@ -45,6 +45,12 @@ class _FakeContext:
     logger: Any = None
     deps_to_install: list[Any] = field(default_factory=list)
     existing_lockfile: Any = None
+    # the resolved graph whose depth the gate judges (#4826)
+    dependency_graph: Any = None
+    dry_run: bool = False
+    package_hashes: dict[str, str] = field(default_factory=dict)
+    package_types: dict[str, Any] = field(default_factory=dict)
+    update_plan_complete_dep_keys: set[str] = field(default_factory=set)
 
     # policy_gate fields
     policy_fetch: Any = None
