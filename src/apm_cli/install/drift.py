@@ -596,29 +596,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger, *, records: bool = Tru
         include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
-    registries: dict[str, str] | None = None
-    downloader = None
-    registry_resolver = None
-    declared_transports: DeclaredTransportIndex | None = None
-    if not config.cache_only:
-        from apm_cli.cache.git_cache import attach_persistent_git_cache
-        from apm_cli.core.auth import AuthResolver
-        from apm_cli.deps.github_downloader import GitHubPackageDownloader
-        from apm_cli.deps.registry.resolver import RegistryPackageResolver
-        from apm_cli.install.replay_transport import DeclaredTransportIndex
-        from apm_cli.models.apm_package import APMPackage
-
-        downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
-        attach_persistent_git_cache(downloader, read_only=True)
-        declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
-        if (apm_yml := manifest_file(project_root)).exists():
-            manifest = APMPackage.from_apm_yml(apm_yml)
-            declared_transports.record(
-                [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]
-            )
-            registries = getattr(manifest, "registries", None) or {}
-            if registries:
-                registry_resolver = RegistryPackageResolver(registries)
+    downloader, registry_resolver, registries, declared_transports = _replay_sources(
+        config, project_root, apm_modules_dir
+    )
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
@@ -796,6 +776,38 @@ def run_replay(config: ReplayConfig, logger: CheckLogger, *, records: bool = Tru
         # A live package rendered onto a served destination: replay all live.
         return _replay_all_live(config, logger, scratch_root)
     return scratch_root
+
+
+def _replay_sources(
+    config: ReplayConfig, project_root: Path, apm_modules_dir: Path
+) -> tuple[Any, Any, dict[str, str] | None, DeclaredTransportIndex | None]:
+    """The downloader, registry resolver, registries and declared transports a replay fetches with.
+
+    A cache-only replay fetches nothing, so all four are ``None``.
+    """
+    if config.cache_only:
+        return None, None, None, None
+    from apm_cli.cache.git_cache import attach_persistent_git_cache
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.registry.resolver import RegistryPackageResolver
+    from apm_cli.install.replay_transport import DeclaredTransportIndex
+    from apm_cli.models.apm_package import APMPackage
+
+    registries: dict[str, str] | None = None
+    registry_resolver = None
+    downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+    attach_persistent_git_cache(downloader, read_only=True)
+    declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
+    if (apm_yml := manifest_file(project_root)).exists():
+        manifest = APMPackage.from_apm_yml(apm_yml)
+        declared_transports.record(
+            [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]
+        )
+        registries = getattr(manifest, "registries", None) or {}
+        if registries:
+            registry_resolver = RegistryPackageResolver(registries)
+    return downloader, registry_resolver, registries, declared_transports
 
 
 def _replay_all_live(config: ReplayConfig, logger: CheckLogger, scratch_root: Path) -> Path:
