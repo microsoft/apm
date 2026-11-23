@@ -108,17 +108,31 @@ class _TextMemo:
     reachability, replay, LSP). The checks and the parse below are pure
     functions of the text (the path only names a file in error messages), so
     a text that already passed is not re-scanned; failures are never kept,
-    so a bad manifest raises on every read with its own path.
+    so a bad manifest raises on every read with its own path. Texts longer
+    than ``MAX_TEXT_CHARS`` are never kept, so the memo's memory stays bounded
+    (at most ``limit`` small texts) whatever a manifest holds.
     """
 
     _MISS = object()
+    MAX_TEXT_CHARS = 256 * 1024
 
     def __init__(self, limit: int) -> None:
         self._limit = limit
         self._entries: OrderedDict[Any, Any] = OrderedDict()
         self._lock = threading.Lock()
 
+    @classmethod
+    def _keeps(cls, key: Any) -> bool:
+        text = key if isinstance(key, str) else key[-1]
+        return len(text) <= cls.MAX_TEXT_CHARS
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
     def get(self, key: Any) -> Any:
+        if not self._keeps(key):
+            return self._MISS
         with self._lock:
             value = self._entries.get(key, self._MISS)
             if value is not self._MISS:
@@ -126,6 +140,8 @@ class _TextMemo:
             return value
 
     def put(self, key: Any, value: Any) -> None:
+        if not self._keeps(key):
+            return
         with self._lock:
             self._entries[key] = value
             while len(self._entries) > self._limit:

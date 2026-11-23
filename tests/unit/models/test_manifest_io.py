@@ -148,6 +148,24 @@ def test_every_manifest_read_gets_a_private_copy(tmp_path: Path) -> None:
     assert first.read_text(encoding="utf-8") == text
 
 
+def test_an_oversized_manifest_loads_but_is_never_retained(tmp_path: Path) -> None:
+    """The memo keeps only small texts, so its memory is bounded (QL W3c)."""
+    from apm_cli.models import manifest_io
+
+    filler = "x" * (manifest_io._TextMemo.MAX_TEXT_CHARS + 1)
+    text = f"name: big-{tmp_path.name}\nversion: 1.0.0\ndescription: {filler}\n"
+    path = tmp_path / "apm.yml"
+    path.write_text(text, encoding="utf-8")
+    sizes = (len(manifest_io._checked_texts), len(manifest_io._parsed_texts))
+
+    first, second = load_manifest(path), load_manifest(path)
+
+    assert first == second
+    assert first["description"] == filler
+    assert (len(manifest_io._checked_texts), len(manifest_io._parsed_texts)) == sizes
+    assert path.read_text(encoding="utf-8") == text
+
+
 def test_a_refused_text_is_refused_on_every_read_with_its_own_path(tmp_path: Path) -> None:
     """Only texts that passed are remembered, so each bad file names itself."""
     text = f"name: bad-{tmp_path.name}\nversion: 1.0.0\nname: again\n"
