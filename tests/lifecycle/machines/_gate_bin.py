@@ -44,12 +44,13 @@ BIN_PATH = f".agents/plugins/{PLUGIN}/bin/{PLUGIN}"
 _PLUGINS = ".agents/plugins"
 _POLICY = "deny-native"
 # Steps under the org deny that keep bin/ although the deny should retire it:
-# a user-scope command discovers no org policy (#3703). install --mcp is not one:
-# it keeps bin/ byte-identical at every gate level (U7), so it is checked as usual.
+# a user-scope command discovers no org policy (#3703). install --mcp (U7) and lock
+# (reference/cli/lock.md) are not: both keep bin/ byte-identical at every gate level,
+# so they are checked as usual.
 _USER_SCOPE_DENY = "#3703"
 KNOWN_DD: dict[str, str] = {
     f"G1|{op}|bin|denied-dependency|user": _USER_SCOPE_DENY
-    for op in ("install", "install-frozen", "lock", "update")
+    for op in ("install", "install-frozen", "update")
 }
 
 
