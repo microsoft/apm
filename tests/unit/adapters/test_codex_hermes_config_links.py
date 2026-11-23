@@ -21,6 +21,7 @@ from apm_cli.factory import _MCP_CLIENT_REGISTRY
 
 pytestmark = [
     pytest.mark.component,
+    pytest.mark.promise("P-INV-I5", "P-OWN-mcp-json-config-writer"),
     pytest.mark.skipif(sys.platform == "win32", reason="symlink creation"),
 ]
 
