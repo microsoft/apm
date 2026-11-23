@@ -151,7 +151,8 @@ def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
     for dep in lockfile.get_package_dependencies():
         if lockfile_parent_identity(dep, lockfile.replacements) == parent_identity:
             if dep.source == "local" and dep.local_path:
-                return dep.local_path
+                # Portable: an absolute or home path prints as _local/<name>.
+                return _dependency_public_label(dep.local_path)
             return dep.repo_url
     return parent_identity or "another dependency"
 
