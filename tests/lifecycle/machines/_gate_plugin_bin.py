@@ -125,7 +125,10 @@ class GatePluginBin(StepRunner):
             if after:
                 self.root_files = self._root_files()
                 assert BIN_PATH in self.root_files, sorted(self.root_files)
-                assert self._declarations(), "install did not declare the plugin"
+                # A claude-only plugin is declared to Claude Code and pinned off for
+                # Copilot, so each settings file holds a key prune must remove.
+                files = {entry.split(":", 1)[0] for entry in self._declarations()}
+                assert files == set(SETTINGS), f"install declared it in {sorted(files)}"
             return
         if not retires:
             assert after == set(step.before.deployed), f"{op} changed bin/: {sorted(after)}"
@@ -133,11 +136,25 @@ class GatePluginBin(StepRunner):
         root = self.bench.deploy_root / ROOT
         assert not root.exists(), f"prune kept {ROOT}: {sorted(self._root_files())}"
         assert not self._declarations(), f"prune kept declarations: {self._declarations()}"
-        lock = step.after.lock
-        records = [d for d in (lock.dependencies.values() if lock else ()) if d.native_plugin]
-        assert not records, f"prune kept the native plugin record: {records}"
         declared = (self.bench.manifest().get("dependencies") or {}).get("apm") or []
         assert bool(declared) == requested.declared, f"prune changed apm.yml: {declared}"
+        lock, before = step.after.lock, step.before.lock
+        assert before is not None, "prune ran without a readable lockfile"
+        kept = {k for k in before.dependencies if PLUGIN in k}
+        others = set(before.dependencies) - kept
+        if not requested.declared and not others:
+            # prune.md: a prune that leaves zero dependencies deletes apm.lock.yaml.
+            assert not self.bench.lock_path.exists(), "orphan prune kept an empty lockfile"
+            return
+        assert lock is not None, "prune left no readable lockfile"
+        rows = {k for k in lock.dependencies if PLUGIN in k}
+        if not requested.declared:
+            assert not rows, f"orphan prune kept lock rows: {sorted(rows)}"
+            return
+        # A gate retirement keeps the declared dependency's row, minus its record.
+        assert kept and rows == kept, f"prune changed the rows: {sorted(kept)} -> {sorted(rows)}"
+        records = [k for k in rows if lock.dependencies[k].native_plugin]
+        assert not records, f"prune kept the native plugin record: {records}"
 
     def _credit(self, op: str, cell: str, step: Step, retires: bool) -> None:
         present: dict[str, list[str]] = {}
