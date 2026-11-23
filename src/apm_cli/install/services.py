@@ -204,6 +204,12 @@ def integrate_package_primitives(  # noqa: PLR0913
         AgentPluginDeploymentBoundaryError: If native Agent Plugin content reaches deployment.
     """
     enforce_agent_plugin_deployment_boundary(package_info)
+    if not (Path(package_info.install_path) / ".apm" / "hooks").is_dir():
+        # PERF FALSIFICATION HACK (per-package ceiling): hook-free packages skip -- NEVER SHIP
+        return {"prompts": 0, "agents": 0, "skills": 0, "sub_skills": 0, "instructions": 0,
+                "commands": 0, "hooks": 0, "canvases": 0, "links_resolved": 0,
+                "deployed_files": [], "native_plugin": False, "files_changed": 0,
+                "hooks_contributed": 0}
 
     from apm_cli.core.deployment_ledger import recorded_writes
     from apm_cli.integration.dispatch import get_dispatch_table
