@@ -532,15 +532,19 @@ def _enter_manifest_host_scope(stack: contextlib.ExitStack, data: dict, logger) 
 
 
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
-    """Ensure dependency sections exist and return their mutable list views."""
-    if "dependencies" not in data:
+    """Ensure dependency sections exist and return their mutable list views.
+
+    A null section (``devDependencies:`` with no value) counts as absent,
+    as the audit's manifest projection reads it (#4570).
+    """
+    if data.get("dependencies") is None:
         data["dependencies"] = {}
-    if "apm" not in data["dependencies"]:
+    if data["dependencies"].get("apm") is None:
         data["dependencies"]["apm"] = []
-    had_dev_section = "devDependencies" in data
+    had_dev_section = data.get("devDependencies") is not None
     if not had_dev_section:
         data["devDependencies"] = {}
-    if "apm" not in data["devDependencies"]:
+    if data["devDependencies"].get("apm") is None:
         data["devDependencies"]["apm"] = []
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []

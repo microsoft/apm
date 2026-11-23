@@ -387,7 +387,13 @@ def test_a_surviving_dev_dependency_that_reaches_the_denied_one_falls_back_to_th
     assert check.remediations == ()
 
 
-def test_a_null_dev_dependencies_section_still_yields_the_advice(tmp_path: Path, capsys) -> None:
+def test_a_null_dev_dependencies_section_yields_advice_that_clears_the_failure(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
     root = _project(
         tmp_path,
         ["acme/evil-pkg", "contoso/keep"],
@@ -398,6 +404,16 @@ def test_a_null_dev_dependencies_section_still_yields_the_advice(tmp_path: Path,
     check = _allowlist(root)
 
     assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'")
+
+    monkeypatch.chdir(root)
+    result = CliRunner().invoke(cli, ["uninstall", "acme/evil-pkg"])
+    clear_apm_yml_cache()
+
+    assert result.exit_code == 0, result.output
+    assert yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))["dependencies"] == {
+        "apm": ["contoso/keep"]
+    }
+    assert _allowlist(root).passed
 
 
 @pytest.mark.parametrize(
