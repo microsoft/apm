@@ -839,6 +839,44 @@ def _check_native_mcp_ownership(
     )
 
 
+def _edited_native_mcp_entries(
+    project_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+) -> tuple[CheckResult, ...]:
+    """Report recorded native MCP entries edited since APM wrote them (#4757).
+
+    Empty when none was edited, so audit output is unchanged for every other project.
+    """
+    from ..install.mcp.native_entry import edited_recorded_native_mcp_entries
+
+    edited = edited_recorded_native_mcp_entries(
+        lock,
+        [target.name for target in targets],
+        project_root=project_root,
+        user_scope=user_scope,
+    )
+    if not edited:
+        return ()
+    check = CheckResult(
+        name="native-mcp-drift",
+        passed=False,
+        message=(
+            f"{len(edited)} native MCP entr(ies) recorded in apm.lock.yaml changed since "
+            f"APM wrote them -- {remediation.NATIVE_MCP_ENTRY_EDITED.clause()}"
+        ),
+        remediations=(remediation.NATIVE_MCP_ENTRY_EDITED,),
+        details=[
+            f"MCP server {name!a} in {config} ({runtime}): the entry differs from what "
+            "APM recorded writing"
+            for name, runtime, config in edited
+        ],
+    )
+    return (check,)
+
+
 def _kept_mcp_entries(
     project_root: Path, lock: LockFile, *, user_scope: bool, lockless: bool = False
 ) -> tuple[CheckResult, ...]:
@@ -1817,7 +1855,14 @@ def run_baseline_checks(
         or _run(
             _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
         )
-        # 7c: MCP entries kept without a lockfile because they could not be proven (#4737)
+        # 7c: recorded native MCP entries edited since APM wrote them (#4757)
+        or any(
+            _run(check)
+            for check in _edited_native_mcp_entries(
+                project_root, lock, resolved_targets, user_scope=user_scope
+            )
+        )
+        # 7d: MCP entries kept without a lockfile because they could not be proven (#4737)
         or any(
             _run(check) for check in _kept_mcp_entries(deployment_root, lock, user_scope=user_scope)
         )

@@ -699,3 +699,57 @@ def test_native_comparison_distinguishes_json_types():
     assert not MCPClientAdapter.json_identical({"enabled": True}, {"enabled": 1})
     assert not MCPClientAdapter.json_identical({"timeout": 1}, {"timeout": 1.0})
     assert MCPClientAdapter.json_identical({"a": 1, "b": 2}, {"b": 2, "a": 1})
+
+
+def _recorded_user_claude(tmp_path, monkeypatch, *, recorded_hash: bool):
+    """A self-defined server APM wrote to ~/.claude.json, as the lockfile records it."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    stored = {"name": "srv", "registry": False, "transport": "stdio", "command": "srv-bin"}
+    client = ClaudeClientAdapter(project_root=tmp_path / "project", user_scope=True)
+    native = client.render_server_config(
+        MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored))
+    )
+    path = Path(client.get_config_path())
+    path.write_text(json.dumps({"mcpServers": {"srv": native}}), encoding="utf-8")
+    lock = LockFile()
+    lock.mcp_servers = ["srv"]
+    lock.mcp_configs = {"srv": stored}
+    hashes = {"claude": {"srv": mcp_native_hash(client.managed_server_config(native))}}
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock, {"claude": ["srv"]}, native_hashes=hashes if recorded_hash else {}
+    )
+    return lock, path
+
+
+def _edited_entries(lock, tmp_path):
+    from apm_cli.install.mcp.native_entry import edited_recorded_native_mcp_entries
+
+    return edited_recorded_native_mcp_entries(
+        lock, ["claude"], project_root=tmp_path / "project", user_scope=True
+    )
+
+
+def test_a_hand_edited_recorded_user_claude_entry_is_reported(tmp_path, monkeypatch) -> None:
+    """#4757: an edit to a recorded ~/.claude.json entry is named with its file; read-only."""
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=True)
+    assert _edited_entries(lock, tmp_path) == []
+
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    assert _edited_entries(lock, tmp_path) == [("srv", "claude", path.absolute().as_posix())]
+    assert path.read_bytes() == before
+
+
+def test_a_recorded_entry_without_a_fingerprint_is_not_reported(tmp_path, monkeypatch) -> None:
+    """Without a recorded fingerprint there is nothing APM recorded to compare against."""
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=False)
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    assert _edited_entries(lock, tmp_path) == []
+    assert path.read_bytes() == before
