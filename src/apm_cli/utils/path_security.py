@@ -23,7 +23,6 @@ Design
 from __future__ import annotations
 
 import os
-import unicodedata
 import urllib.parse as _up
 from pathlib import Path
 from stat import S_ISLNK
@@ -264,10 +263,11 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
 def _caseless(path: Path) -> str:
     """Return *path* folded for a caseless compare (NFC and NFD spellings agree).
 
-    Decomposing first and recomposing after matches Unicode canonical caseless
-    matching: folding can undo a composition the input had.
+    The shared key of :func:`apm_cli.utils.paths.caseless`.
     """
-    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", str(path)).casefold())
+    from .paths import caseless
+
+    return caseless(str(path))
 
 
 def filesystem_containment(path: Path, root: Path) -> bool | None:

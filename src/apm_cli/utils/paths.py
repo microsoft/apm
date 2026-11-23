@@ -67,13 +67,24 @@ def resolve_base_and_source_dirs(
     return resolved_base, resolved_source
 
 
+def caseless(text: str) -> str:
+    """Unicode canonical caseless key of *text*: NFD, case folding, then NFC.
+
+    Decomposing first and recomposing after matches canonical caseless
+    matching: folding can undo a composition the input had (U+0390 and the
+    NFD capital iota with U+0308 U+0301 share one key). The one key for path
+    spellings and containment (#5158, #5167).
+    """
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", text).casefold())
+
+
 def spelling_key(path: str) -> str:
-    """Case-folded, NFC-normalized, ``/``-separated key of *path*.
+    """Caseless, ``/``-separated key of *path*.
 
     Spellings that differ only in letter case or Unicode normalization share
     one key; whether they are one entry is a property of the volume.
     """
-    return unicodedata.normalize("NFC", path.replace("\\", "/")).casefold()
+    return caseless(path.replace("\\", "/"))
 
 
 _spelling_key = spelling_key

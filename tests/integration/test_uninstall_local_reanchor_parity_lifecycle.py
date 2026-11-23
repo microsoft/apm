@@ -555,6 +555,23 @@ def test_an_nfd_variant_link_into_the_moving_copy_refuses(
     _assert_refused_unchanged(world, nfc)
 
 
+def test_a_re_decomposing_variant_link_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """U+0390 named copy, link spelled NFD capital iota + U+0308 + U+0301: one key."""
+    composed, decomposed = "\u0390", "\u0399\u0308\u0301"
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        f"See [package](../../../apm_modules/_local/{decomposed}).",
+        name=composed,
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert f"apm_modules/_local/{decomposed})" in deployed, ascii(deployed)
+
+    _assert_refused_unchanged(world, name=composed)
+
+
 def test_an_angle_bracket_link_with_a_space_into_the_moving_copy_refuses(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
