@@ -367,6 +367,32 @@ def user_script_environment(env: dict[str, str]) -> dict[str, str]:
     return restored
 
 
+def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* with PATH limited to directories outside the project.
+
+    For scripts APM itself authors and launches (runtime setup, self-update):
+    the programs they call by name resolve the way :func:`trusted_executable`
+    resolves APM's own helpers. ``.``, empty and relative entries and every
+    entry inside the project are dropped; user-authored scripts never use this.
+    """
+    exclusion_root = _executable_exclusion_root()
+    result = dict(env)
+    for key in [key for key in env if key.upper() == "PATH"]:
+        kept = []
+        for entry in env[key].split(os.pathsep):
+            if not entry or not Path(entry).expanduser().is_absolute():
+                continue
+            try:
+                directory = Path(entry).expanduser().resolve()
+                if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+                    continue
+            except (OSError, ValueError):
+                continue
+            kept.append(entry)
+        result[key] = os.pathsep.join(kept)
+    return result
+
+
 def trusted_executable(name: str) -> str | None:
     """Return the absolute path of helper *name*, or ``None`` if it is not installed.
 

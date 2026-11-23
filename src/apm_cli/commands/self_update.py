@@ -196,7 +196,8 @@ def _build_self_update_installer_env(
     """
     from ..config import get_self_update_install_dir
 
-    env = external_process_env()
+    # APM authored the installer: what it calls resolves outside the project.
+    env = git_env.trusted_path_environment(external_process_env())
     install_dir = get_self_update_install_dir()
     if install_dir and _ENV_INSTALL_DIR not in env:
         env[_ENV_INSTALL_DIR] = install_dir
