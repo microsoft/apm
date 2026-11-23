@@ -659,9 +659,6 @@ def _plan_reanchor_or_exit(
 
     try:
         plan = plan_local_reanchor(lockfile, decision, project_root, frozenset(labels), label=label)
-        problems = reanchor_receipt_problems(
-            project_root, InstallScope.PROJECT, lockfile, plan.renames
-        )
         if plan.renames and (shrunk := sorted(shrinks())):
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but the remaining packages select "
@@ -700,6 +697,9 @@ def _plan_reanchor_or_exit(
                 lockfile, plan, project_root, label, dict(decision.rescued_depths)
             )
             plan = replace(plan, writers=writers)
+        problems = reanchor_receipt_problems(
+            project_root, InstallScope.PROJECT, lockfile, plan.renames, plan.writers
+        )
         if problems:
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but APM cannot prove it wrote "
@@ -860,7 +860,7 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
         renamed = {new for old, new in plan.renames.items() if old != new}
         if committed is None or not renamed <= committed.dependencies.keys():
             return  # the lock was not committed; receipts still match it
-        rename_receipt_owners(deploy_root, scope, committed, plan.renames)
+        rename_receipt_owners(deploy_root, scope, committed, plan.renames, plan.writers)
     except Exception as exc:
         # One transaction: without its receipts the re-anchor does not stand.
         _roll_back_and_exit(

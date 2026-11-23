@@ -931,6 +931,7 @@ def test_a_reanchor_records_the_shared_skill_writer_a_fresh_install_records(
     assert (world.project / _SHARED_SKILL).read_bytes() == deployed
     _assert_reanchored_like_a_full_install(world)
     assert (world.project / _SHARED_SKILL).read_bytes() == deployed
+    world.audit_clean()
 
 
 def test_a_reanchor_that_changes_a_shared_skill_writer_refuses(

@@ -754,11 +754,12 @@ def run_replay(
                         )
                     except AgentPluginTargetExcludedError:
                         continue
-                    carry_kept_loose_into_replay(
-                        result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
+                    _after_replayed_package(
+                        result,
+                        lock_dep,
+                        (dep_key, deployment_frame[1], scratch_root, config.user_scope),
+                        on_package,
                     )
-                    if on_package is not None:
-                        on_package(dep_key, list(result.get("deployed_files") or ()), scratch_root)
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
                             lock_dep,
@@ -800,6 +801,14 @@ def run_replay(
 
     logger.replay_complete(replayed_count)
     return scratch_root
+
+
+def _after_replayed_package(result, lock_dep, frame: tuple, on_package) -> None:
+    """Carry the package's kept loose files, then report its output to *on_package*."""
+    dep_key, frame_root, scratch_root, user_scope = frame
+    carry_kept_loose_into_replay(result, lock_dep, frame_root, scratch_root, user_scope)
+    if on_package is not None:
+        on_package(dep_key, list(result.get("deployed_files") or ()), scratch_root)
 
 
 # Diff engine
