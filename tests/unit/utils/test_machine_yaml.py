@@ -133,7 +133,7 @@ def test_a_mutated_copy_never_reaches_the_memoized_parse() -> None:
 
 def test_only_the_lockfile_parse_uses_the_machine_loader() -> None:
     callers = sorted(
-        str(path.relative_to(ROOT))
+        path.relative_to(ROOT).as_posix()
         for path in (ROOT / "src").rglob("*.py")
         if re.search(r"\bload_machine_yaml_str\b", path.read_text(encoding="utf-8"))
     )
