@@ -432,23 +432,29 @@ def test_a_destination_substituted_right_after_publish_is_never_taken_for_ours(
     assert [path for path, _reason in issues] == [destination]
 
 
-def test_a_commit_with_nothing_published_leaves_no_apm_modules_behind(tmp_path: Path) -> None:
-    """A session that only staged scratch work does not create apm_modules (#5159 I2)."""
+
+def test_removing_a_created_apm_modules_after_commit_leaves_none_behind(tmp_path: Path) -> None:
+    """Commit keeps the directory; the locked apply removes it when empty (#5159 I2)."""
     modules = tmp_path / "apm_modules"
     session = ResolutionStagingSession(modules)
     session.prepare_replacement(modules / "scratch").mkdir()
 
     assert session.commit() == []
+    assert modules.is_dir(), "the full run keeps the apm_modules it created"
+    assert session.remove_created_modules_dir() == []
     assert not modules.exists()
 
 
-def test_a_commit_keeps_an_apm_modules_that_existed_or_holds_a_package(tmp_path: Path) -> None:
+def test_removing_created_apm_modules_keeps_one_that_existed_or_holds_a_package(
+    tmp_path: Path,
+) -> None:
     """Only an empty apm_modules this session created is removed."""
     existed = tmp_path / "existed" / "apm_modules"
     existed.mkdir(parents=True)
     session = ResolutionStagingSession(existed)
     session.prepare_replacement(existed / "scratch").mkdir()
     assert session.commit() == []
+    assert session.remove_created_modules_dir() == []
     assert existed.is_dir()
 
     modules = tmp_path / "fresh" / "apm_modules"
@@ -459,4 +465,5 @@ def test_a_commit_keeps_an_apm_modules_that_existed_or_holds_a_package(tmp_path:
     (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
     session.publish_replacement(replacement, clobber=False)
     assert session.commit() == []
+    assert session.remove_created_modules_dir() == []
     assert (destination / "apm.yml").is_file()

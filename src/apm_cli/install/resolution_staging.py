@@ -254,8 +254,6 @@ class ResolutionStagingSession:
                 )
             finally:
                 cleanup_issues.extend(self._release_staging_lock())
-            # Staging alone must not leave an apm_modules behind (#5159, I2).
-            cleanup_issues.extend(self._remove_created_modules_dir())
         return cleanup_issues
 
     def remove_abandoned_roots(self) -> list[tuple[Path, str]]:
@@ -347,7 +345,7 @@ class ResolutionStagingSession:
                 cleanup_issues.append((self._staging_root, f"could not remove staging: {exc}"))
             finally:
                 cleanup_issues.extend(self._release_staging_lock())
-            cleanup_issues.extend(self._remove_created_modules_dir())
+            cleanup_issues.extend(self.remove_created_modules_dir())
             try:
                 for created in self._missing_parents:
                     if created.is_dir() and not any(created.iterdir()):
@@ -363,7 +361,7 @@ class ResolutionStagingSession:
                 self._relocations.clear()
         return cleanup_issues
 
-    def _remove_created_modules_dir(self) -> list[tuple[Path, str]]:
+    def remove_created_modules_dir(self) -> list[tuple[Path, str]]:
         """Remove ``apm_modules`` when this session created it and it is still empty."""
         try:
             if (
