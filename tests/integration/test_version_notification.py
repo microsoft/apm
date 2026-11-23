@@ -1,6 +1,8 @@
 """Integration tests for version update notification in CLI."""
 
 import os  # noqa: F401
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,8 +18,13 @@ class TestVersionNotificationIntegration(unittest.TestCase):
     """Test version check notification in CLI commands."""
 
     def setUp(self):
-        """Set up test fixtures."""
+        """Give each test its own HOME, so no daily-check stamp leaks in from the worker."""
         self.runner = CliRunner()
+        self.home = Path(tempfile.mkdtemp(prefix="apm-notice-home-"))
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        home_env = patch.dict("os.environ", {"HOME": str(self.home)}, clear=False)
+        home_env.start()
+        self.addCleanup(home_env.stop)
 
     @patch("apm_cli.commands._helpers.check_for_updates")
     @patch.dict("os.environ", {"APM_E2E_TESTS": ""}, clear=False)
@@ -57,6 +64,24 @@ class TestVersionNotificationIntegration(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("A new version", result.output)
         self.assertIn("0.7.0", result.output)
+
+    @patch("apm_cli.commands._helpers.check_for_updates")
+    @patch.dict("os.environ", {"APM_E2E_TESTS": ""}, clear=False)
+    def test_a_fresh_daily_stamp_skips_the_check_and_the_notice(self, mock_check):
+        """Within a day of the last check the notice neither checks nor prints (620c6ea79)."""
+        mock_check.return_value = "0.7.0"
+        stamp = self.home / ".cache" / "apm" / "last_version_check"
+        stamp.parent.mkdir(parents=True)
+        stamp.touch()
+
+        from apm_cli.cli import cli
+
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, ["init", "test-project", "--yes"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("A new version", result.output)
+        mock_check.assert_not_called()
 
     @patch("apm_cli.commands._helpers.check_for_updates")
     def test_no_notification_when_up_to_date(self, mock_check):
