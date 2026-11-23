@@ -137,6 +137,7 @@
     "P-OWN-marketplace-ref-pin-commit": "architecture owner (marketplace-plugins.json): Marketplace ref pins are trust on first use: resolution checks and stages, a contradicting ref is refused, and only a committed install records pins",
     "P-OWN-marketplace-source-admission": "architecture owner (marketplace-plugins.json): Marketplace source admission, transport identity, and repository-relative catalog path",
     "P-OWN-marketplace-tag-pattern": "architecture owner (marketplace-plugins.json): Marketplace tag-pattern validation and expansion",
+    "P-OWN-marketplace-view-json-envelope": "architecture owner (marketplace-plugins.json): Versioned success and error envelopes and safe metadata/source/install-path projection for marketplace and view JSON output",
     "P-OWN-materialized-manifest-evidence": "architecture owner (install-deployment.json): Acquired manifest metadata snapshot",
     "P-OWN-mcp-declaration-scope": "architecture owner (hooks-integrations.json): Root vs dependency MCP declaration scope, receipt-bound local-bundle baseline (the set audit MCP policy judges), and dependency-bound intentional omission evidence",
     "P-OWN-mcp-json-config-writer": "architecture owner (hooks-integrations.json): Writing a user-editable MCP JSON config file (.github/mcp.json, .mcp.json, ~/.claude.json, the IntelliJ MCP config) in the file's own style: indentation, final newline, line endings and literal non-ASCII kept; only APM's entries change; new or minified files use the caller's default",

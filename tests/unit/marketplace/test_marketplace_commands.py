@@ -814,7 +814,6 @@ class TestMarketplaceList:
     ) -> None:
         """Sources cannot disclose URL secrets or internal cache locations."""
         from apm_cli.cli import cli
-        from apm_cli.config import CONFIG_DIR
 
         monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
         cache = tmp_path / "download-cache"
@@ -849,7 +848,7 @@ class TestMarketplaceList:
                 SimpleNamespace(name="invalid", kind="local", url="file://[", ref="", path=""),
                 MarketplaceSource(name="cached", url=str(cache / "checkout")),
                 MarketplaceSource(
-                    name="legacy", url=str(Path(CONFIG_DIR) / "cache" / "marketplace")
+                    name="legacy", url=str(tmp_path / ".apm" / "cache" / "marketplace")
                 ),
             ],
         )

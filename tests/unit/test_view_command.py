@@ -259,13 +259,17 @@ def test_view_json_usage_boundary(arguments: list[str]) -> None:
     assert "schema_version" not in result.stderr
 
 
+def _write_lock(path: Path, **fields: str) -> None:
+    """Write a one-dependency lockfile for org/review (JSON is valid YAML)."""
+    entry = {"repo_url": "org/review", **fields}
+    path.write_text(json.dumps({"lockfile_version": "2", "dependencies": [entry]}))
+
+
 @pytest.mark.parametrize("global_scope", [False, True])
 def test_view_json_installed_scope_and_lockfile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, global_scope: bool
 ) -> None:
     """Both scopes use the same installed location and lock metadata as text mode."""
-    from apm_cli.deps.lockfile import LockedDependency, LockFile
-
     project = tmp_path / "project"
     home = tmp_path / "home"
     project.mkdir()
@@ -278,16 +282,12 @@ def test_view_json_installed_scope_and_lockfile(
         (package / "apm.yml").write_text(
             f"name: {name}\nversion: 2.0.0\ndescription: Review changes\nauthor: Alice\n"
         )
-        LockFile(
-            dependencies={
-                "org/review": LockedDependency(
-                    repo_url="org/review",
-                    resolved_ref=f"{name}-ref",
-                    resolved_commit="aabbccddeeff0011223344556677889900112233",
-                    source="registry",
-                )
-            }
-        ).write(root / "apm.lock.yaml")
+        _write_lock(
+            root / "apm.lock.yaml",
+            resolved_ref=f"{name}-ref",
+            resolved_commit="aabbccddeeff0011223344556677889900112233",
+            source="registry",
+        )
 
     args = ["view", "org/review", "--format", "json"]
     if global_scope:
@@ -441,7 +441,6 @@ def test_view_json_unusable_optional_source_is_null(source: object) -> None:
 
 def test_view_json_omits_cache_locations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Internal source and resolved cache paths never appear in detail output."""
-    from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
 
     monkeypatch.chdir(tmp_path)
@@ -471,9 +470,7 @@ def test_view_json_omits_cache_locations(tmp_path: Path, monkeypatch: pytest.Mon
     package = tmp_path / "apm_modules" / "org" / "review"
     package.mkdir(parents=True)
     (package / "apm.yml").write_text("name: review\nversion: 1.0.0\n")
-    LockFile(
-        dependencies={"org/review": LockedDependency(repo_url="org/review", source=cache_source)}
-    ).write(tmp_path / "apm.lock.yaml")
+    _write_lock(tmp_path / "apm.lock.yaml", source=cache_source)
 
     installed = CliRunner().invoke(cli, ["view", "org/review", "-f", "json"])
 
@@ -488,8 +485,6 @@ def test_view_json_sanitizes_installed_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Installed details preserve literal metadata while scrubbing credential URLs."""
-    from apm_cli.deps.lockfile import LockedDependency, LockFile
-
     monkeypatch.chdir(tmp_path)
     package = tmp_path / "apm_modules" / "org" / "review"
     package.mkdir(parents=True)
@@ -497,9 +492,7 @@ def test_view_json_sanitizes_installed_metadata(
     (package / "apm.yml").write_text(
         f'name: review\nversion: 1.0.0\ndescription: "Read {url}"\nauthor: unknown\n'
     )
-    LockFile(
-        dependencies={"org/review": LockedDependency(repo_url="org/review", source=url)}
-    ).write(tmp_path / "apm.lock.yaml")
+    _write_lock(tmp_path / "apm.lock.yaml", source=url)
     (package / "run.prompt.md").write_text("Run review.\n")
     hooks = package / "hooks"
     hooks.mkdir()

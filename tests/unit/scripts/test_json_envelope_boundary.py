@@ -10,7 +10,7 @@ from scripts.architecture_linter.checks.marketplace_locked_evidence import (
 )
 from scripts.architecture_linter.facts import FactsProvider
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-marketplace-view-json-envelope")]
 
 
 @pytest.mark.parametrize(

@@ -279,6 +279,7 @@ catalog without network access.
 
 ```bash
 apm marketplace browse awesome-agents
+apm marketplace browse awesome-agents --format json
 ```
 
 ### JSON output
