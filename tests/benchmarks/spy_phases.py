@@ -168,10 +168,11 @@ _INVARIANTS = (
         ("deps/tiered_ref_resolver", "deps/git_reference_resolver"),
     ),
     ("copy-to-modules", {"robust_copytree", "robust_copy_entry"}, ()),
-    ("cache-lookup", set(), ("cache/",)),
-    ("manifest-validate", {"validate_apm_package", "from_apm_yml", "load_manifest"}, ()),
     ("receipts-ledger", set(), ("core/deployment_ledger", "cache/deploy_store",
                                 "install/deploy_snapshot", "install/receipts")),  # fmt: skip
+    ("path-containment", set(), ("utils/path_security", "utils/paths")),
+    ("cache-lookup", set(), ("cache/",)),
+    ("manifest-validate", {"validate_apm_package", "from_apm_yml", "load_manifest"}, ()),
     ("lockfile", set(), ("deps/lockfile", "install/phases/lockfile",
                          "deps/lockfile_generator", "install/cache_pin")),  # fmt: skip
     (
@@ -183,6 +184,15 @@ _INVARIANTS = (
                               "install/deployment_plan", "install/commit_gate")),  # fmt: skip
     ("resolver-graph", set(), ("deps/",)),
 )
+
+
+def _leaf_owner(frames: list[tuple[str, str]], default: str) -> str:
+    for func, path in reversed(frames):
+        mod = _apm(path) or ""
+        for bucket, wanted_funcs, wanted_mods in _INVARIANTS:
+            if func in wanted_funcs or (mod and wanted_mods and mod.startswith(wanted_mods)):
+                return bucket
+    return default
 
 
 def invariants(text: str, rate: int) -> list[str]:
@@ -199,10 +209,11 @@ def invariants(text: str, rate: int) -> list[str]:
         funcs = {func for func, _path in frames}
         mods = [_apm(path) or "" for _func, path in frames]
         name = "other-apm" if any(mods) else "interpreter"
-        for bucket, wanted_funcs, wanted_mods in _INVARIANTS:
-            if funcs & wanted_funcs or any(m.startswith(wanted_mods) for m in mods if m):
-                name = bucket
-                break
+        if "_find_and_load" in funcs:
+            name = "imports"
+        else:
+            # Leaf first: the innermost frame that some invariant owns decides.
+            name = _leaf_owner(frames, name)
         buckets[name] += n
     out = [f"INV TOTAL samples={total} ~{total / rate:.2f}s"]
     for name, n in buckets.most_common():
