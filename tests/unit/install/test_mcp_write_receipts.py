@@ -142,8 +142,9 @@ def _reconcile(
 
 
 _UNTARGETED = (
-    f"Kept MCP server '{SERVER}' in .mcp.json: APM no longer targets copilot. Remove "
-    "the entry if you no longer use it, or add copilot to targets: in apm.yml."
+    f"Kept MCP server '{SERVER}' in .mcp.json: APM no longer deploys it for copilot. "
+    "Remove the entry if you no longer use it, or check targets: in apm.yml and in the "
+    "server's declaration."
 )
 
 
@@ -188,23 +189,55 @@ def test_a_declared_entry_no_targeted_runtime_deploys_is_kept_and_reported(
 def test_a_runtime_sharing_the_destination_clears_the_keep(project: Path, retire: bool) -> None:
     """Claude reuses copilot's .mcp.json entry without a write: it is in use again."""
     _install_write(project, _Logger())
+    before = _config(project).read_bytes()
     _reconcile(project, _Logger(), {"cursor": {SERVER}})
     logger = _Logger()
 
     _reconcile(project, logger, {"claude": {SERVER}}, retire=retire)
 
+    assert _config(project).read_bytes() == before
     assert not logger.warnings
     assert kept_mcp_writes(project, user_scope=False, managed={SERVER}) == []
+
+
+@pytest.mark.parametrize(("flag", "reported"), [("copilot", False), (None, True)])
+def test_a_runtime_the_target_flag_selects_is_not_reported(
+    project: Path, flag: str | None, reported: bool
+) -> None:
+    """apm.yml targets cursor; `--target copilot` selects copilot for this run."""
+    from types import SimpleNamespace
+
+    from apm_cli.core.target_detection import FLAG_TARGET_SOURCE, EffectiveTargetDecision
+
+    _install_write(project, _Logger())
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    retire_undeclared_mcp_writes(
+        {SERVER},
+        project_root=project,
+        user_scope=False,
+        exclude=None,
+        logger=logger,
+        manifest=SimpleNamespace(targets=["cursor"]),
+        dependencies=[SERVER],
+        target_decision=EffectiveTargetDecision([flag], FLAG_TARGET_SOURCE) if flag else None,
+    )
+
+    assert _config(project).read_bytes() == before
+    assert logger.warnings == ([_UNTARGETED] if reported else [])
 
 
 def test_a_kept_entry_whose_server_is_no_longer_declared_stays_reported(project: Path) -> None:
     """Restoring copilot does not adopt an entry the lockfile no longer manages."""
     _install_write(project, _Logger())
+    before = _config(project).read_bytes()
     _reconcile(project, _Logger(), {"cursor": {SERVER}})
     logger = _Logger()
 
     _reconcile(project, logger, {"copilot": set()}, declared=set(), retire=False)
 
+    assert _config(project).read_bytes() == before
     assert logger.warnings == [_UNTARGETED]
     assert [
         write.name for write, _ in kept_mcp_writes(project, user_scope=False, managed=set())

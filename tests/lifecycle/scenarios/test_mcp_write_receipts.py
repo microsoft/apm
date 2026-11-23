@@ -372,7 +372,7 @@ def test_a_local_bundle_mcp_entry_is_retired_without_the_lockfile(lifecycle_worl
 
 
 _CURSOR = ".cursor/mcp.json"
-_KEPT_CURSOR = f"Kept MCP server '{SERVER}' in {_CURSOR}: APM no longer targets cursor"
+_KEPT_CURSOR = f"Kept MCP server '{SERVER}' in {_CURSOR}: APM no longer deploys it for cursor"
 
 
 def test_an_apm_written_entry_for_a_runtime_no_longer_targeted_is_retired_without_the_lockfile(

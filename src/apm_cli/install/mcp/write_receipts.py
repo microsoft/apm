@@ -355,8 +355,8 @@ class McpWriteReceipts:
         if write.untargeted:
             logger.warning(
                 f"Kept MCP server '{write.name}' in {self.display(write)}: APM no longer "
-                f"targets {write.runtime}. Remove the entry if you no longer use it, or "
-                f"add {write.runtime} to targets: in apm.yml."
+                f"deploys it for {write.runtime}. Remove the entry if you no longer use it, "
+                "or check targets: in apm.yml and in the server's declaration."
             )
             return
         logger.warning(
@@ -513,6 +513,7 @@ def retire_undeclared_mcp_writes(
     manifest: Any = None,
     dependencies: Iterable[Any] = (),
     runtime: str | None = None,
+    target_decision: Any = None,
 ) -> None:
     """Without a lockfile, retire the entries APM wrote for servers it no longer deploys.
 
@@ -529,10 +530,17 @@ def retire_undeclared_mcp_writes(
     declared servers it receives; a declared server's entry no admitted
     destination covers is kept and reported (#4784). Without *admitted*, it is
     derived from *manifest* and its MCP *dependencies*, unless an explicit
-    *runtime* narrows this run (not the project).
+    *runtime* narrows this run (not the project); runtimes a ``--target`` flag
+    selects for this run (*target_decision*) are admitted too.
     """
     if admitted is None and manifest is not None and runtime is None:
-        admitted = _admitted(manifest, list(dependencies), set(declared), user_scope=user_scope)
+        admitted = _admitted(
+            manifest,
+            list(dependencies),
+            set(declared),
+            user_scope=user_scope,
+            flagged=_flag_runtimes(target_decision, user_scope=user_scope),
+        )
     try:
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
     except (OSError, ValueError):
@@ -566,14 +574,27 @@ def retire_undeclared_mcp_writes(
         logger.record_mcp_removed(removed)
 
 
+def _flag_runtimes(target_decision: Any, *, user_scope: bool) -> set[str]:
+    """The runtimes a ``--target`` flag selects for this run (empty otherwise)."""
+    if target_decision is None or not getattr(target_decision, "from_flag", False):
+        return set()
+    return set(target_decision.runtime_targets_for_scope(user_scope=user_scope) or ())
+
+
 def _admitted(
-    manifest: Any, dependencies: list[Any], declared: set[str], *, user_scope: bool
+    manifest: Any,
+    dependencies: list[Any],
+    declared: set[str],
+    *,
+    user_scope: bool,
+    flagged: set[str] = frozenset(),
 ) -> dict[str, set[str]] | None:
     """Each runtime the manifest's ``targets:`` select, with the declared servers it receives.
 
     None when the manifest selects no targets (auto-detection never makes an
     entry look abandoned). A server no dependency declares (a local bundle's)
-    names no ``targets:`` and reaches every selected runtime.
+    names no ``targets:`` and reaches every selected runtime. Runtimes in
+    *flagged* (selected by ``--target`` for this run) are selected too.
     """
     from apm_cli.install.mcp.integration import _declared_manifest_runtimes
     from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -584,7 +605,8 @@ def _admitted(
         return None
     unscoped = declared - MCPIntegrator.get_server_names(dependencies)
     return {
-        runtime: mcp_servers_for_runtime(dependencies, runtime) | unscoped for runtime in targeted
+        runtime: mcp_servers_for_runtime(dependencies, runtime) | unscoped
+        for runtime in targeted | flagged
     }
 
 
