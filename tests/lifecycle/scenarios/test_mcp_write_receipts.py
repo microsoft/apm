@@ -12,6 +12,7 @@ tests/lifecycle/oracles.py).
 CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=copilot.
 CELL: OP=install SCOPE=user LOCK=absent PRIM=mcp MCPOWN=copilot (two COPILOT_HOME
 profiles, #4801).
+CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=cursor DECL=retarget (#4784).
 OWNER: install/mcp/write_receipts.py -- per-entry write evidence bound to this
 installation, keyed by (runtime, config file, native key), read by install when
 the lockfile is absent; kept entries are announced on every later install.
@@ -60,6 +61,7 @@ _DECLARATION = {
 _RENDERED = {"type": "stdio", "command": "apm-lifecycle-inert-server", "args": ["--stdio"]}
 _NO_LOCK = {"OP": "install", "SCOPE": "project", "LOCK": "absent", "MCPOWN": "copilot"}
 _NO_LOCK_USER = {**_NO_LOCK, "SCOPE": "user"}
+_NO_LOCK_RETARGET = {**_NO_LOCK, "MCPOWN": "cursor", "DECL": "retarget"}
 _KEPT = f"Kept MCP server '{SERVER}' in .mcp.json"
 
 CREDITS = credits(
@@ -77,22 +79,31 @@ CREDITS = credits(
         ],
         "test_each_copilot_home_profile_keeps_its_own_evidence": [_NO_LOCK_USER],
         "test_a_local_bundle_mcp_entry_is_retired_without_the_lockfile": [_NO_LOCK],
+        "test_an_apm_written_entry_for_a_runtime_no_longer_targeted_is_retired_without_the_lockfile": [
+            _NO_LOCK_RETARGET
+        ],
     },
 )
 
 
-def _servers(scenario: Scenario) -> dict:
-    path = scenario.world.project / ".mcp.json"
+def _servers(scenario: Scenario, config: str = ".mcp.json") -> dict:
+    path = scenario.world.project / config
     if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {}
 
 
-def _start(world) -> Scenario:
+def _start(world, targets: tuple[str, ...] = ("copilot",)) -> Scenario:
     use_policy(world, "allow")
     factory = LocalPackageFactory(world.root / "owned")
     package = factory.create("o-mcp", version="1.0.0", mcp_dependencies=[_DECLARATION])
-    return Scenario(world, {"o-mcp": str(package.root)}, kinds={"o-mcp": ("mcp",)}, policy="allow")
+    return Scenario(
+        world,
+        {"o-mcp": str(package.root)},
+        kinds={"o-mcp": ("mcp",)},
+        policy="allow",
+        targets=targets,
+    )
 
 
 def _deploy(scenario: Scenario) -> None:
@@ -349,4 +360,61 @@ def test_a_local_bundle_mcp_entry_is_retired_without_the_lockfile(lifecycle_worl
 
     assert _BUNDLE_SERVER not in _servers(scenario), "the proven bundle entry stays configured"
     assert "Kept MCP server" not in step.output, step.output
+    scenario.finish()
+
+
+_CURSOR = ".cursor/mcp.json"
+_KEPT_CURSOR = f"Kept MCP server '{SERVER}' in {_CURSOR}: APM no longer targets cursor"
+
+
+def test_an_apm_written_entry_for_a_runtime_no_longer_targeted_is_retired_without_the_lockfile(
+    lifecycle_world,
+) -> None:
+    """The server stays declared; only cursor leaves the targets, and the lock is gone (#4784).
+
+    Install keeps the cursor entry (no removal of a declared server's entry)
+    and reports it on that install, every later install and ``audit --ci``,
+    until the user removes it.
+    """
+    scenario = _start(lifecycle_world, targets=("copilot", "cursor"))
+    _deploy(scenario)
+    assert SERVER in _servers(scenario, _CURSOR), "the server must deploy for cursor"
+    scenario.set_targets("copilot")
+    scenario.lock_path.unlink()
+    scenario.model = scenario.model.with_lock("absent")
+    cursor = lifecycle_world.project / _CURSOR
+    before = cursor.read_bytes()
+    held = scenario.user_write(_CURSOR, before.decode("utf-8"))
+
+    step = scenario.run("install", credit=[_NO_LOCK_RETARGET], keep={"project": (held,)})
+
+    assert step.result.returncode == 0, step.output
+    assert SERVER in _servers(scenario), "the entry for the targeted runtime must stay"
+    # Retired, or kept and reported (the evidence cannot prove ownership): never silent.
+    kept_reported = _KEPT_CURSOR in step.output
+    assert SERVER not in _servers(scenario, _CURSOR) or kept_reported, (
+        f"the entry APM wrote to {_CURSOR} stays configured for a runtime install "
+        f"no longer targets, unreported:\n{step.output}"
+    )
+    assert cursor.read_bytes() == before, "a declared server's entry was changed or removed"
+    assert "Kept MCP server" not in step.output.replace(_KEPT_CURSOR, ""), step.output
+
+    # Kept and reported persists: audit --ci and every later install name it.
+    audit = scenario.run("audit --ci", read_only=True, exit=1)
+    assert f"MCP server '{SERVER}' in {_CURSOR} (cursor)" in " ".join(audit.output.split())
+    rerun = scenario.run("install")
+    assert cursor.read_bytes() == before
+    assert _KEPT_CURSOR in rerun.output, "install announces the kept entry while the lock exists"
+    audit = scenario.run("audit --ci", read_only=True, exit=1)
+    assert f"MCP server '{SERVER}' in {_CURSOR} (cursor)" in " ".join(audit.output.split())
+
+    # The printed hint: remove the entry; nothing is reported any more.
+    scenario.release_user_write(_CURSOR)
+    data = json.loads(cursor.read_text(encoding="utf-8"))
+    del data["mcpServers"][SERVER]
+    cursor.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    resolved = scenario.run("install")
+    assert "Kept MCP server" not in resolved.output, resolved.output
+    assert SERVER in _servers(scenario), "the targeted runtime's entry must stay"
+    scenario.run("audit --ci", read_only=True, exit=0)
     scenario.finish()
