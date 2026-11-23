@@ -581,6 +581,7 @@
     "J|E01|3|O5": "tests/lifecycle/journeys/test_journeys.py::test_journey[E01]",
     "J|E01|4|O1": "tests/lifecycle/journeys/test_journeys.py::test_journey[E01]",
     "J|E01|4|O5": "tests/lifecycle/journeys/test_journeys.py::test_journey[E01]",
+    "J|E01|4|O8a": "tests/lifecycle/journeys/test_journeys.py::test_journey[E01]",
     "J|E01|5|I4": "tests/lifecycle/journeys/test_journeys.py::test_journey[E01]",
     "J|E01|5|O5": "tests/lifecycle/journeys/test_journeys.py::test_journey[E01]",
     "J|E01|5|O6": "tests/lifecycle/journeys/test_journeys.py::test_journey[E01]",
@@ -1093,7 +1094,6 @@
     "G|marketplace-install|policy-dep-deny|bin": "#3703",
     "G|native-plugin|org-deny|native": "#3703",
     "G|native-plugin|org-enables-gate|native": "#3703",
-    "G|native-plugin|policy-dep-deny|native": "#3703",
-    "J|E01|4|O8a": "#4570"
+    "G|native-plugin|policy-dep-deny|native": "#3703"
   }
 }

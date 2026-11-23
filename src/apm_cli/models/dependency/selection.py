@@ -48,46 +48,69 @@ def select_manifest_dependency(
     lock metadata maps that alias back to one declared local dependency key.
     Ambiguous aliases fail closed instead of guessing. One package declared
     more than once (in both sections, or under two spellings) is one match;
-    ``manifest_declarations_of`` returns every declaration to remove.
+    ``manifest_declarations_of`` returns every declaration to remove. Callers
+    selecting many identifiers build one :class:`ManifestSelectionIndex`.
     """
-    try:
-        requested_identity = DependencyReference.parse(package).get_identity()
-    except (ValueError, TypeError, AttributeError, KeyError):
-        requested_identity = package
+    return ManifestSelectionIndex(manifest_dependencies, lockfile).select(package)
 
-    parsed_entries: list[tuple[int, object, DependencyReference]] = []
-    matched_entries: dict[int, object] = {}
-    for index, entry in enumerate(manifest_dependencies):
-        try:
-            dependency = parse_dependency_entry(entry)
-        except (ValueError, TypeError, AttributeError, KeyError):
-            if (entry if isinstance(entry, str) else str(entry)) == package:
-                matched_entries[index] = entry
-            continue
-        parsed_entries.append((index, entry, dependency))
-        if dependency.get_identity() == requested_identity:
-            matched_entries[index] = entry
 
-    locked_alias_keys: set[str] = set()
-    locked_dependencies = getattr(lockfile, "dependencies", None)
-    if isinstance(locked_dependencies, dict):
-        for dependency in locked_dependencies.values():
-            if (
-                getattr(dependency, "source", None) != "local"
-                or getattr(dependency, "repo_url", None) != package
-            ):
-                continue
+class ManifestSelectionIndex:
+    """One parse of the manifest and lockfile, answering many uninstall selections.
+
+    :meth:`select` gives the same answer as :func:`select_manifest_dependency`
+    in time proportional to its matches, not to the manifest and lock sizes.
+    """
+
+    def __init__(self, manifest_dependencies: list[object], lockfile: object | None) -> None:
+        self._by_identity: dict[str, list[tuple[int, object]]] = {}
+        self._unparsed: dict[str, list[tuple[int, object]]] = {}
+        self._local_by_key: dict[str, list[tuple[int, object]]] = {}
+        for index, entry in enumerate(manifest_dependencies):
             try:
-                locked_alias_keys.add(dependency.get_unique_key())
+                dependency = parse_dependency_entry(entry)
             except (ValueError, TypeError, AttributeError, KeyError):
+                text = entry if isinstance(entry, str) else str(entry)
+                self._unparsed.setdefault(text, []).append((index, entry))
                 continue
+            self._by_identity.setdefault(dependency.get_identity(), []).append((index, entry))
+            if dependency.is_local:
+                key = dependency.get_unique_key()
+                self._local_by_key.setdefault(key, []).append((index, entry))
+        self._locked_local: dict[str, set[str]] = {}
+        locked_dependencies = getattr(lockfile, "dependencies", None)
+        if isinstance(locked_dependencies, dict):
+            for dependency in locked_dependencies.values():
+                if getattr(dependency, "source", None) != "local":
+                    continue
+                try:
+                    key = dependency.get_unique_key()
+                except (ValueError, TypeError, AttributeError, KeyError):
+                    continue
+                repo_url = getattr(dependency, "repo_url", None)
+                self._locked_local.setdefault(repo_url, set()).add(key)
 
-    if locked_alias_keys:
-        for index, entry, dependency in parsed_entries:
-            if dependency.is_local and dependency.get_unique_key() in locked_alias_keys:
-                matched_entries[index] = entry
-
-    return _selection_from_matches(list(matched_entries.values()))
+    def select(self, package: str) -> DependencySelection:
+        """Select exactly one manifest entry for *package* (see the module function)."""
+        try:
+            requested_identity = DependencyReference.parse(package).get_identity()
+        except (ValueError, TypeError, AttributeError, KeyError):
+            requested_identity = package
+        direct = sorted(
+            [*self._by_identity.get(requested_identity, ()), *self._unparsed.get(package, ())],
+            key=lambda item: item[0],
+        )
+        matched: dict[int, object] = dict(direct)
+        aliased = sorted(
+            (
+                item
+                for key in self._locked_local.get(package, ())
+                for item in self._local_by_key.get(key, ())
+            ),
+            key=lambda item: item[0],
+        )
+        for index, entry in aliased:
+            matched.setdefault(index, entry)
+        return _selection_from_matches(list(matched.values()))
 
 
 def select_marketplace_declaration(

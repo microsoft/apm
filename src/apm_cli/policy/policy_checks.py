@@ -22,6 +22,7 @@ from ..core.remediation import (
     REQUIRED_PACKAGE_UNLOCKED,
     UNMANAGED_FILE_TRACK,
 )
+from .allowlist_remedy import with_allowlist_next_step as _advise
 from .models import (
     CheckResult,
     CIAuditResult,
@@ -1929,6 +1930,7 @@ def run_policy_checks(
     fail_fast: bool = True,
     modules_root: Path | None = None,
     no_policy: bool = False,
+    policy_source: str | None = None,
 ) -> CIAuditResult:
     """Run the full set of policy checks against a project on disk.
 
@@ -2028,7 +2030,8 @@ def run_policy_checks(
             manifest.marketplaces, marketplace_resolution_origins(lock)
         ),
     )
-    result.checks.extend(dep_result.checks)
+    inputs = (project_root, manifest, apm_deps, lock, raw_yml)
+    result.checks.extend(_advise(dep_result.checks, source_deps, policy, policy_source, inputs))
 
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:
