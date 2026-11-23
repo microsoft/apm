@@ -732,7 +732,7 @@ def _holds_apm_state(unit: _Replay) -> bool:
         return True
     if "dir" not in current:
         return False
-    return _dir_holds_apm_state(unit, current["dir"], whole)
+    return _dir_holds_apm_state(unit, current, whole)
 
 
 def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
@@ -744,20 +744,26 @@ def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
     return current.get("file") == expected
 
 
-def _dir_holds_apm_state(unit: _Replay, entries: Mapping[str, str], whole: Any) -> bool:
-    """Every entry below a directory unit is its prior entry or one APM wrote."""
+def _dir_holds_apm_state(unit: _Replay, current: Mapping[str, Any], whole: Any) -> bool:
+    """The directory's own mode and every entry below it are prior or APM's."""
     prior = unit.prior.get("dir", {})
     sealed = whole.get("dir", {}) if isinstance(whole, dict) else {}
-    accounted = set()
+    modes = {unit.prior.get("mode"), whole.get("mode") if isinstance(whole, dict) else None}
+    if modes != {None} and current.get("mode") not in modes:
+        return False
+    entries: Mapping[str, str] = current["dir"]
+    accounted, unknown = set(), set()
     for rel, fingerprint in entries.items():
         event = unit.events.get(rel)
         if fingerprint in (prior.get(rel), sealed.get(rel), event) or (
             isinstance(event, tuple) and _entry_matches_expected(fingerprint, event[1])
         ):
             accounted.add(rel)
-    # A directory is APM's when APM wrote something below it.
-    for rel, fingerprint in entries.items():
-        if fingerprint.startswith("dir:") and any(a.startswith(f"{rel}/") for a in accounted):
+        elif rel not in prior and rel not in sealed and event is None:
+            unknown.add(rel)
+    # A directory with no evidence of its own is APM's when APM wrote below it.
+    for rel in sorted(unknown, key=len, reverse=True):
+        if entries[rel].startswith("dir:") and any(a.startswith(f"{rel}/") for a in accounted):
             accounted.add(rel)
     return accounted == set(entries)
 
@@ -821,13 +827,13 @@ def _validated(
     for index, line in enumerate(lines):
         try:
             unit = _validate_unit(line, store, bases, ledger)
+            events = {"": _pending(line), **seals.get(index, {})}
         except _Unproven as exc:
             issues.append(exc.issue)
             continue
         except (TypeError, ValueError, AttributeError, KeyError):
             issues.append((str(store), "journal manifest holds a malformed unit"))
             continue
-        events = {"": _pending(line), **seals.get(index, {})}
         units.append(replace(unit, events=events))
     return units, issues
 

@@ -13,7 +13,7 @@ from ...core.command_logger import library_logger
 from ...core.remediation import MCP_ENV_VARS_UNRESOLVED
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
 from ...utils.atomic_io import umask_file_mode
-from ...utils.json_config import write_json_config
+from ...utils.json_config import json_config_text, write_json_config
 from ...utils.path_security import has_symlink_component, user_config_crosses_link
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -288,16 +288,20 @@ def warn_unreadable_config_once(logger, config_path: Path, exc: Exception) -> No
     logger.warning("Could not read %s: %s", config_path, exc)
 
 
-def journal_config_write(config_path: Path) -> None:
+def journal_config_write(config_path: Path, text: str) -> None:
     """Record an MCP config file before APM writes it (#4594).
 
     The install transaction journals it at the deploy write seam, so a failed
     install restores the file. Outside an install this records nothing.
     """
     from ...integration.write_seam import record_before_mkdir, record_before_write
+    from ...utils.content_hash import content_hash_of_bytes
 
     record_before_mkdir(config_path.parent)
-    record_before_write(config_path, follow=True)
+    # *text* is what APM is about to write: replay keeps any other bytes (#4863).
+    record_before_write(
+        config_path, follow=True, expected=content_hash_of_bytes(text.encode("utf-8"))
+    )
 
 
 def journal_config_written(config_path: Path) -> None:
@@ -718,9 +722,12 @@ class MCPClientAdapter(ABC):
         """
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
-        journal_config_write(config_path)
-        config_path.parent.mkdir(parents=True, exist_ok=True)
         trailing_newline = self.json_config_trailing_newline
+        journal_config_write(
+            config_path,
+            json_config_text(config_path, config, default_trailing_newline=trailing_newline),
+        )
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         if shared and self._is_project_config_path(config_path):
             write_json_config(
                 config_path,

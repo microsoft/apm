@@ -223,9 +223,10 @@ class HermesClientAdapter(CopilotClientAdapter):
             data[self.mcp_servers_key] = servers
             from .base import journal_config_write, journal_config_written
 
-            journal_config_write(path)
+            text = yaml_to_str(data)
+            journal_config_write(path, text)
             path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, yaml_to_str(data), new_file_mode=_CONFIG_FILE_MODE)
+            atomic_write_text(path, text, new_file_mode=_CONFIG_FILE_MODE)
             # Tighten perms even when the file pre-existed with a looser mode
             # (atomic_write_text only applies new_file_mode on first create).
             with contextlib.suppress(OSError, NotImplementedError):
