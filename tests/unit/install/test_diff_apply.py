@@ -98,6 +98,8 @@ _REL = ".github/prompts/a.prompt.md"
         ".github/GIT~1/config",
         ".github/workflows/ci.yml",
         ".github/Actions/setup/action.yml",
+        ".github/workflows./ci.yml",
+        ".github/workflows /ci.yml",
         ".vscode/settings.json",
         "notes.md",
     ],

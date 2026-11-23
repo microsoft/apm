@@ -125,7 +125,8 @@ def _within(root: Path, rel: str, prefixes: tuple[str, ...] | None = None) -> Pa
     parts = rel.split("/") if rel else []
     if not rel or rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in parts):
         raise Decline(f"unsafe path {rel!r}")
-    if any(_is_git_dir_name(p) for p in parts) or rel.lower().startswith(_CI_DIRS):
+    windows_name = "/".join(p.lower().rstrip(". ") for p in parts) + "/"
+    if any(_is_git_dir_name(p) for p in parts) or windows_name.startswith(_CI_DIRS):
         raise Decline(f"unsafe path {rel!r}")
     if prefixes is not None:
         from apm_cli.integration.base_integrator import BaseIntegrator
