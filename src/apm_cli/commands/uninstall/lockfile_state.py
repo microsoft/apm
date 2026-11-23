@@ -88,6 +88,32 @@ def reconcile_uninstall_deployment_state(
     return changed
 
 
+def retain_failed_claims(lockfile, removed_rows: dict, failed_paths) -> bool:
+    """Keep each removed row's claim on the files sync could not remove (#4851).
+
+    The row returns narrowed to those files and their recorded hashes, through
+    the ledger owner, so the lock keeps tracking what is still on disk and the
+    next run can retry. Returns whether the lock changed.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    failed = {str(path).replace("\\", "/") for path in failed_paths}
+    updates: dict[str, tuple[list[str], dict[str, str]]] = {}
+    for key, row in removed_rows.items():
+        kept = [path for path in row.deployed_files if path.replace("\\", "/") in failed]
+        if not kept or key in lockfile.dependencies:
+            continue
+        hashes = {
+            path: row.deployed_file_hashes[path]
+            for path in kept
+            if path in row.deployed_file_hashes
+        }
+        lockfile.dependencies[key] = row
+        updates[key] = (kept, hashes)
+    DeploymentLedgerCodec.replace_legacy_owners(lockfile, updates)
+    return bool(updates)
+
+
 def lockfile_has_persisted_state(lockfile) -> bool:
     """Return whether uninstall should keep rather than remove the lockfile."""
     return bool(

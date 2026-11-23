@@ -1428,15 +1428,16 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 9: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.
         lockfile_updated = False
+        # Rows removed here, so a file sync cannot remove keeps its claim (#4851).
+        removed_rows = {}
         if lockfile:
-            for pkg in packages_to_remove:
-                key = _removed_lock_key(pkg, lockfile)
+            for key in [_removed_lock_key(pkg, lockfile) for pkg in packages_to_remove]:
                 if key in lockfile.dependencies:
-                    del lockfile.dependencies[key]
+                    removed_rows[key] = lockfile.dependencies.pop(key)
                     lockfile_updated = True
             for orphan_key in actual_orphans:
                 if orphan_key in lockfile.dependencies:
-                    del lockfile.dependencies[orphan_key]
+                    removed_rows[orphan_key] = lockfile.dependencies.pop(orphan_key)
                     lockfile_updated = True
             lockfile_updated |= _reparent_still_needed(lockfile, still_needed_repairs)
 
@@ -1476,7 +1477,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         if lockfile:
             try:
-                from .lockfile_state import reconcile_uninstall_deployment_state
+                from .lockfile_state import (
+                    reconcile_uninstall_deployment_state,
+                    retain_failed_claims,
+                )
 
                 lockfile_updated = (
                     reconcile_uninstall_deployment_state(
@@ -1488,6 +1492,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     )
                     or lockfile_updated
                 )
+                retain_failed_claims(lockfile, removed_rows, integration_cleanup.failed_paths)
             except Exception as state_err:
                 lockfile_ready = False
                 logger.warning(

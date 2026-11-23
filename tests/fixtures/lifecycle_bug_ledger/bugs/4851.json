@@ -1,0 +1,15 @@
+{
+  "issue": 4851,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall deleted the removed package's lock row before hook sync, so a hook file sync then failed to remove stayed on disk while apm.lock.yaml stopped tracking it; the row now returns narrowed to the files sync could not remove.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_uninstall_keeps_the_claim_of_a_hook_sync_could_not_remove"
+  ]
+}
