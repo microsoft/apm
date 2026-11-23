@@ -267,12 +267,23 @@ def _env_log() -> Iterator[None]:
     name too, so a change in any value the run consulted misses.
     """
     original = os.environ
+    base = type(original)
+    read = base.__getitem__
+    note = _ENV_READS.add
+    # A run reads the environment tens of thousands of times: one call, no super().
+    if os.name == "nt":
 
-    class _Logged(type(original)):  # type: ignore[misc]
-        def __getitem__(self, key: Any) -> Any:
-            if isinstance(key, str):
-                _ENV_READS.add(key.upper() if os.name == "nt" else key)
-            return super().__getitem__(key)
+        class _Logged(base):  # type: ignore[misc,valid-type]
+            def __getitem__(self, key: Any) -> Any:
+                note(key.upper() if isinstance(key, str) else key)
+                return read(self, key)
+
+    else:
+
+        class _Logged(base):  # type: ignore[misc,valid-type,no-redef]
+            def __getitem__(self, key: Any) -> Any:
+                note(key)
+                return read(self, key)
 
     logged = _Logged(
         original._data,  # type: ignore[attr-defined]
@@ -715,21 +726,22 @@ def _body(digest: _Digest, record: dict) -> None:
         digest.put(f"body:{field}", repr(record.get(field)).encode("utf-8", "surrogateescape"))
 
 
-def _provable(lock: dict) -> bool:
-    """Every package copy has a locked content hash at a plain path (W3d R3).
+def _provable_row(field: Any) -> bool:
+    """A package copy with a locked content hash at a plain path (W3d R3).
 
     Local, virtual and unhashed packages cannot be proven by a hit, so a run
     over them records nothing instead of a record that could never hit.
+    *field* reads one lock-row field (a mapping row or a LockedDependency).
     """
-    for dep in lock.get("dependencies") or []:
-        if not isinstance(dep, dict):
-            return False
-        repo = str(dep.get("repo_url", ""))
-        if not repo or ".." in repo.split("/") or not dep.get("content_hash"):
-            return False
-        if dep.get("virtual_path") or dep.get("source"):
-            return False
-    return True
+    repo = str(field("repo_url") or "")
+    if not repo or ".." in repo.split("/") or not field("content_hash"):
+        return False
+    return not (field("virtual_path") or field("source"))
+
+
+def _provable(lock: dict) -> bool:
+    rows = lock.get("dependencies") or []
+    return all(isinstance(row, dict) and _provable_row(row.get) for row in rows)
 
 
 def _deployed_intact(root: Path, lock: dict) -> bool:
@@ -952,21 +964,50 @@ def recording(argv: list[str]) -> Iterator[None]:
         _ACTIVE.remove(out)
         sys.stdout, sys.stderr = out.stream, err.stream
         if code == 0 and not _UNKNOWN:
-            if _VERIFIED_NOOP and not _FULL_SUCCESS:
-                _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts))
-            elif _FULL_SUCCESS and "services" in _SEGMENTS:
-                start, end = _SEGMENTS["services"]
-                try:
-                    text = _noop_form(argv, "".join(out.parts[start:end]))
-                except Exception as exc:  # the install succeeded; only the record is lost
-                    _trace(f"no record (no-op form: {type(exc).__name__})")
-                    text = None
-                if text is not None:
-                    _write_at_entry(entry, argv, text, "")
-            else:
-                _trace("no record (no verified no-op or full success)")
+            _record_after(argv, entry, out, err)
         elif _UNKNOWN:
             _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
+
+
+def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
+    """After a successful run: record its no-op form when the run proved one."""
+    noop = bool(_VERIFIED_NOOP) and not _FULL_SUCCESS
+    if not noop and not (_FULL_SUCCESS and "services" in _SEGMENTS):
+        _trace("no record (no verified no-op or full success)")
+        return
+    lock = _committed_lock()
+    if lock is None:
+        return
+    if noop:
+        _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts))
+        return
+    start, end = _SEGMENTS["services"]
+    try:
+        text = _noop_form(argv, "".join(out.parts[start:end]), lock)
+    except Exception as exc:  # the install succeeded; only the record is lost
+        _trace(f"no record (no-op form: {type(exc).__name__})")
+        return
+    if text is not None:
+        _write_at_entry(entry, argv, text, "")
+
+
+def _committed_lock() -> Any:
+    """The lock this run committed (its owner's read), if a hit could prove it."""
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    try:
+        lock = LockFile.read(get_lockfile_path(Path.cwd()))
+    except Exception as exc:  # the install succeeded; only the record is lost
+        _trace(f"no record (lockfile: {type(exc).__name__})")
+        return None
+    if lock is None:
+        _trace("no record (no lockfile)")
+        return None
+    for key, dep in lock.dependencies.items():
+        if key != "." and not _provable_row(lambda name, dep=dep: getattr(dep, name, None)):
+            _trace("no record (a package copy a hit cannot prove)")
+            return None
+    return lock
 
 
 def _write_at_entry(
@@ -981,19 +1022,17 @@ def _write_at_entry(
         _ENTRY_ENV, _ENTRY_PRESENTATION = None, None
 
 
-def _noop_form(argv: list[str], services_text: str) -> str | None:
+def _noop_form(argv: list[str], services_text: str, lock: Any) -> str | None:
     """Today's no-op text, rendered by the engine's own renderer with the services block's
     no-op view (fast_output.render), in this process after the install committed."""
     import time as _time
 
     from apm_cli.core.scope import manifest_file
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.install import fast_output
     from apm_cli.install.service import InstallService
     from apm_cli.models.apm_package import APMPackage
 
     root = Path.cwd()
-    lock = LockFile.read(get_lockfile_path(root))
     if lock is None:
         return None
     manifest = APMPackage.from_apm_yml(manifest_file(root))
@@ -1031,15 +1070,6 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
         if lock_text is None:
             _trace("no record (no lockfile)")
             return
-        import yaml
-
-        try:
-            lock = yaml.load(lock_text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
-        except yaml.YAMLError:
-            lock = None
-        if not isinstance(lock, dict) or not _provable(lock):
-            _trace("no record (a package copy a hit cannot prove)")
-            return
         stdout_text, stamps = _ELAPSED_RE.subn(rf"\g<1>{_ELAPSED}\g<2>", stdout_text)
         templated = _template_ages(stdout_text)
         if templated is None:
@@ -1054,7 +1084,9 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
             _trace("no record (no private key)")
             return
         run_env = sorted(
-            name for name in _ENV_READS if name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT
+            name
+            for name in _ENV_READS
+            if isinstance(name, str) and name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT
         )
         surfaces = _owner_surfaces(root)
         git_system = _git_system()
