@@ -2,9 +2,9 @@
 name: cut-release
 description: >-
   Use this skill to cut an APM release from the current worktree:
-  assess whether the cycle since the last tag warrants a patch or
-  minor bump (semver discipline against the merged-since-last-tag
-  diff), assemble the changelog.d/ fragments and any legacy
+  assess whether the cycle since the last tag warrants a minor
+  release (no patch releases: a fix-only cycle accumulates into the
+  next minor; PATCH only for a CEO-approved hotfix), assemble the changelog.d/ fragments and any legacy
   [Unreleased] CHANGELOG bullets into a dated version block and
   sanitize it so each change has one line in one section
   (dedupe across sections, condense, add Highlights, drop
@@ -116,14 +116,17 @@ script's stdout.
 Before picking the bump, read the latest `release-acceptance` report for this candidate (its release-gate row must be GO; see `../release-acceptance/SKILL.md`).
 
 Load `assets/semver-rubric.md`. Walk every PR from Phase 1
-against the rubric. The rubric outputs PATCH, MINOR, or
-ESCALATE-TO-MAJOR.
+against the rubric. The rubric outputs MINOR, NO RELEASE (a
+fix-only cycle: the fixes accumulate into the next MINOR), REFUSE,
+or ESCALATE-TO-MAJOR. PATCH is only for an explicit CEO-approved
+hotfix (security emergency), never a rubric output.
 
 Show the operator:
 
 - The chosen bump and the next version number.
 - Per-PR rationale (which signal fired).
-- The "why patch/minor" one-liner that will go into the PR body.
+- The "why minor" one-liner that will go into the PR body (or, for
+  a CEO-approved hotfix, the approval and why it cannot wait).
 
 If the rubric outputs ESCALATE-TO-MAJOR (>= 1.0.0), STOP and
 surface the escalation per `assets/semver-rubric.md` "Major bump"

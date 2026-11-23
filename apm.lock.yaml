@@ -1363,7 +1363,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8b326e7adf51d4b3f6e347bf82bb9f62315cde3ee8462b535b02609507fd2961
+  content_hash: sha256:dea539ba91115b9c3e2749d1c4bfd63e113543a76742ccfd012115de9fa20ee7
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/assets/entry-sanitizer.md
@@ -1390,7 +1390,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:ef1d9338ac0d0c3790ebd677f4f95acaa648118d9c74e018ed877d0587349c95
+  content_hash: sha256:4335c3738540bdffd820b000ba74092f2a498e2e861b63dba527a4ffc4b90ebd
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/evals/evals.json
@@ -3483,10 +3483,10 @@ local_deployed_file_hashes:
   .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
   .agents/skills/auth/SKILL.md: sha256:64f08ad849c95cf7d949499bd2939d7bfc52a8e773b4e990b632ae5a38de4dac
   .agents/skills/cli-logging-ux/SKILL.md: sha256:b04d5282a9f21b33c75ac98c41c7eab7e562eafea8c89bbb5732d9956958fe7c
-  .agents/skills/cut-release/SKILL.md: sha256:8b326e7adf51d4b3f6e347bf82bb9f62315cde3ee8462b535b02609507fd2961
+  .agents/skills/cut-release/SKILL.md: sha256:dea539ba91115b9c3e2749d1c4bfd63e113543a76742ccfd012115de9fa20ee7
   .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:f5bd68ff42a2b408b7a3ebc106a9b6a2bb6057db5e8ef970a5b46aa74880beb2
   .agents/skills/cut-release/assets/pr-body-template.md: sha256:4d7fb7d8908d9938f4587af7bcafb016362a39ba38a8e0891147d5fab1b9016e
-  .agents/skills/cut-release/assets/semver-rubric.md: sha256:ef1d9338ac0d0c3790ebd677f4f95acaa648118d9c74e018ed877d0587349c95
+  .agents/skills/cut-release/assets/semver-rubric.md: sha256:4335c3738540bdffd820b000ba74092f2a498e2e861b63dba527a4ffc4b90ebd
   .agents/skills/cut-release/evals/evals.json: sha256:bfe097eed3f636215556e3ed3068a0dec684ef06c8eb8349f1e4daf8aac4753d
   .agents/skills/cut-release/scripts/bump-version.sh: sha256:bc382b5024f415998a3d66689a36596f0458e0a3c79370e96705477a5672a1d4
   .agents/skills/cut-release/scripts/changelog_fragments.py: sha256:d6310a5a2f196e731e0b29df6e95b95be999e2b1ad4a3165694bb22d28e378c8

@@ -14,11 +14,19 @@ wins.
 | 4. ANY PR added a NEW normative spec, JSON Schema, or contract surface | **MINOR** |
 | 5. ANY PR added a NEW dependency-resolution mode (e.g. semver ranges on git deps) | **MINOR** |
 | 6. ANY PR added a NEW supported target / adapter / integration host | **MINOR** |
-| 7. All remaining PRs are bug fixes, security patches, doc-only, internal | **PATCH** |
+| 7. All remaining PRs are bug fixes, security patches, doc-only, internal | **NO RELEASE** -- fixes accumulate into the next MINOR |
 | 8. NO PRs since last tag | **REFUSE** -- nothing to release |
 
 Read top to bottom. The first row whose condition matches is the
 chosen bump. Do not "average" across rows.
+
+## No patch releases
+
+Releases are MINOR (or an escalated MAJOR). A cycle of fixes only
+is not released on its own: the fixes ship in the next MINOR. The
+one exception is a hotfix the CEO explicitly approves (a security
+emergency); only then is the bump PATCH. Record that approval in
+the release PR body.
 
 ## Pre-1.0 vs post-1.0 framing
 
@@ -51,7 +59,9 @@ operator. Default to MINOR in the 0.x line even with breakings.
 
 Given current version `MAJOR.MINOR.PATCH`:
 
-- PATCH bump: `MAJOR.MINOR.(PATCH+1)`.
+- PATCH bump: `MAJOR.MINOR.(PATCH+1)`. Only for an explicit
+  CEO-approved hotfix (security emergency); never chosen by the
+  signal table.
 - MINOR bump: `MAJOR.(MINOR+1).0`.
 - MAJOR bump: `(MAJOR+1).0.0` (escalate first; see above).
 
@@ -72,14 +82,16 @@ Signals seen:
 First match: Row 1 (BREAKING). Pre-1.0 framing -> **MINOR**.
 Result: `0.15.0 -> 0.16.0`.
 
-### Hypothetical patch-only cycle
+### Hypothetical fix-only cycle
 
 Signals seen:
 - Three PRs, all `fix(install): ...`. No BREAKING. No new
   command. No new schema.
 
-First match: Row 7. -> **PATCH**.
-Result: `0.16.0 -> 0.16.1`.
+First match: Row 7. -> **NO RELEASE**. Surface to operator:
+"Only fixes have merged since v0.16.0. No patch release: they
+accumulate into the next MINOR (0.17.0). Cut 0.16.1 only on an
+explicit CEO-approved hotfix (security emergency)."
 
 ### Hypothetical no-op cycle
 
@@ -110,7 +122,7 @@ Per-PR rationale:
   ...
   #1486 windsurf uninstall fix  -> Row 7 (fix; subordinate to Row 1 above)
 
-Why MINOR (not PATCH): Row 1 fired (BREAKING) AND Rows 2-5 fired.
+Why MINOR: Row 1 fired (BREAKING) AND Rows 2-5 fired.
 Why MINOR (not MAJOR): pre-1.0 framing; breakings ride in minor.
 ```
 
