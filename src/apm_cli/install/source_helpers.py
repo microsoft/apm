@@ -244,7 +244,10 @@ def materialized_manifest_snapshot(
     from apm_cli.utils.yaml_io import load_yaml
 
     try:
+        from apm_cli.native_plugins.route import refuse_route_boolean_spellings
+
         data = load_yaml(manifest)
+        refuse_route_boolean_spellings(manifest)
         if not isinstance(data, dict):
             raise ValueError("apm.yml must contain a YAML object")
         snapshot = APMPackage.from_mapping(

@@ -503,6 +503,12 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
 
 
 _RID_CLAUDE = "marketplace-integrations-claude-ownership"
+_NATIVE_ROUTE_CONSUMERS = (
+    "src/apm_cli/agent_plugins/errors.py",
+    "src/apm_cli/claude_plugins/admission.py",
+    "src/apm_cli/codex_plugins/admission.py",
+    "src/apm_cli/copilot_plugins/capability.py",
+)
 _CLAUDE_OWNER = "src/apm_cli/claude_plugins/registrar.py"
 
 
@@ -550,6 +556,18 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             "Claude declarations must derive ownership from the lockfile and verify approved bytes",
         )
     )
+    # Every native planner asks the one route owner before trust work (#4995).
+    for consumer in _NATIVE_ROUTE_CONSUMERS:
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_CLAUDE,
+                consumer,
+                ("effective_native_route(",),
+                "native planners must decide native or loose through native_plugins/route.py",
+            )
+        )
     findings.extend(
         _require_subs(
             provider,

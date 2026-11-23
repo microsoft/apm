@@ -1071,9 +1071,11 @@ def _collect_locked_dependencies(
             continue
 
         try:
+            from apm_cli.native_plugins.route import refuse_route_boolean_spellings
             from apm_cli.utils.yaml_io import load_yaml
 
             manifest = load_yaml(manifest_path)
+            refuse_route_boolean_spellings(manifest_path)
             if not isinstance(manifest, dict):
                 raise ValueError("package manifest must be a mapping")
             # Collecting declarations only reads: never create user config.

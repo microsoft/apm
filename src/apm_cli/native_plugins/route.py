@@ -75,12 +75,18 @@ def _misspelled(text: str, node: Any) -> str | None:
 _MERGE_TAG = "tag:yaml.org,2002:merge"
 
 
-def _mapping_items(node: Any) -> list:
-    """A mapping's items, including those a ``<<`` merge key brings in."""
+def _mapping_items(node: Any, seen: set[int] | None = None) -> list:
+    """A mapping's items, including those a ``<<`` merge key brings in.
+
+    Each merged mapping is visited once, so a shared or cyclic merge graph
+    costs no more than its size.
+    """
     import yaml
 
-    if not isinstance(node, yaml.MappingNode):
+    seen = set() if seen is None else seen
+    if not isinstance(node, yaml.MappingNode) or id(node) in seen:
         return []
+    seen.add(id(node))
     items = []
     for key, value in node.value:
         if key.tag != _MERGE_TAG:
@@ -88,7 +94,7 @@ def _mapping_items(node: Any) -> list:
             continue
         merged = value.value if isinstance(value, yaml.SequenceNode) else [value]
         for source in merged:
-            items += _mapping_items(source)
+            items += _mapping_items(source, seen)
     return items
 
 
@@ -170,8 +176,9 @@ def load_route_manifest(manifest_path: Path) -> Any:
     path = Path(manifest_path)
     if not path.is_file():
         return None
-    refuse_route_boolean_spellings(path)
+    # The loader's duplicate-key and anchor checks run before the raw scan.
     data = load_manifest(path)
+    refuse_route_boolean_spellings(path)
     if not isinstance(data, dict):
         return None
     scope = manifest_host_scope_for(data)

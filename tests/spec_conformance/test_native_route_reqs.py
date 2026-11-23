@@ -159,8 +159,27 @@ def test_conflicting_root_declarations_resolve_false_in_any_order(
             "devDependencies:\n  apm:\n    - path: ./pkg\n      native: True\n",
             "'native' field must be true or false, got 'True'",
         ),
+        (
+            "dependencies:\n  apm:\n    - <<: {native: no}\n      path: ./pkg\n",
+            "'native' field must be true or false, got 'no'",
+        ),
+        (
+            "<<: {native_plugins: off}\n",
+            "'native_plugins' must be true or false, got 'off'",
+        ),
+        (
+            "dependencies:\n  apm:\n    - <<: [{alias: k}, {native: Yes}]\n      path: ./pkg\n",
+            "'native' field must be true or false, got 'Yes'",
+        ),
     ],
-    ids=["native_plugins-no", "native-Off", "dev-native-True"],
+    ids=[
+        "native_plugins-no",
+        "native-Off",
+        "dev-native-True",
+        "dependency-merge",
+        "top-level-merge",
+        "sequence-merge",
+    ],
 )
 def test_yaml_1_1_boolean_spellings_are_rejected_on_load(
     tmp_path: Path, body: str, message: str
@@ -176,29 +195,3 @@ def test_an_explicit_bool_tag_is_accepted_on_load(tmp_path: Path) -> None:
     )
 
     assert effective_native_route(DependencyReference.parse("./pkg"), manifest) is False
-
-
-@pytest.mark.req("req-mf-030")
-@pytest.mark.parametrize(
-    ("body", "message"),
-    [
-        (
-            "dependencies:\n  apm:\n    - <<: {native: no}\n      path: ./pkg\n",
-            "'native' field must be true or false, got 'no'",
-        ),
-        (
-            "<<: {native_plugins: off}\n",
-            "'native_plugins' must be true or false, got 'off'",
-        ),
-        (
-            "dependencies:\n  apm:\n    - <<: [{alias: k}, {native: Yes}]\n      path: ./pkg\n",
-            "'native' field must be true or false, got 'Yes'",
-        ),
-    ],
-    ids=["dependency-merge", "top-level-merge", "sequence-merge"],
-)
-def test_a_misspelled_boolean_behind_a_merge_key_is_rejected(
-    tmp_path: Path, body: str, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        _manifest(tmp_path, body)
