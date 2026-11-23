@@ -609,3 +609,21 @@ def _parse_lock_records(
             axes.append(_normalize_axis(value, axis))
         edges.append((axes[0], axes[1]))
     return edges
+
+
+def copy_subset_pairings(value: object) -> Any:
+    """Copy raw ``subset_pairings`` records without validating them.
+
+    Malformed values survive the round trip so audit and frozen install can
+    reject them through ``LockedDependency.selection()`` (req-rs-018).
+    """
+    if value is None or value == []:
+        return None
+    if isinstance(value, list):
+        return [
+            {key: list(item) if isinstance(item, list) else item for key, item in record.items()}
+            if isinstance(record, dict)
+            else record
+            for record in value
+        ]
+    return value

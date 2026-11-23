@@ -1090,3 +1090,53 @@ def test_bench_timed_run_kills_a_hung_command(tmp_path: Path) -> None:
         journeys._wait4_with_deadline(proc, 0.2)
     assert proc.poll() is not None
     assert not marker.exists()
+
+
+def test_bench_run_measured_reports_job_cpu_and_exit_code_on_windows(monkeypatch) -> None:
+    # Job Object times are 100 ns units of user plus kernel time.
+    assert journeys._job_cpu_seconds(12_500_000, 2_500_000) == 1.5
+
+    class _Proc:
+        returncode = 3
+
+    proc = _Proc()
+    calls: list[tuple] = []
+
+    def fake_popen(argv, **kwargs):
+        calls.append(("popen", argv, kwargs))
+        return proc, 42
+
+    def fake_wait(waited, job, timeout_s):
+        calls.append(("wait", waited, job, timeout_s))
+        return 1.25
+
+    def no_wait4(*_args):
+        raise AssertionError("wait4 must not run on Windows")
+
+    monkeypatch.setattr(journeys, "_job_popen", fake_popen)
+    monkeypatch.setattr(journeys, "_job_wait_with_deadline", fake_wait)
+    monkeypatch.setattr(journeys, "_wait4_with_deadline", no_wait4)
+
+    result = journeys._run_measured(["apm", "install"], 9.0, platform="win32", cwd="x")
+
+    assert result == (proc.returncode, 1.25)
+    assert calls == [("popen", ["apm", "install"], {"cwd": "x"}), ("wait", proc, 42, 9.0)]
+
+
+def test_bench_run_measured_counts_a_grandchild(tmp_path: Path) -> None:
+    # wait4 on POSIX, the Job Object on Windows: the grandchild's CPU counts.
+    burn = (
+        "import time\nt = time.process_time()\n"
+        "while time.process_time() - t < 0.3: pass\nprint('burned')"
+    )
+    parent = (
+        f"import subprocess, sys; subprocess.run([sys.executable, '-c', {burn!r}]); sys.exit(5)"
+    )
+    log = tmp_path / "child.out"
+
+    with log.open("w") as out:
+        code, cpu = journeys._run_measured([sys.executable, "-c", parent], 30.0, stdout=out)
+
+    assert log.read_text() == "burned\n"
+    assert code == 5
+    assert cpu >= 0.3
