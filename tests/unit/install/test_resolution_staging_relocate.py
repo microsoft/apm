@@ -1,5 +1,6 @@
 """Direct regression tests for resolution-staging path relocations."""
 
+import os
 import re
 from pathlib import Path
 
@@ -361,3 +362,30 @@ def test_a_no_clobber_publish_never_replaces_an_existing_destination(tmp_path: P
     assert destination.read_text(encoding="utf-8") == "user\n"
     assert session.rollback() == []
     assert destination.read_text(encoding="utf-8") == "user\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows rename never replaces")
+def test_a_no_clobber_publish_loses_a_race_without_touching_what_appeared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Something created at the destination after the check is never backed up or replaced."""
+    modules = tmp_path / "apm_modules"
+    destination = modules / "o" / "p"
+    session = ResolutionStagingSession(modules)
+    replacement = session.prepare_replacement(destination)
+    replacement.mkdir(parents=True)
+    (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
+    real_rename = os.rename
+
+    def racing_rename(source, target):
+        if Path(target) == destination:
+            (destination / "user.md").write_text("user\n", encoding="utf-8")
+        return real_rename(source, target)
+
+    monkeypatch.setattr("os.rename", racing_rename)
+    with pytest.raises(OSError):
+        session.publish_replacement(replacement, clobber=False)
+    monkeypatch.undo()
+
+    assert (destination / "user.md").read_text(encoding="utf-8") == "user\n"
+    assert not (destination / "apm.yml").exists()

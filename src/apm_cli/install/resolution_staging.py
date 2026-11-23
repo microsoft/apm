@@ -23,6 +23,25 @@ from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 _STAGING_NAME = re.compile(r"[0-9a-f]{12}|[0-9a-f]{32}")
 
 
+def _publish_no_clobber(staged: Path, destination: Path) -> None:
+    """Rename *staged* to *destination* only if nothing is there, atomically.
+
+    Windows ``rename`` never replaces. Elsewhere the destination is first
+    claimed by an exclusive ``mkdir``; the rename can then only replace that
+    empty claim, and fails if anything was put into or in place of it.
+    """
+    if os.name == "nt":
+        os.rename(staged, destination)
+        return
+    os.mkdir(destination)
+    try:
+        os.rename(staged, destination)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.rmdir(destination)  # only our own claim, and only while still empty
+        raise
+
+
 class ResolutionStagingSession:
     """Track paths mutated during resolution and restore them on failure."""
 
@@ -101,7 +120,8 @@ class ResolutionStagingSession:
         """Activate a prepared replacement and return its live path.
 
         With ``clobber=False`` an existing destination is never backed up and
-        replaced: the publish fails with :class:`FileExistsError` instead.
+        replaced: the publish is atomic no-replace (:func:`_publish_no_clobber`)
+        and fails with :class:`FileExistsError` instead.
         """
         staged = ensure_path_within(replacement, self._staging_root)
         with self._lock:
@@ -112,8 +132,13 @@ class ResolutionStagingSession:
                 raise RuntimeError(f"Path is already staged for replacement: {resolved}")
             if not staged.exists():
                 raise FileNotFoundError(f"Replacement path was not materialized: {staged}")
-            if not clobber and os.path.lexists(resolved):
-                raise FileExistsError(f"Refusing to replace {resolved}")
+            if not clobber:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                _publish_no_clobber(staged, resolved)
+                self._backups[resolved] = None  # rollback removes what this created
+                self._replacement_by_destination.pop(resolved)
+                self._destination_by_replacement.pop(staged)
+                return resolved
 
             backup: Path | None = None
             if resolved.exists():
