@@ -127,7 +127,9 @@ def test_a_live_package_rendering_onto_a_served_file_replays_all_live(
     )
     world.apm("install", expect=None)
 
-    _same_verdict(world, "--ci", "--no-fail-fast")
+    served, live = _same_verdict(world, "--ci", "--no-fail-fast")
+    assert served.returncode == live.returncode
+    assert _SUMMARY.search(live.stderr) is None
     # The clash sent the whole replay live: nothing is reported as served.
     assert _replay_counts(world, records=True) == ("0", "2")
     assert _replay_counts(world, records=False) == ("0", "2")

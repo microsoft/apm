@@ -50,6 +50,7 @@ def test_each_known_outcome_and_policy_fingerprints_distinctly() -> None:
         _fetch("hash_mismatch", _DENY_A),
         _fetch("incomplete_chain", _DENY_A),
         _fetch("malformed"),
+        _fetch("found", _DENY_A, unavailable_sources=[_fetch("cache_miss_fetch_fail")]),
     ],
 )
 def test_an_uncertain_effective_policy_has_no_fingerprint(fetch: object) -> None:

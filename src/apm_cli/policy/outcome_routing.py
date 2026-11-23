@@ -635,7 +635,8 @@ def effective_policy_fingerprint(fetch: Any | None, *, disabled: bool = False) -
     outcome = getattr(fetch, "outcome", None)
     if outcome not in _KNOWN_OUTCOMES or getattr(fetch, "cache_stale", False):
         return None
-    if getattr(fetch, "fetch_error", None):
+    if getattr(fetch, "fetch_error", None) or getattr(fetch, "unavailable_sources", None):
+        # A source that failed to resolve leaves the effective policy uncertain.
         return None
     policy = getattr(fetch, "policy", None)
     if outcome in ("found", "empty"):

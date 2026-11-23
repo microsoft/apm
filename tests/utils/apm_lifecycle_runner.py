@@ -85,17 +85,40 @@ class ApmLifecycleRunner:
             budget_seconds=self._timeout_seconds,
         )
         _check_output(args, result, scenario_id=scenario_id, env=env)
-        if _audit_parity_applies(args, env):
-            live = self._run_with_timeout(
-                args,
-                cwd=cwd,
-                env={**env, _RECORDS_SWITCH: "0"},
-                timeout_seconds=self._timeout_seconds,
-                scenario_id=scenario_id,
-                budget_seconds=self._timeout_seconds,
-            )
-            _assert_audit_parity(result, live)
+        self._check_audit_parity(
+            args,
+            result,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=self._timeout_seconds,
+            scenario_id=scenario_id,
+            budget_seconds=self._timeout_seconds,
+        )
         return result
+
+    def _check_audit_parity(
+        self,
+        args: Sequence[str],
+        result: CommandResult,
+        *,
+        cwd: Path,
+        env: Mapping[str, str],
+        timeout_seconds: float,
+        scenario_id: str,
+        budget_seconds: float,
+    ) -> None:
+        """Replay a read-only ``apm audit`` with records off; both must agree (#4940)."""
+        if not _audit_parity_applies(args, env):
+            return
+        live = self._run_with_timeout(
+            args,
+            cwd=cwd,
+            env={**env, _RECORDS_SWITCH: "0"},
+            timeout_seconds=timeout_seconds,
+            scenario_id=scenario_id,
+            budget_seconds=budget_seconds,
+        )
+        _assert_audit_parity(result, live)
 
     def _run_with_timeout(
         self,
@@ -180,6 +203,15 @@ class ApmLifecycleRunner:
             )
             results.append(result)
             _check_output(command, result, scenario_id=scenario_id, env=env)
+            self._check_audit_parity(
+                command,
+                result,
+                cwd=cwd,
+                env=env,
+                timeout_seconds=max(deadline - time.monotonic(), 1.0),
+                scenario_id=scenario_id,
+                budget_seconds=self._scenario_timeout_seconds,
+            )
             if result.returncode != expected_returncode:
                 raise AssertionError(
                     _unexpected_result_evidence(
@@ -197,7 +229,14 @@ _RECORDS_SWITCH = "APM_AUDIT_RECORDS"
 _RECORDS_SUMMARY = re.compile(
     r"^\[i\] drift replay: \d+ package\(s\) from records, \d+ live\n?", re.M
 )
-_MUTATING_AUDIT_FLAGS = frozenset({"--strip"})
+# Flags that write: a second run would read what the first one wrote.
+_MUTATING_AUDIT_FLAGS = frozenset({"--strip", "--output", "-o"})
+
+
+def _writes(arg: str) -> bool:
+    if arg in _MUTATING_AUDIT_FLAGS or arg.startswith("--output="):
+        return True
+    return arg.startswith("-o") and not arg.startswith("--")
 
 
 def _audit_parity_applies(args: Sequence[str], env: Mapping[str, str]) -> bool:
@@ -205,7 +244,7 @@ def _audit_parity_applies(args: Sequence[str], env: Mapping[str, str]) -> bool:
         bool(args)
         and args[0] == "audit"
         and _RECORDS_SWITCH not in env
-        and not _MUTATING_AUDIT_FLAGS.intersection(args)
+        and not any(_writes(arg) for arg in args[1:])
     )
 
 

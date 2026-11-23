@@ -15,8 +15,9 @@ import pytest
 
 from apm_cli.cache.deploy_store import DeployStore, package_record_key
 from apm_cli.core.scope import InstallScope
-from apm_cli.install.drift_records import RECORDS_SWITCH, served_outputs
+from apm_cli.install.drift_records import RECORDS_SWITCH, record_policy, served_outputs
 from apm_cli.install.package_resolution import EffectiveDependencySelection
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.content_hash import canonical_digest
 from apm_cli.version import get_version
 
@@ -31,11 +32,15 @@ _SOURCES = {
 }
 
 
-def _world(tmp_path: Path, *, policy: str | None = _POLICY, manifest: str = "") -> dict:
+def _world(
+    tmp_path: Path, *, policy: str | None = _POLICY, manifest: str = "", skill: bytes | None = None
+) -> dict:
     root = tmp_path / "pkg"
     for rel in _SOURCES.values():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_bytes(f"# {rel}\n".encode("ascii"))
+    if skill is not None:
+        (root / ".apm/skills/guide/SKILL.md").write_bytes(skill)
     (root / "apm.yml").write_text(f"name: pkg\nversion: 1.0.0\n{manifest}", encoding="ascii")
     files = {dest: (root / src).read_bytes() for dest, src in _SOURCES.items()}
     dep = SimpleNamespace(
@@ -81,11 +86,15 @@ def _serve(
     selection=None,
     policy: str | None = _POLICY,
     other_dests: tuple[str, ...] = (),
+    parsed: bool = True,
 ):
+    # The replay hands the decision the manifest it already parsed.
+    package = APMPackage.from_apm_yml(world["root"] / "apm.yml") if parsed else None
+    context = SimpleNamespace(**vars(_CONTEXT), package_info=SimpleNamespace(package=package))
     return served_outputs(
         world["dep"],
         world["root"],
-        context=_CONTEXT,
+        context=context,
         selection=selection or EffectiveDependencySelection(None, None),
         policy_fingerprint=policy,
         other_dests=other_dests,
@@ -310,3 +319,94 @@ def test_a_plugin_format_server_declaration_replays_live(tmp_path: Path, declara
 
     assert _serve(world) is None
     assert path.is_file()
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "devDependencies:\n  mcp:\n    - io.github.acme/server\n",
+        "dependencies:\n  lsp:\n    - name: kit-lsp\n      command: kit-ls\n"
+        "      extensionToLanguage:\n        .kit: kit\n",
+        "devDependencies:\n  lsp:\n    - name: kit-lsp\n      command: kit-ls\n"
+        "      extensionToLanguage:\n        .kit: kit\n",
+    ],
+)
+def test_a_package_declaring_dev_or_lsp_servers_replays_live(tmp_path: Path, manifest: str) -> None:
+    world = _world(tmp_path, manifest=manifest)
+
+    assert _serve(world) is None
+
+
+def test_a_manifest_the_replay_did_not_parse_replays_live(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+
+    assert _serve(world, parsed=False) is None
+    assert _serve(world) is not None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX links")
+def test_a_linked_source_directory_replays_live(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (world["root"] / ".apm/context").symlink_to(elsewhere, target_is_directory=True)
+
+    assert _serve(world) is None
+
+
+def test_source_bytes_off_the_lock_bound_digest_replay_live(tmp_path: Path) -> None:
+    # A record whose raw digest was moved to new source bytes, while its
+    # canonical digest (and the lock) still name the installed bytes.
+    world = _world(tmp_path)
+    source = world["root"] / ".apm/skills/guide/SKILL.md"
+    source.write_bytes(b"# unrendered\n")
+    files = {d: list(pair) for d, pair in world["record"]["files"].items()}
+    files[".github/skills/guide/SKILL.md"][1] = hashlib.sha256(source.read_bytes()).hexdigest()
+    _rewrite_record(world, files=files)
+
+    assert _serve(world) is None
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        b"[ref](../context/ref.context.md)",
+        b"[ref](/abs/ref.context.md)",
+        b"[readme](../../README.md)",
+        b"[x](javascript:alert)",
+        b"[x](https://)",
+    ],
+)
+def test_a_source_with_a_rewritable_link_replays_live(tmp_path: Path, link: bytes) -> None:
+    world = _world(tmp_path, skill=b"# guide\nSee " + link + b".\n")
+
+    assert _serve(world) is None
+
+
+def test_a_source_with_only_external_urls_is_served(tmp_path: Path) -> None:
+    world = _world(tmp_path, skill=b"# guide\nSee [docs](https://example.com/docs).\n")
+
+    assert _serve(world) is not None
+
+
+@pytest.mark.parametrize(
+    ("outcome", "discoveries"),
+    [("found", 1), ("absent", 1), ("cache_miss_fetch_fail", 2), ("cached_stale", 2)],
+)
+def test_the_shared_discovery_keeps_only_answers_a_command_reuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, discoveries: int
+) -> None:
+    calls: list[Path] = []
+
+    def discover(root: Path) -> SimpleNamespace:
+        calls.append(root)
+        return SimpleNamespace(outcome=outcome)
+
+    # The discovery I/O boundary below the trust-policy owner.
+    monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", discover)
+    config = SimpleNamespace(policy_provider=None, policy_fetch=None, user_scope=False)
+    fetch, _provider = record_policy(config, tmp_path, enabled=True)
+
+    assert fetch().outcome == outcome
+    assert fetch().outcome == outcome
+    assert len(calls) == discoveries

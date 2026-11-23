@@ -125,7 +125,7 @@ def _served(
     root = Path(install_path)
     if record is None or not _distinct_dests(record["files"], other_dests):
         return None
-    if _source_is_live(root):
+    if _source_is_live(root, getattr(getattr(context, "package_info", None), "package", None)):
         return None
     return _verbatim(record, mapping(root, context), root)
 
@@ -174,13 +174,41 @@ def _verbatim(
         return None
     if len({Path(source) for source in planned.values()}) != len(planned):
         return None
+    from apm_cli.utils.content_hash import canonical_digest
+
     served: dict[str, bytes] = {}
     for rel, source in planned.items():
         data = _plain_bytes(Path(source), root)
-        if data is None or hashlib.sha256(data).hexdigest() != record["files"][rel][1]:
+        if data is None or _may_rewrite_links(data):
+            return None
+        canonical, raw = record["files"][rel][:2]
+        # Raw bytes the install recorded, and the lock-bound canonical digest.
+        if hashlib.sha256(data).hexdigest() != raw or canonical_digest(data) != canonical:
             return None
         served[rel] = data
     return served
+
+
+def _may_rewrite_links(data: bytes) -> bool:
+    """Whether a live render could rewrite a link in *data*: any non-URL markdown link.
+
+    Link rewriting depends on files outside the package bytes (context files,
+    sibling assets), so such a file replays live.
+    """
+    from urllib.parse import urlparse
+
+    from apm_cli.compilation.link_resolver import UnifiedLinkResolver
+
+    text = data.decode("utf-8", errors="replace")
+    for match in UnifiedLinkResolver.LINK_PATTERN.finditer(text):
+        try:
+            target = urlparse(match.group(2).strip())
+        except ValueError:
+            return True
+        # Only an http(s) URL with a host is left alone, as the resolver does.
+        if target.scheme not in ("http", "https") or not target.netloc:
+            return True
+    return False
 
 
 def _plain_shape(lock_dep: Any, selection: Any) -> bool:
@@ -217,26 +245,38 @@ def _record(lock_dep: Any, targets: Any, store: Any | None) -> dict | None:
     )
 
 
-def _source_is_live(root: Path) -> bool:
-    """A package with executables, executable-gated or MCP/LSP content replays live."""
+def _source_is_live(root: Path, package: Any) -> bool:
+    """A package with executables, executable-gated or MCP/LSP content replays live.
+
+    *package* is the manifest the replay already parsed for this package (no
+    second parse, so manifest warnings print exactly as a live replay prints
+    them); a package without one replays live.
+    """
     from apm_cli.core.scope import manifest_file
-    from apm_cli.models.apm_package import APMPackage
     from apm_cli.utils.helpers import find_plugin_json
 
     if find_plugin_json(root) is not None:
         return True
-
-    manifest = manifest_file(root)
-    if manifest.exists():
-        package = APMPackage.from_apm_yml(manifest)
-        if package.get_mcp_dependencies() or package.get_lsp_dependencies():
+    if manifest_file(root).exists():
+        if package is None or any(
+            getattr(package, getter)()
+            for getter in (
+                "get_mcp_dependencies",
+                "get_dev_mcp_dependencies",
+                "get_lsp_dependencies",
+                "get_dev_lsp_dependencies",
+            )
+        ):
             return True
     for directory, dirs, names in os.walk(root):
         dirs[:] = [d for d in dirs if d != ".git"]
         if _LIVE_DIRS.intersection(dirs) or _LIVE_FILES.intersection(names):
             return True
-        for name in names:
+        # A linked directory can change what a live render resolves.
+        for name in [*dirs, *names]:
             info = os.lstat(Path(directory) / name)
+            if stat.S_ISDIR(info.st_mode):
+                continue
             if not stat.S_ISREG(info.st_mode) or info.st_mode & _EXEC_BITS:
                 return True
     return False
@@ -413,13 +453,26 @@ def record_policy(
     """
     if not enabled or config.policy_provider is not None:
         return config.policy_fetch, config.policy_provider
-    import functools
-
     from apm_cli.core.scope import manifest_root
-    from apm_cli.policy.outcome_routing import discover_trust_policy, resolve_trust_policy
+    from apm_cli.policy.outcome_routing import (
+        discover_trust_policy,
+        keep_policy_answer,
+        resolve_trust_policy,
+    )
 
     root = manifest_root(project_root, user_scope=config.user_scope)
-    fetch = functools.cache(lambda: discover_trust_policy(root))
+    kept: list[Any] = []
+
+    def fetch() -> Any:
+        # Share an answer only where the command would reuse it anyway; an
+        # outcome a retry may change is discovered again, as it would be live.
+        if kept:
+            return kept[0]
+        result = discover_trust_policy(root)
+        if keep_policy_answer(result):
+            kept.append(result)
+        return result
+
     return fetch, lambda: resolve_trust_policy(root, announce=False, fetch_result=fetch())
 
 
