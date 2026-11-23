@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -114,6 +115,24 @@ def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]
         CROSS_CLIENT_SKILLS_TARGET in package_allowed
         and target.capability.accepts_agent_skills_packages
     )
+
+
+def recorded_package_targets(package: object) -> list[str]:
+    """Return the package's own ``targets:`` restriction as the lockfile records it (#4850).
+
+    Empty when the package admits every target (no ``targets:`` or ``all``),
+    the same restriction :func:`resolve_effective_package_targets` applies.
+    """
+    declared = canonical_package_targets(package)
+    return sorted(declared) if declared and "all" not in declared else []
+
+
+def recorded_targets_exclude(target: TargetProfile, recorded: Iterable[str]) -> bool:
+    """Return whether a recorded package restriction keeps *target* out (#4850)."""
+    allowed = frozenset(recorded)
+    if not allowed or "all" in allowed:
+        return False
+    return not package_allows_target(target, allowed)
 
 
 def _no_target_hint(declared: list[str], requested: str) -> str:
