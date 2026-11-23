@@ -1680,6 +1680,18 @@ REPOSITORY_NOT_FOUND = _entry(
 LOCAL_BUNDLE_UPDATE = _entry(
     "local-bundle-update", "apm install <newer-bundle-file>", "update a bundle"
 )
+# A local bundle is not in apm.yml, so it is uninstalled apart from packages (#3700).
+LOCAL_BUNDLE_UNINSTALL_APART = _entry(
+    "local-bundle-uninstall-apart",
+    "apm uninstall <bundle>",
+    "remove a local bundle's hooks",
+    then="uninstall the other packages in a separate command",
+)
+LOCAL_BUNDLE_UNINSTALL_BY_NAME = _entry(
+    "local-bundle-uninstall-by-name",
+    "apm uninstall <installed-name>",
+    "remove one installed local bundle's hooks",
+)
 NATIVE_PLUGIN_UPDATE_HELD = _entry(
     "native-plugin-update-held", "apm install", "update it", before="drop --target"
 )
