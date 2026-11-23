@@ -35,6 +35,16 @@ class ClaudeNativePluginError(RuntimeError):
     """Native registration cannot safely honor the requested package."""
 
 
+# The one install-summary notice for a dependency installed through the native
+# plugin route (#4998). Extend this text, never add a second notice.
+NATIVE_ROUTE_NOTICE = (
+    "installed as a native plugin. Native plugins are reported not to load in "
+    "git worktrees, in non-interactive claude -p runs (including "
+    "claude-code-action) and in Copilot CLI 1.0.106. To deploy its skills loose "
+    'instead, set skills: ["*"] on this dependency in apm.yml.'
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ClaudeNativePlugin:
     """An admitted dependency, not a claim of native activation or execution.
