@@ -1260,3 +1260,79 @@ def test_altered_cached_policy_document_is_ignored(tmp_path: Path) -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Pinned entries are read from their fetched bytes; freshness is bounded
+# ---------------------------------------------------------------------------
+
+_LEAF = "name: org\nversion: '1.0'\ndependencies:\n  deny:\n    - acme/blocked\n"
+_REF = "contoso/.github"
+
+
+def _pin(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _pinned_entry(root: Path) -> tuple[Path, Path]:
+    policy, _warnings = load_policy(_LEAF)
+    _write_cache(_REF, policy, root, raw_bytes_hash=_pin(_LEAF), raw_content=_LEAF)
+    cache_dir = _get_cache_dir(root)
+    key = _cache_key(_REF)
+    return cache_dir / f"{key}.yml", cache_dir / f"{key}.meta.json"
+
+
+def test_a_pinned_entry_is_parsed_from_its_fetched_bytes(tmp_path: Path) -> None:
+    policy_file, meta_file = _pinned_entry(tmp_path)
+    # The stored document is replaced, with metadata recorded to match it.
+    replaced = _serialize_policy(ApmPolicy())
+    policy_file.write_text(replaced, encoding="utf-8")
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    meta["fingerprint"] = _policy_fingerprint(replaced)
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+
+    entry = _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF))
+
+    assert entry is not None
+    assert entry.policy.dependencies.deny == ("acme/blocked",)
+    assert policy_file.read_text(encoding="utf-8") == replaced
+
+
+@pytest.mark.parametrize("change", ["modified", "missing"])
+def test_pinned_bytes_that_do_not_hash_to_the_pin_are_fetched_again(
+    tmp_path: Path, change: str
+) -> None:
+    policy_file, _meta_file = _pinned_entry(tmp_path)
+    raw_file = policy_file.with_suffix(".raw")
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+    if change == "modified":
+        raw_file.write_text(_LEAF.replace("acme/blocked", "acme/other"), encoding="utf-8")
+    else:
+        raw_file.unlink()
+
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)) is None
+    assert policy_file.exists()
+
+
+def test_a_composed_entry_drops_leaf_bytes_and_is_fetched_again_when_pinned(
+    tmp_path: Path,
+) -> None:
+    policy_file, _meta_file = _pinned_entry(tmp_path)
+    merged, _warnings = load_policy(_LEAF)
+    _write_cache(_REF, merged, tmp_path, chain_refs=["parent/.github", _REF])
+
+    assert not policy_file.with_suffix(".raw").exists()
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)) is None
+
+
+def test_a_cached_policy_cannot_keep_itself_fresh_past_the_cap(tmp_path: Path) -> None:
+    from apm_cli.policy._cache_verify import MAX_FRESH_TTL
+
+    policy, _warnings = load_policy(_LEAF + f"cache:\n  ttl: {MAX_FRESH_TTL * 6}\n")
+    _setup_cache(_REF, tmp_path, policy, cached_at=time.time() - MAX_FRESH_TTL - 60)
+
+    entry = _read_cache_entry(_REF, tmp_path)
+
+    assert entry is not None and entry.stale
+    assert entry.policy.cache.ttl == MAX_FRESH_TTL * 6
+    assert (_get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.yml").exists()
