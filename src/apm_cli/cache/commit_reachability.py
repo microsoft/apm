@@ -109,6 +109,11 @@ def _stage() -> VerdictStage | None:
         return _active_stage
 
 
+def _linked_dirs(path: Path, depth: int = 3) -> bool:
+    """Whether any of the *depth* directories above *path* in the ref cache is a link."""
+    return any(part.is_symlink() for part in list(path.parents)[:depth])
+
+
 def _write_marker(marker: Path, canonical: str) -> None:
     """Write a verdict as a new regular file, never through a planted link.
 
@@ -118,8 +123,10 @@ def _write_marker(marker: Path, canonical: str) -> None:
     """
     import tempfile
 
+    if _linked_dirs(marker):
+        return
     marker.parent.mkdir(parents=True, exist_ok=True)
-    if any(part.is_symlink() for part in (marker.parent, *list(marker.parents)[1:3])):
+    if _linked_dirs(marker):
         return
     fd, staged = tempfile.mkstemp(prefix=".verdict-", dir=marker.parent)
     try:
@@ -144,6 +151,8 @@ def _recorded(marker: Path, canonical: str) -> bool:
     stage = _stage()
     if stage is not None and stage.holds(marker, canonical):
         return True
+    if _linked_dirs(marker):
+        return False
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(marker, flags)
@@ -617,8 +626,14 @@ def _reached_by_refs(
     repo = Path(cache_root) / "reachability" / shard_key / "refs.git"
     git = [get_git_executable(), *_safe_git_args(), *inert_git_args(), "--git-dir", str(repo)]
     try:
+        # The ref cache never follows a link: a linked parent fails closed,
+        # and a linked repository is unlinked (its target is never touched).
+        if _linked_dirs(repo, depth=2):
+            raise OSError("the reachability cache path contains a link")
         repo.parent.mkdir(parents=True, exist_ok=True)
         with shard_lock(repo):
+            if repo.is_symlink():
+                repo.unlink()
             # A persisted repository holds only Git state APM writes; any
             # other configuration is discarded before Git reads it.
             if repo.is_dir() and not cached_repo_is_trusted(

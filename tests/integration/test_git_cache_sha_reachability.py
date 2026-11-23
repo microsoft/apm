@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -457,3 +458,51 @@ def test_a_listed_tip_is_recorded_for_the_destination_that_answered(
     recorded = marker.read_text(encoding="utf-8")
     assert recorded.endswith(origin.url.removesuffix(".git").removesuffix("/"))
     assert "missing" not in recorded
+
+
+class TestRefCacheLinks:
+    """The ref cache never follows a link."""
+
+    def _non_tip(self, origin: _Origin) -> str:
+        return origin.m1
+
+    def test_a_linked_ref_repository_is_relinked_and_its_target_untouched(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        from apm_cli.cache.commit_reachability import require_reachable_commit
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        root = tmp_path / "cache"
+        shard = cache_shard_key(origin.url)
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (target / "keep.txt").write_text("kept\n", encoding="utf-8")
+        target.chmod(0o755)
+        link = root / "reachability" / shard / "refs.git"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(target, target_is_directory=True)
+
+        require_reachable_commit(root, origin.url, shard, self._non_tip(origin))
+
+        assert sorted(p.name for p in target.iterdir()) == ["keep.txt"]
+        assert (target / "keep.txt").read_text(encoding="utf-8") == "kept\n"
+        assert stat.S_IMODE(target.stat().st_mode) == 0o755
+        assert link.is_dir() and not link.is_symlink()
+
+    def test_a_linked_shard_directory_fails_closed(self, tmp_path: Path, origin: _Origin) -> None:
+        from apm_cli.cache.commit_reachability import (
+            CommitNotReachableError,
+            require_reachable_commit,
+        )
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        root = tmp_path / "cache"
+        shard = cache_shard_key(origin.url)
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (root / "reachability").mkdir(parents=True)
+        (root / "reachability" / shard).symlink_to(target, target_is_directory=True)
+
+        with pytest.raises(CommitNotReachableError):
+            require_reachable_commit(root, origin.url, shard, self._non_tip(origin))
+        assert list(target.iterdir()) == []
