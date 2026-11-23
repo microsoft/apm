@@ -2055,7 +2055,7 @@ def test_a_shared_directory_swapped_for_a_link_is_journaled_and_never_followed(
     """Only a real directory skips the seam: a link takes the recording path."""
     import json
 
-    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.install.deploy_snapshot import DeployJournal, JournalReplayError
 
     project = tmp_path / "project"
     project.mkdir()
@@ -2083,7 +2083,8 @@ def test_a_shared_directory_swapped_for_a_link_is_journaled_and_never_followed(
     whole = [line["state"] for line in lines if line.get("sub") == "" and "sealed" in line]
     assert whole[-1] == {"link": str(outside)}
 
-    _replay(apm_home, project)
+    with pytest.raises(JournalReplayError):  # a link leaving the deploy root is refused
+        _replay(apm_home, project)
 
     assert (outside / "keep.md").read_text(encoding="utf-8") == "not APM's\n"
     assert sorted(p.name for p in outside.iterdir()) == ["keep.md"]
