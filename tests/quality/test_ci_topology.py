@@ -55,7 +55,7 @@ RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
 # A job that hits its cap ends "cancelled", which hides the ratchet result.
-RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 5}
+RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 10}
 MAIN_PUSH_RATCHET_WORKFLOW = "main-architecture-ratchets.yml"
 MAIN_PUSH_RATCHET_CHECK = "Architecture Ratchet Contracts (main)"
 RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
