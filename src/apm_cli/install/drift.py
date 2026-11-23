@@ -122,8 +122,7 @@ class ReplayConfig:
     policy_provider: Callable[[], Any] | None = None
     # Cleanup evidence (#3701) also renders targets the lock recorded.
     include_recorded_targets: bool = False
-    # Cleanup evidence renders each dependency on the route the lock recorded,
-    # not the one apm.yml now declares (#4995).
+    # Cleanup evidence replays each dependency on its locked route (#4995).
     route_from_lock: bool = False
 
 
@@ -544,11 +543,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import (
-        replay_deployment_frame,
-        replay_route_manifest,
-        replay_target,
-    )
+    from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
+    from apm_cli.install.audit_target_roots import replay_route_manifest as _route_for
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import (
@@ -607,7 +603,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
-    route_manifest = replay_route_manifest(
+    route_manifest = _route_for(
         manifest_file(self_source_root), lock, live_targets, from_lock=config.route_from_lock
     )
     registries: dict[str, str] | None = None
@@ -713,17 +709,19 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 lock_dep, install_path
                             )
 
+                    package_info = (
+                        build_project_local_package_info(install_path)
+                        if lock_dep.local_path == _SELF_KEY
+                        else _dependency_package_info(
+                            lock_dep, install_path, deployment_modules_dir
+                        )
+                    )
                     if lock_dep.local_path == _SELF_KEY:
-                        package_info = build_project_local_package_info(install_path)
                         package_info.root_local_project_root = self_source_root
                         # The root package deploys from where install read it;
                         # its links render in the live frame like any dependency
                         # (#4832: a user-root context link from ~/.apm).
                         package_info.deployment_package_root = self_source_root
-                    else:
-                        package_info = _dependency_package_info(
-                            lock_dep, install_path, deployment_modules_dir
-                        )
                     package_info.deployment_frame = deployment_frame
                     package_info.route_manifest = route_manifest
                     dep_key = lock_dep.get_unique_key()
