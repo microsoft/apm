@@ -39,6 +39,8 @@ PUBLISHED_AT = "2026-11-01T00:00:00Z"
 REGISTRY_PUBLISHED: dict[str, tuple[str, ...]] = {
     "p-skill": ("1.0.0", "1.1.0"),
     "p-exec": ("1.0.0",),
+    "p-lsp": ("1.0.0",),
+    "p-canvas": ("1.0.0",),
 }
 _PREFIX = f"{BASE}/v1/packages/"
 # 1980-01-01, the zip epoch: archives are byte-identical across builds.
