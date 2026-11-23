@@ -1,0 +1,27 @@
+{
+  "issue": 4889,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall of a direct local dependency that another installed package still needed refused (#4882); it now re-anchors the kept package to the identity apm install --no-frozen records (lock row, ledger owners, receipts with their hash history), so --frozen passes and later removals keep deletion evidence. A forged receipt or a graph unreadable offline still refuses before any write.",
+  "failure_modes": [
+    "transaction",
+    "ownership"
+  ],
+  "properties": [
+    "lockfile.frozen_preserves_bytes",
+    "transaction.failed_command_preserves_state",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_uninstall_reanchors_a_still_needed_local_dependency",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_later_uninstall_and_prune_of_the_reanchored_package_keep_deletion_evidence",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_forged_receipt_binding_refuses_the_reanchor",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_that_would_need_the_network_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_an_edit_made_before_reanchoring_is_still_reported",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchoring_carries_the_receipt_hash_history",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_whitespace_and_non_ascii_local_paths",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_when_the_kept_package_directory_is_gone",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_through_a_symlinked_local_directory",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_a_symlink_loop",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_of_a_dependency_outside_the_project"
+  ]
+}

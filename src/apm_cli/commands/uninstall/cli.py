@@ -108,13 +108,14 @@ class _StillNeededRepair(NamedTuple):
     depths: dict
     dev: dict
     roots: frozenset = frozenset()
+    reanchor: Any = None
 
 
 _NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
 
 
 def _split_still_needed_packages(
-    lockfile, packages_to_remove: list, modules_dir, apm_yml_path, logger
+    lockfile, packages_to_remove: list, modules_dir, apm_yml_path, logger, *, user_scope=False
 ) -> tuple[list, list, _StillNeededRepair]:
     """Split removals into full removals and declarations a survivor still needs.
 
@@ -135,15 +136,72 @@ def _split_still_needed_packages(
         for package in packages_to_remove
         if _removed_lock_key(package, lockfile) in decision.rescued_roots
     ]
-    _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
+    if user_scope:
+        _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
+    reanchor = _plan_reanchor_or_exit(lockfile, decision, still_needed, apm_yml_path.parent, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
     repair = _StillNeededRepair(
         dict(decision.rescued_parents),
         dict(decision.rescued_depths),
         dict(decision.rescued_dev),
         frozenset(decision.rescued_roots),
+        reanchor,
     )
     return removed, still_needed, repair
+
+
+def _plan_reanchor_or_exit(lockfile, decision, still_needed: list, project_root, logger):
+    """Plan re-anchoring of still-needed local packages; refuse before any write (#4889)."""
+    from ...core.deployment_reanchor import reanchor_receipt_problems
+    from ...core.scope import InstallScope
+    from .local_reanchor import LocalReanchorRefused, plan_local_reanchor
+
+    labels = {_removed_lock_key(package, lockfile): package for package in still_needed}
+
+    def label(key: str) -> str:
+        return _dependency_public_label(labels.get(key, key))
+
+    try:
+        plan = plan_local_reanchor(lockfile, decision, project_root, frozenset(labels), label=label)
+        problems = reanchor_receipt_problems(
+            project_root, InstallScope.PROJECT, lockfile, plan.renames
+        )
+        if problems:
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but APM cannot prove it wrote "
+                f"{', '.join(problems[:3])}: the deployment receipt is missing or does not "
+                "match its owner"
+            )
+    except LocalReanchorRefused as exc:
+        logger.error(f"{exc}; apm.yml and apm.lock.yaml were not changed.")
+        logger.progress(
+            "Uninstall the package that still needs it first, or keep the local "
+            "declaration in apm.yml."
+        )
+        sys.exit(1)
+    return plan
+
+
+def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logger) -> None:
+    """After the lock commits, carry receipts to the re-anchored owners (#4889)."""
+    plan = repair.reanchor
+    if not plan or not plan.renames:
+        return
+    from ...core.deployment_reanchor import rename_receipt_owners
+    from ...deps.lockfile import LockFile
+
+    committed = LockFile.read(lockfile_path)
+    renamed = {new for old, new in plan.renames.items() if old != new}
+    if committed is None or not renamed <= set(committed.dependencies):
+        return  # the lock was not committed; receipts still match it
+    try:
+        rename_receipt_owners(deploy_root, scope, committed, plan.renames)
+    except (OSError, ValueError) as exc:
+        logger.error(
+            f"Deployment receipts were not moved to the re-anchored package ({exc}); "
+            "its files are kept. Run 'apm install' to rebuild them."
+        )
+        sys.exit(1)
 
 
 def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
@@ -193,7 +251,7 @@ def _split_removals(
     )
     modules_dir, apm_yml_path = paths
     removed, still_needed, repairs = _split_still_needed_packages(
-        lockfile, removed, modules_dir, apm_yml_path, logger
+        lockfile, removed, modules_dir, apm_yml_path, logger, user_scope=user_scope
     )
     return removed, retained, still_needed, repairs
 
@@ -224,6 +282,11 @@ def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
             if kept is not None and getattr(kept, field_name) != value:
                 setattr(kept, field_name, value)
                 updated = True
+    if repair.reanchor:
+        # Re-key still-needed local rows to the identity install records (#4889).
+        from .local_reanchor import apply_local_reanchor
+
+        updated |= apply_local_reanchor(lockfile, repair.reanchor)
     return updated
 
 
@@ -395,6 +458,7 @@ def _persist_lock_then_resync_native(
     modules_dir,
     scope,
     native_before,
+    still_needed_repairs=_NO_STILL_NEEDED_REPAIR,
 ) -> None:
     """Persist survivors, converge native registrations, then drop an empty lock.
 
@@ -409,6 +473,7 @@ def _persist_lock_then_resync_native(
     if lock_changed and (saved is None or not saved.saved):
         _hold_native_registration(native_before, logger)
         return
+    _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,
@@ -1641,6 +1706,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             modules_dir=modules_dir,
             scope=scope,
             native_before=native_before,
+            still_needed_repairs=still_needed_repairs,
         )
 
         # Final summary: count each package once, whichever stores it left.

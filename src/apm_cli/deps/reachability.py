@@ -108,6 +108,9 @@ class ReachabilityResult:
             graph, direct declarations at 1, as install records it (#4833).
         graph_children: Every declaring edge the walk saw, parent key to
             child keys, for repairs that follow the graph, not the lock.
+        local_dirs: The anchored directory of every local node the walk
+            reached, by its lock key, so a re-anchored local row takes the
+            identity install records for it (#4889).
     """
 
     reachable: frozenset[str]
@@ -119,6 +122,7 @@ class ReachabilityResult:
     parent_keys: dict[str, str] = field(default_factory=dict)
     depths: dict[str, int] = field(default_factory=dict)
     graph_children: dict[str, frozenset[str]] = field(default_factory=dict)
+    local_dirs: dict[str, Path] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -373,6 +377,7 @@ def compute_forward_reachable_keys(
         (ref, project_root, None, True, (), None) for ref in dev_refs
     )
     edge_selections: dict[str, list[EdgeSelection]] = {}
+    local_dirs: dict[str, Path] = {}
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
     marketplace_index = lockfile.marketplace_index()
@@ -397,7 +402,12 @@ def compute_forward_reachable_keys(
         if ref.is_local and ref.local_path:
             if ref.replacement is not None:
                 anchor = project_root
-            real_dir = _join_local(anchor, ref.local_path) if anchor else None
+            try:
+                real_dir = _join_local(anchor, ref.local_path) if anchor else None
+            except (OSError, RuntimeError) as exc:
+                # A symlink loop cannot be resolved: the subtree is unknown (#4889).
+                unverifiable.append((ref.get_unique_key(), str(exc)))
+                continue
             if real_dir is None:
                 continue
             if ref.replacement is None and parent_repo_url is not None:
@@ -414,6 +424,9 @@ def compute_forward_reachable_keys(
                 if ref.replacement is not None and ref.get_unique_key() in lockfile.dependencies
                 else local_dir_index.get(real_dir)
             )
+            if matched_key is None and ref.get_unique_key() in lockfile.dependencies:
+                # A surviving local node keeps its dev status like a remote one (#4889).
+                matched_key = ref.get_unique_key()
             edge_selections.setdefault(matched_key or ref.get_unique_key(), []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
@@ -433,6 +446,7 @@ def compute_forward_reachable_keys(
             # A surviving local parent is not in the candidate directory
             # index; its own identity is still its lock key (#4823).
             node_key = matched_key or ref.get_unique_key()
+            local_dirs.setdefault(node_key, real_dir)
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
             # Several edges may alias one node; it is materialized where the
@@ -524,6 +538,7 @@ def compute_forward_reachable_keys(
         parent_keys=parent_keys,
         depths=depths,
         graph_children=graph_children,
+        local_dirs=local_dirs,
     )
 
 

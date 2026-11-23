@@ -1,0 +1,297 @@
+"""Uninstall keeps a still-needed LOCAL dependency by re-anchoring it (#4889).
+
+PROMISE: P-INV-I3 -- after ``apm uninstall ./vendor/e``, where a surviving
+package still declares ``e``, ``e`` stays installed under the identity
+``apm install --no-frozen`` records for it (its lock row, ledger owners and
+deployment receipts are re-keyed), so ``apm install --frozen`` passes and
+later removals keep deletion evidence (source: #4889 scope record).
+CELL: OP=uninstall SRC=local PRIM=skill SCOPE=project LOCK=consistent
+GRAPH=direct-also-transitive | refusals: forged receipt, offline-unreadable graph
+
+Resolution is the offline reachability walk; a re-anchor never fetches and
+an incomplete walk, or a receipt APM cannot prove, refuses before any write.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from tests.integration._install_audit_replay_kit import (
+    ReplayWorld,
+    lock_bytes,
+    tree_digest,
+    write,
+)
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I3", "P-INV-I1", "P-INV-I2"),
+]
+
+
+def _skill_package(root: Path, name: str, deps: tuple[str, ...] = (), body: str = "") -> None:
+    manifest = f"name: {name}\nversion: 1.0.0\n"
+    if deps:
+        manifest += "dependencies:\n  apm:\n" + "".join(f"    - {dep}\n" for dep in deps)
+    write(root / "apm.yml", manifest)
+    write(
+        root / f".apm/skills/{name}-skill/SKILL.md",
+        f"---\nname: {name}-skill\ndescription: Skill of {name}\n---\n# {name}{body}\n",
+    )
+
+
+def _manifest(world: ReplayWorld, direct: list, dev: list) -> None:
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": direct},
+            "devDependencies": {"apm": dev},
+        },
+        world.project / "apm.yml",
+    )
+
+
+def _local_world(tmp_path: Path, apm_binary_path: Path, e_dir: str = "e") -> ReplayWorld:
+    """Graph local e -> f, dev d -> e, dev a -> f, with e declared direct (#4889)."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / e_dir, "e", ("../f",))
+    _skill_package(vendor / "d", "d", (f"../{e_dir}",))
+    _skill_package(vendor / "a", "a", ("../f",))
+    _manifest(world, [f"./vendor/{e_dir}"], ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    return world
+
+
+def _receipts(world: ReplayWorld) -> dict[str, bytes]:
+    directory = world.isolated.home / ".apm" / "deployment-receipts"
+    return {path.name: path.read_bytes() for path in sorted(directory.glob("*.json"))}
+
+
+def _rows(world: ReplayWorld) -> dict[str, dict]:
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    return {row["repo_url"]: row for row in lock["dependencies"]}
+
+
+def _assert_reanchored_like_a_full_install(world: ReplayWorld) -> None:
+    """Done-when 1: frozen passes; a REAL --no-frozen rewrites neither lock nor receipts."""
+    world.apm("install", "--frozen")
+    lock, receipts = lock_bytes(world.project), _receipts(world)
+    world.apm("install", "--no-frozen")
+    assert lock_bytes(world.project) == lock
+    assert _receipts(world) == receipts
+
+
+def _assert_refused_before_any_write(world: ReplayWorld, *expected: str) -> None:
+    before, receipts = tree_digest(world.project), _receipts(world)
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+    output = " ".join((refused.stdout + refused.stderr).split())
+    for text in expected:
+        assert text in output, output
+    assert "apm.yml and apm.lock.yaml were not changed" in output, output
+    assert "Traceback" not in output, output
+    assert tree_digest(world.project) == before
+    assert _receipts(world) == receipts
+
+
+def test_uninstall_reanchors_a_still_needed_local_dependency(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 1: e stays under d's declaration; frozen passes, no-frozen rewrites nothing."""
+    world = _local_world(tmp_path, apm_binary_path)
+
+    result = world.apm("uninstall", "./vendor/e")
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "./vendor/e stays installed because" in output, output
+    row = _rows(world)["_local/e"]
+    assert (row["local_path"], row["declaring_parent"], row["anchored_local_path"]) == (
+        "../e",
+        "./vendor/d",
+        "vendor/e",
+    )
+    assert row.get("is_dev") is True
+    assert (world.project / ".claude/skills/e-skill/SKILL.md").is_file()
+    _assert_reanchored_like_a_full_install(world)
+    world.audit_clean()
+
+
+def test_later_uninstall_and_prune_of_the_reanchored_package_keep_deletion_evidence(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 2: removing d later deletes e's proven files and keeps an edited one."""
+    world = _local_world(tmp_path, apm_binary_path)
+    world.apm("uninstall", "./vendor/e")
+    edited = world.project / ".claude/skills/e-skill/SKILL.md"
+    edited.write_text(edited.read_text(encoding="utf-8") + "\nmine\n", encoding="utf-8")
+
+    result = world.apm("uninstall", "./vendor/d")
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert edited.is_file() and edited.read_text(encoding="utf-8").endswith("mine\n")
+    assert "e-skill" in output, output
+    assert "_local/e" not in _rows(world)
+    assert not (world.project / ".claude/skills/d-skill").exists()
+
+    # Prune: an unedited re-anchored package leaves with its proven files.
+    other = _local_world(tmp_path / "prune", apm_binary_path)
+    other.apm("uninstall", "./vendor/e")
+    _manifest(other, [], ["./vendor/a"])
+    other.apm("prune")
+    assert not (other.project / ".claude/skills/e-skill").exists()
+    assert "_local/e" not in _rows(other)
+
+
+def test_a_forged_receipt_binding_refuses_the_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 3: a receipt bound to another owner refuses before any write (I7)."""
+    world = _local_world(tmp_path, apm_binary_path)
+    directory = world.isolated.home / ".apm" / "deployment-receipts"
+    (receipt,) = [
+        path for path in directory.glob("*.json") if "e-skill" in path.read_text(encoding="utf-8")
+    ]
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    for key, binding in data["bindings"].items():
+        if "e-skill" in key:
+            binding[0] = "./vendor/x"
+    receipt.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    _assert_refused_before_any_write(world, "APM cannot prove it wrote", "e-skill")
+
+
+def test_a_reanchor_that_would_need_the_network_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 4: a survivor's remote dependency missing offline refuses; nothing changes."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    world.publish("r", lambda root, name: _skill_package(root, name))
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "d", "d", ("../e", "test/r"))
+    _manifest(world, ["./vendor/e"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    shutil.rmtree(world.project / "apm_modules" / "test" / "r")
+
+    _assert_refused_before_any_write(world, "could not all be read offline", "never fetches")
+
+
+def test_an_edit_made_before_reanchoring_is_still_reported(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 6: re-keying keeps edit evidence; audit still reports the edited file."""
+    world = _local_world(tmp_path, apm_binary_path)
+    edited = world.project / ".claude/skills/e-skill/SKILL.md"
+    edited.write_text(edited.read_text(encoding="utf-8") + "\nmine\n", encoding="utf-8")
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert edited.read_text(encoding="utf-8").endswith("mine\n")
+    audit = world.apm("audit", "--ci", "--no-policy", "--no-fail-fast", expect=None)
+    output = " ".join((audit.stdout + audit.stderr).split())
+    assert ".claude/skills/e-skill/SKILL.md [local:vendor/e]" in output, output
+
+
+def test_reanchoring_carries_the_receipt_hash_history(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 7: the owner rename never forgets a receipt's earlier hashes (#4428)."""
+    world = _local_world(tmp_path, apm_binary_path)
+    _skill_package(world.project / "vendor" / "e", "e", ("../f",), body=" v2")
+    world.apm("install")
+
+    def history() -> dict:
+        merged: dict = {}
+        for raw in _receipts(world).values():
+            merged.update(json.loads(raw).get("history") or {})
+        return {key: value for key, value in merged.items() if "e-skill" in key}
+
+    before = history()
+    assert before, "the rewrite recorded no receipt history"
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert history() == before
+
+
+@pytest.mark.parametrize("e_dir", ["my e", "caf\u00e9-e"])
+def test_reanchor_keeps_whitespace_and_non_ascii_local_paths(
+    tmp_path: Path, apm_binary_path: Path, e_dir: str
+) -> None:
+    """#4889 cell 8a: a re-anchored path with whitespace or non-ASCII keeps one identity."""
+    world = _local_world(tmp_path, apm_binary_path, e_dir=e_dir)
+    world.apm("uninstall", f"./vendor/{e_dir}")
+    _assert_reanchored_like_a_full_install(world)
+
+
+def test_reanchor_refuses_when_the_kept_package_directory_is_gone(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 8b: a missing local target never falls back to a parent directory."""
+    world = _local_world(tmp_path, apm_binary_path)
+    shutil.rmtree(world.project / "vendor" / "f")
+
+    _assert_refused_before_any_write(world, "could not all be read offline")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_reanchor_through_a_symlinked_local_directory(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 8c: a symlinked dependency directory keeps the identity install records."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    outside = world.isolated.work_root / "outside-e"
+    _skill_package(outside, "e")
+    vendor = world.project / "vendor"
+    vendor.mkdir()
+    os.symlink(outside, vendor / "e", target_is_directory=True)
+    _skill_package(vendor / "d", "d", ("../e",))
+    _manifest(world, ["./vendor/e"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_reanchored_like_a_full_install(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_reanchor_refuses_a_symlink_loop(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4889 cell 8c: a looping dependency directory refuses cleanly, never hangs or crashes."""
+    world = _local_world(tmp_path, apm_binary_path)
+    loop = world.project / "vendor" / "f"
+    shutil.rmtree(loop)
+    os.symlink(loop, loop, target_is_directory=True)
+
+    _assert_refused_before_any_write(world, "could not all be read offline")
+
+
+def test_reanchor_of_a_dependency_outside_the_project(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889 cell 8e: ``..`` and absolute local paths re-anchor to the identity install records."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    shared = world.isolated.work_root / "shared"
+    _skill_package(shared / "e", "e")
+    _skill_package(world.project / "vendor" / "d", "d", (str(shared / "e"),))
+    _manifest(world, ["../shared/e"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    world.apm("uninstall", "../shared/e")
+
+    _assert_reanchored_like_a_full_install(world)
