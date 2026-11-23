@@ -103,8 +103,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-audit-policy-discovery",
         path="src/apm_cli/commands/audit.py",
-        old="lambda: discover_policy_with_chain(\n            cfg.project_root,",
-        new="lambda: discover_policy(\n            cfg.project_root,",
+        old="lambda: discover_policy_with_chain(\n                cfg.project_root,",
+        new="lambda: discover_policy(\n                cfg.project_root,",
         intent="Audit resolves policy without the chain-aware discovery entry point.",
     ),
     MutationCase(

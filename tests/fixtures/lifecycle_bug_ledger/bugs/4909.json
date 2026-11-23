@@ -1,0 +1,16 @@
+{
+  "issue": 4909,
+  "fixed_in": "Unreleased",
+  "summary": "When apm install --frozen could not re-download a locked package, the failed download was only recorded as a diagnostic and the frozen MCP-declarations check raised first, so the [x] line blamed restored MCP declarations; the refusal now names the package that could not be fetched and its cause, still with zero durable writes.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_frozen_unfetchable_lock_lifecycle.py::test_frozen_names_the_locked_package_it_could_not_fetch"
+  ]
+}

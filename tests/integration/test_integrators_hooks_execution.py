@@ -1287,12 +1287,14 @@ class TestSyncIntegrationHooks:
 
     def test_clean_apm_entries_deletes_empty_event_key(self, tmp_path: Path) -> None:
         hooks_json = tmp_path / "hooks.json"
+        # A user key keeps the file; an emptied file APM created goes (#4852).
         data = {
+            "model": "user-choice",
             "hooks": {
                 "PreToolUse": [
                     {"command": "apm", "_apm_source": "pkg"},
                 ]
-            }
+            },
         }
         hooks_json.write_text(json.dumps(data))
 

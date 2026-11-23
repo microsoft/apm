@@ -67,6 +67,7 @@ from apm_cli.integration.hook_ownership import (
     dependency_hook_sources,
     drop_dependency_owned_entries,
     drop_source_entries,
+    hook_file_emptied,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
     read_hook_object,
@@ -130,6 +131,7 @@ class HookTargetReconcileStats(TypedDict):
     errors: int
     failed_targets: list[str]
     failed_paths: list[str]
+    deleted_paths: list[str]  # emptied hook files deleted (#4852)
 
 
 @dataclass(frozen=True)
@@ -368,6 +370,7 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         require_dir=True,
     ),
 }
+
 
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
 
@@ -1733,6 +1736,7 @@ class HookIntegrator(BaseIntegrator):
             "errors": 0,
             "failed_targets": [],
             "failed_paths": [],
+            "deleted_paths": [],
         }
         for target in excluded_targets:
             config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -1740,7 +1744,7 @@ class HookIntegrator(BaseIntegrator):
                 continue
             target_dir = project_root / target.root_dir
             json_path = target_dir / config.config_filename
-            errors_before = stats["errors"]
+            errors_before, existed = stats["errors"], json_path.exists()
             self._clean_apm_source_from_json(
                 json_path,
                 source_markers,
@@ -1748,7 +1752,11 @@ class HookIntegrator(BaseIntegrator):
                 container=config.event_container_key,
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                 dry_run=dry_run,
+                defaults=config.top_level_defaults,
+                root=project_root,
             )
+            if existed and not dry_run and not json_path.exists():
+                stats["deleted_paths"].append(portable_relpath(json_path, project_root))
             if stats["errors"] != errors_before:
                 stats["failed_targets"].append(target.name)
                 for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
@@ -1764,6 +1772,8 @@ class HookIntegrator(BaseIntegrator):
         container: str,
         sidecar_path: Path,
         dry_run: bool = False,
+        defaults: dict[str, Any] | None = None,
+        root: Path | None = None,
     ) -> None:
         """Remove one package owner while preserving user and sibling entries."""
         if not json_path.exists() and not sidecar_path.exists():
@@ -1829,7 +1839,10 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
+                if hook_file_emptied(json_path, data, defaults or {}, root):
+                    write_seam.unlink(json_path)  # a fresh deploy writes no file
+                else:
+                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
@@ -1916,6 +1929,8 @@ class HookIntegrator(BaseIntegrator):
                     stats,
                     container=config.event_container_key,
                     sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+                    defaults=config.top_level_defaults,
+                    root=project_root,
                 )
 
         return stats
@@ -2032,6 +2047,8 @@ class HookIntegrator(BaseIntegrator):
         stats: dict[str, Any],
         container: str = "hooks",
         sidecar_path: Path | None = None,
+        defaults: dict[str, Any] | None = None,
+        root: Path | None = None,
     ) -> None:
         """Remove externally-owned entries from a native hooks JSON file.
 
@@ -2064,7 +2081,10 @@ class HookIntegrator(BaseIntegrator):
             if not data[container]:
                 del data[container]
 
-            if modified:
+            if modified and hook_file_emptied(json_path, data, defaults or {}, root):
+                write_seam.unlink(json_path)  # a fresh deploy writes no file
+                stats["files_removed"] += 1
+            elif modified:
                 with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2)
                     f.write("\n")
