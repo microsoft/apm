@@ -113,12 +113,12 @@ def _abandoned(chain: Chain) -> Path:
     return stores[0]
 
 
-def _kill_mid_refusal(chain: Chain, fault: str, *args: str) -> None:
+def _kill_mid_refusal(chain: Chain, fault: str, *args: str, **env: str) -> None:
     """Run ``apm install`` on the engine, killed where the refusal would restore.
 
     A killed process has no exit contract, so it bypasses the runner's output oracle.
     """
-    env = dict(chain.env)
+    env = {**chain.env, **env}
     env["APM_TEST_DEPLOY_FAULT"] = fault
     env["PYTHONPATH"] = os.pathsep.join(
         part for part in (str(_KILL_HOOK), env.get("PYTHONPATH", "")) if part
@@ -372,3 +372,82 @@ def test_a_kill_after_the_lockfile_commit_settles_the_journal(
     assert _stores(chain) == [], _evidence(result)
     _assert_lock_matches_disk(chain.project)
     assert chain.run("audit", "--ci").returncode == 0
+
+
+def test_a_kill_mid_deploy_restores_every_journaled_path(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Killed before any gate seal: each path journaled before its write is restored."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    before = _tree_state(chain.project)
+    _write_package(chain, revision="v2", description="agent helper v2", extra=True)
+    _kill_mid_refusal(chain, "deploy+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_AFTER="2")
+    journal = _journal(_abandoned(chain))
+    written = [line for line in journal[1:] if "kind" in line and line["base"] == "root"]
+    assert written, journal
+    assert not any("sealed" in line for line in journal), journal
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert "left by an interrupted install" in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert chain.run("audit", "--ci").returncode == 0
+
+
+def test_a_tampered_root_copy_is_kept_and_reported_not_restored(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    chain, _before = _killed_world(tmp_path, apm_binary_path, _SCAN)
+    store = _abandoned(chain)
+    agent = _unit(_journal(store), "pkg-agent.md")
+    (store / agent["copy"]).write_bytes(b"# tampered copy\n")
+    _SCAN.cure(chain)
+
+    result = _assert_kept_and_reported(chain, _SCAN, store, agent["path"])
+
+    assert "journal copy does not match its recorded hash" in _text(result), _evidence(result)
+    assert (chain.project / agent["path"]).read_bytes() != b"# tampered copy\n"
+
+
+def test_a_kill_settling_a_repair_keeps_the_repaired_file(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A repair commits no lockfile change; a kill at the journal's discard settles it."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    before = _tree_state(chain.project)
+    agent = next(path for path in before if path.endswith("pkg-agent.md"))
+    (chain.project / agent).unlink()
+    _kill_mid_refusal(chain, "settle+kill", *_SCAN.args)
+    _abandoned(chain)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+
+
+def test_an_mcp_install_replays_a_killed_install_first(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``apm install --mcp`` opens no install transaction, yet replays before it writes."""
+    chain, before = _killed_world(tmp_path, apm_binary_path, _SCAN)
+    _SCAN.cure(chain)
+
+    result = chain.run("install", "--mcp", "replay-srv", "--target", "kiro", "--", "echo", "hi")
+
+    assert "left by an interrupted install" in _text(result), _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert result.returncode == 0, _evidence(result)
+    # The killed install's files are restored; the MCP install then adds its server.
+    after = _tree_state(chain.project)
+    restored = {k: v for k, v in after.items() if k in before and k != "apm.lock.yaml"}
+    assert restored == {k: v for k, v in before.items() if k != "apm.lock.yaml"}, after
+    assert not any(path.endswith("extra-agent.md") for path in after), after

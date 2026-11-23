@@ -130,6 +130,83 @@ def _ledger_hashes(apm_dir: Path) -> dict[str, str | None]:
     return ledger
 
 
+def replay_abandoned_deploys(apm_modules_dir: Path, logger: Any) -> None:
+    """Replay the deploy journal a killed install left for this workspace (#4863).
+
+    The one recovery owner: every install entry that mutates deployed state
+    calls it under the lifecycle lock, before it changes anything. A journal
+    that cannot be proven against the deployment ledger, or a path that
+    cannot be restored, keeps the journal, names each path and raises
+    ``InstallFailureAlreadyRendered``.
+    """
+    from apm_cli.core.scope import get_apm_home
+    from apm_cli.install.deploy_snapshot import JournalReplayError, replay_abandoned_journals
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+
+    apm_dir = Path(os.path.abspath(apm_modules_dir)).parent
+    store_parent = get_apm_home() / "install-snapshots"
+    if not any(store_parent.glob("deploy-*")):
+        return
+    try:
+        root = _deploy_root_of(apm_modules_dir)
+        outcome = replay_abandoned_journals(
+            store_parent,
+            root,
+            lambda: _ledger_hashes(apm_dir),
+            receipts=_receipts_directory(root),
+            committed=lambda: _committed_lockfile(apm_dir),
+        )
+    except JournalReplayError as exc:
+        _report_kept_journal(exc, logger)
+        raise InstallFailureAlreadyRendered(str(exc)) from None
+    if logger is None:
+        return
+    from apm_cli.core.remediation import kept_note
+
+    copies = ", ".join(str(store) for store in outcome.retained)
+    for path, reason in outcome.kept:
+        note = kept_note(
+            path,
+            f"{reason}, so it was not restored",
+            f"Review it; the pre-install copies are kept at {copies}.",
+        )
+        logger.warning(note)
+    if outcome.restored:
+        logger.progress(
+            f"Restored {outcome.restored} deployed path(s) left by an interrupted install."
+        )
+
+
+def replay_before_install_entry(scope: Any, *, dry_run: bool, logger: Any) -> None:
+    """Replay before any ``apm install`` entry writes; a dry run changes nothing.
+
+    The local-bundle and ``--mcp`` entries never open an install transaction.
+    """
+    if not dry_run:
+        from apm_cli.core.scope import get_modules_dir
+
+        replay_abandoned_deploys(get_modules_dir(scope), logger)
+
+
+def _report_kept_journal(exc: Any, logger: Any) -> None:
+    """Name each path of a journal replay kept, and where its copies are."""
+    if logger is None:
+        return
+    if exc.applied:
+        logger.error("An interrupted install left deployed files that could not all be restored:")
+    else:
+        logger.error(
+            "An interrupted install left a deploy journal that cannot be replayed "
+            "safely; nothing was restored:"
+        )
+    for path, reason in exc.issues:
+        logger.error(f"  {path}: {reason}")
+    logger.error(
+        f"The journal is kept at {exc.store}. Restore or remove the listed paths "
+        "by hand, then run the command again."
+    )
+
+
 class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
@@ -276,63 +353,8 @@ class InstallTransaction:
         return self.commit(result)
 
     def _replay_abandoned_deploys(self) -> None:
-        """Replay the deploy journal a killed install left for this deploy root (#4863).
-
-        A journal that cannot be proven against the deployment ledger, or a
-        path that cannot be restored, keeps the journal, names each path and
-        stops this install.
-        """
-        from apm_cli.core.scope import get_apm_home
-        from apm_cli.install.deploy_snapshot import JournalReplayError, replay_abandoned_journals
-        from apm_cli.install.errors import InstallFailureAlreadyRendered
-
-        store_parent = get_apm_home() / "install-snapshots"
-        if not any(store_parent.glob("deploy-*")):
-            return
-        try:
-            root = _deploy_root_of(self.apm_modules_dir)
-            outcome = replay_abandoned_journals(
-                store_parent,
-                root,
-                lambda: _ledger_hashes(self.apm_modules_dir.parent),
-                receipts=_receipts_directory(root),
-                committed=lambda: _committed_lockfile(self.apm_modules_dir.parent),
-            )
-        except JournalReplayError as exc:
-            logger = self._logger
-            if logger is not None:
-                if exc.applied:
-                    logger.error(
-                        "An interrupted install left deployed files that could not all be restored:"
-                    )
-                else:
-                    logger.error(
-                        "An interrupted install left a deploy journal that cannot be replayed "
-                        "safely; nothing was restored:"
-                    )
-                for path, reason in exc.issues:
-                    logger.error(f"  {path}: {reason}")
-                logger.error(
-                    f"The journal is kept at {exc.store}. Restore or remove the listed paths "
-                    "by hand, then run the command again."
-                )
-            raise InstallFailureAlreadyRendered(str(exc)) from None
-        if self._logger is None:
-            return
-        from apm_cli.core.remediation import kept_note
-
-        copies = ", ".join(str(store) for store in outcome.retained)
-        for path, reason in outcome.kept:
-            note = kept_note(
-                path,
-                f"{reason}, so it was not restored",
-                f"Review it; the pre-install copies are kept at {copies}.",
-            )
-            self._logger.warning(note)
-        if outcome.restored:
-            self._logger.progress(
-                f"Restored {outcome.restored} deployed path(s) left by an interrupted install."
-            )
+        """Replay the deploy journal a killed install left for this deploy root (#4863)."""
+        replay_abandoned_deploys(self.apm_modules_dir, self._logger)
 
     def journal_deploy_writes(self, ctx: Any = None) -> None:
         """Record, at the integrator write seam, the prior state of every path written from now on.
@@ -470,10 +492,19 @@ class InstallTransaction:
         return journal
 
     def _settle_deploy_journal(self) -> None:
-        """The lockfile records what was written: drop the pre-write copies."""
+        """The lockfile records what was written: drop the pre-write copies.
+
+        The journal first names the lockfile on disk, so a kill before the
+        copies are gone settles it too (#4863).
+        """
         journal = self._take_deploy_journal()
-        if journal is not None:
-            journal.discard()
+        if journal is None:
+            return
+        if journal.store is not None:
+            committed = _committed_lockfile(self.apm_modules_dir.parent)
+            if committed is not None:
+                journal.mark_commit(committed, seal=False)
+        journal.discard()
 
     def _restore_deploy_targets(self) -> None:
         """Put every journaled path back and discard the lockfile this attempt staged."""
