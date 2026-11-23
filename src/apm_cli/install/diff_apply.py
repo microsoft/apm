@@ -37,7 +37,7 @@ _STORE_DIR = "deploy-store-v1"
 _EXTRAS_DIR = "extras"
 # Project files APM writes beside the deployed primitives; the lock does not hash them.
 _SKIP_HARVEST = {"apm.yml", "apm.lock.yaml"}
-_SKIP_DIRS = {"apm_modules", ".git", ".apm-local"}
+_SKIP_DIRS = {"apm_modules", ".git"}
 
 
 # Per-package integration body lines this process emitted (full run), by dependency key.
@@ -107,6 +107,12 @@ def _store_put(store: Path, data: bytes) -> str:
             handle.write(data)
         os.replace(tmp, path)
     return digest
+
+
+def _manifest_bytes(project_root: Path) -> bytes:
+    from apm_cli.core.scope import manifest_file
+
+    return manifest_file(project_root).read_bytes()
 
 
 def _extras_key(lock_text: str, manifest: bytes) -> str:
@@ -184,9 +190,7 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
                 continue
             data = (project_root / rel).read_bytes()
             extras.append([rel, before.get(rel), _store_put(store, data)])
-        key = _extras_key(
-            lock_path.read_text(encoding="utf-8"), (project_root / "apm.yml").read_bytes()
-        )
+        key = _extras_key(lock_path.read_text(encoding="utf-8"), _manifest_bytes(project_root))
         index = store / _EXTRAS_DIR / f"{key}.json"
         index.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=index.parent, prefix=".idx.")
@@ -288,7 +292,7 @@ def _plan_files(
 
 
 def _plan_extras(project_root: Path, lock_text: str, store: Path) -> list[tuple[Path, bytes]]:
-    key = _extras_key(lock_text, (project_root / "apm.yml").read_bytes())
+    key = _extras_key(lock_text, _manifest_bytes(project_root))
     try:
         extras = json.loads((store / _EXTRAS_DIR / f"{key}.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -400,7 +404,13 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
     return result.passed and not any(getattr(c, "warned", False) for c in result.checks)
 
 
-def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Path) -> bool:
+def try_apply(
+    options: dict[str, Any],
+    argv: list[str] | None,
+    project_root: Path,
+    *,
+    frozen_disposition: Any,
+) -> bool:
     """Apply the verified diff and return True; False (with a trace reason) runs the full pipeline."""
     from apm_cli.install import noop_diff
 
@@ -480,7 +490,7 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
     except ImportError:
         render = None
     if render is not None:
-        render(project_root, lock, outcomes, frozen=bool(options.get("frozen")), started=started)
+        render(project_root, lock, outcomes, frozen_disposition=frozen_disposition, started=started)
         return True
     from apm_cli.utils.console import _rich_info, _rich_success
 

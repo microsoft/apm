@@ -26,20 +26,25 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
 
     def run(frozen: bool) -> Any:
         from pathlib import Path
+        from types import SimpleNamespace
 
         from apm_cli.install import diff_apply
         from apm_cli.install.locking import lifecycle_operation
+        from apm_cli.install.service import InstallService
 
         current = click.get_current_context()
         root, argv = Path.cwd(), list(raw)
-        options = {"frozen": frozen}
+        disposition = InstallService.frozen_disposition(SimpleNamespace(frozen=frozen))
+        options = {"frozen": disposition.replay}
         with lifecycle_operation():
-            done = diff_apply.try_apply(options, argv, root)
+            done = diff_apply.try_apply(options, argv, root, frozen_disposition=disposition)
         if done:
             return None
         current.meta[DECLINED] = True
         real = lazy.resolved()
-        sub = real.make_context("install", ["--frozen"] if frozen else [], parent=current.parent)
+        sub = real.make_context(
+            "install", ["--frozen"] if disposition.replay else [], parent=current.parent
+        )
         with sub:
             return real.invoke(sub)
 

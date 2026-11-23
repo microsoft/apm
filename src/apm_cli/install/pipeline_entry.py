@@ -15,6 +15,7 @@ import os
 import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from apm_cli.models.dependency.reference import DependencyReference
@@ -187,38 +188,22 @@ def install_pipeline_options(
     )
 
 
-def _lineage(ctx: Any) -> list[Any]:
-    out = []
-    while ctx is not None:
-        out.append(ctx)
-        ctx = ctx.parent
-    return out
-
-
 def stateless_noop(command: Any) -> Any:
-    """Exit ``apm install`` early when nothing would change (install/noop_diff.py).
+    """Record what a full ``apm install`` deployed for the locked fast path.
 
-    The decision module loads only when the command runs; any doubt runs
-    *command*, the full pipeline.
+    The fast path itself runs before this command is imported
+    (install/fast_entry.py); this wrapper only harvests a successful full run.
     """
 
     @functools.wraps(command)
     def install(*args: Any, **kwargs: Any) -> Any:
-        from pathlib import Path
-
         import click
 
         from apm_cli.install import diff_apply
-        from apm_cli.install.fast_entry import DECLINED
-        from apm_cli.install.noop_diff import invocation_argv, try_noop
 
-        root, argv = Path.cwd(), invocation_argv()
-        current = click.get_current_context(silent=True)
-        declined = any(c.meta.get(DECLINED) for c in _lineage(current))
-        if not declined and (
-            try_noop(kwargs, argv, root) or diff_apply.try_apply(kwargs, argv, root)
-        ):
-            return None
+        if kwargs.get("root") or kwargs.get("global_"):
+            return command(*args, **kwargs)  # the fast path serves only the cwd project
+        root = Path.cwd()
         before = diff_apply.snapshot(root)
         try:
             result = command(*args, **kwargs)

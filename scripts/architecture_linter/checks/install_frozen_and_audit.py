@@ -346,6 +346,7 @@ _FROZEN_PARAMETER_SITES = frozenset(
         ("src/apm_cli/deps/apm_resolver.py", "__init__"),
         ("src/apm_cli/deps/immutable_requirements.py", "__init__"),
         ("src/apm_cli/install/dry_run_plan.py", "with_resolved_dependencies"),
+        ("src/apm_cli/install/fast_entry.py", "run"),
         ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
         ("src/apm_cli/install/pipeline.py", "run_install_pipeline"),
     }
