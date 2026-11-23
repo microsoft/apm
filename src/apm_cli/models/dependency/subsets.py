@@ -205,6 +205,30 @@ def canonical_target_subset(names: Iterable[object] | None) -> list[str]:
     return sorted({canonical_target_name(str(name).strip().lower()) for name in names or ()})
 
 
+# ``skills: ["*"]`` selects every skill the package ships. It is a whole-list
+# token: it still routes the dependency through the loose skills route like any
+# other selection, but filters no names.
+SKILL_SELECT_ALL = "*"
+
+
+def _declared_skill_names(skill_subset: Iterable[object] | None) -> set[str]:
+    return {str(name).strip() for name in skill_subset or () if str(name).strip()}
+
+
+def skill_subset_selects_all(skill_subset: Iterable[object] | None) -> bool:
+    """Return whether *skill_subset* selects every skill.
+
+    One declaration may only say ``["*"]``; a merged selection that includes
+    it (another declaration or ``--skill`` named skills) still selects all.
+    """
+    return SKILL_SELECT_ALL in _declared_skill_names(skill_subset)
+
+
+def has_skill_selection(skill_subset: Iterable[object] | None) -> bool:
+    """Return whether the dependency declares a skills: selection, ``["*"]`` included."""
+    return bool(_declared_skill_names(skill_subset))
+
+
 def skill_subset_filter_tokens(skill_subset: Iterable[object] | None) -> set[str] | None:
     """Return match tokens for declared and flattened skill subset names.
 
@@ -212,8 +236,9 @@ def skill_subset_filter_tokens(skill_subset: Iterable[object] | None) -> set[str
     ``productivity/grill-me``, while deployment promotes each selected skill
     under its leaf name (``grill-me``). Consumers of deployed skill names must
     use these tokens so install and pack apply the same matching rule.
+    ``["*"]`` filters nothing and returns ``None``.
     """
-    if not skill_subset:
+    if not skill_subset or skill_subset_selects_all(skill_subset):
         return None
 
     tokens: set[str] = set()
@@ -246,6 +271,13 @@ def parse_skill_subset(skills_raw: object) -> list[str]:
         if not isinstance(name, str) or not name.strip():
             raise ValueError("Each entry in 'skills' must be a non-empty string")
         name = name.strip()
+        if name == SKILL_SELECT_ALL:
+            if {str(other).strip() for other in skills_raw} != {SKILL_SELECT_ALL}:
+                raise ValueError(
+                    "skills: '*' selects every skill and cannot be combined with skill "
+                    'names; use skills: ["*"] alone or list only skill names.'
+                )
+            return [SKILL_SELECT_ALL]
         validate_path_segments(name, context="skills/<name>")
         if name not in seen:
             seen.add(name)

@@ -248,6 +248,12 @@ copies; `apm audit` flags missing or edited ones.
 Git [skill collections](../../../../../docs/src/content/docs/reference/package-types.md)
 with `skills/<name>/SKILL.md` support `skills: [name]` without root `apm.yml` or `SKILL.md`.
 
+`skills: ["*"]` installs every skill the package ships, including skills added
+in later releases. `"*"` is a whole-list token: `["*", "name"]` is refused, and
+no glob matching applies. Any `skills:` selection deploys skills loose, never as
+a native plugin; use `["*"]` where native plugins do not load (git worktrees,
+non-interactive `claude -p` / claude-code-action, Copilot CLI 1.0.106).
+
 Unknown fields are rejected. A Git `version` field reports an actionable error
 to use `ref` for a branch, tag, or commit; `version` belongs to registry and
 marketplace objects. The `git: parent` form accepts only `git`, `path`, `ref`,

@@ -85,6 +85,28 @@ class TestDependencyReferenceSkillSubset:
         with pytest.raises(ValueError, match="must contain at least one"):
             DependencyReference.parse_from_dict(entry)
 
+    def test_parse_skills_star_selects_every_skill(self):
+        ref = DependencyReference.parse_from_dict({"git": "owner/repo", "skills": ["*"]})
+        assert ref.skill_subset == ["*"]
+        assert skill_subset_filter_tokens(ref.skill_subset) is None
+
+    def test_merged_selection_with_star_selects_every_skill(self):
+        # Two declarations, ["*"] and ["alpha"], merge into one union.
+        assert skill_subset_filter_tokens(("*", "alpha")) is None
+
+    def test_select_all_pairing_keeps_every_skill_beside_a_named_one(self):
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        pairing = merge_edge_pairings([(["*"], ["claude"]), (["alpha"], ["copilot"])])
+        assert SkillIntegrator._paired_name_filter(None, pairing, ("claude",)) is None
+        assert SkillIntegrator._paired_name_filter(None, pairing, ("copilot",)) == {"alpha"}
+
+    @pytest.mark.parametrize("skills", [["*", "alpha"], ["alpha", "*"], ["*", "*", "beta"]])
+    def test_parse_skills_star_mixed_with_names_raises(self, skills: list[str]) -> None:
+        with pytest.raises(ValueError, match=r"'\*' selects every skill and cannot be combined"):
+            DependencyReference.parse_from_dict({"git": "owner/repo", "skills": skills})
+
     @pytest.mark.parametrize("invalid_name", [None, 7, " "])
     def test_parse_skills_rejects_non_string_or_blank_name(self, invalid_name: object) -> None:
         with pytest.raises(ValueError, match="non-empty string"):
@@ -337,6 +359,25 @@ class TestSkillSubsetAdditiveMerge:
         entry = apm_yml_entries["owner/repo"]
         assert isinstance(entry, dict)
         assert sorted(entry["skills"]) == ["grill-me", "qa"]
+
+    def test_skill_name_added_to_a_select_all_entry_keeps_select_all(self):
+        """--skill alpha on an existing skills: ["*"] writes back ["*"], not a mix."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"git": "owner/repo", "skills": ["*"]}]
+        with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+            outcomes, _invalid, _validated, _mktplace, entries, _changed = (
+                _resolve_package_references(
+                    ["owner/repo"], current_deps, {"owner/repo"}, skill_subset=("alpha",)
+                )
+            )
+
+        assert len(outcomes) == 1
+        assert entries["owner/repo"]["skills"] == ["*"]
+        # The written entry parses back cleanly: no mixed "*" and names.
+        assert DependencyReference.parse_from_dict(entries["owner/repo"]).skill_subset == ["*"]
 
     def test_skill_names_no_duplicates(self):
         """Re-adding an existing skill name does not produce duplicates."""
