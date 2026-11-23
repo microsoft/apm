@@ -420,10 +420,10 @@ def test_the_run_s_own_environment_changes_are_not_keyed(
     state before the CLI runs, so the record keys the run's entry state."""
     monkeypatch.delenv("PYTHONIOENCODING", raising=False)
     with verdict_record.recording(["install"]):
-        os.environ["PYTHONIOENCODING"] = "utf-8"
+        monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
         sys.stdout.write(_OUTPUT)
         verdict_record.note_verified_noop()
-    monkeypatch.delenv("PYTHONIOENCODING")
+    os.environ.pop("PYTHONIOENCODING")  # the CLI process ends; the next run starts without it
     capsys.readouterr()
     verdict_record.replay(["install"])
     assert "up to date in " in capsys.readouterr().out
