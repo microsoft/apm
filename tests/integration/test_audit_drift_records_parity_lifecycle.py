@@ -92,3 +92,32 @@ def test_record_served_replay_gives_the_live_verdict(tmp_path: Path, apm_binary_
     assert served.returncode != 0
     assert "style.instructions.md" in served.stdout
     _same_verdict(world)
+
+
+def _clashing_hooks_package(root: Path, name: str) -> None:
+    """A live (hooks) package that also deploys the served package's instruction file."""
+    hooks_package(root, name)
+    write(root / ".apm/instructions/style.instructions.md", '---\napplyTo: "**"\n---\nOther.\n')
+
+
+def test_a_live_package_rendering_onto_a_served_file_replays_all_live(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    # Replayed after "plain" (lock order), so the live package renders over a served file.
+    deps = [
+        world.publish("plain", _verbatim_package),
+        world.publish("zclash", _clashing_hooks_package),
+    ]
+    listed = "".join(f"    - {dep}\n" for dep in deps)
+    write(
+        world.project / "apm.yml",
+        f"name: proj\nversion: 1.0.0\ntargets: [copilot]\ndependencies:\n  apm:\n{listed}",
+    )
+    world.apm("install", expect=None)
+
+    served, live = _same_verdict(world, "--ci", "--no-fail-fast")
+    # The clash sent the whole replay live: nothing is reported as served.
+    assert _SUMMARY.search(served.stderr).groups() == ("0", "2")
+    assert _SUMMARY.search(live.stderr).groups() == ("0", "2")
+    _same_verdict(world)

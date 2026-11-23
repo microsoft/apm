@@ -575,19 +575,25 @@ class SkillIntegrator(BaseIntegrator):
         """``{target_path: source}`` the sub-skill copy may write for *targets*, else ``None``.
 
         The same route, skill-root dedup, promoted name and admitted member
-        walk the sub-skill promotion uses. Native and bundle routes are not
-        mapped (``None``). Whether a member is a byte copy is proven by its bytes.
+        walk the sub-skill and bundle promotion uses. Native skills and
+        marketplace plugins are not mapped (``None``). Whether a member is a
+        byte copy is proven by its bytes.
         """
         from copy import copy
 
         from apm_cli.integration.skill_support import _build_deployable_copy_ignore
+        from apm_cli.models.apm_package import PackageType
 
         info = copy(package_info)
         info.install_path = Path(package_info.install_path).resolve()
         selection = self.selected_skill_sources(info)
         if selection.route == "none":
             return {}
-        if selection.route != "subskills":
+        # Bundle and sub-skill routes promote each selected child the same way;
+        # native skills and marketplace plugins have their own deploy paths.
+        if selection.route not in ("subskills", "bundle") or (
+            getattr(info, "package_type", None) is PackageType.MARKETPLACE_PLUGIN
+        ):
             return None
         ignore = _build_deployable_copy_ignore(source_plan=source_plan)
         planned: dict[Path, Path] = {}

@@ -296,3 +296,17 @@ def test_a_locked_directory_holding_recorded_files_still_binds(tmp_path: Path) -
     assert _serve(world) is not None
     world["dep"].deployed_files = [*world["dep"].deployed_files, ".github/skills/empty"]
     assert _serve(world) is None
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [".mcp.json", ".lsp.json", ".claude-plugin/plugin.json", "plugin.json", "nested/.mcp.json"],
+)
+def test_a_plugin_format_server_declaration_replays_live(tmp_path: Path, declaration: str) -> None:
+    world = _world(tmp_path)
+    path = world["root"] / declaration
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"mcpServers": {"s": {"command": "srv"}}}', encoding="ascii")
+
+    assert _serve(world) is None
+    assert path.is_file()

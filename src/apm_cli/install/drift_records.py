@@ -24,6 +24,8 @@ from typing import Any
 RECORDS_SWITCH = "APM_AUDIT_RECORDS"
 # Source directories whose content is executable or gate-decided: always live.
 _LIVE_DIRS = frozenset({"hooks", "bin", "scripts", "extensions"})
+# Plugin-format MCP/LSP server declarations and plugin manifests: always live.
+_LIVE_FILES = frozenset({".mcp.json", ".lsp.json", "plugin.json"})
 # Target primitive kinds this decision can map; hooks and canvas extensions are
 # live by _LIVE_DIRS, and any other kind (e.g. rendered commands) is never mapped.
 _MAPPED_KINDS = frozenset({"instructions", "prompts", "agents", "skills"})
@@ -218,6 +220,10 @@ def _source_is_live(root: Path) -> bool:
     """A package with executables, executable-gated or MCP/LSP content replays live."""
     from apm_cli.core.scope import manifest_file
     from apm_cli.models.apm_package import APMPackage
+    from apm_cli.utils.helpers import find_plugin_json
+
+    if find_plugin_json(root) is not None:
+        return True
 
     manifest = manifest_file(root)
     if manifest.exists():
@@ -226,7 +232,7 @@ def _source_is_live(root: Path) -> bool:
             return True
     for directory, dirs, names in os.walk(root):
         dirs[:] = [d for d in dirs if d != ".git"]
-        if _LIVE_DIRS.intersection(dirs):
+        if _LIVE_DIRS.intersection(dirs) or _LIVE_FILES.intersection(names):
             return True
         for name in names:
             info = os.lstat(Path(directory) / name)
