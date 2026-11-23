@@ -367,13 +367,33 @@ def user_script_environment(env: dict[str, str]) -> dict[str, str]:
     return restored
 
 
+def _links_into(directory: Path, root: Path) -> bool:
+    """Whether *directory* holds a symlink whose resolved target lies inside *root*."""
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        if not entry.is_symlink():
+            continue
+        try:
+            target = entry.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if target == root or target.is_relative_to(root):
+            return True
+    return False
+
+
 def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
     """Return *env* with PATH limited to directories outside the project.
 
     For scripts APM itself authors and launches (runtime setup, self-update):
     the programs they call by name resolve the way :func:`trusted_executable`
     resolves APM's own helpers. ``.``, empty and relative entries and every
-    entry inside the project are dropped; user-authored scripts never use this.
+    entry inside the project are dropped, as is any directory holding a link
+    whose target lies inside the project (the target check
+    :func:`trusted_executable` applies). User-authored scripts never use this.
     Raises ``FileNotFoundError`` when no entry remains, rather than launching
     with an empty PATH.
     """
@@ -387,6 +407,8 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
             try:
                 directory = Path(entry).expanduser().resolve()
                 if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+                    continue
+                if _links_into(directory, exclusion_root):
                     continue
             except (OSError, ValueError):
                 continue
