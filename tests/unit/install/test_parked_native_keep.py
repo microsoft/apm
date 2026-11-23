@@ -43,9 +43,14 @@ _INERT = (
 )
 
 
-def _plan(*, parked: str | None) -> PackageDeploymentPlan:
-    native = ClaudeNativePlugin("pkg", "demo", Path("/src"), "sha256:x", parked=parked)
-    selection = SimpleNamespace(targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]])
+def _plan(
+    *, parked: str | None, harnesses: frozenset[str] = frozenset({"claude"})
+) -> PackageDeploymentPlan:
+    native = ClaudeNativePlugin(
+        "pkg", "demo", Path("/src"), "sha256:x", parked=parked, harnesses=harnesses
+    )
+    names = ("claude", "codex", *sorted(harnesses - {"claude"}))
+    selection = SimpleNamespace(targets=[KNOWN_TARGETS[name] for name in names])
     return PackageDeploymentPlan(selection, claude_native=native)
 
 
@@ -56,6 +61,18 @@ def test_a_parked_plan_keeps_only_inert_loose_files(user_scope: bool) -> None:
     )
 
     assert sorted(kept) == sorted(_INERT)
+
+
+def test_a_root_a_loose_target_still_serves_is_not_kept() -> None:
+    # Copilot routed natively and Codex loose share .agents/skills; Codex
+    # rewrites those files in this install, so they are not kept as they were.
+    plan = _plan(
+        parked="Parked native plugin pkg: denied", harnesses=frozenset({"claude", "copilot"})
+    )
+
+    kept = plan.kept_loose_values((*_PRIOR, ".github/prompts/p.prompt.md"), user_scope=False)
+
+    assert sorted(kept) == sorted((*_INERT, ".github/prompts/p.prompt.md"))
 
 
 def test_an_admitted_plan_keeps_nothing() -> None:
@@ -82,3 +99,24 @@ def test_replay_carries_only_kept_values_the_lock_binds_by_hash(tmp_path: Path) 
     assert (scratch / ".claude/skills/demo/SKILL.md").is_file()
     # A kept value with no recorded hash stays a replay finding (orphaned).
     assert not (scratch / ".claude/skills/demo/notes.md").exists()
+
+
+def test_replay_never_carries_a_kept_claim_outside_its_roots(tmp_path: Path) -> None:
+    live, scratch = tmp_path / "home" / "live", tmp_path / "home" / "scratch"
+    (live / ".claude/skills/demo").mkdir(parents=True)
+    (live / ".claude/skills/demo/SKILL.md").write_text("ok", encoding="ascii")
+    victim = tmp_path / "home" / "victim"
+    victim.write_text("user bytes", encoding="ascii")
+    escape = ".claude/skills/../../../victim"
+    lock_dep = SimpleNamespace(
+        deployed_files=[".claude/skills/demo/SKILL.md", escape],
+        deployed_file_hashes={".claude/skills/demo/SKILL.md": "sha256:a", escape: "sha256:b"},
+    )
+    result = {"deployment_plan": _plan(parked="Parked native plugin pkg: denied")}
+
+    carry_kept_loose_into_replay(result, lock_dep, live, scratch, True)
+
+    assert victim.read_text(encoding="ascii") == "user bytes"
+    assert sorted(p.relative_to(scratch).as_posix() for p in scratch.rglob("*") if p.is_file()) == [
+        ".claude/skills/demo/SKILL.md"
+    ]

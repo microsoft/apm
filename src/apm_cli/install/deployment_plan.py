@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.scope import is_user_scope
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
 from .plan_admission import _is_transitive
@@ -63,19 +68,29 @@ class PackageDeploymentPlan:
         native = self.claude_native
         if self.codex_native is not None or native is None or not native.parked:
             return ()
-        prefixes: list[str] = []
-        for target in self.target_selection.targets:
-            if target.name not in native.harnesses:
-                continue
-            root = target.prefix
-            for kind in _INERT_PRIMITIVES:
-                mapping = target.primitives.get(kind)
-                if mapping is not None:
-                    base = f"{mapping.deploy_root.rstrip('/')}/" if mapping.deploy_root else root
-                    prefixes.append(f"{base}{mapping.subdir}/")
-        # Only inert primitive files: hooks, merged settings, bin/, MCP and LSP
-        # entries stay on the cleanup path a trust or policy verdict decides.
-        return tuple(value for value in prior_values if value.startswith(tuple(prefixes)))
+        targets = self.target_selection.targets
+        kept = _inert_prefixes(t for t in targets if t.name in native.harnesses)
+        # A root a loose target still serves (Codex shares .agents/skills with
+        # Copilot) is rewritten by this install, so it is not kept as it was.
+        loose = _inert_prefixes(t for t in targets if t.name not in native.harnesses)
+        prefixes = tuple(
+            p for p in kept if not any(p.startswith(o) or o.startswith(p) for o in loose)
+        )
+        return tuple(value for value in prior_values if prefixes and value.startswith(prefixes))
+
+
+def _inert_prefixes(targets: Iterable[TargetProfile]) -> tuple[str, ...]:
+    """Root-relative directory prefixes of the inert primitives a target deploys."""
+    prefixes: list[str] = []
+    for target in targets:
+        for kind in _INERT_PRIMITIVES:
+            mapping = target.primitives.get(kind)
+            if mapping is not None:
+                base = (
+                    f"{mapping.deploy_root.rstrip('/')}/" if mapping.deploy_root else target.prefix
+                )
+                prefixes.append(f"{base}{mapping.subdir}/")
+    return tuple(prefixes)
 
 
 def keep_loose_for_parked_native(
@@ -349,9 +364,13 @@ def carry_kept_loose_into_replay(
     for value in plan.kept_loose_values(lock_dep.deployed_files, user_scope=user_scope):
         if value not in hashed:
             continue  # only bytes the lock binds by hash stand in for the replay
-        live = deploy_root / value
-        if live.is_symlink() or not live.is_file():
+        try:
+            validate_path_segments(value, context="kept lock claim", reject_empty=True)
+            live = ensure_path_within(deploy_root / value, deploy_root)
+            replayed = ensure_path_within(scratch_root / value, scratch_root)
+        except PathTraversalError:
+            continue  # a claim outside its root is never carried; drift reports it
+        if (deploy_root / value).is_symlink() or not live.is_file():
             continue
-        replayed = scratch_root / value
         replayed.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(live, replayed)

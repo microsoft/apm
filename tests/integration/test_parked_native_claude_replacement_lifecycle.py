@@ -73,6 +73,8 @@ class _World:
             encoding="ascii",
         )
         self.env = repositories.url_rewrite_subprocess_env(self.repository, _REMOTE)
+        for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"):
+            self.env.pop(name, None)
         self.runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
         self.cwd = isolated.work_root
 
