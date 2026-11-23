@@ -18,7 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.cache.deploy_store import stage as stage_deployed_bytes
 from apm_cli.core.scope import is_user_scope
@@ -597,7 +597,6 @@ class LockfileBuilder:
                 prior = previous.dependencies.get(dep_key) if previous is not None else None
                 fresh = prior is None or not getattr(prior, "deployed_files", None)
                 body = bodies.get(dep_key) if fresh else None
-                record = {"v": 1, "files": files, "ascii_only": ascii_only, "body": body}
                 key = package_record_key(
                     dep.repo_url,
                     dep.resolved_commit,
@@ -606,6 +605,11 @@ class LockfileBuilder:
                     version,
                     self.ctx.scope,
                 )
+                if body is None:
+                    # A converged re-run prints no render body; keep the one the
+                    # first render of these exact files recorded under this key.
+                    body = _recorded_body(dep, self.ctx, version, files)
+                record = {"v": 1, "files": files, "ascii_only": ascii_only, "body": body}
                 stage_record(key, record)
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
@@ -1032,3 +1036,28 @@ class LockfileBuilder:
     def compute_deployed_hashes(self, rel_paths) -> dict[str, str]:
         """Delegate to the module-level canonical implementation."""
         return compute_deployed_hashes(rel_paths, self.ctx.project_root)
+
+
+def _recorded_body(dep: Any, ctx: Any, version: str, files: dict) -> list[str] | None:
+    """The body an earlier record of this exact package, setup and files carries."""
+    from apm_cli.cache.deploy_store import DeployStore
+
+    try:
+        store = DeployStore.open_default()
+        record = (
+            store.package_record(
+                dep.repo_url,
+                dep.resolved_commit,
+                dep.content_hash,
+                ctx.targets,
+                version,
+                ctx.scope,
+            )
+            if store is not None
+            else None
+        )
+    except Exception:
+        return None
+    if not record or record.get("files") != files:
+        return None
+    return record.get("body")

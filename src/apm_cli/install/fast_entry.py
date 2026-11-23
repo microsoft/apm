@@ -21,7 +21,13 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
     from apm_cli.install.noop_diff import disabled
 
     raw = tuple(ctx.meta.get("apm_raw_args") or ())
-    if raw not in _FAST_ARGV or disabled():
+    if disabled():
+        return None
+    if raw not in _FAST_ARGV:
+        if raw[:1] == ("install",):
+            from apm_cli.install.diff_apply import _trace
+
+            _trace("full run (options)")  # one decision line per install (trace only)
         return None
 
     def run(frozen: bool) -> Any:
