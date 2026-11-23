@@ -203,3 +203,95 @@ def test_an_admitted_native_replacement_still_retires_the_loose_claude_skill(
     assert "Parked native plugin" not in text, _evidence(upgraded)
     # The retired copy is not also reported as kept.
     assert "is not part of this install" not in text, _evidence(upgraded)
+
+
+def _publish_writer(world: _World, name: str) -> None:
+    """A second package whose loose Claude skill writes the kept path (#5108)."""
+    writer = world.repository.worktree / "plugins" / name
+    (writer / "skills" / "demo").mkdir(parents=True)
+    (writer / "apm.yml").write_text(
+        f"name: {name}\nversion: 1.0.0\ntargets: [claude]\n"
+        "dependencies:\n  apm: []\n  mcp: []\nincludes:\n  - skills\n",
+        encoding="ascii",
+    )
+    (writer / "skills" / "demo" / "SKILL.md").write_text(_skill("Writer skill."), encoding="ascii")
+
+
+def _claims(world: _World) -> dict[str, bool]:
+    lock = load_yaml(world.manifest.parent / "apm.lock.yaml")
+    return {
+        f"{row['repo_url']}/{row.get('virtual_path', '')}": _CLAUDE_SKILL
+        in row.get("deployed_files", [])
+        for row in lock["dependencies"]
+    }
+
+
+# Package claims reconcile in package-key order; the writer's key sorts before
+# or after the parked package's, so both orders are covered.
+@pytest.mark.parametrize(
+    "writer", ["alpha", "zeta"], ids=["writer-sorts-first", "writer-sorts-last"]
+)
+def test_a_path_another_package_writes_is_not_kept_for_the_parked_package(
+    tmp_path: Path, apm_binary_path: Path, writer: str
+) -> None:
+    world = _World(tmp_path, apm_binary_path)
+    _installed_loose(world)
+    _publish_writer(world, writer)
+    descriptor = {
+        "name": "demo",
+        "version": "1.0.0",
+        "skills": "./skills/",
+        "interface": {"displayName": "Demo"},
+    }
+    commit = world.publish("Updated skill.", descriptor)
+    deps = [
+        {
+            "git": "fixture/marketplace",
+            "path": _SUBDIR,
+            "ref": commit,
+            "targets": ["codex", "claude"],
+        },
+        {
+            "git": "fixture/marketplace",
+            "path": f"plugins/{writer}",
+            "ref": commit,
+            "targets": ["claude"],
+        },
+    ]
+    world.manifest.write_text(
+        json.dumps(
+            {"name": "consumer", "version": "1.0.0", "dependencies": {"apm": deps, "mcp": []}}
+        ),
+        encoding="ascii",
+    )
+
+    upgraded = world.install("--no-frozen")
+
+    assert upgraded.returncode == 0, _evidence(upgraded)
+    assert (world.home / _CLAUDE_SKILL).read_text(encoding="ascii") == _skill("Writer skill.")
+    # The writer's claim and its new hash win; the parked package drops the path.
+    claims = _claims(world)
+    assert claims == {
+        f"fixture/marketplace/plugins/{writer}": True,
+        f"fixture/marketplace/{_SUBDIR}": False,
+    }, f"{claims}\n{_evidence(upgraded)}"
+
+    frozen = world.install("--frozen")
+    assert frozen.returncode == 0, _evidence(frozen)
+    audit = world.runner.run(
+        ("audit", "--ci", "--no-policy"),
+        scenario_id="parked-native-writer-wins-audit",
+        cwd=world.manifest.parent,
+        env=world.env,
+    )
+    assert audit.returncode == 0, _evidence(audit)
+
+    (world.home / _CLAUDE_SKILL).write_text(_skill("Tampered."), encoding="ascii")
+    tampered = world.runner.run(
+        ("audit", "--ci", "--no-policy"),
+        scenario_id="parked-native-writer-wins-tampered",
+        cwd=world.manifest.parent,
+        env=world.env,
+    )
+    assert tampered.returncode == 1, _evidence(tampered)
+    assert f"hash-drift: {_CLAUDE_SKILL}" in _text(tampered), _evidence(tampered)
