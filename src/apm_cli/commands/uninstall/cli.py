@@ -551,16 +551,6 @@ def _persist_lock_then_resync_native(
     except SystemExit:
         _restore_reanchored_dirs(moved, modules_dir)
         raise
-    except Exception as exc:
-        # Any other failure: the re-anchor does not stand, so it all goes back (#4999).
-        from .local_reanchor import _roll_back_and_exit
-
-        _restore_reanchored_dirs(moved, modules_dir)
-        _roll_back_and_exit(
-            still_needed_repairs.reanchor,
-            logger,
-            f"Deployment receipts could not be moved to the re-anchored package ({exc})",
-        )
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,
