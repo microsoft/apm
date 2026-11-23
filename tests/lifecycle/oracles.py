@@ -1062,6 +1062,36 @@ def _artifacts(value: Observation | ArtifactSnapshotSet | None) -> ArtifactSnaps
     return value.artifacts if isinstance(value, Observation) else value
 
 
+# Gate-matrix steps whose admitted primitive must be deployed afterwards (t9, #4981).
+_RESOLVING_OPS = frozenset({"install", "install-frozen", "update"})
+_ADMITTING_GATES = frozenset({"none", "allowed"})
+
+
+def dimension_problems(
+    cell_id: str,
+    after: Observation | ArtifactSnapshotSet | None,
+    result: CommandResult | None,
+) -> list[str]:
+    """A resolving step that credits an admitted primitive must leave it deployed.
+
+    The witness then exercised the cell's PRIM, not just the command: a gate-matrix id
+    ``G1|<op>|<prim>|<gate>|<scope>`` whose gate admits the primitive, on a successful
+    install or update, needs that primitive among the deployed surfaces afterwards. A
+    withheld (parked, denied, revoked) primitive is exercised by the gate's decision.
+    """
+    parts = cell_id.split("|")
+    if parts[0] != "G1" or len(parts) < 5 or not isinstance(after, Observation):
+        return []
+    op, prim, gate = parts[1], parts[2], parts[3]
+    if op not in _RESOLVING_OPS or gate not in _ADMITTING_GATES:
+        return []
+    if result is None or result.returncode != 0:
+        return []
+    if any(cell.split("/")[1:2] == [prim] for cell in after.deployed):
+        return []
+    return [f"{cell_id}: the admitted {prim} is not deployed after {op}; nothing exercised it"]
+
+
 def check_obligation(
     cell_id: str,
     *,
@@ -1075,6 +1105,7 @@ def check_obligation(
     """Check *evidence* for generated obligation *cell_id*; emit its receipt if it holds."""
     problems = _strength_problems(strength, before, after, result, evidence)
     problems += _evidence_problems(_artifacts(before), _artifacts(after), result, evidence)
+    problems += dimension_problems(cell_id, after, result)
     assert not problems, f"{cell_id}:\n" + "\n".join(problems) + _evidence(result)
     pre, post = _artifacts(before), _artifacts(after)
     receipts.emit(

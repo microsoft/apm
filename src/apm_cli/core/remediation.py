@@ -254,6 +254,12 @@ HOOK_PLUGIN_ROOT_UNRESOLVED = _entry(
     before="ensure the quote marks match and wrap the complete reference and path in "
     "balanced double quotes",
 )
+HOOK_EVENT_MALFORMED = _entry(
+    "hook-event-malformed",
+    "apm install",
+    "merge the package's hooks into it",
+    before="fix or remove the event",
+)
 HOOK_PATH_ESCAPES_PACKAGE = _entry(
     "hook-path-escapes-package",
     "apm install",

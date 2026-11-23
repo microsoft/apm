@@ -38,7 +38,7 @@ from tests.lifecycle.generator.rules import (
     UNINSTALL_MCP_REFUSALS,
 )
 from tests.lifecycle.generator.space import Entry
-from tests.lifecycle.generator.witnesses import credits_bin, implied
+from tests.lifecycle.generator.witnesses import credits_dimension, implied
 from tests.lifecycle.world.packages import GIT_PUBLISHED, INERT_COMMAND
 from tests.lifecycle.world.services import REGISTRY_SERVER
 
@@ -430,14 +430,14 @@ def simulate(plan: Plan, steps: Sequence[Step], targets: Sequence[str]) -> list[
 
 
 def _creditable(cells: set[str], step: Step, obligations: Mapping[str, Entry]) -> set[str]:
-    # A row's p-exec loose bin/ never deploys at project scope, so a row credits no
-    # bin cell at all; bin-deploying witnesses do (witnesses.BIN_WITNESSES, #4981).
+    # A row credits only primitives it exercises (witnesses.credits_dimension): its
+    # p-exec loose bin/ never deploys at project scope, so it credits no bin cell (#4981).
     return {
         cell
         for cell in cells
         if cell in obligations
         and (obligations[cell].strength != "e2e-evidence" or step.unchanged)
-        and credits_bin("", parse_cell(cell)[1])
+        and credits_dimension("", parse_cell(cell)[1])
     }
 
 

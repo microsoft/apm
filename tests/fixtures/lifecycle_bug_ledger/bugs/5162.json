@@ -1,0 +1,18 @@
+{
+  "issue": 5162,
+  "fixed_in": "Unreleased",
+  "summary": "Drift replay carried a kept claim into the first enclosing external root, so a Claude root nested under HERMES_HOME could replay in the Hermes frame and report the kept skill as orphaned when Hermes resolved first; and a project lock mixing legacy and converged OpenCode skills left .agents out of the drift walk, so a tampered converged skill there was not drift.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "filesystem.open_world_observation"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_replay_frame_governed_roots.py::test_a_kept_claim_replays_in_its_own_nested_external_root",
+    "tests/unit/install/test_replay_frame_governed_roots.py::test_a_tampered_converged_skill_beside_legacy_opencode_claims_is_drift",
+    "tests/integration/test_parked_native_claude_replacement_lifecycle.py::test_a_parked_native_replacement_keeps_the_loose_skill_under_a_relocated_claude_root"
+  ]
+}

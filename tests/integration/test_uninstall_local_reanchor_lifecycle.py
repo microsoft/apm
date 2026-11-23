@@ -887,6 +887,44 @@ def test_a_hook_bearing_reanchor_refuses_and_keeps_its_hooks(
     assert (settings.read_bytes() if settings.exists() else None) == hooks_before
 
 
+_SHARED_SKILL = ".claude/skills/shared/SKILL.md"
+
+
+def _shared_skill_world(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    *,
+    same: bool,
+    e_first: bool = True,
+    target: str = "claude",
+    install: tuple[str, ...] = (),
+) -> ReplayWorld:
+    """e and z both ship skill ``shared``; z declares ``../e`` (#5048).
+
+    Skills are last-installed-wins, so the re-anchor's new install order can
+    change the final writer of ``shared``.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "z", "z", ("../e",))
+    for name, body in (("e", "E"), ("z", "E" if same else "Z")):
+        write(
+            vendor / name / ".apm/skills/shared/SKILL.md",
+            f"---\nname: shared\ndescription: Shared skill\n---\n# {body}\n",
+        )
+    if e_first:
+        _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    else:
+        _manifest(world, ["./vendor/z", "./vendor/e"], [])
+    manifest = load_yaml(world.project / "apm.yml")
+    manifest["targets"] = [target]
+    dump_yaml(manifest, world.project / "apm.yml")
+    (world.project / f".{target}").mkdir()
+    world.apm("install", *install)
+    return world
+
+
 def _legacy_plugin_world(tmp_path: Path, apm_binary_path: Path) -> ReplayWorld:
     """Local e, dev d -> e, and a direct local legacy plugin p deployed to Cursor (#5049)."""
     world = ReplayWorld.create(tmp_path, apm_binary_path)
@@ -914,6 +952,240 @@ def _legacy_plugin_world(tmp_path: Path, apm_binary_path: Path) -> ReplayWorld:
     (world.project / ".cursor").mkdir()
     world.apm("install")
     return world
+
+
+@pytest.mark.parametrize("e_first", [True, False], ids=["e-installed-first", "z-installed-first"])
+def test_a_reanchor_records_the_shared_skill_writer_a_fresh_install_records(
+    tmp_path: Path, apm_binary_path: Path, e_first: bool
+) -> None:
+    """#5048 cell 1: identical shared bytes re-anchor; --no-frozen keeps owner and bytes."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True, e_first=e_first)
+    deployed = (world.project / _SHARED_SKILL).read_bytes()
+
+    result = world.apm("uninstall", "./vendor/e")
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "./vendor/e stays installed because" in output, output
+    assert (world.project / _SHARED_SKILL).read_bytes() == deployed
+    _assert_reanchored_like_a_full_install(world)
+    assert (world.project / _SHARED_SKILL).read_bytes() == deployed
+    world.audit_clean()
+
+
+def test_a_reanchor_that_changes_a_shared_skill_writer_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 cell 2: the next install would write e's different bytes; refuse first."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=False)
+
+    _assert_refused_before_any_write(world, ".claude/skills/shared", "would change its writer")
+
+
+def test_a_reanchor_without_a_receipt_for_a_carried_shared_skill_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 cell 3: ownership moves only with a receipt APM can verify."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True)
+    (receipt,) = (world.isolated.home / ".apm" / "deployment-receipts").glob("*.json")
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    data["records"] = [row for row in data["records"] if row["value"] != _SHARED_SKILL]
+    for section in ("bindings", "destinations", "history"):
+        for key in [key for key in data.get(section) or {} if key.endswith(_SHARED_SKILL)]:
+            del data[section][key]
+    receipt.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    _assert_refused_before_any_write(world, "cannot prove it wrote", _SHARED_SKILL)
+
+
+def test_a_reanchor_ranks_shared_skill_writers_as_install_orders_them(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048: install orders by lock key, which here disagrees with repo_url order.
+
+    After the re-anchor ``local:vendor/e`` and ``local:vendor/a/x`` share depth
+    2; by key e installs last and writes ``shared``, by repo_url x would.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "a" / "x", "x")
+    _skill_package(vendor / "z", "z", ("../e", "../a/x"))
+    for root in (vendor / "e", vendor / "a" / "x"):
+        write(
+            root / ".apm/skills/shared/SKILL.md",
+            "---\nname: shared\ndescription: Shared skill\n---\n# E\n",
+        )
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    deployed = (world.project / _SHARED_SKILL).read_bytes()
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert (world.project / _SHARED_SKILL).read_bytes() == deployed
+    _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_reanchor_keeps_a_third_provider_that_still_writes_last(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 R2: e, z and y ship ``shared``; y, never re-ranked, still installs last.
+
+    After the re-anchor ``local:vendor/e`` and ``local:vendor/y`` share depth 2
+    and y sorts after e, so a fresh install keeps y as the writer: the
+    prediction must weigh every provider, not prefer the re-anchored one.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "y", "y")
+    _skill_package(vendor / "z", "z", ("../e", "../y"))
+    for name in ("e", "y", "z"):
+        write(
+            vendor / name / ".apm/skills/shared/SKILL.md",
+            "---\nname: shared\ndescription: Shared skill\n---\n# E\n",
+        )
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    owners = {
+        row["value"]: row["active_owner"]
+        for row in load_yaml(world.project / "apm.lock.yaml")["deployments"]
+    }
+    assert owners[_SHARED_SKILL] == "local:vendor/y", owners
+
+    world.apm("uninstall", "./vendor/e")
+
+    owners = {
+        row["value"]: row["active_owner"]
+        for row in load_yaml(world.project / "apm.lock.yaml")["deployments"]
+    }
+    assert owners[_SHARED_SKILL] == "local:vendor/y", owners
+    _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_reanchor_refuses_a_shared_skill_in_a_layout_the_render_cannot_reproduce(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: a legacy per-client skill layout is not reproduced offline; refuse."""
+    world = _shared_skill_world(
+        tmp_path, apm_binary_path, same=False, target="cursor", install=("--legacy-skill-paths",)
+    )
+    assert (world.project / ".cursor/skills/shared/SKILL.md").is_file()
+
+    _assert_refused_before_any_write(world, ".cursor/skills/")
+
+
+def test_a_reanchor_carries_a_shared_skill_directory_claim_spelled_with_a_slash(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: ``.claude/skills/shared/`` is the same claim as without the "/"."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True)
+    directory = ".claude/skills/shared"
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    for row in lock["deployments"]:
+        if row["value"] == directory:
+            row["value"] = f"{directory}/"
+    for row in lock["dependencies"]:
+        files = row.get("deployed_files") or []
+        row["deployed_files"] = [f"{path}/" if path == directory else path for path in files]
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+
+    result = world.apm("uninstall", "./vendor/e")
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "./vendor/e stays installed because" in output, output
+    owners = {
+        row["value"].rstrip("/"): row["active_owner"]
+        for row in load_yaml(world.project / "apm.lock.yaml")["deployments"]
+    }
+    assert owners[directory] == owners[_SHARED_SKILL] == "local:vendor/e", owners
+
+
+def test_a_reanchor_refuses_a_directory_only_shared_skill_claim(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: a directory claim alone cannot prove its files' bytes; refuse."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=False)
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    lock["deployments"] = [row for row in lock["deployments"] if row["value"] != _SHARED_SKILL]
+    for row in lock["dependencies"]:
+        if _SHARED_SKILL in (row.get("deployed_files") or []):
+            row["deployed_files"].remove(_SHARED_SKILL)
+            (row.get("deployed_file_hashes") or {}).pop(_SHARED_SKILL, None)
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+
+    _assert_refused_before_any_write(world, ".claude/skills/shared")
+
+
+def test_a_reanchor_refuses_an_unclaimed_shared_member_whose_bytes_would_change(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: under a directory-only claim, a member e' would rewrite refuses.
+
+    y still writes ``shared`` last, but skill members merge: z's ``asset.txt``
+    stays, and after the re-anchor e' writes its own over it.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "y", "y")
+    _skill_package(vendor / "z", "z", ("../e", "../y"))
+    for name in ("e", "y", "z"):
+        write(
+            vendor / name / ".apm/skills/shared/SKILL.md",
+            "---\nname: shared\ndescription: Shared skill\n---\n# S\n",
+        )
+    write(vendor / "e" / ".apm/skills/shared/asset.txt", "E\n")
+    write(vendor / "z" / ".apm/skills/shared/asset.txt", "Z\n")
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    members = ".claude/skills/shared/"
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    lock["deployments"] = [
+        row for row in lock["deployments"] if not row["value"].startswith(members)
+    ]
+    for row in lock["dependencies"]:
+        row["deployed_files"] = [
+            path for path in row.get("deployed_files") or [] if not path.startswith(members)
+        ]
+        hashes = row.get("deployed_file_hashes") or {}
+        for path in [path for path in hashes if path.startswith(members)]:
+            del hashes[path]
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+    assert (world.project / members / "asset.txt").read_text(encoding="utf-8") == "Z\n"
+
+    _assert_refused_before_any_write(
+        world, ".claude/skills/shared/asset.txt", "has no claim that proves its writer"
+    )
+
+
+def test_a_reanchor_refuses_a_shared_skill_on_a_root_several_targets_deploy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: on .agents/skills the new writer's target is not provable; refuse."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True, target="copilot")
+    assert (world.project / ".agents/skills/shared/SKILL.md").is_file()
+
+    _assert_refused_before_any_write(world, ".agents/skills/shared", "would change its writer")
+
+
+def test_a_reanchor_refuses_a_shared_file_whose_owner_declares_no_rule(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 R3: only a rule the primitive's owner declares is trusted; an agent refuses."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "z", "z", ("../e",))
+    for name in ("e", "z"):
+        write(vendor / name / ".apm/agents/shared.agent.md", "---\ndescription: a\n---\n# A\n")
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    _assert_refused_before_any_write(world, ".claude/agents/shared.md", "would change its writer")
 
 
 def test_an_unchanged_legacy_plugin_survivor_does_not_block_a_reanchor(

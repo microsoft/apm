@@ -55,9 +55,13 @@ def governed_root_dirs(targets: list[TargetProfile] | None) -> set[str]:
             if deploy_root:
                 roots.add(str(deploy_root).split("/", 1)[0])
         # A lock can mix skill layouts (a parked native replacement keeps its
-        # legacy claims, #5092): walk the converged skills root as well.
+        # legacy claims, #5092): walk the converged skills root as well. Only a
+        # user-scope profile whose own override places skills has none (#5162).
         converged = KNOWN_TARGETS.get(getattr(t, "name", None))
-        if converged is None or "skills" in (converged.user_primitive_overrides or {}):
+        if converged is None or (
+            "skills" in (converged.user_primitive_overrides or {})
+            and root == converged.user_root_dir
+        ):
             continue
         skills = converged.primitives.get("skills")
         if skills is not None and skills.deploy_root and "skills" in primitives:

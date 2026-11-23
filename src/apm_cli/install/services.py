@@ -1145,7 +1145,10 @@ def integrate_local_bundle(
     if _canvas_ok and not dry_run:
         from .local_bundle_canvas import record_bundle_canvas
 
-        record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)
+        user_scope = scope is InstallScope.USER
+        record_bundle_canvas(
+            project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope
+        )
 
     from .local_bundle_hooks import integrate_local_bundle_hooks
 
