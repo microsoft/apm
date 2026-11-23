@@ -4827,6 +4827,24 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="The lock evidence probe launches git through an alias reassigned to a different launcher.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="from apm_cli.core.deployment_state import LocatorKind\n",
+        new=(
+            "from apm_cli.core.deployment_state import LocatorKind\n\n"
+            "import subprocess\n\n"
+            "run = subprocess.run\n\n\n"
+            "def _outer():\n"
+            "    run = str\n\n"
+            "    def _inner():\n"
+            "        global run\n"
+            '        return run(["git"])\n\n'
+            "    return _inner\n"
+        ),
+        intent="The lock evidence module launches git through a global declaration past an enclosing rebinding.",
+    ),
+    MutationCase(
         guard_id="install-deployment-gate-retirement",
         rule_id="install-deployment-gate-retirement",
         path="src/apm_cli/commands/uninstall/engine.py",
