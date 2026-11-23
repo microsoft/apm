@@ -93,6 +93,10 @@ GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine
 GATE_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
 )
+GATE_PLUGIN_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::"
+    "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
+)
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "bundle": ("bundle-install", ()),
@@ -176,6 +180,7 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bin import bin_cells
     from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
+    from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
@@ -208,11 +213,16 @@ def machine_cells() -> list[MachineCell]:
         (GATE_BUNDLE_SPINE, bundle_cells()),
         (GATE_PACK_SPINE, pack_cells()),
         (GATE_BIN_SPINE, bin_cells()),
+        (GATE_PLUGIN_BIN_SPINE, plugin_bin_cells()),
     )
     for witness, keys in side_doors:
         for key in sorted(keys):
             assignment = _gate_assignment(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+    for key in sorted(filter(deploys_bin, plugin_bin_cells())):
+        # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
+        assignment = {"PRIM": "bin", "SCOPE": "project"}
+        cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)

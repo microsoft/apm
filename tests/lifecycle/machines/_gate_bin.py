@@ -9,8 +9,9 @@ with ``--trust-bin`` (source: src/apm_cli/install/exec_gate.py
 plugin_bin_deployable, src/apm_cli/security/executables.py compose_trust_bin).
 CELL: OP x PRIM=bin x GATE (T1).
 
-bin/ deploys nowhere else (U-BIN), so this spine is the only place the GATE
-matrix can observe it. It drives ``p-native-claude-bin@lifecycle-market`` on
+Loose bin/ deploys nowhere else; at project scope bin/ ships only inside a
+whole plugin root, which the plugin bin spine (``_gate_plugin_bin.py``,
+U-BIN) observes. It drives ``p-native-claude-bin@lifecycle-market`` on
 the claude target of the user scope through five gate levels: gate off
 (``none``), ``allowed`` (the user manifest opts into the gate), ``revoked-after-deploy`` (deny after a deploy),
 ``denied-executable`` and ``unapproved-exec`` (decisions dropped from

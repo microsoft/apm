@@ -550,7 +550,6 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U3", _u3),
         ("U6", _u6),
         ("U8", lambda cell: _u8(cell) is not None),
-        ("U-BIN", lambda cell: _u_bin(cell)),
     ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
@@ -650,12 +649,7 @@ def test_every_removed_and_mapped_cell_names_its_rules() -> None:
         ), key
 
 
-# -- U-BIN: bin/ at project scope is unreachable (self-reinstating) -------------
-
-
-def _u_bin(cell) -> bool:
-    """bin/ deploys only at user scope (exec_gate.py::plugin_bin_deployable: scope is not InstallScope.USER)."""
-    return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
+# -- U-BIN: bin/ at project scope only inside a whole plugin (#4894) ----------
 
 
 def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
@@ -664,8 +658,36 @@ def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
     assert data["pins"] == {"U-BIN": U_BIN_PIN}
 
 
-def test_a_changed_predicate_reinstates_the_u_bin_cells_as_must_cover(monkeypatch) -> None:
+def test_u_bin_pins_the_whole_plugin_path_beside_the_loose_predicate() -> None:
+    modules = {module for module, _ in bin_pin.PREDICATES}
+    assert modules == {
+        "install/exec_gate.py",
+        "claude_plugins/admission.py",
+        "native_plugins/record.py",
+    }
+
+
+def test_a_changed_predicate_makes_the_project_bin_cells_must_cover(monkeypatch) -> None:
     cell = {"PRIM": "bin", "SCOPE": "project"}
-    assert classify("pair", cell) == Verdict("removed", ("U-BIN",))
+    assert classify("pair", cell) == Verdict("obligation", ())
     monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
     assert classify("pair", cell) == Verdict("obligation", ("U-BIN",), must_cover=True)
+
+
+def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
+    """A trusted plugin deploys bin/ whole at project scope, so no bin cell is removed
+    and the plugin bin spine witnesses prune at every gate level it reaches."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    assert not _removed_by("U-BIN")
+    spine = "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
+    cells = [
+        "pair|PRIM=bin|SCOPE=project",
+        *(
+            cell_id("T1", {"OP": "prune", "GATE": gate, "PRIM": "bin"})
+            for gate in ("none", "unapproved-exec", "denied-dependency")
+        ),
+        cell_id("T1", {"OP": "marketplace", "GATE": "denied-dependency", "PRIM": "bin"}),
+    ]
+    for key in cells:
+        entry = data["obligations"][key]
+        assert entry["status"] == "required" and entry["witness"].endswith(spine), (key, entry)

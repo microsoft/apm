@@ -73,7 +73,7 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
-    # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
+    # bin/ of a Claude marketplace or native plugin under HOME (user scope).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.

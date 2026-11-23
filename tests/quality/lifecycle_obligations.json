@@ -4793,11 +4793,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=marketplace|PRIM=canvas|GATE=denied-dependency": {
    "credited_by": [
@@ -5592,11 +5596,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=prune|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|prune|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -5607,11 +5615,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=prune|PRIM=bin|GATE=none": {
+   "credited_by": [
+    "G1|prune|bin|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5622,11 +5634,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=prune|PRIM=bin|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|prune|bin|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=canvas|GATE=allowed": {
    "family": "T1",
@@ -19059,13 +19075,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|bin|denied-dependency|project",
+    "G1|prune|bin|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "known-failing",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_plugin_with_bin_is_refused_at_user_scope"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|GATE=denied-executable": {
    "family": "pair",
@@ -19161,6 +19180,18 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|PRIM=bin|SCOPE=project": {
+   "credited_by": [
+    "G1|install|bin|allowed|project",
+    "G1|install|bin|none|project"
+   ],
+   "family": "pair",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|SCOPE=user": {
    "family": "pair",
@@ -25733,7 +25764,7 @@
   }
  },
  "pins": {
-  "U-BIN": "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
+  "U-BIN": "9ac0d749836e552b423fe94cf20970c0ed1277c8a7871af859745c477d2a78bd"
  },
  "removed": {
   "T3|OP=approve-deny|SRC=inline-mcp|PRIM=bin": [
@@ -26867,9 +26898,6 @@
   "pair|OP=pack|SRC=pkg-registry": [
    "U6"
   ],
-  "pair|PRIM=bin|SCOPE=project": [
-   "U-BIN"
-  ],
   "pair|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -26951,9 +26979,13 @@
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py::plugin_bin_deployable"
+    "src/apm_cli/install/exec_gate.py::plugin_bin_deployable",
+    "src/apm_cli/claude_plugins/admission.py::plan_native_claude_plugin",
+    "src/apm_cli/native_plugins/record.py::PLUGINS_RELATIVE",
+    "src/apm_cli/native_plugins/uninstall.py::retire_gated_native_plugins",
+    "docs/src/content/docs/reference/cli/prune.md"
    ],
-   "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
+   "text": "bin/ reaches project scope only inside a trusted whole Claude plugin: loose bin/ deploys only for a marketplace plugin at user scope with a Claude target that supports skills (plugin_bin_deployable), but a plugin that ships bin/ deploys whole to .agents/plugins/<plugin>/ under its whole-plugin approval and --trust-bin (claude_plugins/admission.py), and prune retires that root, bin/ included (native_plugins/uninstall.py). So every project-scope bin cell is reachable and U-BIN removes none; the M-GATE plugin bin spine witnesses them. Self-reinstating: the generator hashes the pinned elements (generator/bin_pin.py); when the hash differs from U_BIN_PIN the project-scope bin cells become must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
