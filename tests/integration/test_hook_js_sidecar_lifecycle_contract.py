@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -983,3 +984,138 @@ def test_required_claude_hook_keeps_nested_module_metadata(
         deployed,
         LifecycleStateSnapshot.capture(consumer.root, targets=("claude",), config_paths=paths),
     )
+
+    # #4921: the sidecar and the nested metadata are module metadata, not hooks.
+    audit = _run_audit(
+        scenario, consumer.root, ("audit", "--ci"), environment, "nested-module-audit"
+    )
+    assert audit.returncode == 0, f"stdout={audit.stdout!r}\nstderr={audit.stderr!r}"
+    assert _missing_container_paths(audit) == set()
+    _assert_exact_state(
+        deployed,
+        LifecycleStateSnapshot.capture(consumer.root, targets=("claude",), config_paths=paths),
+    )
+
+    # Control: an edited sidecar and an unrelated JSON file stay reported.
+    extra = _NESTED_CLAUDE_METADATA.parent / "extra.json"
+    consumer.root.joinpath(*extra.parts).write_text('{"type": "module"}\n', encoding="utf-8")
+    consumer.root.joinpath(*_NESTED_CLAUDE_SIDECAR.parts).write_text(
+        '{"name": "edited", "type": "commonjs"}\n', encoding="utf-8"
+    )
+    audit = _run_audit(
+        scenario, consumer.root, ("audit", "--ci"), environment, "nested-module-audit-control"
+    )
+    assert audit.returncode == 1, f"stdout={audit.stdout!r}\nstderr={audit.stderr!r}"
+    assert _missing_container_paths(audit) == {
+        extra.as_posix(),
+        _NESTED_CLAUDE_SIDECAR.as_posix(),
+    }
+
+
+def _run_audit(
+    scenario: LifecycleScenario,
+    cwd: Path,
+    args: tuple[str, ...],
+    environment: dict[str, str],
+    scenario_id: str,
+) -> CommandResult:
+    result = scenario.runner.run(args, scenario_id=scenario_id, cwd=cwd, env=environment)
+    output = result.stdout + result.stderr
+    assert output.isascii(), output
+    return result
+
+
+def _missing_container_paths(result: CommandResult) -> set[str]:
+    """Paths audit reports as hook files without a native hook container."""
+    output = " ".join((result.stdout + result.stderr).split())
+    return set(re.findall(r"(\.claude/\S+): missing native hook container", output))
+
+
+_JSHOOK = "jshook"
+_JSHOOK_SIDECAR = PurePosixPath(f".claude/hooks/{_JSHOOK}/scripts/package.json")
+_JSHOOK_SCRIPT = PurePosixPath(f".claude/hooks/{_JSHOOK}/scripts/check.js")
+
+
+def test_required_global_claude_js_hook_passes_audit(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A user-scope JavaScript Claude hook passes audit (#4921).
+
+    Install writes ``{"type": "commonjs"}`` beside the deployed script; audit
+    must read it as hook-bundle module metadata, not a hook definition.
+    """
+    scenario = new_lifecycle_scenario(tmp_path / "global-claude-audit", apm_binary_path)
+    package = scenario.sources.create(_JSHOOK, targets=("claude",))
+    scenario.sources.add_hook(
+        package,
+        "check",
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": 'node "${CLAUDE_PLUGIN_ROOT}/scripts/check.js"',
+                                "timeout": 10,
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+    script = package.root / "scripts" / "check.js"
+    script.parent.mkdir()
+    script.write_text("process.exit(0);\n", encoding="utf-8")
+    config_root = scenario.isolated.config_root
+    dump_yaml(
+        {
+            "name": "global-claude-audit",
+            "version": "0.1.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": [package.root.as_posix()]},
+        },
+        config_root / "apm.yml",
+    )
+    environment = scenario.isolated.subprocess_env()
+    _run_success(
+        scenario,
+        scenario.consumers.create("global-claude-audit-cwd"),
+        ("install", "--global", "--parallel-downloads", "0"),
+        environment=environment,
+        scenario_id="global-claude-audit-install",
+    )
+    claude_root = scenario.isolated.home / ".claude"
+    assert scenario.isolated.home.joinpath(*_JSHOOK_SCRIPT.parts).is_file()
+    assert json.loads(
+        scenario.isolated.home.joinpath(*_JSHOOK_SIDECAR.parts).read_text(encoding="utf-8")
+    ) == {"type": "commonjs"}
+
+    def capture() -> LifecycleStateSnapshot:
+        return LifecycleStateSnapshot.capture(
+            config_root,
+            external_roots=(
+                LifecycleStateRoot(
+                    root_id="claude-user",
+                    target="claude",
+                    scope="user",
+                    path=claude_root,
+                    config_paths=(
+                        _JSHOOK_SIDECAR.relative_to(".claude"),
+                        _JSHOOK_SCRIPT.relative_to(".claude"),
+                    ),
+                ),
+            ),
+        )
+
+    installed = capture()
+    for args in (("audit",), ("audit", "--ci")):
+        audit = _run_audit(
+            scenario, config_root, args, environment, "global-claude-" + "-".join(args)
+        )
+        assert audit.returncode == 0, f"stdout={audit.stdout!r}\nstderr={audit.stderr!r}"
+        assert _missing_container_paths(audit) == set()
+        _assert_exact_state(installed, capture())

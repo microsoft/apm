@@ -12,6 +12,7 @@ from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.hook_native_formats import NODE_MODULE_TYPES, hook_module_type_metadata
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -75,7 +76,7 @@ def _hook_module_type(package_path: Path, hook_source_root: Path) -> str:
             except (json.JSONDecodeError, OSError):
                 return "commonjs"
             package_type = data.get("type") if isinstance(data, dict) else None
-            return package_type if package_type in {"commonjs", "module"} else "commonjs"
+            return package_type if package_type in NODE_MODULE_TYPES else "commonjs"
         if current in (package_path, current.parent):
             return "commonjs"
         current = current.parent
@@ -332,7 +333,9 @@ def copy_deployed_hook_bundle(
         if target_rel in copy_plan:
             # An enclosing root already deploys this directory's own metadata.
             continue
-        content = json.dumps({"type": module_type}, indent=2, sort_keys=True) + "\n"
+        content = (
+            json.dumps(hook_module_type_metadata(module_type), indent=2, sort_keys=True) + "\n"
+        )
         if target_file.exists() and _same_text(target_file, content):
             target_paths.append(target_file)
             continue

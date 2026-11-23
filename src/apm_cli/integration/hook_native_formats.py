@@ -52,6 +52,26 @@ CURSOR_NATIVE_EVENTS = frozenset(
 # https://cursor.com/docs/hooks - the only keys Cursor's loader recognizes.
 CURSOR_CONFIG_TOP_LEVEL_KEYS = frozenset({"version", "hooks"})
 
+# Node.js module types a hook bundle's package.json may declare.
+NODE_MODULE_TYPES: tuple[str, ...] = ("commonjs", "module")
+
+
+def hook_module_type_metadata(module_type: str) -> dict[str, str]:
+    """Return the package.json document that sets a hook bundle's Node module type."""
+    return {"type": module_type}
+
+
+def is_hook_module_type_metadata(path: Path, document: object) -> bool:
+    """Return True for hook-bundle Node module metadata, which defines no hooks.
+
+    Hook bundle deploy writes this ``package.json`` beside JavaScript hooks and
+    deploys nested copies with the scripts they govern (#2950, #4921). Any
+    other content, including an edited ``package.json``, stays a hook candidate.
+    """
+    return path.name == "package.json" and any(
+        document == hook_module_type_metadata(module_type) for module_type in NODE_MODULE_TYPES
+    )
+
 
 def _cursor_matcher(matcher: str | None, event: str, *, foreign: bool) -> str | None:
     """Translate only explicitly representable Claude tool-name alternatives."""
