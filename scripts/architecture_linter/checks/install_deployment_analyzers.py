@@ -45,6 +45,10 @@ from scripts.architecture_linter.checks.install_claude_agents_md_routing import 
     GUARD_CLAUDE_AGENTS_MD_ROUTING,
     check_claude_agents_md_routing,
 )
+from scripts.architecture_linter.checks.install_cleanup_spelling_aliases import (
+    GUARD_CLEANUP_SPELLING_ALIASES,
+    check_cleanup_spelling_aliases,
+)
 from scripts.architecture_linter.checks.install_cleanup_target_roots import (
     GUARD_CLEANUP_TARGET_ROOTS,
     check_cleanup_target_roots,
@@ -269,6 +273,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LOCKFILE_REQUIRED,
         "Frozen install and audit share one answer to whether a lockfile is required.",
         check_lockfile_required,
+    ),
+    _rule(
+        GUARD_CLEANUP_SPELLING_ALIASES,
+        "Cleanup reads claim spellings naming one file only through SpellingAliasIndex.aliases.",
+        check_cleanup_spelling_aliases,
     ),
     _rule(
         GUARD_CLEANUP_TARGET_ROOTS,
