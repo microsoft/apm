@@ -520,3 +520,22 @@ def test_a_new_config_never_probes_unrelated_records(
     assert calls == []
     assert config_file_origin(config) is Origin.CREATED
     assert config.is_file()
+
+
+def test_a_record_of_a_file_linked_for_now_survives_other_saves(tmp_path, apm_home) -> None:
+    """A stored key is checked as written, never re-resolved: project A's config, a
+    link for a while, keeps its record through project B's saves."""
+    a_config = tmp_path / "a" / ".mcp.json"
+    a_config.parent.mkdir()
+    a_config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(a_config, _WITH_ENTRY, manifest_root=tmp_path / "a")
+    held = a_config.read_bytes()
+    a_config.unlink()
+    a_config.symlink_to(tmp_path / "elsewhere.json")
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)  # project B saves the store
+    a_config.unlink()
+    a_config.write_bytes(held)
+
+    assert config_file_origin(a_config) is Origin.PREEXISTING
+    assert _apm_empties(a_config, root=tmp_path / "a") is False
+    assert a_config.read_bytes() == held

@@ -644,13 +644,19 @@ def _shared_config_vouched(
     if kind != "file" or rel in ledger or path.is_symlink():
         return False
     current = _state(path)
+    if "dir" in current:
+        return False  # a directory swapped in is never replaced by a config file
     if current == _state(copy):
         return True
     sealed = (events or {}).get("")
     if not isinstance(sealed, dict) or current == _ABSENT:
         return False  # a write never sealed, or a missing file: nothing proves it
     if current == sealed:
-        return vouches_for_current_bytes(path)
+        try:
+            prior = _read_no_follow(copy)
+        except OSError:
+            return False
+        return vouches_for_current_bytes(path, prior)
     return True  # a later write: _decide keeps and names it, never replaces it
 
 

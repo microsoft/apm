@@ -4589,7 +4589,7 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/install/deploy_snapshot.py",
-            "        return vouches_for_current_bytes(path)",
+            "        return vouches_for_current_bytes(path, prior)",
             "        return True",
             id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
         ),

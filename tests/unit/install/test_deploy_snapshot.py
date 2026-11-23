@@ -1105,3 +1105,48 @@ def test_a_shared_config_replaced_by_a_fifo_is_kept_and_named(
 
     assert [rel for rel, _ in outcome.kept] == [".mcp.json"]
     assert config.exists() and not config.is_file()
+
+
+def test_a_shared_config_replaced_by_a_directory_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Checklist path: an (empty) directory swapped in after the kill is never replaced."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    _apm_killed_write(apm_home, project, config)
+    config.unlink()
+    config.mkdir()
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project)
+
+    assert config.is_dir()
+
+
+def test_a_forged_journal_copy_with_a_matching_hash_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The records vouch for the pre-install bytes too: a journal copy swapped, with its
+    manifest hash updated to match, is never written into the user's config."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _apm_killed_write(apm_home, project, config)
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    unit = next(line for line in lines if line.get("path") == ".mcp.json")
+    forged = b'{"mcpServers": {"evil": {"command": "evil"}}}\n'
+    (store / unit["copy"]).write_bytes(forged)
+    unit["hash"] = compute_file_hash(store / unit["copy"])
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project)
+
+    assert config.read_bytes() == _APM_MCP
