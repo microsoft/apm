@@ -192,6 +192,112 @@ def test_apm_format_pack_carries_skills_deployed_under_agents(
     assert (target / deployed).read_bytes() == (producer / deployed).read_bytes()
 
 
+_SCOPED_RULE = "---\napplyTo: '**/*.py'\n---\n# Python review rule\n"
+
+
+def _primitive_stems(bundle: Path, kind: str) -> list[str]:
+    """Return the primitive stem of every packed file under *kind*/."""
+    return sorted(p.name.split(".", 1)[0] for p in (bundle / kind).iterdir())
+
+
+def test_multi_target_pack_ships_one_rendering_per_primitive(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3686: a [claude, copilot] producer packs one rendering per primitive.
+
+    A Claude consumer of the bundle keeps the rule's path scoping and sees no
+    collision warning; a Copilot consumer keeps its applyTo scoping.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    package = world.isolated.package_root / "reviewpkg"
+    write(
+        package / "apm.yml",
+        "name: reviewpkg\nversion: 1.0.0\ndescription: r\ntargets: [claude, copilot]\n",
+    )
+    write(package / ".apm" / "agents" / "rv.agent.md", "---\ndescription: rv\n---\n# rv\n")
+    write(package / ".apm" / "instructions" / "py.instructions.md", _SCOPED_RULE)
+    _, commit = world.publish("reviewpkg", package)
+    producer = world.consumer(
+        "multi",
+        targets=("claude", "copilot"),
+        deps=({"git": remote_url("reviewpkg"), "ref": commit.sha},),
+    )
+    world.apm(producer, "install")
+    sources_before = tree_bytes(producer)
+
+    packed = output(world.apm(producer, "pack", "--format", "plugin", "-o", str(tmp_path / "out")))
+    bundle = tmp_path / "out" / "multi-0.1.0"
+    assert _primitive_stems(bundle, "agents") == ["rv"], sorted((bundle / "agents").iterdir())
+    assert _primitive_stems(bundle, "instructions") == ["py"], sorted(
+        (bundle / "instructions").iterdir()
+    )
+    dropped = [line for line in packed.splitlines() if "[i]" in line and "rendering" in line]
+    assert len(dropped) == 1, packed
+    # Dropped renderings are named by the path their target deployed.
+    assert ".github/agents/rv.agent.md" in dropped[0], dropped
+    assert ".claude/rules/py.md" in dropped[0], dropped
+    assert (bundle / "instructions" / "py.instructions.md").read_text() == _SCOPED_RULE
+    assert "collision" not in packed, packed
+    # Pack only adds the generated ecosystem manifests to the project.
+    generated = {".claude-plugin/plugin.json", ".github/plugin/plugin.json"}
+    after = {rel: data for rel, data in tree_bytes(producer).items() if rel not in generated}
+    assert after == sources_before
+
+    claude = world.consumer("claude-consumer", targets=("claude",))
+    installed = output(world.apm(claude, "install", str(bundle), "--no-policy"))
+    assert "different content" not in installed, installed
+    rule = (claude / ".claude" / "rules" / "py.md").read_text()
+    assert "paths:" in rule and "**/*.py" in rule and "applyTo" not in rule, rule
+    assert (claude / ".claude" / "agents" / "rv.md").is_file()
+    world.apm(claude, "audit", "--ci", "--no-policy")
+    settled = tree_bytes(claude)
+    world.apm(claude, "install", str(bundle), "--no-policy")
+    assert tree_bytes(claude) == settled
+
+    copilot = world.consumer("copilot-consumer", targets=("copilot",))
+    installed = output(world.apm(copilot, "install", str(bundle), "--no-policy"))
+    assert "different content" not in installed, installed
+    instruction = (copilot / ".github" / "instructions" / "py.instructions.md").read_text()
+    assert "applyTo" in instruction and "**/*.py" in instruction, instruction
+    assert (copilot / ".github" / "agents" / "rv.agent.md").is_file()
+
+
+@pytest.mark.parametrize("targets", [("grok-build",), ("grok-build", "copilot")])
+def test_grok_instructions_round_trip_under_their_source_name(
+    tmp_path: Path, apm_binary_path: Path, targets: tuple[str, ...]
+) -> None:
+    """#3686: Grok Build copies instructions verbatim, so they pack and install as such."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    package = world.isolated.package_root / "rulepkg"
+    write(package / "apm.yml", "name: rulepkg\nversion: 1.0.0\ndescription: r\n")
+    write(package / ".apm" / "instructions" / "py.instructions.md", _SCOPED_RULE)
+    _, commit = world.publish("rulepkg", package)
+    producer = world.consumer(
+        "grok-producer",
+        targets=targets,
+        deps=({"git": remote_url("rulepkg"), "ref": commit.sha},),
+    )
+    (producer / ".grok").mkdir(exist_ok=True)
+    world.apm(producer, "install", "--no-policy")
+    assert (producer / ".grok" / "rules" / "py.instructions.md").read_text() == _SCOPED_RULE
+
+    packed = output(world.apm(producer, "pack", "--format", "plugin", "-o", str(tmp_path / "out")))
+    assert "collision" not in packed, packed
+    bundle = tmp_path / "out" / "grok-producer-0.1.0"
+    assert [p.name for p in (bundle / "instructions").iterdir()] == ["py.instructions.md"]
+
+    for consumer_targets, deployed in (
+        (("copilot",), (".github", "instructions", "py.instructions.md")),
+        (("grok-build",), (".grok", "rules", "py.instructions.md")),
+    ):
+        consumer = world.consumer(f"{consumer_targets[0]}-consumer", targets=consumer_targets)
+        (consumer / ".grok").mkdir(exist_ok=True)
+        world.apm(consumer, "install", str(bundle), "--no-policy")
+        assert consumer.joinpath(*deployed).read_text() == _SCOPED_RULE
+        assert not list(consumer.rglob("*.instructions.instructions.md"))
+        world.apm(consumer, "audit", "--ci", "--no-policy")
+
+
 def test_share_hint_in_a_bare_directory_leaves_an_auditable_project(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

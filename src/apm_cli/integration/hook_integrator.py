@@ -39,6 +39,7 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.integration.copilot_hook_paths import copilot_hook_target
 from apm_cli.integration.hook_bundle import (
     copy_deployed_hook_bundle,
+    hook_cleanup_root,
     iter_deployable_hook_bundle_files,
 )
 from apm_cli.integration.hook_command_paths import (
@@ -1754,7 +1755,7 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                 dry_run=dry_run,
                 defaults=config.top_level_defaults,
-                root=project_root,
+                root=hook_cleanup_root(target, project_root),
             )
             if existed and not dry_run and not json_path.exists():
                 stats["deleted_paths"].append(portable_relpath(json_path, project_root))
@@ -1927,7 +1928,7 @@ class HookIntegrator(BaseIntegrator):
                     container=config.event_container_key,
                     sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                     defaults=config.top_level_defaults,
-                    root=project_root,
+                    root=hook_cleanup_root(t, project_root),
                 )
 
         return stats
