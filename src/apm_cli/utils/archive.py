@@ -61,14 +61,14 @@ class _BoundedStream:
     anything is read, so memory stays bounded.
     """
 
-    def __init__(self, stream: IO[bytes], limit: int) -> None:
+    def __init__(self, stream: IO[bytes], max_uncompressed: int) -> None:
         self._stream = stream
-        self._limit = limit
+        self._cap = max_uncompressed
+        self._limit = max_uncompressed + _TAR_HEADER_ALLOWANCE
 
     def _refuse(self) -> None:
         raise _TarStreamLimit(
-            "Archive uncompressed size exceeds size limit: "
-            f"{_MAX_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+            f"Archive uncompressed size exceeds size limit: {self._cap // (1024 * 1024)} MB"
         )
 
     def read(self, size: int | None = -1) -> bytes:
@@ -104,13 +104,15 @@ def open_tar_gz(
     *,
     path: Path | None = None,
     fileobj: IO[bytes] | None = None,
+    max_uncompressed: int | None = None,
     error_type: type[_ErrorT] = ArchiveError,
 ) -> Iterator[tarfile.TarFile]:
     """Open a gzip-compressed tar for reading through the bounded stream."""
+    cap = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
     with contextlib.ExitStack() as stack:
         raw = stack.enter_context(open(path, "rb")) if path is not None else fileobj
         compressed = stack.enter_context(gzip.GzipFile(fileobj=raw, mode="rb"))
-        stream = _BoundedStream(compressed, _MAX_UNCOMPRESSED_BYTES + _TAR_HEADER_ALLOWANCE)
+        stream = _BoundedStream(compressed, cap)
         try:
             tar = stack.enter_context(tarfile.open(fileobj=stream, mode="r:"))
         except _TarStreamLimit as exc:

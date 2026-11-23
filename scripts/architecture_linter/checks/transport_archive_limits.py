@@ -98,12 +98,8 @@ def _check_archive_extraction_limits(provider: FactsProvider) -> tuple[Violation
             _OWNER,
             (
                 ("re", r"^def open_tar_gz\(", 1, "eq"),
-                (
-                    "sub",
-                    "_BoundedStream(compressed, _MAX_UNCOMPRESSED_BYTES + _TAR_HEADER_ALLOWANCE)",
-                    1,
-                    "eq",
-                ),
+                ("sub", "stream = _BoundedStream(compressed, cap)", 1, "eq"),
+                ("sub", "self._limit = max_uncompressed + _TAR_HEADER_ALLOWANCE", 1, "eq"),
                 ("sub", 'tarfile.open(fileobj=stream, mode="r:")', 1, "eq"),
                 ("sub", "_bounded_members(tar, error_type)", 1, "eq"),
                 ("sub", "tarfile.open(path", 0, "eq"),

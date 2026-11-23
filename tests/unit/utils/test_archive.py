@@ -310,21 +310,22 @@ def test_oversized_tar_header_is_refused_for_a_registry_tarball(tmp_path: Path) 
     assert not (tmp_path / "out").exists()
 
 
-def test_endless_sparse_headers_are_refused_within_the_bound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 1024)
+def _extract_capped(data: bytes, dest: Path, cap: int) -> list[str]:
+    with archive_mod.open_tar_gz(fileobj=io.BytesIO(data), max_uncompressed=cap) as tar:
+        return archive_mod.safe_extract_tar(
+            tar, dest, max_uncompressed=cap, error_type=ArchiveError
+        )
+
+
+def test_endless_sparse_headers_are_refused_within_the_bound(tmp_path: Path) -> None:
     data = _endless_sparse_tar_gz(40 * 1024)
 
     with pytest.raises(ArchiveError, match="exceeds size limit"):
-        _extract_tar_gz(data, str(tmp_path / "out"))
+        _extract_capped(data, tmp_path / "out", 1024)
     assert not (tmp_path / "out").exists()
 
 
-def test_many_small_global_headers_are_refused_within_the_bound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 1024)
+def test_many_small_global_headers_are_refused_within_the_bound(tmp_path: Path) -> None:
     header = tarfile.TarInfo._create_pax_generic_header(
         {"comment": "c" * (1024 * 1024)}, tarfile.XGLTYPE, "utf-8"
     )
@@ -332,7 +333,7 @@ def test_many_small_global_headers_are_refused_within_the_bound(
     raw = header * 40 + member.tobuf(format=tarfile.USTAR_FORMAT) + bytes(1024)
 
     with pytest.raises(ArchiveError, match="exceeds size limit"):
-        _extract_tar_gz(_gzip(raw), str(tmp_path / "out"))
+        _extract_capped(_gzip(raw), tmp_path / "out", 1024)
     assert not (tmp_path / "out").exists()
 
 
@@ -350,15 +351,15 @@ def test_large_pax_header_within_the_caps_extracts(tmp_path: Path) -> None:
     assert (tmp_path / "out" / "plugin" / "SKILL.md").read_bytes() == b"content"
 
 
-def test_archive_near_the_cap_extracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 64 * 1024)
+def test_archive_near_the_cap_extracts(tmp_path: Path) -> None:
+    cap = 64 * 1024
     entries = {f"plugin/f{i}.md": b"x" for i in range(30)}
-    entries["plugin/big.bin"] = b"x" * (64 * 1024 - 30)
+    entries["plugin/big.bin"] = b"x" * (cap - 30)
 
-    extracted = _extract_tar_gz(_tar_gz_bytes(entries), str(tmp_path / "out"))
+    extracted = _extract_capped(_tar_gz_bytes(entries), tmp_path / "out", cap)
 
     assert len(extracted) == 31
-    assert (tmp_path / "out" / "plugin" / "big.bin").stat().st_size == 64 * 1024 - 30
+    assert (tmp_path / "out" / "plugin" / "big.bin").stat().st_size == cap - 30
 
 
 def test_extract_zip_writes_safe_members(tmp_path: Path) -> None:

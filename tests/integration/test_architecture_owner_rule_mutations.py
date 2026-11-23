@@ -68,8 +68,8 @@ def _shared_linter_session() -> Iterator[LinterSession]:
     [
         pytest.param(
             "src/apm_cli/utils/archive.py",
-            "_BoundedStream(compressed, _MAX_UNCOMPRESSED_BYTES + _TAR_HEADER_ALLOWANCE)",
-            "compressed",
+            "stream = _BoundedStream(compressed, cap)",
+            "stream = compressed",
             id="tar-stream-unbounded",
         ),
         pytest.param(
