@@ -263,6 +263,37 @@ def test_first_upgraded_install_updates_a_migrated_user_root_skill(
     assert deployed[0].read_text(encoding="utf-8").rstrip().endswith("Version two.")
 
 
+def test_first_upgrade_switching_to_a_target_sharing_the_skills_dir_updates_it(
+    scene: HarnessScene,
+) -> None:
+    """#4813: a 0.37 Copilot skill receipt migrates on a first ``install -g --target codex``.
+
+    Copilot and Codex share ``~/.agents/skills``; the receipt's target is not
+    selected, yet its skill directory is the selected target's destination.
+    """
+    source = scene.isolated.config_root / "skills" / "research" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "---\nname: research\ndescription: Research skill\n---\nVersion one.\n",
+        encoding="utf-8",
+    )
+    _install(scene, target="copilot")
+    deployed = scene.home / ".agents" / "skills" / "research" / "SKILL.md"
+    assert deployed.is_file(), sorted(p.as_posix() for p in scene.home.rglob("SKILL.md"))
+    _as_037_state(scene, deployed)
+    (scene.home / ".codex").mkdir(exist_ok=True)
+    source.write_text(
+        "---\nname: research\ndescription: Research skill\n---\nVersion two.\n",
+        encoding="utf-8",
+    )
+
+    upgraded = _install(scene, target="codex")
+
+    assert "skipped" not in flat(upgraded.stdout + upgraded.stderr), describe(upgraded)
+    assert deployed.read_text(encoding="utf-8").rstrip().endswith("Version two.")
+    assert ".agents/skills/research" in (_lock(scene).get("local_deployed_files") or [])
+
+
 def test_adding_a_dependency_that_deploys_a_root_claimed_agent_keeps_its_file(
     scene: HarnessScene,
 ) -> None:

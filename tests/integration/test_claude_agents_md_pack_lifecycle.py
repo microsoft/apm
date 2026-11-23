@@ -428,3 +428,45 @@ def test_pack_keeps_packing_a_dependency_that_excludes_claude_without_its_cache(
         )
         (bundle,) = [path for path in out.iterdir() if path.is_dir()]
         assert any("helper" in path for path in _files(bundle)), sorted(_files(bundle))
+
+
+def test_pack_keeps_packing_a_package_whose_own_targets_exclude_claude(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A package's own ``targets: [copilot]`` is recorded and honoured without its cache (#4850).
+
+    The edge declares no ``targets:``; only the package manifest excludes
+    Claude, so the lock must carry that decision for pack to trust it.
+    """
+    scenario = _new_scenario(tmp_path / "self-excluded", apm_binary_path)
+    package = scenario.sources.create("guard-kit", targets=("copilot",))
+    scenario.sources.add_instruction(package, "guard", _instruction("guard"))
+    repository = scenario.repositories.create("guard-kit", source_tree=package.root)
+    commit = scenario.repositories.commit(repository, message="seed guard-kit")
+    remote_url = f"https://github.com/{_OWNER}/guard-kit"
+    environment = scenario.repositories.url_rewrite_subprocess_env(repository, remote_url)
+    dependency = {"git": remote_url, "ref": commit.sha, "alias": "guard-kit"}
+    producer = scenario.consumers.create(
+        "producer", dependencies=(dependency,), targets=("claude", "copilot")
+    )
+    _run_success(scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install")
+    lock = load_yaml(producer.root / "apm.lock.yaml")
+    (row,) = [dep for dep in lock["dependencies"] if "guard-kit" in dep["repo_url"]]
+    assert row.get("package_targets") == ["copilot"], row
+    assert "targets" not in dependency
+
+    shutil.rmtree(producer.root / "apm_modules" / "guard-kit")
+
+    for args, name in ((("--format", "apm"), "apm-out"), ((), "plugin-out")):
+        out = tmp_path / name
+        result = scenario.runner.run(
+            ("pack", *args, "-o", str(out)),
+            scenario_id=f"pack-{name}",
+            cwd=producer.root,
+            env=environment,
+        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode == 0, output
+        assert "apm_modules/guard-kit is missing" not in output, output
+        (bundle,) = [path for path in out.iterdir() if path.is_dir()]
+        assert not (bundle / _RULE).exists(), sorted(_files(bundle))
