@@ -3220,6 +3220,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="absence_proven is rebound to a plain path probe under the same spelling.",
     ),
     MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-child-no-follow",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/hook_absence.py",
+        old="os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)",
+        new="os.open(part, os.O_RDONLY | os.O_DIRECTORY, dir_fd=handle)",
+        intent="The walk below the root follows a parent swapped for a link.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-absence-proof-helper",
         rule_id="install-deployment-uninstall-absence-proof",
         path="src/apm_cli/commands/uninstall/cli.py",
@@ -3231,6 +3239,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             "    failed = [p for p in integration_cleanup.failed_paths if not _gone(p)]\n"
         ),
         intent="A local helper wrapping Path.exists decides absence beside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-moved-pin",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="(deploy_root, manifest_path.parent, root_pin)",
+        new="(deploy_root, manifest_path.parent, root_identity(deploy_root))",
+        intent="The root is pinned again after the sync, so a replaced root is trusted.",
     ),
     MutationCase(
         guard_id="install-deployment-uninstall-preflight",
