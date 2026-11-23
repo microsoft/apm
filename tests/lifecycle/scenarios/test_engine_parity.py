@@ -1131,3 +1131,46 @@ def test_kill_mid_commit_then_install_equals_the_full_world(twin: Twin, point: s
     assert not problems, f"{point}: recovery differs from a full install\n" + "\n".join(problems)
     modes = [_modes(world) for world in twin.worlds]
     assert modes[0] == modes[1], f"{point}: file modes differ after recovery"
+
+
+# -- output failure after the commit: the apply stands, no full pipeline -----------
+
+_RELEASE_FAULT = """
+try:
+    import apm_cli.install.fast_output as _held_module
+except Exception:
+    _held_module = None
+if _held_module is not None and hasattr(_held_module, "HeldOutput"):
+
+    def _broken_release(self):
+        raise OSError(32, "injected broken pipe while releasing held output")
+
+    _held_module.HeldOutput.release = _broken_release
+"""
+
+
+@NEEDS_DIFF
+def test_output_failure_after_commit_never_runs_the_full_pipeline(twin: Twin) -> None:
+    """Printing a committed apply fails (a broken pipe): the command exits non-zero, the
+    full pipeline never starts on top of it, and the tree equals a full install's.
+    """
+    if os.environ.get("APM_LIFECYCLE_DRIVER") == "binary":
+        pytest.skip("the release hook loads only under the engine driver")
+    _converge(twin, *BOTH)
+    twin.each(_remove_deployed)  # warm-locked: the engine applies
+    _install_hook(twin.fast, _RELEASE_FAULT)
+    why = "held output release fails by design; the cell asserts the non-zero exit"
+    result = _run_outside_contract(twin.fast, ("install",), {FAST_ENV: "trace"}, why)
+    evidence = result.stdout + result.stderr
+    if result.returncode == 0:
+        raise MissingDecision("expected a diff decision, got a clean run (output never failed)")
+    assert "Installing dependencies" not in result.stdout, f"the full pipeline ran: {evidence}"
+    decisions = _DECISION.findall(result.stderr)
+    assert len(decisions) <= 1, f"one decision at most, got {decisions}"
+    assert not decisions or _kind(decisions[0]) == DIFF, decisions
+    reference = twin.invoke(twin.full, ("install",))
+    assert reference.returncode == 0, reference.stdout + reference.stderr
+    problems = diff(comparable(twin.fast), comparable(twin.full), twin.worlds, ("fast", "full"))
+    assert not problems, "the committed tree differs from a full install\n" + "\n".join(problems)
+    modes = [_modes(world) for world in twin.worlds]
+    assert modes[0] == modes[1], "file modes differ from a full install"
