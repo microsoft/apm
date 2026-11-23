@@ -4208,6 +4208,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Update discards resolver-provided retained revision pins.",
     ),
     MutationCase(
+        guard_id="transport-platform-rmtree-callback-no-follow-chmod",
+        rule_id="transport-platform-rmtree-callback-no-follow-chmod",
+        path="src/apm_cli/utils/file_ops.py",
+        old="os.chmod(path, stat.S_IWRITE, follow_symlinks=False)",
+        new="os.chmod(path, stat.S_IWRITE)",
+        intent="The rmtree read-only callback changes a mode through a link again.",
+    ),
+    MutationCase(
         guard_id="transport-platform-self-update-resolution",
         rule_id="transport-platform-self-update-resolution",
         path="src/apm_cli/commands/self_update.py",

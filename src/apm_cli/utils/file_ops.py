@@ -220,10 +220,42 @@ def _debug_file_op(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _on_readonly_retry(func: Callable, path: str, _exc_info: Any) -> None:
-    """``onerror`` callback: chmod writable and retry the failing removal."""
+def _is_link(path: str) -> bool:
+    """Whether *path* is a symlink or a Windows junction (never its target)."""
+    isjunction = getattr(os.path, "isjunction", None)
+    return os.path.islink(path) or bool(isjunction and isjunction(path))
+
+
+def _remove_link(path: str) -> None:
+    """Remove the link at *path* itself; its target is never touched."""
     try:
-        os.chmod(path, stat.S_IWRITE)
+        if os.name == "nt" and os.path.isdir(path):
+            os.rmdir(path)  # a directory symlink or junction on Windows
+        else:
+            os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+def _on_readonly_retry(func: Callable, path: str, _exc_info: Any) -> None:
+    """``onerror`` callback: clear the read-only bit and retry the failing removal.
+
+    A link is removed itself, never made writable: changing its mode would
+    change its target's. The mode change never follows a link; where the
+    platform cannot guarantee that, the error stands.
+    """
+    try:
+        if func is os.path.islink or _is_link(path):
+            _remove_link(path)
+            return
+        try:
+            os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
+        except NotImplementedError:
+            # Windows before Python 3.13 changes a link's own attribute and
+            # offers no follow_symlinks; elsewhere the path became a link.
+            if os.name != "nt":
+                raise OSError(errno.ELOOP, "refusing to change a link's mode", path) from None
+            os.chmod(path, stat.S_IWRITE)
         func(path)
     except FileNotFoundError:
         pass
@@ -258,6 +290,10 @@ def robust_rmtree(
     path_s = str(path)
 
     def _do_rmtree() -> None:
+        if _is_link(path_s):
+            # A link root is removed itself: never descended, never made writable.
+            _remove_link(path_s)
+            return
         failures: list[OSError] = []
 
         def recover_or_record(func: Callable, failed_path: str, exc_info: Any) -> None:

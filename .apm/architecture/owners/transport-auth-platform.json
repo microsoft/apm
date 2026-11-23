@@ -31,6 +31,13 @@
       "guards": ["transport-platform-unix-install-ownership"]
     },
     {
+      "id": "rmtree-link-safety",
+      "decision": "Removing a tree never changes a mode through a link: a link root or failing link is removed itself",
+      "owner": "utils/file_ops.py (robust_rmtree, _on_readonly_retry)",
+      "selectors": ["src/apm_cli/utils/file_ops.py"],
+      "guards": ["transport-platform-rmtree-callback-no-follow-chmod"]
+    },
+    {
       "id": "cache-cleanup-outcome",
       "decision": "Explicit cache-clean removal and residual outcome",
       "owner": "cache/cleanup.py (clean_cache_buckets)",
