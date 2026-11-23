@@ -133,7 +133,7 @@ def covered_from_record(record: dict, root: Path, env: dict) -> tuple[set[str], 
         elif kind == "target":
             trees.append(str(root / rest))  # existence keyed; contents keyed by listing
         elif kind in ("parent", "git-head") and rest.startswith("/"):
-            files.add(os.path.normpath(rest if kind == "parent" else rest + "/HEAD"))
+            files.add(os.path.normpath(rest if kind == "parent" else os.path.join(rest, "HEAD")))
         elif kind == "modules":
             trees_listed.add(str(root / rest))
     files.add(str(root / "apm.lock.yaml"))
@@ -173,8 +173,10 @@ def classify(path, calls, *, files, trees, writes, env, venv, prefixes, git_dirs
         return "record"
     if path in writes:
         return "self"
-    if path in files:
-        return "keyed"
+    if path in files or os.path.dirname(path) in env["_LISTED"]:
+        return "keyed"  # a keyed file, or an entry of a keyed listing (its name and kind)
+    if path == os.path.join(env["_ROOT"], ".apm"):
+        return "keyed"  # its existence makes the run ineligible (never recorded, never a hit)
     if os.path.basename(path) == ".git" and any(under(env["_ROOT"], os.path.dirname(path)) for _ in [0]):
         return "keyed"  # git discovery: verdict_git repeats the walk (a new .git changes the MAC)
     if any(under(env["_ROOT"], path) or under(k, path) for k in env["_ANCHORS"]):
@@ -200,7 +202,7 @@ def classify(path, calls, *, files, trees, writes, env, venv, prefixes, git_dirs
                         "/etc/passwd", "/etc/group", "/usr/share/i18n", "/etc/host.conf",
                         "/etc/resolv.conf", "/etc/hosts", "/etc/gai.conf", "/usr/local/lib")):
         return "system libs"
-    if os.path.dirname(path) in path_dirs or path in path_dirs:
+    if os.path.dirname(path) in path_dirs or any(under(d, path) for d in path_dirs):
         return "path lookup"
     tmp = os.environ.get("RUNNER_TEMP", "/tmp")
     if any(under(path, w) for w in writes if os.path.isdir(w) is False) or path.startswith("/tmp/"):
@@ -278,6 +280,7 @@ for name in fixture_names:
                     ancestors.add(parent)
                     parent = os.path.dirname(parent)
         env["_FILE_ANCESTORS"] = ancestors
+        env["_LISTED"] = {f for f in files if os.path.isdir(f)}
         gdirs_here = gdirs + git_dirs(env)[4:]
         classes: Counter[str] = Counter()
         gaps: list[str] = []

@@ -36,4 +36,7 @@ jobs:
       run: |
         uv sync --frozen --extra dev --quiet
         cp ../mine/scripts/perf/l5_readset.py scripts/perf/
+        # Serve the org policy at discovery's first candidate, so a governed no-op records.
+        sed -i 's#repositories\[f"{POLICY_ORG}/.github"\]#repositories[f"{POLICY_ORG}/.github-private"]#' tests/fixtures/perf/offline.py
+        grep -n 'github-private' tests/fixtures/perf/offline.py
         uv run --frozen python scripts/perf/l5_readset.py "$GITHUB_WORKSPACE/new/.venv/bin/apm" "$RUNNER_TEMP/rs" tree-10 tree-10-mcp tree-10-multi monorepo-4 tree-10-policy tree-50
