@@ -708,6 +708,27 @@ class TestKeptEntryReviewThree:
         assert record.held_claims == {"opencode": {"pyright"}}
         assert record.kept_edits == {"pyright": "blocked"}
 
+    def test_a_held_target_that_cannot_be_prepared_fails_the_install(self, tmp_path):
+        stdio = [_make_dep("pyright", command="p-v1")]
+        targets = ["copilot", "opencode"]
+        LSPIntegrator.install(stdio, project_root=tmp_path, target_runtimes=targets)
+        self._edit(tmp_path / ".github" / "lsp.json", "pyright")
+        opencode = tmp_path / "opencode.json"
+        opencode.write_text(json.dumps({"lsp": False}), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="non-object 'lsp'"):
+            LSPIntegrator.install(
+                [_make_dep("pyright", transport="socket", extension_to_language=None)],
+                project_root=tmp_path,
+                target_runtimes=targets,
+                managed_target_servers={"copilot": {"pyright"}, "opencode": {"pyright"}},
+                record=LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(stdio)),
+                diagnostics=MagicMock(),
+                fail_on_write_error=True,
+            )
+
+        assert json.loads(opencode.read_text()) == {"lsp": False}
+
     def test_an_upgrade_that_is_not_blocked_reaches_no_held_target(self, tmp_path):
         record, _before = self._upgrade_to_socket(tmp_path, edit_copilot=False)
 

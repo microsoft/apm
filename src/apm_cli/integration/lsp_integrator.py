@@ -976,20 +976,14 @@ class LSPIntegrator:
             own_kept = prepared.kept if prepared is not None else {}
             joined = LSPIntegrator._held_joiners(kept, servers, options)
             if kept & (builtins.set(servers) - builtins.set(own_kept)) or joined:
-                try:
-                    # A target's own keeps are re-judged, never withheld: that drops their claim.
-                    rebuilt = LSPIntegrator._prepare_target_config(
-                        spec,
-                        {**servers, **joined},
-                        **options,
-                        held=frozenset(kept - builtins.set(own_kept)),
-                    )
-                except Exception:
-                    if prepared is None:
-                        # A target the install never wrote keeps its old reconciliation.
-                        _log.debug("Could not hold LSP config %s", runtime, exc_info=True)
-                        continue
-                    raise
+                # A target's own keeps are re-judged, never withheld: that drops their claim.
+                # A joining target that cannot be prepared fails like any other (#4871).
+                rebuilt = LSPIntegrator._prepare_target_config(
+                    spec,
+                    {**servers, **joined},
+                    **options,
+                    held=frozenset(kept - builtins.set(own_kept)),
+                )
                 # The held render is the locked one: keep the original kinds.
                 prepared = replace(
                     rebuilt,
