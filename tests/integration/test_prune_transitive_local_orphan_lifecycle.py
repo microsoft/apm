@@ -418,3 +418,37 @@ def test_prune_reparents_under_the_locked_row_of_an_aliased_parent(
     assert _row_named(world, "g")[1]["resolved_by"] in rows
     assert (world.project / ".claude/skills/g-skill/SKILL.md").is_file()
     _assert_frozen_then_no_frozen_converge(world)
+
+
+def test_prune_reparents_a_legacy_local_row_with_its_path(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A lock without declaring_parent: the survivor takes its new parent's path too."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("e", ("../f",)),
+        ("sub/z", ("../../f",)),
+        ("d", ("../e",)),
+        ("a", ("../sub/z",)),
+    ):
+        _skill_package(vendor / name, name.rsplit("/", 1)[-1], deps)
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    lock_path = world.project / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    for row in lock["dependencies"]:
+        row.pop("declaring_parent", None)
+        row.pop("anchored_local_path", None)
+    dump_yaml(lock, lock_path)
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" not in rows, sorted(rows)
+    assert _row_named(world, "f")[1]["local_path"] == "../../f"
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    world.apm("install", "--frozen")
