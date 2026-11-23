@@ -1104,6 +1104,212 @@ class TestExportPluginBundle:
         content = (result.bundle_path / "agents" / "shared.agent.md").read_text()
         assert content == "from-second"
 
+    @pytest.mark.parametrize(
+        ("deps", "force", "expected"),
+        [
+            # A's Copilot rendering is dropped; B's distinct Claude agent wins.
+            (
+                [
+                    ("acme/a", [(".claude", "rv.md"), (".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                False,
+                {"agents/rv.md": ".md", "agents/rv.agent.md": ".md"},
+            ),
+            # Collision on agents/rv.agent.md: first writer (Copilot) wins.
+            (
+                [
+                    ("acme/a", [(".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                False,
+                {"agents/rv.agent.md": ".agent.md"},
+            ),
+            # --force: last writer (Claude) wins, and so does its provenance.
+            (
+                [
+                    ("acme/a", [(".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                True,
+                {"agents/rv.agent.md": ".md"},
+            ),
+        ],
+    )
+    def test_pack_records_the_winning_rendering_provenance(self, tmp_path, deps, force, expected):
+        """#3686: pack.renderings follows the final packed file, never a dropped one."""
+        project = _setup_plugin_project(tmp_path)
+        locked = []
+        for repo_url, files in deps:
+            deployed = []
+            for root, name in files:
+                deployed += _write_deployed_agent_at(project, root, name, f"{repo_url} {root}")
+            locked.append(LockedDependency(repo_url=repo_url, depth=1, deployed_files=deployed))
+        _write_lockfile(project, locked)
+
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+            result = export_plugin_bundle(project, tmp_path / "build", force=force)
+
+        pack = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())["pack"]
+        assert pack["renderings"] == expected
+
+    @pytest.mark.parametrize("copilot_first", [False, True])
+    @pytest.mark.parametrize(
+        ("claude", "copilot", "packed"),
+        [
+            ("review.md", "review.prompt.md", "review.md"),
+            # A dotted prompt stem: the Claude command keeps its own name.
+            ("review.prompt.md", "review.prompt.prompt.md", "review.prompt.md"),
+        ],
+    )
+    def test_claude_and_copilot_commands_pack_once(
+        self, tmp_path, claude, copilot, packed, copilot_first
+    ):
+        """#3686: one command rendering per primitive, the Claude one, in either lock order."""
+        project = _setup_plugin_project(tmp_path)
+        renderings = [
+            (".claude/commands", claude, "claude"),
+            (".github/prompts", copilot, "copilot"),
+        ]
+        if copilot_first:
+            renderings.reverse()
+        deployed = []
+        for root, name, body in renderings:
+            path = project / root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            deployed.append(f"{root}/{name}")
+        _write_lockfile(
+            project, [LockedDependency(repo_url="acme/cmd", depth=1, deployed_files=deployed)]
+        )
+
+        with (
+            patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning,
+            patch("apm_cli.bundle.plugin_exporter._rich_info") as info,
+        ):
+            result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert sorted(p.name for p in (result.bundle_path / "commands").iterdir()) == [packed]
+        assert (result.bundle_path / "commands" / packed).read_text() == "claude"
+        assert not any("collision" in str(call) for call in warning.call_args_list)
+        lines = [str(call) for call in info.call_args_list if "rendering" in str(call)]
+        assert len(lines) == 1 and f".github/prompts/{copilot}" in lines[0], lines
+
+    @staticmethod
+    def _pack_deployed(tmp_path, deployed: list[tuple[str, str]]):
+        project = _setup_plugin_project(tmp_path)
+        for rel, body in deployed:
+            path = project / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        _write_lockfile(
+            project,
+            [
+                LockedDependency(
+                    repo_url="acme/dep", depth=1, deployed_files=[r for r, _ in deployed]
+                )
+            ],
+        )
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+            return export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+    @pytest.mark.parametrize(
+        "deployed",
+        [
+            [".grok/rules/py.instructions.md"],
+            [".grok/rules/py.instructions.md", ".github/instructions/py.instructions.md"],
+        ],
+    )
+    def test_grok_instructions_pack_as_the_apm_rendering(self, tmp_path, deployed):
+        """#3686: Grok Build copies instructions under their source name, not as .md."""
+        project = _setup_plugin_project(tmp_path)
+        for rel in deployed:
+            (project / rel).parent.mkdir(parents=True, exist_ok=True)
+            (project / rel).write_text('---\napplyTo: "**/*.py"\n---\n# py\n', encoding="utf-8")
+        _write_lockfile(
+            project, [LockedDependency(repo_url="acme/dep", depth=1, deployed_files=deployed)]
+        )
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning:
+            bundle = export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+        assert [p.name for p in (bundle / "instructions").iterdir()] == ["py.instructions.md"]
+        pack = yaml.safe_load((bundle / "apm.lock.yaml").read_text())["pack"]
+        assert pack["renderings"] == {"instructions/py.instructions.md": ".instructions.md"}
+        assert not any("collision" in str(call) for call in warning.call_args_list)
+
+    @pytest.mark.parametrize("claude_first", [True, False])
+    def test_dotted_instruction_stems_keep_each_apm_rendering(self, tmp_path, claude_first):
+        """#3686: py and py.instructions both ship their APM (applyTo) rendering."""
+        claude = [
+            (".claude/rules/py.md", "claude py"),
+            (".claude/rules/py.instructions.md", "claude py.instructions"),
+        ]
+        copilot = [
+            (".github/instructions/py.instructions.md", "copilot py"),
+            (".github/instructions/py.instructions.instructions.md", "copilot py.instructions"),
+        ]
+        bundle = self._pack_deployed(
+            tmp_path, claude + copilot if claude_first else copilot + claude
+        )
+        instructions = bundle / "instructions"
+        assert sorted(p.name for p in instructions.iterdir()) == [
+            "py.instructions.instructions.md",
+            "py.instructions.md",
+        ]
+        assert (instructions / "py.instructions.md").read_text() == "copilot py"
+
+    @pytest.mark.parametrize(
+        ("rules", "shared"),
+        [
+            # Claude and Kiro rules never convert, so neither is a duplicate.
+            (
+                [(".claude/rules/py.md", "claude"), (".kiro/steering/py.md", "kiro")],
+                "instructions/py.md",
+            ),
+            # Stems rv.agent (Claude) and rv (Copilot) are two primitives.
+            (
+                [
+                    (".claude/agents/rv.agent.md", "claude"),
+                    (".github/agents/rv.agent.md", "copilot"),
+                ],
+                "agents/rv.agent.md",
+            ),
+        ],
+    )
+    def test_shared_path_without_one_primitive_reports_a_collision(self, tmp_path, rules, shared):
+        """#3686: only renderings of one primitive drop; others keep the collision report."""
+        project = _setup_plugin_project(tmp_path)
+        for rel, body in rules:
+            (project / rel).parent.mkdir(parents=True, exist_ok=True)
+            (project / rel).write_text(body, encoding="utf-8")
+        _write_lockfile(
+            project,
+            [LockedDependency(repo_url="acme/dep", depth=1, deployed_files=[r for r, _ in rules])],
+        )
+        with (
+            patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning,
+            patch("apm_cli.bundle.plugin_exporter._rich_info") as info,
+        ):
+            bundle = export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+        # First writer wins; the collision names the shared path.
+        assert (bundle / shared).read_text() == "claude"
+        warnings = [str(call) for call in warning.call_args_list]
+        assert any(f"{shared} -- collision" in w for w in warnings), warnings
+        assert not any("rendering" in str(call) for call in info.call_args_list)
+
+    def test_native_markdown_prompts_keep_their_stem(self, tmp_path):
+        """#3686: a Kiro prompt review.prompt.md pairs with its Claude command, not review.md."""
+        bundle = self._pack_deployed(
+            tmp_path,
+            [
+                (".claude/commands/review.prompt.md", "claude"),
+                (".kiro/prompts/review.prompt.md", "kiro"),
+            ],
+        )
+        assert sorted(p.name for p in (bundle / "commands").iterdir()) == ["review.prompt.md"]
+        assert (bundle / "commands" / "review.prompt.md").read_text() == "claude"
+
     def test_hooks_merged(self, tmp_path):
         """Root (first-party) hooks are packed; dependency cache hooks are not.
 

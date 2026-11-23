@@ -38,6 +38,7 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.integration.copilot_hook_paths import copilot_hook_target
 from apm_cli.integration.hook_bundle import (
     copy_deployed_hook_bundle,
+    hook_cleanup_root,
     iter_deployable_hook_bundle_files,
 )
 from apm_cli.integration.hook_command_paths import (
@@ -1753,7 +1754,7 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                 dry_run=dry_run,
                 defaults=config.top_level_defaults,
-                root=project_root,
+                root=hook_cleanup_root(target, project_root),
             )
             if existed and not dry_run and not json_path.exists():
                 stats["deleted_paths"].append(portable_relpath(json_path, project_root))
@@ -1886,7 +1887,7 @@ class HookIntegrator(BaseIntegrator):
         ]
         hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import remove_synced_files
+            from apm_cli.integration.cleanup import consent_outcome, remove_synced_files
 
             # Deletion needs deployment evidence; None keeps every file (#3701).
             cleanup = remove_synced_files(
@@ -1900,11 +1901,11 @@ class HookIntegrator(BaseIntegrator):
                 allow_final_symlink=True,
             )
             stats["files_removed"] += len(cleanup.deleted)
-            retained = cleanup.retained
+            retained, unsafe = consent_outcome(cleanup, evidence)
             if retained:
                 stats["errors"] += len(retained)
                 stats.setdefault("failed_paths", []).extend(retained)
-            stats.setdefault("unsafe_paths", []).extend(cleanup.skipped_unmanaged)
+            stats.setdefault("unsafe_paths", []).extend(unsafe)
             self.cleanup_empty_parents(cleanup.deleted_targets, stop_at=project_root)
         else:
             hooks_dir = project_root / ".github" / "hooks"
@@ -1930,7 +1931,7 @@ class HookIntegrator(BaseIntegrator):
                     container=config.event_container_key,
                     sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                     defaults=config.top_level_defaults,
-                    root=project_root,
+                    root=hook_cleanup_root(t, project_root),
                 )
 
         return stats

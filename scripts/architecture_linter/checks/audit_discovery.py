@@ -11,13 +11,20 @@ from scripts.architecture_linter.models import Rule, Violation
 RULE_ID = "audit-primitive-discovery"
 _SCANNER = "src/apm_cli/security/file_scanner.py"
 _DISCOVERY = "src/apm_cli/security/primitive_discovery.py"
+_HOOK_BUNDLE = "src/apm_cli/integration/hook_bundle.py"
+# Node module types are named only by hook_native_formats.NODE_MODULE_TYPES.
+_MODULE_TYPE_LITERALS = frozenset({"'commonjs'", "'module'"})
 _REQUIRED = {
     _SCANNER: {
         "_scan_claimed_files": {"primitive_surfaces", "_scan_primitive"},
         "_scan_deployed_trees": {"primitive_surfaces", "iter_surface_files", "_scan_primitive"},
-        "_content_entries": {"inspect_native_hooks"},
+        "_content_entries": {"inspect_native_hooks", "is_deployed_hook_module_metadata"},
         "_scan_primitive": {"safe_surface_path"},
-        "scan_project_result": {"_scan_claimed_files", "_scan_deployed_trees"},
+        "scan_project_result": {
+            "_scan_claimed_files",
+            "_scan_deployed_trees",
+            "deployed_file_hashes",
+        },
     },
     _DISCOVERY: {
         "_mapping_surface": {"skills_deploy_path"},
@@ -29,6 +36,22 @@ _REQUIRED = {
     },
     "src/apm_cli/integration/hook_native_formats.py": {
         "inspect_native_hooks": {"hook_handlers"},
+        "hook_module_type_metadata": {"node_module_type"},
+        "is_hook_module_type_metadata": {"hook_module_type_metadata"},
+    },
+    # Hook-bundle module metadata: the writer and the audit recognizer share
+    # one owner and one module-type vocabulary (#4921).
+    _HOOK_BUNDLE: {
+        "_hook_module_type": {"node_module_type"},
+        "copy_deployed_hook_bundle": {"hook_module_type_metadata"},
+        "is_deployed_hook_module_metadata": {
+            "hook_bundle_deploys_json",
+            "is_hook_module_type_metadata",
+            "content_hash_of_bytes",
+        },
+    },
+    "src/apm_cli/integration/hook_source_selection.py": {
+        "select_hook_sources": {"hook_bundle_deploys_json"},
     },
     "src/apm_cli/commands/audit.py": {"_audit_content_scan": {"scan_project_result"}},
     "src/apm_cli/policy/ci_checks.py": {"_check_content_integrity": {"scan_project_result"}},
@@ -68,6 +91,15 @@ def check_audit_discovery(provider: FactsProvider) -> Iterable[Violation]:
                         path,
                         "Automatic audit must not bypass primitive applicability with a raw file/tree scan.",
                         line=call.line,
+                    )
+        if path in {_SCANNER, _HOOK_BUNDLE}:
+            for literal in facts.literals:
+                if literal.value_repr in _MODULE_TYPE_LITERALS:
+                    yield violation(
+                        RULE_ID,
+                        path,
+                        "Node module types must come from hook_native_formats.",
+                        line=literal.line,
                     )
         if path in {_SCANNER, _DISCOVERY}:
             for literal in facts.literals:

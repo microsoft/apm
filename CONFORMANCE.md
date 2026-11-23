@@ -81,7 +81,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 8 / 8 | - |
 | [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 5 / 6 | - |
 | [req-lk-023](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-023) | MUST | 5.2.1 | consumer | active | 1 / 7 | - |
-| [req-lk-024](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-024) | MUST | 5.2 | consumer | active | 4 / 5 | - |
+| [req-lk-024](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-024) | MUST | 5.2 | consumer | active | 43 / 45 | - |
 | [req-mf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-001) | MUST | 4.1 | producer | active | 3 / 4 | - |
 | [req-mf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-002) | MUST | 4.1 | producer | active | 8 / 9 | - |
 | [req-mf-003](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-003) | MUST | 4.1 | producer | active | 8 / 9 | - |
@@ -179,7 +179,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | active | 4 / 5 | - |
 | [req-sc-007](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-007) | MUST | 10.3 | consumer | active | 3 / 4 | - |
 | [req-sc-008](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-008) | SHOULD | 10.3 | consumer | active | 3 / 4 | - |
-| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 8 / 13 | - |
+| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 10 / 15 | - |
 | [req-sc-010](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-010) | MUST | 10.13 | consumer | active | 1 / 2 | - |
 | [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 2 / 3 | - |
 | [req-sc-012](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-012) | MUST | 10.14 | consumer | active | 1 / 2 | - |

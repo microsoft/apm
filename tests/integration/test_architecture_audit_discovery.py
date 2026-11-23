@@ -40,6 +40,66 @@ def test_guard_rejects_discovery_applicability_or_containment_bypass(old: str, n
 
 
 @pytest.mark.parametrize(
+    "path,old,new",
+    [
+        (
+            "src/apm_cli/integration/hook_bundle.py",
+            "json.dumps(hook_module_type_metadata(module_type),",
+            'json.dumps({"type": module_type},',
+        ),
+        (
+            "src/apm_cli/integration/hook_bundle.py",
+            "return node_module_type(package_type)",
+            'return package_type if package_type in {"commonjs", "module"} else "commonjs"',
+        ),
+        (
+            "src/apm_cli/integration/hook_bundle.py",
+            'or content_hash_of_bytes(text.encode("utf-8")) != recorded_hash',
+            "",
+        ),
+        (
+            "src/apm_cli/integration/hook_bundle.py",
+            "or not hook_bundle_deploys_json(target_name)",
+            "",
+        ),
+        (
+            _SCANNER,
+            "if is_deployed_hook_module_metadata(\n"
+            "            path, text, target_name=surface.target, recorded_hash=recorded_hash\n"
+            "        ):",
+            'if document in ({"type": "commonjs"}, {"type": "module"}):',
+        ),
+        (
+            _SCANNER,
+            "recorded_hashes=DeploymentLedgerCodec.deployed_file_hashes(lock) if lock else {},",
+            "recorded_hashes={},",
+        ),
+        (
+            "src/apm_cli/integration/hook_source_selection.py",
+            "exclude_json_files=not hook_bundle_deploys_json(target_name),",
+            'exclude_json_files=target_name == "copilot",',
+        ),
+    ],
+    ids=[
+        "inline-sidecar-writer",
+        "inline-module-type-vocabulary",
+        "recognizer-skips-recorded-hash",
+        "recognizer-skips-target-eligibility",
+        "scanner-hardcoded-predicate",
+        "scanner-drops-recorded-hashes",
+        "selection-hardcodes-json-exclusion",
+    ],
+)
+def test_hook_bundle_module_metadata_cannot_bypass_its_owner(path: str, old: str, new: str) -> None:
+    source = (_ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(old, new, 1)
+    assert mutated != source
+    result = run_selected_rules(_ROOT, {_RULE}, source_overrides={path: mutated})
+    assert result.failures == ()
+    assert any(v.rule_id == _RULE and v.path == path for v in result.violations)
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "src/apm_cli/security/primitive_discovery.py",
