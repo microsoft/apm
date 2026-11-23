@@ -703,6 +703,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
                     # Replay deploys the locked selection, as uninstall does (#3760).
                     selection = effective_dependency_selection(package_info.dependency_ref)
+                    if not config.user_scope and lock_dep.local_path != _SELF_KEY and _serve_from_record(
+                        lock_dep, install_path, scratch_root, live_targets, selection
+                    ):
+                        replayed_count += 1
+                        continue
                     # Withhold what the install gate withheld (#3924) or would
                     # now withhold after a deny no install reconciled (#3958).
                     replay_allow = gated_allow_map.for_dependency(lock_dep, package_info)
@@ -778,6 +783,62 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     logger.replay_complete(replayed_count)
     return scratch_root
+
+
+# SKIP-HACK (perf audit lane, never merge): serve a package's replay from its
+# package-bound render record when EVERY recorded file is verbatim, i.e. its raw
+# sha256 equals a live source file of the materialized package. Rendered kinds,
+# hooks, native plugins, local sources and narrowed selections stay live.
+def _serve_from_record(lock_dep, install_path: Path, scratch_root: Path, targets, selection) -> bool:
+    import hashlib as _hashlib
+    import os as _os
+
+    from apm_cli.cache.deploy_store import DeployStore, record_matches
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.version import get_version
+
+    if (
+        getattr(lock_dep, "native_plugin", None) is not None
+        or getattr(lock_dep, "is_local_source", False)
+        or getattr(selection, "skill_subset", None) is not None
+        or getattr(selection, "target_subset", None) is not None
+    ):
+        return False
+    lock_hashes = getattr(lock_dep, "deployed_file_hashes", None) or {}
+    if not lock_hashes or any("hooks" in rel.split("/") for rel in lock_hashes):
+        return False
+    store = DeployStore.open_default()
+    if store is None:
+        return False
+    record = store.package_record(
+        lock_dep.repo_url,
+        lock_dep.resolved_commit,
+        lock_dep.content_hash,
+        targets,
+        get_version(),
+        InstallScope.PROJECT,
+    )
+    if not record_matches(record, lock_hashes):
+        return False
+    source: dict[str, Path] = {}
+    for directory, dirs, names in _os.walk(install_path):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for name in names:
+            path = Path(directory) / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            source.setdefault(_hashlib.sha256(path.read_bytes()).hexdigest(), path)
+    plan = []
+    for rel, (_digest, raw_sha) in record["files"].items():
+        origin = source.get(raw_sha)
+        if origin is None:
+            return False
+        plan.append((rel, origin))
+    for rel, origin in plan:
+        target = scratch_root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(origin.read_bytes())
+    return True
 
 
 # Diff engine
