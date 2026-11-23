@@ -34,8 +34,10 @@ import json
 import os
 import re
 import shutil
+import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -55,6 +57,7 @@ from tests.lifecycle.scenarios._deploy_diff import (
 )
 from tests.lifecycle.world import World
 from tests.lifecycle.world.clone import clone
+from tests.lifecycle.world.packages import MCP_SERVER
 from tests.lifecycle.world.scopes import use_policy, use_registry
 from tests.lifecycle.world.services import (
     ORG,
@@ -729,10 +732,22 @@ def test_fresh_marketplace_install_declines_to_the_full_pipeline(twin: Twin) -> 
 
 # -- invariant: a declined fast path writes nothing before the full run ------------
 
-DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, ...]]] = {
-    **{f"lock-{t}": (BOTH, change, argv) for t, (change, argv, _) in DOUBTS.items()},
-    **{f"fresh-{d}": (keys, change, ("install",)) for d, (keys, change) in FRESH_DOUBTS.items()},
+# trigger: (packages converged, change, install argv, exit of the ordinary pipeline)
+DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, ...], int]] = {
+    **{f"lock-{t}": (BOTH, change, argv, code) for t, (change, argv, code) in DOUBTS.items()},
+    **{f"fresh-{d}": (keys, change, ("install",), 0) for d, (keys, change) in FRESH_DOUBTS.items()},
 }
+# Log files are written by every invocation; they are not install state.
+_RAW_SKIP = (".git", ".apm/logs")
+
+
+def _raw_state(world: World) -> dict[str, dict[str, str]]:
+    """Unnormalized bytes of everything an install may write: project, HOME, APM_HOME and
+    caches, ownership metadata (.apm-local, receipts) and deploy-store entries included.
+    """
+    roots = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
+    roots.update({f"cache:{root}": root for root in _cache_roots(world)})
+    return {name: digest(root, _RAW_SKIP, world) for name, root in roots.items()}
 
 
 # The decide seam's exit on a decline: distinct and non-zero, so it can never pass for
@@ -740,20 +755,66 @@ DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, .
 DECIDE_EXIT = 3
 
 
-def _decide(world: World, argv: tuple[str, ...]):
-    """Run *argv* in decide mode through the driver's entry point.
+def _run_outside_contract(world: World, argv: tuple[str, ...], env: dict[str, str], why: str):
+    """Run *argv* through the driver's entry point with I8 suspended for this run only.
 
-    The decide seam is a test-only exit, outside every command's user exit contract,
-    so I8 is suspended (the driver hook and the runner's output oracle); this cell
-    asserts the exit, ASCII and the empty stdout itself.
+    For test-only exits outside every command's user exit contract (the decide seam,
+    a killed process); the calling cell asserts the exit itself.
     """
     args = driver.command_args(argv, scope="project")
     runner = ApmLifecycleRunner(driver.driver_command(), timeout_seconds=driver.TIMEOUT_SECONDS)
-    env = {**world.env, FAST_ENV: "decide"}
     cwd = driver.command_cwd(world, "project")
-    reason = f"the decide seam exits DECIDE_EXIT={DECIDE_EXIT} by design; the cell asserts it"
-    with expect_output_violation("I8", reason=reason):
-        return runner.run(args, cwd=cwd, env=env, scenario_id="lifecycle-decide")
+    with expect_output_violation("I8", reason=why):
+        return runner.run(args, cwd=cwd, env={**world.env, **env}, scenario_id="lifecycle-seam")
+
+
+def _decide(world: World, argv: tuple[str, ...]):
+    """Run *argv* in decide mode; this cell asserts the exit, ASCII and stdout itself."""
+    why = f"the decide seam exits DECIDE_EXIT={DECIDE_EXIT} by design; the cell asserts it"
+    return _run_outside_contract(world, argv, {FAST_ENV: "decide"}, why)
+
+
+def _cache_stats(world: World) -> dict[str, str]:
+    """``(size, mtime_ns)`` of every cache path, directories and roots included.
+
+    Content digests miss a utime, an eviction-and-refill or a created root; the
+    stat view sees them (cache_root, APM_CACHE_DIR and the APM_HOME cache).
+    """
+    roots = {*(_cache_roots(world)), world.apm_home / "cache"}
+    stats: dict[str, str] = {}
+    for root in sorted(roots):
+        if not root.exists():
+            stats[str(root)] = "<absent>"
+            continue
+        for path in [root, *sorted(root.rglob("*"))]:
+            info = path.lstat()
+            size = info.st_size if path.is_file() else "-"
+            stats[str(path)] = f"{size}:{info.st_mtime_ns}:{oct(info.st_mode & 0o7777)}"
+    return stats
+
+
+@contextmanager
+def _read_only_caches(world: World) -> Iterator[None]:
+    """Drop every write bit on the cache trees for the block, then restore the modes."""
+    roots = [r for r in {*(_cache_roots(world)), world.apm_home / "cache"} if r.exists()]
+    saved = {
+        path: path.lstat().st_mode & 0o7777
+        for root in roots
+        for path in [root, *root.rglob("*")]
+        if not path.is_symlink()
+    }
+    try:
+        for path, mode in saved.items():
+            path.chmod(mode & ~0o222)
+        yield
+    finally:
+        for path, mode in saved.items():
+            path.chmod(mode)
+
+
+def _assert_caches_untouched(before: dict[str, str], after: dict[str, str], label: str) -> None:
+    moved = [p for p in sorted(before.keys() | after.keys()) if before.get(p) != after.get(p)]
+    assert not moved, f"{label}: decide mode touched the caches: {moved}"
 
 
 @pytest.mark.parametrize(
@@ -764,23 +825,64 @@ def test_declined_fast_path_writes_nothing(twin: Twin, trigger: str) -> None:
     on a decline, exits ``DECIDE_EXIT`` before the full pipeline; not one byte may
     have moved by then.
     """
-    keys, change, argv = DECLINES[trigger]
+    keys, change, argv, ordinary = DECLINES[trigger]
     _converge(twin, *keys)
     world = twin.fast
     change(world)
-    before = comparable(world)
+    before = _raw_state(world)
+    stats = _cache_stats(world)
     result = _decide(world, argv)
-    if "Installing dependencies" in result.stdout:
+    evidence = result.stdout + result.stderr
+    if result.returncode != DECIDE_EXIT:
+        # No decide seam: the ordinary pipeline ran, and it must still behave.
+        assert result.returncode == ordinary, f"exit {result.returncode}, expected {ordinary}"
         raise MissingDecision("expected a decide decision, got the full pipeline")
     decisions = _DECISION.findall(result.stderr)
-    assert len(decisions) <= 1, f"one decision per command, got {decisions}"
-    _assert_decision(decisions[0] if decisions else "", FULL)
-    evidence = result.stdout + result.stderr
-    assert result.returncode == DECIDE_EXIT, f"exit {result.returncode}, expected {DECIDE_EXIT}"
+    assert len(decisions) == 1, f"one decision per command, got {decisions}"
+    _assert_decision(decisions[0], FULL)
     assert not result.stdout.strip(), f"a decline printed pipeline output: {evidence}"
     assert evidence.isascii(), "I6: decide output is not ASCII"
-    problems = diff(before, comparable(world), (world, world), ("before", "after"))
-    assert not problems, f"{trigger}: the declined fast path wrote\n" + "\n".join(problems)
+    after = _raw_state(world)
+    changed = [
+        f"{name}:{rel}"
+        for name in before
+        for rel in sorted(before[name].keys() | after[name].keys())
+        if before[name].get(rel) != after[name].get(rel)
+    ]
+    assert not changed, f"{trigger}: the declined fast path wrote: {changed}"
+    _assert_caches_untouched(stats, _cache_stats(world), trigger)
+
+
+# hit: (packages converged, change, decision, owning engine marks)
+DECIDE_HITS = {
+    "noop": (BOTH, _nothing, NOOP, NEEDS_NOOP.marks),
+    "warm-locked": (BOTH, _remove_deployed, DIFF, NEEDS_DIFF.marks),
+}
+
+
+@pytest.mark.parametrize(
+    "hit", [pytest.param(h, marks=DECIDE_HITS[h][3]) for h in sorted(DECIDE_HITS)]
+)
+def test_decide_mode_hit_leaves_caches_untouched(twin: Twin, hit: str) -> None:
+    """Decide mode runs under read-only caches: a hit reads them and never writes,
+    evicts, touches or creates any cache path.
+    """
+    keys, change, kind, _ = DECIDE_HITS[hit]
+    _converge(twin, *keys)
+    world = twin.fast
+    change(world)
+    with _read_only_caches(world):
+        stats = _cache_stats(world)
+        result = _decide(world, ("install",))
+        after = _cache_stats(world)
+    decisions = _DECISION.findall(result.stderr)
+    if not decisions:
+        assert result.returncode == 0, result.stdout + result.stderr
+        raise MissingDecision("expected a decide decision, got the full pipeline")
+    assert len(decisions) == 1, f"one decision per command, got {decisions}"
+    _assert_decision(decisions[0], kind)
+    assert result.returncode in (0, DECIDE_EXIT), result.stdout + result.stderr
+    _assert_caches_untouched(stats, after, hit)
 
 
 # -- review-fix cells (must pass once the engine lands) -----------------------------
@@ -806,6 +908,25 @@ if _at:
 """
 
 
+def _install_hook(world: World, source: str) -> None:
+    """Put a ``sitecustomize`` running *source* first on *world*'s PYTHONPATH.
+
+    Python loads only the first sitecustomize, so the world's network guard runs first.
+    """
+    hook = world.root / "fault-hook"
+    hook.mkdir()
+    existing = world.env.get("PYTHONPATH", "")
+    guards = [
+        Path(entry) / "sitecustomize.py"
+        for entry in existing.split(os.pathsep)
+        if entry and (Path(entry) / "sitecustomize.py").is_file()
+    ]
+    assert guards, "the world's network guard sitecustomize is missing"
+    guard = guards[0].read_text(encoding="utf-8")
+    (hook / "sitecustomize.py").write_text(guard + "\n\n" + source, encoding="utf-8")
+    world.env["PYTHONPATH"] = os.pathsep.join(p for p in (str(hook), existing) if p)
+
+
 @NEEDS_DIFF
 def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) -> None:
     """A fault on the commit's 2nd write: the engine declines and the full run's tree wins.
@@ -817,11 +938,7 @@ def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) 
         pytest.skip("the fault hook loads only under the engine driver")
     _converge(twin, *BOTH)
     twin.each(_remove_deployed)
-    hook = twin.fast.root / "fault-hook"
-    hook.mkdir()
-    (hook / "sitecustomize.py").write_text(_WRITE_FAULT, encoding="ascii")
-    path = [str(hook), twin.fast.env.get("PYTHONPATH", "")]
-    twin.fast.env["PYTHONPATH"] = os.pathsep.join(p for p in path if p)
+    _install_hook(twin.fast, _WRITE_FAULT)
     twin.fast.env["APM_TEST_WRITE_FAULT_AT"] = "2"
     try:
         decision = twin.ok("install")
@@ -872,7 +989,10 @@ def test_escaped_hidden_unicode_in_a_deployed_hook_declines(twin: Twin) -> None:
         twin.run(*argv)  # a scanner finding may block: parity holds either way
     decision = twin.run("install")
     _assert_decision(decision, FULL)
-    assert "non-ASCII deployed content" in decision, decision
+    # Either guard may decline first: the content scan, or the deploy store refusing a
+    # record whose replayed body is not printable ASCII. Both decline before any write.
+    reasons = ("non-ASCII deployed content", "no matching package record")
+    assert any(reason in decision for reason in reasons), decision
 
 
 @NEEDS_ANY
@@ -882,3 +1002,132 @@ def test_revoked_approval_with_apm_modules_absent_declines(twin: Twin) -> None:
     twin.each(_remove_deployed)
     twin.each(revoke_user_approval)
     _assert_decision(twin.ok("install"), FULL)
+
+
+# -- W3c R1: SIGKILL mid-commit, then a plain install recovers to the full world ------
+
+_KILL = """import os
+import signal
+
+_spec = os.environ.get("APM_TEST_KILL_AT", "")
+if _spec:
+    _module, _attrs, _nth, _when = _spec.split(":")
+    try:
+        import importlib
+
+        _engine = importlib.import_module(_module)
+    except Exception:
+        _engine = None
+    _names = [n for n in _attrs.split("|") if _engine is not None and hasattr(_engine, n)]
+    if _names:
+        _attr = _names[0]
+        _original, _calls = getattr(_engine, _attr), [0]
+
+        def _killing(*args, **kwargs):
+            _calls[0] += 1
+            hit = _calls[0] == int(_nth)
+            if hit and _when == "before":
+                os.kill(os.getpid(), signal.SIGKILL)
+            result = _original(*args, **kwargs)
+            if hit and _when == "after":
+                os.kill(os.getpid(), signal.SIGKILL)
+            return result
+
+        setattr(_engine, _attr, _killing)
+
+# Crash inside service reconciliation, after its first durable write: count the
+# write seam's records while run_services runs and die before the Nth one.
+_svc = int(os.environ.get("APM_TEST_KILL_IN_SERVICES", "0"))
+if _svc:
+    try:
+        import apm_cli.install.fast_output as _output
+        import apm_cli.integration.write_seam as _seam
+    except Exception:
+        _output = _seam = None
+    if _output is not None and hasattr(_output, "run_services"):
+        _state = {"active": False, "writes": 0}
+        _run, _record = _output.run_services, _seam.record_before_write
+
+        def run_services(*args, **kwargs):
+            _state["active"] = True
+            try:
+                return _run(*args, **kwargs)
+            finally:
+                _state["active"] = False
+
+        def record_before_write(path, *args, **kwargs):
+            if _state["active"]:
+                _state["writes"] += 1
+                if _state["writes"] == _svc:
+                    os.kill(os.getpid(), signal.SIGKILL)
+            return _record(path, *args, **kwargs)
+
+        _output.run_services = run_services
+        _seam.record_before_write = record_before_write
+"""
+_ENGINE_MODULE = "apm_cli.install.diff_apply"
+# point: module:attribute[|fallback]:call:before|after, hooks of the diff-apply owner.
+# _publish supersedes _commit_package; _render runs the services and receipt writes
+# inside the commit journal.
+KILL_POINTS = {
+    "after-first-package-published": {
+        "APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_publish|_commit_package:1:after"
+    },
+    "after-first-file-linked": {"APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_write:1:after"},
+    "before-services-render": {"APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_render:1:before"},
+    # Before the 2nd service write: the 1st is durable, reconciliation unfinished.
+    "after-first-service-write": {"APM_TEST_KILL_IN_SERVICES": "2"},
+}
+
+
+def _mcp_configs(world: World) -> list[Path]:
+    """Project files that register the world's MCP server (service-owned configs)."""
+    return [
+        path
+        for path in sorted(world.project.rglob("*.json"))
+        if not path.relative_to(world.project).as_posix().startswith(("apm_modules/", ".git/"))
+        and MCP_SERVER in path.read_text(encoding="utf-8", errors="replace")
+    ]
+
+
+_SIGKILL = getattr(signal, "SIGKILL", 9)  # absent on Windows, where the module is skipped
+_KILLED = (-_SIGKILL, 128 + _SIGKILL)
+
+
+@pytest.mark.parametrize(
+    "point", [pytest.param(p, marks=NEEDS_DIFF.marks) for p in sorted(KILL_POINTS)]
+)
+def test_kill_mid_commit_then_install_equals_the_full_world(twin: Twin, point: str) -> None:
+    """SIGKILL the applying engine mid-commit; the next plain install must leave the tree,
+    lock, receipts and modes of a full install: no partial package or file, no staging.
+    """
+    if os.environ.get("APM_LIFECYCLE_DRIVER") == "binary":
+        pytest.skip("the kill hook loads only under the engine driver")
+    _converge(twin, *BOTH)
+    twin.each(_remove_deployed)  # warm-locked: the engine applies packages and files
+    services = point == "after-first-service-write"
+    if services:
+        configs = _mcp_configs(twin.fast)
+        assert configs, "the fixture must register an MCP server for services to rewrite"
+        twin.each(lambda w: [path.unlink() for path in _mcp_configs(w)])
+    _install_hook(twin.fast, _KILL)
+    why = "the apply is SIGKILLed mid-commit by design; the cell asserts the kill"
+    env = {FAST_ENV: "trace", **KILL_POINTS[point]}
+    killed = _run_outside_contract(twin.fast, ("install",), env, why)
+    if killed.returncode not in _KILLED:
+        assert killed.returncode == 0, killed.stdout + killed.stderr
+        raise MissingDecision(f"expected a mid-commit-kill decision, got exit {killed.returncode}")
+    recovered = driver.run(twin.fast, ("install",))
+    assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+    reference = twin.invoke(twin.full, ("install",))
+    assert reference.returncode == 0, reference.stdout + reference.stderr
+    if services:
+        assert _mcp_configs(twin.full), "the full install must rewrite the service configs"
+    staging = twin.fast.project / "apm_modules" / ".apm-resolution-staging"
+    assert not staging.exists(), f"staging left behind: {sorted(staging.rglob('*'))}"
+    problems = diff(
+        comparable(twin.fast), comparable(twin.full), twin.worlds, ("recovered", "full")
+    )
+    assert not problems, f"{point}: recovery differs from a full install\n" + "\n".join(problems)
+    modes = [_modes(world) for world in twin.worlds]
+    assert modes[0] == modes[1], f"{point}: file modes differ after recovery"
