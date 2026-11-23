@@ -43,13 +43,11 @@ jobs:
       run: |
         uv sync --frozen --extra dev --quiet
         cp ../mine/scripts/perf/l5_miss.py scripts/perf/l5_miss.py
-    - name: Probe
+    - name: First no-op
       working-directory: harness
       run: |
         if [ "$RUNNER_OS" = "Windows" ]; then a=Scripts/apm.exe; else a=bin/apm; fi
-        cp ../mine/scripts/perf/l5_benchprobe.py scripts/perf/
-        cat ../mine/scripts/perf/l5_argv_hook.py >> tests/benchmarks/spawn_counter/sitecustomize.py
-        for spec in "tree-10 install-noop" "monorepo-4 install-noop" "tree-10 install-warm"; do
-          set -- $spec
-          uv run --frozen python scripts/perf/l5_benchprobe.py "$GITHUB_WORKSPACE/new/.venv/$a" "$RUNNER_TEMP/p-$1-$2" $1 $2 || true
+        cp ../mine/scripts/perf/l5_firstnoop.py scripts/perf/
+        for fx in tree-10 tree-50; do
+          uv run --frozen python scripts/perf/l5_firstnoop.py "$GITHUB_WORKSPACE/base/.venv/$a" "$GITHUB_WORKSPACE/new/.venv/$a" "$RUNNER_TEMP/fn-$fx" $fx 5
         done
