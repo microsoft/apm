@@ -496,3 +496,28 @@ def test_runtime_launch_refuses_a_project_local_runtime(
     with pytest.raises(RuntimeError, match="apm runtime setup codex"):
         ScriptRunner()._execute_runtime_command("codex exec", "prompt", dict(os.environ))
     assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+def test_runtime_listing_never_follows_a_link_out_of_the_runtime_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A managed-runtime link into a checkout is neither reported nor version-probed."""
+    from apm_cli.runtime.manager import RuntimeManager
+
+    project = tmp_path / "project"
+    project.mkdir()
+    marker = _plant_project_binary(project, "codex")
+    runtimes = tmp_path / "runtimes"
+    runtimes.mkdir()
+    (runtimes / "codex").symlink_to(project / "codex")
+    _search_cwd_first(monkeypatch, *_system_dirs())
+    monkeypatch.chdir(tmp_path)
+    manager = RuntimeManager()
+    manager.runtime_dir = runtimes
+
+    listed = manager.list_runtimes()["codex"]
+
+    assert listed["path"] is None or not Path(listed["path"]).resolve().is_relative_to(project)
+    assert manager.is_runtime_available("codex") is False
+    assert not marker.exists()
