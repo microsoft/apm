@@ -8,8 +8,8 @@ import shlex
 import subprocess
 import sys
 import tomllib
-from collections import Counter
-from collections.abc import Sequence
+from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from itertools import pairwise, product
 from pathlib import Path
@@ -1344,12 +1344,37 @@ def test_lifecycle_shards_collect_exact_required_union() -> None:
     )
 
 
-def _assert_lifecycle_shard_budget(shard_seconds: Sequence[float], timeout_minutes: int) -> None:
-    """Every balanced shard must expect to finish well inside its job timeout."""
+def _largest_serial_unit(
+    shard: Sequence[str], sources: Mapping[str, str], durations: Mapping[str, float]
+) -> float:
+    """The longest work one worker must run alone: one test or one xdist group."""
+    members = set(shard)
+    largest = 0.0
+    groups: dict[str, float] = defaultdict(float)
+    for node, seconds in durations.items():
+        module, test = ci_sharding._entry_of(node)
+        if module not in members and f"{module}::{test}" not in members:
+            continue
+        if test is not None:
+            largest = max(largest, seconds)
+        for group in set(ci_sharding._GROUP_NAME.findall(sources.get(module, ""))):
+            groups[group] += seconds
+    return max([largest, *groups.values()])
+
+
+def _assert_lifecycle_shard_budget(
+    shards: Sequence[tuple[float, float]], timeout_minutes: int
+) -> None:
+    """Every balanced shard must expect to finish well inside its job timeout.
+
+    A shard takes its serial seconds over its workers, or its longest serial
+    unit when that is longer, plus the measured job overhead.
+    """
     budget = LIFECYCLE_SMOKE_CAP_FRACTION * timeout_minutes * 60
     expected = [
-        seconds / LIFECYCLE_SMOKE_WORKERS + LIFECYCLE_SMOKE_OVERHEAD_SECONDS
-        for seconds in shard_seconds
+        ci_sharding.estimated_wall(seconds, largest, LIFECYCLE_SMOKE_WORKERS)
+        + LIFECYCLE_SMOKE_OVERHEAD_SECONDS
+        for seconds, largest in shards
     ]
     assert max(expected) <= budget, (
         f"the largest lifecycle smoke shard is expected to take {max(expected):.0f}s, over "
@@ -1359,28 +1384,45 @@ def _assert_lifecycle_shard_budget(shard_seconds: Sequence[float], timeout_minut
 
 
 def test_lifecycle_shards_fit_their_timeout() -> None:
+    roots = list(LIFECYCLE_SMOKE_ROOTS)
+    durations = ci_sharding.load_durations(REPO_ROOT / LIFECYCLE_SMOKE_DURATIONS)
+    sources = ci_sharding.select_test_modules(roots, LIFECYCLE_SMOKE_REQUIRED_EXPRESSION, REPO_ROOT)
     plan = ci_sharding.shard_test_files(
-        list(LIFECYCLE_SMOKE_ROOTS),
+        roots,
         LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
         len(LIFECYCLE_SMOKE_SHARD_JOBS),
-        ci_sharding.load_durations(REPO_ROOT / LIFECYCLE_SMOKE_DURATIONS),
+        durations,
         REPO_ROOT,
     )
-    _assert_lifecycle_shard_budget(plan.seconds, LIFECYCLE_SMOKE_TIMEOUT_MINUTES)
+    _assert_lifecycle_shard_budget(
+        [
+            (seconds, _largest_serial_unit(shard, sources, durations))
+            for shard, seconds in zip(plan.shards, plan.seconds, strict=True)
+        ],
+        LIFECYCLE_SMOKE_TIMEOUT_MINUTES,
+    )
 
 
 @pytest.mark.parametrize(
-    ("shard_seconds", "timeout_minutes"),
+    ("shards", "timeout_minutes"),
     [
-        ([2400.0, 2400.0, 2400.0, 2400.0], 15),
-        ([1600.0, 1600.0, 1600.0, 4000.0], 20),
+        ([(2400.0, 0.0)] * 4, 15),
+        ([(1600.0, 0.0)] * 3 + [(4000.0, 0.0)], 20),
+        ([(2400.0, 0.0)] * 3 + [(2400.0, 700.0)], 20),
     ],
 )
 def test_lifecycle_shard_budget_overrun_fails(
-    shard_seconds: list[float], timeout_minutes: int
+    shards: list[tuple[float, float]], timeout_minutes: int
 ) -> None:
     with pytest.raises(AssertionError):
-        _assert_lifecycle_shard_budget(shard_seconds, timeout_minutes)
+        _assert_lifecycle_shard_budget(shards, timeout_minutes)
+
+
+def test_largest_serial_unit_counts_tests_and_whole_xdist_groups() -> None:
+    sources = {"a.py": "", "b.py": 'xdist_group("home")', "c.py": 'xdist_group("home")'}
+    durations = {"a.py::test_x": 50.0, "b.py::test_y": 40.0, "c.py::test_z": 30.0, "d.py::t": 99.0}
+    assert _largest_serial_unit(["a.py"], sources, durations) == 50.0
+    assert _largest_serial_unit(["a.py", "b.py", "c.py"], sources, durations) == 70.0
 
 
 @pytest.mark.parametrize(
