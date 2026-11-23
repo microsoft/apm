@@ -29,7 +29,6 @@ so a checkout that changes after verification is never trusted.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import os
 import re
 import stat
@@ -40,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..utils.git_env import git_subprocess_env
+from ..utils.git_object_id import git_object_id, object_format
 from ..utils.git_sparse import _LINK_MODE, _TREE_MODE, _LinkResolver, _TreeEntry
 from .cached_repo import cached_repo_env, inert_git_args
 
@@ -71,16 +71,6 @@ _MANIFESTS: dict[tuple[str, str], _Manifest] = {}
 _MANIFEST_LOCK = threading.Lock()
 
 
-def _algorithm(sha: str) -> str:
-    if len(sha) not in (40, 64) or any(c not in "0123456789abcdef" for c in sha):
-        raise ValueError("not a full object id")
-    return "sha256" if len(sha) == 64 else "sha1"
-
-
-def _object_id(algorithm: str, kind: str, data: bytes) -> str:
-    return hashlib.new(algorithm, f"{kind} {len(data)}\0".encode() + data).hexdigest()
-
-
 class _Objects:
     """Read objects through one inert ``git cat-file --batch``; every object is re-hashed."""
 
@@ -107,7 +97,7 @@ class _Objects:
             raise CheckoutVerificationError(f"object {oid[:12]} is not a {kind}")
         data = process.stdout.read(int(header[2]))
         process.stdout.read(1)
-        if _object_id(self._algorithm, kind, data) != oid:
+        if git_object_id(self._algorithm, kind, data) != oid:
             raise CheckoutVerificationError(f"{kind} {oid[:12]} does not hash to its id")
         return data
 
@@ -453,7 +443,7 @@ def _accept_file(run: _Run, rel: str, path: Path, want: _Expect) -> str:
     """Return the blob id of the accepted on-disk bytes, or raise."""
     _check_mode(rel, os.lstat(path), want.executable)
     data = path.read_bytes()
-    observed = _object_id(run.algorithm, "blob", data)
+    observed = git_object_id(run.algorithm, "blob", data)
     if observed == want.oid:
         return observed
     blob = run.objects.read(want.oid, "blob")
@@ -480,7 +470,7 @@ def _verify(
     git_exe: str,
     env: dict[str, str] | None,
 ) -> _Manifest:
-    algorithm = _algorithm(sha)
+    algorithm = object_format(sha)
     objects = _Objects(git_exe, repo, env, algorithm)
     try:
         commit = objects.read(sha, "commit")
@@ -577,7 +567,7 @@ def _manifest(
 
 def _check_bytes(manifest: _Manifest, rel: str, data: bytes, info: os.stat_result) -> None:
     want = manifest.files.get(rel)
-    if want is None or _object_id(manifest.algorithm, "blob", data) != want[0]:
+    if want is None or git_object_id(manifest.algorithm, "blob", data) != want[0]:
         raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
     _check_mode(rel, info, want[1])
 
@@ -652,7 +642,7 @@ def require_verified_bytes(
     """Raise unless *data*, read from *rel* in checkout *repo*, are the bytes verification accepted."""
     manifest = _manifest(repo, sha, [scope.strip("/")] if scope.strip("/") else None, None)
     want = manifest.files.get(rel.strip("/"))
-    if want is None or _object_id(manifest.algorithm, "blob", data) != want[0]:
+    if want is None or git_object_id(manifest.algorithm, "blob", data) != want[0]:
         raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
 
 
