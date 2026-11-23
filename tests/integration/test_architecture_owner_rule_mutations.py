@@ -958,7 +958,8 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)\n",
+            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write,"
+            " journal=token)\n",
             "            pass\n",
             id="transaction-not-listening",
         ),
@@ -4724,7 +4725,7 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/install/deploy_snapshot.py",
-            "        return vouches_for_current_bytes(path, prior)",
+            "        return vouches_for_current_bytes(path, prior, journal=journal)",
             "        return True",
             id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
         ),

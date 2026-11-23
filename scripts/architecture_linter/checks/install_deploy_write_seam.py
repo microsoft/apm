@@ -90,7 +90,15 @@ _WRITE_FLAGS = re.compile(r"\bos\.O_(?:WRONLY|RDWR|CREAT|TRUNC|APPEND)\b")
 _RECORDERS = frozenset({"record_before_write", "record_before_mkdir"})
 _AFTER = "record_after_write"
 _SEAM_CONTROL = frozenset(
-    {"listen", "stop_listening", "planning", "private_scratch", _AFTER, *_RECORDERS}
+    {
+        "listen",
+        "stop_listening",
+        "active_journal",
+        "planning",
+        "private_scratch",
+        _AFTER,
+        *_RECORDERS,
+    }
 )
 # (path, function) of every caller outside the seam that records a path
 # itself (#4863), with the call that reports its finished write.
@@ -361,9 +369,9 @@ def check_deploy_write_seam(provider: FactsProvider) -> tuple[Violation, ...]:
     if failures:
         return (*found, *failures)
     transaction_text = "\n".join(_lines(transaction))
-    if "write_seam.listen(self._record_deploy_write, self._seal_deploy_write)" not in (
-        transaction_text
-    ):
+    # The journal token lets the config file records name this install (#5051).
+    listen = "write_seam.listen(self._record_deploy_write, self._seal_deploy_write, journal="
+    if listen not in transaction_text:
         found.append(
             _summary(rule_id, _TRANSACTION, "InstallTransaction must journal at the write seam")
         )

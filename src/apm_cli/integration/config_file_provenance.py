@@ -130,7 +130,9 @@ class _Store:
     # Per recorded file, the digest of the bytes it held before APM's last write
     # (``prior``), so crash recovery can prove a journal copy (#5009). Kept under a
     # top-level ``history`` map: earlier contents, not the file's current record.
-    history: dict[str, str] = field(default_factory=dict)
+    # A write inside an install's deploy journal stores ``{"prior", "journal"}``:
+    # the bytes before that install's first write and the journal's token (#5051).
+    history: dict[str, str | dict[str, str]] = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> _Store:
@@ -157,7 +159,7 @@ class _Store:
             store.history = {
                 key: prior
                 for key, prior in history.items()
-                if key in store.files and isinstance(prior, str)
+                if key in store.files and _history_entry(prior)
             }
         return store
 
@@ -321,11 +323,34 @@ def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None)
     store = _Store.load()
     key = config_file_key(path)
     store.files[key] = {"origin": origin.value, "hash": _digest(after)}
-    if before is None:
+    from apm_cli.integration.write_seam import active_journal
+
+    journal = active_journal()
+    entry = store.history.get(key)
+    if journal is not None and isinstance(entry, dict) and entry.get("journal") == journal:
+        pass  # a later write of the same install: its journal keeps the first bytes
+    elif before is None:
         store.history.pop(key, None)  # created: no earlier bytes to restore
+    elif journal is not None:
+        store.history[key] = {"prior": _digest(before), "journal": journal}
     else:
         store.history[key] = _digest(before)
     store.save()
+
+
+def _history_entry(entry: Any) -> bool:
+    if isinstance(entry, dict):
+        return set(entry) == {"prior", "journal"} and all(
+            isinstance(value, str) for value in entry.values()
+        )
+    return isinstance(entry, str)
+
+
+def _prior_digest(entry: Any, journal: str | None) -> str | None:
+    """The prior digest *entry* vouches for when replaying *journal*'s writes."""
+    if isinstance(entry, dict):
+        return entry["prior"] if journal is not None and entry["journal"] == journal else None
+    return entry
 
 
 @contextmanager
@@ -370,12 +395,15 @@ def recorded_install_write(
     return recorded_config_write(path, manifest_root=installation_root(project_root, user_scope))
 
 
-def vouches_for_current_bytes(path: str | os.PathLike[str], prior: bytes) -> bool:
+def vouches_for_current_bytes(
+    path: str | os.PathLike[str], prior: bytes, *, journal: str | None = None
+) -> bool:
     """Whether this machine's record vouches for undoing APM's last write to *path*.
 
     APM last wrote exactly the bytes *path* holds, and *prior* (the copy crash
     recovery would put back, #5009) is exactly what the file held before that
-    write. A link or other non-regular file, a missing, unreadable or
+    write, or before the first write of the install whose deploy *journal* is
+    replayed (#5051). A link or other non-regular file, a missing, unreadable or
     VCS-tracked record, a record without its ``prior`` digest, or other bytes
     never vouch.
     """
@@ -392,7 +420,7 @@ def vouches_for_current_bytes(path: str | os.PathLike[str], prior: bytes) -> boo
         current is not None
         and _origin(row) is not None
         and row.get("hash") == _digest(current)
-        and store.history.get(key) == _digest(prior)
+        and _prior_digest(store.history.get(key), journal) == _digest(prior)
         and store.local()
     )
 

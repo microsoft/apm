@@ -16,6 +16,8 @@ import json
 import os
 import sys
 import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,7 @@ from apm_cli.integration.config_file_provenance import (
     config_file_origin,
     delete_emptied_config,
     recorded_config_write,
+    vouches_for_current_bytes,
 )
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-ownership.preserve_unowned")]
@@ -586,3 +589,55 @@ def test_a_users_config_on_a_unc_path_is_never_deleted(tmp_path, apm_home) -> No
     assert config_file_origin(config) is Origin.PREEXISTING
     assert _apm_empties(config, root=config.parent) is False
     assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+# -- the first bytes of an install's deploy journal (#5051) ------------------------------
+
+
+@contextmanager
+def _journal(token: str) -> Iterator[None]:
+    """APM writes inside an install whose deploy journal is *token*."""
+    from apm_cli.integration import write_seam
+
+    def recorder(path, contents, expected=None) -> None:
+        return None
+
+    write_seam.listen(recorder, journal=token)
+    try:
+        yield
+    finally:
+        write_seam.stop_listening(recorder)
+
+
+def test_every_write_of_one_install_vouches_for_its_first_bytes(tmp_path, apm_home) -> None:
+    """Two packages rewrite one config in one install: the journal keeps the bytes the
+    install first found, and the records vouch for undoing both writes to them."""
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    first = config.read_bytes()
+    with _journal("install-1"):
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "a"))
+        middle = config.read_bytes()
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "b"))
+
+    assert vouches_for_current_bytes(config, first, journal="install-1") is True
+    assert vouches_for_current_bytes(config, middle, journal="install-1") is False
+    assert vouches_for_current_bytes(config, first, journal="another-install") is False
+    assert vouches_for_current_bytes(config, first) is False
+    assert '"b"' in config.read_text(encoding="utf-8")
+
+
+def test_the_next_install_starts_its_own_first_bytes(tmp_path, apm_home) -> None:
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    first = config.read_bytes()
+    with _journal("install-1"):
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "a"))
+    between = config.read_bytes()
+    with _journal("install-2"):
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "b"))
+
+    assert vouches_for_current_bytes(config, between, journal="install-2") is True
+    assert vouches_for_current_bytes(config, first, journal="install-2") is False
+    assert vouches_for_current_bytes(config, first, journal="install-1") is False
+    assert '"b"' in config.read_text(encoding="utf-8")

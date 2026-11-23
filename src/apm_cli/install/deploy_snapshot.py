@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import tempfile
@@ -114,6 +115,8 @@ class DeployJournal:
         # The metadata workspace (lockfile directory) whose ledger vouches for it.
         self.workspace = Path(os.path.abspath(workspace or root or store_parent))
         self.store: Path | None = None
+        # Names this journal in the config file records' first-touch digests (#5051).
+        self.token = secrets.token_hex(16)
         self._units: list[_Unit] = []
         self._recorded: dict[Path, int] = {}
         self._lock = threading.Lock()
@@ -137,6 +140,7 @@ class DeployJournal:
                     "version": _VERSION,
                     "root": str(self.root),
                     "workspace": str(self.workspace),
+                    "token": self.token,
                 }
                 self._append_line(header)
         return self.store
@@ -554,6 +558,8 @@ class _Bases:
 
     root: Path
     receipts: Path
+    # The abandoned journal's token: the config file records name it (#5051).
+    journal: str | None = None
 
 
 class _Unproven(Exception):
@@ -607,7 +613,7 @@ def _validate_unit(
         try:
             _check_vouched(rel, kind, expected, ledger)
         except _Unproven:
-            if not _shared_config_vouched(rel, path, kind, copy, events, ledger):
+            if not _shared_config_vouched(rel, path, kind, copy, events, ledger, bases.journal):
                 raise
     return _Replay(rel, path, kind, copy, expected, ancestors, prior=_state(copy))
 
@@ -630,6 +636,7 @@ def _shared_config_vouched(
     copy: Path,
     events: Mapping[str, Any] | None,
     ledger: Mapping[str, str | None],
+    journal: str | None = None,
 ) -> bool:
     """A file the ledger never claims, restorable from the config file records (#5009).
 
@@ -656,7 +663,7 @@ def _shared_config_vouched(
             prior = _read_no_follow(copy)
         except OSError:
             return False
-        return vouches_for_current_bytes(path, prior)
+        return vouches_for_current_bytes(path, prior, journal=journal)
     return True  # a later write: _decide keeps and names it, never replaces it
 
 
@@ -868,7 +875,8 @@ def _replay_store(
 ) -> ReplayOutcome:
     """Replay one abandoned store, or raise ``JournalReplayError`` after keeping it."""
     try:
-        lines, seals, commit = _parse(_read_manifest(store)[1])
+        header, body = _read_manifest(store)
+        lines, seals, commit = _parse(body)
     except ValueError as exc:
         raise JournalReplayError(_keep(store), [(str(store), str(exc))], applied=False) from None
     if commit is not None and commit == committed():
@@ -879,6 +887,8 @@ def _replay_store(
         vouched = ledger()
     except LedgerUnavailable as exc:
         raise JournalReplayError(_keep(store), [exc.issue], applied=False) from None
+    token = header.get("token")
+    bases = replace(bases, journal=token if isinstance(token, str) else None)
     units, issues = _validated(lines, seals, store, bases, vouched)
     if issues:
         raise JournalReplayError(_keep(store), issues, applied=False)

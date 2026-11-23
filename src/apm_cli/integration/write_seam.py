@@ -35,6 +35,8 @@ _ABSENT, _DIR = "absent", "dir"
 _recorder: Recorder | None = None
 # Notified after each write completes: the journal seals what APM wrote (#4863).
 _after: Callable[[Path], None] | None = None
+# The listening journal's token, so the config file records can name it (#5051).
+_journal: str | None = None
 _planning = False
 _guard = threading.Lock()
 
@@ -60,22 +62,29 @@ def planning() -> Iterator[None]:
             _planning = False
 
 
-def listen(recorder: Recorder, after: Callable[[Path], None] | None = None) -> None:
+def listen(
+    recorder: Recorder, after: Callable[[Path], None] | None = None, journal: str | None = None
+) -> None:
     """Route every deploy write through *recorder*, and each finished one through *after*.
 
-    Only InstallTransaction listens.
+    Only InstallTransaction listens; *journal* is its deploy journal's token.
     """
-    global _recorder, _after
+    global _recorder, _after, _journal
     with _guard:
-        _recorder, _after = recorder, after
+        _recorder, _after, _journal = recorder, after, journal
 
 
 def stop_listening(recorder: Recorder) -> None:
     """Stop routing deploy writes to *recorder* if it is still the listener."""
-    global _recorder, _after
+    global _recorder, _after, _journal
     with _guard:
         if _recorder == recorder:
-            _recorder, _after = None, None
+            _recorder, _after, _journal = None, None, None
+
+
+def active_journal() -> str | None:
+    """The token of the deploy journal recording writes now, or ``None``."""
+    return _journal
 
 
 @contextmanager
