@@ -321,6 +321,8 @@ def blocking_install_policy(ctx: InstallContext) -> Any:
 
 def _refuse_denied_scripts_before_fetch(ctx: InstallContext) -> None:
     """Refuse ``manifest.scripts: deny`` before resolution writes a byte (#4826)."""
+    if not getattr(ctx.apm_package, "scripts", None):
+        return
     from apm_cli.core.scope import is_user_scope, manifest_root
 
     refuse_denied_scripts(

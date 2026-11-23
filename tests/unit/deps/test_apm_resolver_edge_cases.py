@@ -302,30 +302,6 @@ class TestBuildDependencyTree:
         # max_depth=0: depth-1 items exceed 0, none should be added
         assert len(tree.nodes) == 0
 
-    def test_an_edge_to_a_node_already_at_the_limit_is_not_cut(self, tmp_path: Path) -> None:
-        """A and B direct, A -> B, max_depth 1: B is reused at depth 1, nothing is cut (#4826)."""
-        mods = tmp_path / "apm_modules"
-        mods.mkdir()
-        _write_pkg(mods / "org", "a", deps=["org/b"])
-        _write_pkg(mods / "org", "b", deps=["org/c"])
-        _write_pkg(mods / "org", "c")
-        (tmp_path / "apm.yml").write_text(
-            yaml.safe_dump(
-                {
-                    "name": "root",
-                    "version": "0.0.1",
-                    "dependencies": {"apm": ["org/a", "org/b"], "mcp": []},
-                }
-            )
-        )
-        resolver = APMDependencyResolver(apm_modules_dir=mods, max_depth=1)
-        resolver._project_root = tmp_path
-        tree = resolver.build_dependency_tree(tmp_path / "apm.yml")
-        assert {node.depth for node in tree.nodes.values()} == {1}
-        assert sorted(tree.nodes) == ["org/a", "org/b"]
-        # Only the genuinely deeper edge is cut, naming its chain.
-        assert resolver.depth_limit_chains == ["org/b -> org/c"]
-
     def test_dev_dep_added_when_not_in_prod(self, tmp_path: Path) -> None:
         mods = tmp_path / "apm_modules"
         mods.mkdir()

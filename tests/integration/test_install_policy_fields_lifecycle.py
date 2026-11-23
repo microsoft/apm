@@ -110,13 +110,13 @@ def _assert_refused(
     return text
 
 
-def _seed(world: World, *args: str, scope: str = "project") -> None:
+def _seed(world: World, *args: str, package: str = "p-child") -> None:
     """Install one compliant package under the policy first.
 
     apm.lock.yaml and its deployment ledger then exist, and the policy cache
     holds the policy, so the refused install is judged against both unchanged.
     """
-    _assert_ok(world, "install", *args, world.packages["p-child"].spec, scope=scope)
+    _assert_ok(world, "install", *args, world.packages[package].spec)
 
 
 def _add_scripts(manifest: Path) -> None:
@@ -249,11 +249,27 @@ def test_max_depth_refuses_a_graph_deeper_than_the_limit(
     use_policy(world, "max-depth-1")
 
     if offending:
-        _seed(world)
+        _seed(world, package="p-skill:git")
         text = _assert_refused(world, _DEPTH, world.packages["p-parent"].spec, keep_git_cache=True)
         assert "p-child" in text, text
     else:
         _assert_ok(world, "install", world.packages["p-skill:git"].spec)
+
+
+def test_max_depth_reuses_a_dependency_already_resolved_directly(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """p-child direct, then p-parent -> p-child under max_depth 1: p-child stays at depth 1."""
+    world = lifecycle_world
+    use_policy(world, "max-depth-1")
+    _assert_ok(world, "install", world.packages["p-child"].spec)
+
+    _assert_ok(world, "install", world.packages["p-parent"].spec)
+
+    lock = yaml.safe_load((world.project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    rows = lock["dependencies"]
+    assert sorted(row.get("depth", 1) for row in rows) == [1, 1], rows
+    _assert_ok(world, "audit", "--ci")
 
 
 def test_max_depth_judges_the_resolved_graph_not_the_old_lockfile(
