@@ -367,3 +367,32 @@ def test_an_inherited_licence_must_hold_its_verified_bytes(tmp_path: Path) -> No
     (repo / "LICENSE").write_bytes(b"Something else\n")  # after verification
     with pytest.raises(CheckoutVerificationError, match="verified bytes"):
         checked_license(repo, "pkg", sha)
+
+
+def test_a_quoted_attribute_pattern_keeps_the_other_rules(tmp_path: Path) -> None:
+    repo, sha = _attributes_repo(tmp_path, b'"pkg/a b.md" -text\npkg/*.md text eol=crlf\n')
+
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\r\n")
+    assert verify_checkout(repo, sha, env=neutral_git_env())
+
+
+def test_a_scope_that_is_itself_a_directory_link_verifies(tmp_path: Path) -> None:
+    origin, sha = build_link_origin(tmp_path)
+
+    checkout = GitCache(tmp_path / "cache").get_checkout(
+        str(origin), sha, locked_sha=sha, sparse_paths=["pkg/shared"]
+    )
+
+    shared = {k[len("shared/") :]: v for k, v in EXPECTED_PKG.items() if k.startswith("shared/")}
+    assert tree_bytes(checkout / "pkg" / "shared") == shared
+
+
+def test_ambient_git_location_variables_do_not_redirect_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    other, _ = _attributes_repo(tmp_path / "other", b"* -text\n")  # a different commit
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_OBJECT_DIRECTORY", str(other / ".git" / "objects"))
+
+    assert verify_checkout(repo, sha)

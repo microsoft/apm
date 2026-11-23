@@ -1438,15 +1438,15 @@ class GitHubPackageDownloader:
 
         temp_dir = None
         shared_bare_path: Path | None = None
-        # WS2 path resolves the SHA from the BARE so we don't pay
-        # rev-parse twice (or open the working-tree Repo unnecessarily).
-        # See design.md sec 5.5: _ws2_resolved_commit threads the SHA past
-        # the generic Repo(temp_clone_path).head.commit.hexsha block below.
+        # WS2 resolves the SHA from the bare and a persistent hit from its
+        # verified shard, so neither re-reads the working tree's mutable HEAD
+        # (design.md sec 5.5: this threads the SHA past the block below).
         _ws2_resolved_commit: str | None = None
         try:
             if _persistent_checkout is not None:
                 # WS3: persistent cache hit -- use the cached checkout directly.
                 temp_clone_path = _persistent_checkout
+                _ws2_resolved_commit = _persistent_checkout.parent.name
                 if _perf_logger is not None and getattr(_perf_logger, "verbose", False):
                     _sha_short = (
                         (ref or "")[:12] if ref and re.match(r"^[a-f0-9]{7,40}$", ref) else ""

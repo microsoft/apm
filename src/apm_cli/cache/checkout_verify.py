@@ -38,6 +38,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..utils.git_env import git_subprocess_env
 from ..utils.git_sparse import _LINK_MODE, _TREE_MODE, _LinkResolver, _TreeEntry
 from .cached_repo import cached_repo_env, inert_git_args
 
@@ -89,7 +90,7 @@ class _Objects:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=cached_repo_env(dict(os.environ if env is None else env), offline=True),
+            env=cached_repo_env(git_subprocess_env(env), offline=True),
         )
 
     def read(self, oid: str, kind: str) -> bytes:
@@ -226,6 +227,38 @@ def _attribute(token: str) -> tuple[str, object]:
     return name, (value if sep else True)
 
 
+_C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def _unquote(line: str) -> tuple[str, str] | None:
+    """Git's C-quoted pattern opening *line* and the text after it, or None if malformed."""
+    raw = line.encode("utf-8", "surrogateescape")
+    out = bytearray()
+    i = 1
+    while i < len(raw):
+        char = raw[i : i + 1]
+        if char == b'"':
+            rest = raw[i + 1 :].decode("utf-8", "replace")
+            if rest and not rest[0].isspace():
+                return None
+            return out.decode("utf-8", "replace"), rest
+        if char != b"\\":
+            out += char
+            i += 1
+            continue
+        escape = raw[i + 1 : i + 2].decode("ascii", "replace")
+        octal = raw[i + 1 : i + 4]
+        if escape in _C_ESCAPES:
+            out.append(_C_ESCAPES[escape])
+            i += 2
+        elif len(octal) == 3 and all(c in b"01234567" for c in octal) and int(octal, 8) < 256:
+            out.append(int(octal, 8))
+            i += 4
+        else:
+            return None
+    return None
+
+
 class _Attributes:
     """Attributes from the commit's own ``.gitattributes`` files only."""
 
@@ -249,9 +282,13 @@ class _Attributes:
                 if not line or line.startswith("#"):
                     continue
                 if line.startswith('"'):
-                    self._unknown.add(directory)
-                    return
-                pattern, *tokens = line.split()
+                    quoted = _unquote(line)
+                    if quoted is None:
+                        self._unknown.add(directory)
+                        return
+                    pattern, tokens = quoted[0], quoted[1].split()
+                else:
+                    pattern, *tokens = line.split()
                 if pattern.startswith("[attr]"):
                     if not directory:
                         self._macros[pattern[6:]] = tuple(_attribute(t) for t in tokens)
@@ -318,11 +355,14 @@ def _expected(
     entries: dict[str, _TreeEntry] = {}
     for directory in scope if scope is not None else ("",):
         entries.update(tree.walk(directory))
+        top = tree.entry(directory) if directory else None
+        if top is not None and top.mode == _LINK_MODE:  # expanded in place
+            entries[directory] = top
     expected: dict[str, _Expect] = {}
     if scope is not None and cone:
         for directory in _scope_dirs(scope):
             for name, entry in (tree.listing(directory) or {}).items():
-                if entry.kind == "blob":
+                if entry.kind == "blob" and _join(directory, name) not in entries:
                     path = _join(directory, name)
                     expected[path] = _Expect(entry.oid, path, entry.mode == _EXECUTABLE)
     links = [path for path, entry in entries.items() if entry.mode == _LINK_MODE]

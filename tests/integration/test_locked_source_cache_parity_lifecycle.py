@@ -134,7 +134,7 @@ def _names_failed_fetch(result: CommandResult) -> bool:
     cause = re.compile(r"fetch|does not match its commit|could not", re.IGNORECASE)
     return any(
         line.lstrip().startswith("[x]") and "test/pkg" in line and cause.search(line)
-        for line in _text(result).splitlines()
+        for line in (result.stdout + "\n" + result.stderr).splitlines()
     )
 
 
