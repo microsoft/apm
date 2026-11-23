@@ -1,7 +1,8 @@
 """Retire stale MCP claims, recording what reached disk if a retirement is refused (#4792).
 
-``run_mcp_integration`` (install/mcp/integration.py) plans each retirement as
-``(runtime, names, exclude)``; :func:`retire_mcp_claims` runs them in order.
+``run_mcp_integration`` (install/mcp/integration.py) hands over the deselected
+and stale claims; :func:`retire_mcp_claims` plans each retirement as
+``(runtime, names, exclude)`` and runs them in order.
 When the owner refuses one because the user edited a managed entry
 (``require_removable_mcp_connections`` raises ``RequiredIntegrationError``),
 :func:`record_refused_retirement` persists the claims this run wrote and every
@@ -11,7 +12,7 @@ earlier claim the run did not actually remove, then the refusal propagates.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -19,13 +20,24 @@ Retirement = tuple[str | None, builtins.set, str | None]
 
 
 def retire_mcp_claims(
-    retirements: Iterable[Retirement],
+    deselected: dict[str, builtins.set],
+    stale: tuple[builtins.set, dict[str | None, builtins.set], str | None],
     remove: Callable[[builtins.set, str | None, str | None], None],
     on_refusal: Callable[[dict[str | None, builtins.set], list[Retirement]], None],
 ) -> None:
-    """Run each planned retirement; on a refusal, report what was and was not removed."""
+    """Run each planned retirement; on a refusal, report what was and was not removed.
+
+    *deselected* maps a runtime to the claims it loses; *stale* is
+    ``(stale_servers, cleanup_owners, exclude)`` for servers no longer declared.
+    """
     from apm_cli.install.errors import RequiredIntegrationError
 
+    stale_servers, cleanup_owners, exclude = stale
+    retirements: list[Retirement] = [(target, names, None) for target, names in deselected.items()]
+    retirements += [
+        (owner, stale_servers & owned, exclude)
+        for owner, owned in sorted(cleanup_owners.items(), key=lambda item: item[0] or "")
+    ]
     planned = [(runtime, set(names), exclude) for runtime, names, exclude in retirements if names]
     removed: dict[str | None, builtins.set] = {}
     try:
@@ -78,11 +90,16 @@ def record_refused_retirement(
     for runtime, names, _exclude in planned:
         if runtime is not None and runtime in old_target_servers:
             pending.setdefault(runtime, set()).update(names & retained[runtime])
+    # A claim with no recorded declaration can never be retired, so a missing
+    # baseline never displaces the new declaration this run wrote.
     keep_baseline = {
         name
         for name in set().union(*pending.values(), set())
-        if _refused_baseline_is_ours(name, managed_target_servers, old_target_servers)
-        or old_configs.get(name) == new_configs.get(name)
+        if (name in old_configs or name not in new_configs)
+        and (
+            _refused_baseline_is_ours(name, managed_target_servers, old_target_servers)
+            or old_configs.get(name) == new_configs.get(name)
+        )
     }
     for runtime, names in pending.items():
         # The lockfile holds one declaration per server: the refused baseline

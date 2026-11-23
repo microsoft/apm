@@ -605,6 +605,42 @@ def test_a_refused_deselection_keeps_its_baseline_across_a_declaration_change(
     assert scenario.servers("codex")["notes"]["url"] == updated
 
 
+def test_a_refused_deselection_without_a_recorded_declaration_keeps_the_new_one(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """The lock claims ``notes`` on both runtimes but lost its declaration (#4792).
+
+    A missing baseline cannot vouch for the refused claude retirement, so the
+    unverifiable claude claim is dropped and the new declaration is recorded:
+    codex's entry stays retirable and a later removal retires it.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install())
+    lock_path = scenario.root / "apm.lock.yaml"
+    document = load_yaml(lock_path)
+    document["mcp_configs"].pop("notes")
+    dump_yaml(document, lock_path)
+    edited = {**scenario.servers("claude")["notes"], "url": "http://127.0.0.1:9/personal"}
+    scenario.edit("claude", "notes", edited)
+    scenario.declare([{**_http(), "targets": ["codex"]}])
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
+    assert "notes" in scenario.lock().mcp_configs
+
+    scenario.declare([])
+    _success(scenario.install())
+    assert "notes" not in scenario.servers("codex")
+    assert scenario.servers("claude")["notes"] == edited
+    assert scenario.lock().mcp_target_servers == {}
+
+
 @pytest.mark.parametrize("targets", ["claude,codex", "codex"])
 def test_a_refused_deselection_never_vouches_for_a_newly_targeted_runtime(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],

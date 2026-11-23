@@ -898,13 +898,7 @@ def run_mcp_integration(  # noqa: PLR0913
             )
 
         retire_mcp_claims(
-            [(target, names, None) for target, names in retired_by_target.items()]
-            + [
-                (owner, stale_servers.intersection(owned), exclude)
-                for owner, owned in sorted(cleanup_owners.items(), key=lambda item: item[0] or "")
-            ],
-            _remove,
-            _record_refusal,
+            retired_by_target, (stale_servers, cleanup_owners, exclude), _remove, _record_refusal
         )
 
         _keep_unhealed(healed)
