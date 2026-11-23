@@ -3621,6 +3621,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="GitCache reintroduces its own traversal and outcome authority.",
     ),
     MutationCase(
+        guard_id="transport-platform-cached-repo-git",
+        rule_id="transport-platform-cached-repo-git",
+        path="src/apm_cli/cache/git_cache.py",
+        old="if not self._bare_trusted(bare_dir):\n            raise RuntimeError(",
+        new="if False:\n            raise RuntimeError(",
+        intent="A fetch into a cached bare runs Git without the owner's trust check.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-checkout-verified",
+        rule_id="transport-platform-checkout-verified",
+        path="src/apm_cli/cache/git_cache.py",
+        old="if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):",
+        new="if True:",
+        intent="A cached checkout is returned without verifying it against its commit.",
+    ),
+    MutationCase(
         guard_id="transport-platform-clone-connect-retry",
         rule_id="transport-platform-clone-connect-retry",
         path="src/apm_cli/deps/clone_engine.py",

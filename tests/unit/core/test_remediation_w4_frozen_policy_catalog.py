@@ -77,6 +77,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "managed-paths-unresolved": _FAULT,
     "native-mcp-ownership-unrecorded": "covered by the audit --ci native-mcp-ownership "
     "check tests in tests/unit/policy/test_ci_checks.py",
+    "native-mcp-entry-edited": "executed by test_ownership_siblings::"
+    "test_audit_reports_a_hand_edited_recorded_mcp_entry",
     "kept-mcp-entries": "needs a deleted lockfile and an edited MCP entry; covered by "
     "tests/lifecycle/scenarios/test_mcp_write_receipts.py and the audit --ci kept-mcp-entries "
     "check test in tests/unit/install/test_mcp_write_receipts.py",

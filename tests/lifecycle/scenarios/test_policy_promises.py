@@ -22,6 +22,7 @@ import yaml
 
 from tests.lifecycle import driver
 from tests.lifecycle.world import use_policy
+from tests.lifecycle.world.services import REGISTRY_SERVER
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
@@ -30,6 +31,10 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.promise("P-INV-I4", "P-INV-I7"),
 ]
+
+_PRIVATE = "see private tracking"
+_SERVER = "t-transitive-srv"
+_MCP_CONFIGS = (".mcp.json", ".vscode/mcp.json", ".cursor/mcp.json")
 
 
 def _serve_policy(world, org: str, document: dict) -> None:
@@ -57,10 +62,273 @@ def _skill(factory: LocalPackageFactory, package, name: str) -> None:
 
 # A transitive MCP server reaches a project three ways: the one-run flag admits a
 # self-defined one, an approval pins it, or a plain registry server needs neither.
+PATHS = ("flag", "approved", "registry")
+_CONFIGURED_NAME = {"flag": _SERVER, "approved": _SERVER, "registry": "p-registry"}
+
+
+def _author(world, path: str) -> tuple[str, Path, str]:
+    """t-parent -> t-child; t-child declares the path's MCP server.
+
+    Returns the parent spec, the child root and the server name the policy names.
+    """
+    factory = LocalPackageFactory(world.root / "g1")
+    if path == "registry":
+        server, name = REGISTRY_SERVER, REGISTRY_SERVER
+    else:
+        server = {
+            "name": _SERVER,
+            "registry": False,
+            "transport": "stdio",
+            "command": "apm-lifecycle-inert-server",
+            "args": ["--stdio"],
+        }
+        name = _SERVER
+    child = factory.create("t-child", version="1.0.0", mcp_dependencies=[server])
+    _skill(factory, child, "t-child")
+    parent = factory.create("t-parent", version="1.0.0", dependencies=["../t-child"])
+    _skill(factory, parent, "t-parent")
+    if path != "approved":
+        _gate_off(world)
+    return str(parent.root), Path(child.root).resolve(), name
+
+
+def _gate_off(world) -> None:
+    """A project with no ``executables`` block: the default executables gate is off."""
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data.pop("executables", None)
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def _install(world, path: str, parent: str, child: Path):
+    """Reach the transitive server the path's way; return the deciding install."""
+    if path == "flag":
+        return driver.run(world, ["install", parent, "--trust-transitive-mcp"])
+    if path == "registry":
+        return driver.run(world, ["install", parent])
+    first = driver.run(world, ["install", parent])
+    assert first.returncode == 0, _text(first)
+    approve = driver.run(world, ["approve", f"local:{child}"])
+    assert approve.returncode == 0, _text(approve)
+    return driver.run(world, ["install"])
+
+
+def _install_under_policy(world, path: str, parent: str, child: Path, **mcp):
+    """Serve the trust_transitive policy, then reach the server the path's way.
+
+    An approval needs an install the policy has not yet refused, so the approved
+    path pins the server first and meets the policy on the next install.
+    """
+    if path != "approved":
+        _transitive_policy(world, path, **mcp)
+        return _install(world, path, parent, child)
+    first = driver.run(world, ["install", parent])
+    assert first.returncode == 0, _text(first)
+    approve = driver.run(world, ["approve", f"local:{child}"])
+    assert approve.returncode == 0, _text(approve)
+    _transitive_policy(world, path, **mcp)
+    return driver.run(world, ["install"])
+
+
+# An unrelated deny entry keeps the policy non-empty: a policy that only restates
+# defaults is reported "present but empty" and is not enforced at all.
+_UNRELATED_DENY = "io.github.unrelated/never-requested"
+
+
+def _transitive_policy(world, path: str, **mcp) -> None:
+    _serve_policy(
+        world,
+        f"policy-g1-{path}",
+        {
+            "name": "g1",
+            "version": "1.0",
+            "enforcement": "block",
+            "mcp": {"deny": [_UNRELATED_DENY], **mcp},
+        },
+    )
+
+
+def _configured(world, name: str) -> bool:
+    return any(
+        name in (world.project / rel).read_text(encoding="utf-8")
+        for rel in _MCP_CONFIGS
+        if (world.project / rel).is_file()
+    )
 
 
 def _text(result) -> str:
     return " ".join((result.stdout + result.stderr).split())
+
+
+# -- G1: mcp.trust_transitive (policy-schema.md, mcp section) ----------------------
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_transitive_mcp_without_org_policy_is_admitted(lifecycle_world, path) -> None:
+    """Control: a project with no org policy reaches the server as before."""
+    parent, child, _name = _author(lifecycle_world, path)
+    result = _install(lifecycle_world, path, parent, child)
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, _CONFIGURED_NAME[path]), _text(result)
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_transitive_mcp_on_the_allow_list_is_admitted(lifecycle_world, path) -> None:
+    """Control: trust_transitive false still admits a server mcp.allow names."""
+    parent, child, name = _author(lifecycle_world, path)
+    _transitive_policy(lifecycle_world, path, trust_transitive=False, allow=[name])
+    result = _install(lifecycle_world, path, parent, child)
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, _CONFIGURED_NAME[path]), _text(result)
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_trust_transitive_false_refuses_an_unlisted_transitive_server(
+    lifecycle_world, path
+) -> None:
+    """mcp.trust_transitive false: install refuses a transitive server mcp.allow does not name."""
+    parent, child, _name = _author(lifecycle_world, path)
+    result = _install_under_policy(lifecycle_world, path, parent, child, trust_transitive=False)
+    assert result.returncode == 1, _text(result)
+    assert "trust_transitive" in _text(result), _text(result)
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME[path]), _text(result)
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_trust_transitive_false_fails_audit_for_an_unlisted_transitive_server(
+    lifecycle_world, path
+) -> None:
+    """A server installed before the policy applied fails ``audit --ci`` once it does."""
+    parent, child, name = _author(lifecycle_world, path)
+    installed = _install(lifecycle_world, path, parent, child)
+    assert installed.returncode == 0, _text(installed)
+    _transitive_policy(lifecycle_world, path, trust_transitive=False)
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    assert audit.returncode == 1, _text(audit)
+    # The policy names the cause: a one-run flag install already fails audit on
+    # its own (the consumer trust check), so the server name alone proves nothing.
+    assert "trust_transitive" in _text(audit), _text(audit)
+    assert name in _text(audit), _text(audit)
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_a_transitive_server_in_both_allow_and_deny_is_refused_at_install(
+    lifecycle_world, path
+) -> None:
+    """mcp.deny wins over mcp.allow for a transitive server: install refuses before any write."""
+    parent, child, name = _author(lifecycle_world, path)
+    project = lifecycle_world.project
+    before = {
+        rel: (project / rel).read_bytes() if (project / rel).exists() else None
+        for rel in ("apm.yml", "apm.lock.yaml")
+    }
+    result = _install_under_policy(
+        lifecycle_world, path, parent, child, trust_transitive=False, allow=[name], deny=[name]
+    )
+    text = _text(result)
+    assert result.returncode == 1, text
+    assert "mcp-denylist" in text or "denied by pattern" in text, text
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME[path]), text
+    if path != "approved":
+        after = {
+            rel: (project / rel).read_bytes() if (project / rel).exists() else None
+            for rel in before
+        }
+        assert after == before, "a refused install changed apm.yml or apm.lock.yaml"
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_audit_reports_a_transitive_server_in_both_allow_and_deny(lifecycle_world, path) -> None:
+    """audit --ci fails a kept transitive server that mcp.deny names, even if mcp.allow lists it.
+
+    A one-run flag install already fails audit on the consumer trust check
+    (fail-fast), so that path asserts the failure and the server name.
+    """
+    parent, child, name = _author(lifecycle_world, path)
+    installed = _install(lifecycle_world, path, parent, child)
+    assert installed.returncode == 0, _text(installed)
+    _transitive_policy(lifecycle_world, path, trust_transitive=False, allow=[name], deny=[name])
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    text = _text(audit)
+    assert audit.returncode == 1, text
+    assert name in text, text
+    if path != "flag":
+        assert "mcp-denylist" in text, text
+
+
+def test_a_direct_dependency_server_is_not_transitive(lifecycle_world) -> None:
+    """mcp.trust_transitive judges depth > 1 only: a direct dependency's server installs."""
+    factory = LocalPackageFactory(lifecycle_world.root / "g1-direct")
+    package = factory.create("t-direct", version="1.0.0", mcp_dependencies=[REGISTRY_SERVER])
+    _skill(factory, package, "t-direct")
+    _gate_off(lifecycle_world)
+    _transitive_policy(lifecycle_world, "direct", trust_transitive=False)
+    result = driver.run(lifecycle_world, ["install", str(package.root)])
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-registry"), _text(result)
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    assert audit.returncode == 0, _text(audit)
+
+
+def test_a_root_redeclared_server_is_judged_as_a_direct_one(lifecycle_world) -> None:
+    """A root re-declaration is the project's own server: mcp.deny governs it, not 10b."""
+    parent, _child, name = _author(lifecycle_world, "registry")
+    manifest = lifecycle_world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data.setdefault("dependencies", {}).setdefault("mcp", []).append(name)
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    _transitive_policy(lifecycle_world, "redeclared", deny=[name])
+    result = driver.run(lifecycle_world, ["install", parent])
+    assert result.returncode == 1, _text(result)
+    assert "mcp-denylist" in _text(result), _text(result)
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME["registry"]), _text(result)
+
+
+def test_a_dry_run_previews_the_trust_transitive_refusal(lifecycle_world) -> None:
+    """--dry-run names the refused transitive server and writes nothing (#4455 convention)."""
+    parent, _child, name = _author(lifecycle_world, "registry")
+    _transitive_policy(lifecycle_world, "dry-run", trust_transitive=False)
+    result = driver.run(lifecycle_world, ["install", parent, "--dry-run"])
+    assert result.returncode == 0, _text(result)
+    assert f"Would be blocked by policy: {name}" in _text(result), _text(result)
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME["registry"]), _text(result)
+
+
+# Policy activation (regent ruling): an explicit ``trust_transitive: false`` counts
+# as set; a policy that states nothing keeps no enforcement; any other non-default
+# field makes the default ``false`` apply. Shown on the registry path.
+_ACTIVATION = {
+    "explicit-false-alone": {"trust_transitive": False},
+    "default-under-another-field": {"deny": [_UNRELATED_DENY]},
+}
+
+
+def _activation_policy(world, case: str, mcp: dict | None) -> None:
+    document = {"name": "g1", "version": "1.0", "enforcement": "block"}
+    if mcp is not None:
+        document["mcp"] = mcp
+    _serve_policy(world, f"policy-g1-activation-{case}", document)
+
+
+def test_a_policy_that_states_nothing_keeps_transitive_servers_admitted(lifecycle_world) -> None:
+    """Control: a minimal policy is reported present but empty and enforces nothing."""
+    parent, child, _name = _author(lifecycle_world, "registry")
+    _activation_policy(lifecycle_world, "empty", None)
+    result = _install(lifecycle_world, "registry", parent, child)
+    assert result.returncode == 0, _text(result)
+    assert "present but empty" in _text(result), _text(result)
+    assert _configured(lifecycle_world, _CONFIGURED_NAME["registry"]), _text(result)
+
+
+@pytest.mark.parametrize("case", sorted(_ACTIVATION))
+def test_an_active_policy_refuses_an_unlisted_transitive_server(lifecycle_world, case) -> None:
+    """An explicit false, or the default false under any other non-default field, refuses."""
+    parent, child, _name = _author(lifecycle_world, "registry")
+    _activation_policy(lifecycle_world, case, _ACTIVATION[case])
+    result = _install(lifecycle_world, "registry", parent, child)
+    assert result.returncode == 1, _text(result)
+    assert "trust_transitive" in _text(result), _text(result)
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME["registry"]), _text(result)
 
 
 # -- G2: manifest.content_types (policy-schema.md, manifest section) ---------------
