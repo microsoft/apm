@@ -62,9 +62,6 @@ logger = logging.getLogger(__name__)
 # Candidate repo names in precedence order (first valid policy wins); host
 # profiles select which candidates are valid for a given git host.
 _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
-# A command discovers policy several times (preflight, gate, exec trust, MCP) and
-# reuses each answer, except outcomes a retry in the same command may change.
-_RETRY_OUTCOMES = frozenset({"cached_stale", "cache_miss_fetch_fail", "incomplete_chain"})
 
 # Azure DevOps project and repository names cannot begin with ``_``.
 ADO_POLICY_PROJECT = "apm"
@@ -253,7 +250,14 @@ def policy_disabled_by_env() -> bool:
     return os.environ.get("APM_POLICY_DISABLE", "").strip() == "1"
 
 
-@memoized_per_invocation("policy-chain", keep=lambda r: r.outcome not in _RETRY_OUTCOMES)
+def _keep_policy_answer(result: PolicyFetchResult) -> bool:
+    """Reuse an answer within one command unless a retry there may change it."""
+    from .outcome_routing import RETRY_OUTCOMES
+
+    return result.outcome not in RETRY_OUTCOMES
+
+
+@memoized_per_invocation("policy-chain", keep=_keep_policy_answer)
 def discover_policy_with_chain(
     project_root: Path,
     *,

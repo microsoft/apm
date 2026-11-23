@@ -25,7 +25,7 @@ from apm_cli.core.invocation_memo import (
 )
 from apm_cli.policy.discovery import discover_policy
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-policy-outcome-routing")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-policy-outcome-routing")]
 
 _SOURCE = "contoso/.github"
 

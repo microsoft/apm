@@ -32,6 +32,10 @@ from typing import TYPE_CHECKING
 from apm_cli.core.remediation import POLICY_FETCH_FAILURE_BLOCKED
 from apm_cli.install.errors import PolicyViolationError
 
+# A command discovers policy several times (preflight, gate, exec trust, MCP) and
+# reuses each answer, except outcomes a retry in the same command may change.
+RETRY_OUTCOMES = frozenset({"cached_stale", "cache_miss_fetch_fail", "incomplete_chain"})
+
 if TYPE_CHECKING:  # pragma: no cover - type-checking only
     from apm_cli.policy.discovery import PolicyFetchResult
     from apm_cli.policy.schema import ApmPolicy
