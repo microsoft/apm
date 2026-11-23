@@ -12,7 +12,10 @@ import pytest
 from apm_cli.install import diff_apply
 from apm_cli.install.diff_apply import Decline
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-frozen-install-mutation-eligibility"),
+]
 
 _ENGINE_MODULES = ("diff_apply.py", "fast_entry.py")
 _REMOVALS = {"unlink", "rmtree", "remove", "rmdir", "removedirs", "rename", "replace_tree"}
@@ -94,23 +97,41 @@ def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     target.parent.mkdir(parents=True)
     target.write_bytes(b"edited\n")
     with pytest.raises(Decline, match="edited"):
-        diff_apply._plan_files(tmp_path, lock, tmp_path / "store", [True], {})
+        diff_apply._plan_files(tmp_path, lock, {}, None, {})
     target.write_bytes(b"locked\n")
     with pytest.raises(Decline, match="without a receipt"):
-        diff_apply._plan_files(tmp_path, lock, tmp_path / "store", [True], {})
+        diff_apply._plan_files(tmp_path, lock, {}, None, {})
 
 
 def test_partially_applied_package_declines(tmp_path: Path) -> None:
     lock = _lock(**{"o/p": {"a.md": _digest(b"a"), "b.md": _digest(b"b")}})
     files = [(tmp_path / "a.md", b"a", _digest(b"a"), "o/p")]
     with pytest.raises(Decline, match="partial"):
-        diff_apply._outcomes(lock, files, tmp_path)
+        diff_apply._outcomes(lock, files, {})
 
 
 def test_fresh_package_without_a_recorded_body_declines(tmp_path: Path) -> None:
     lock = _lock(**{"o/p": {"a.md": _digest(b"a")}})
     files = [(tmp_path / "a.md", b"a", _digest(b"a"), "o/p")]
     with pytest.raises(Decline, match="no recorded output"):
-        diff_apply._outcomes(lock, files, tmp_path)
-    untouched = diff_apply._outcomes(lock, [], tmp_path)
+        diff_apply._outcomes(lock, files, {"o/p": {"body": None}})
+    untouched = diff_apply._outcomes(lock, [], {})
     assert [o.body for o in untouched] == [("  |-- (files unchanged)",)]
+
+
+def test_lock_hashes_without_a_matching_package_record_decline() -> None:
+    """A lock edit cannot select cached bytes: the package-bound record must equal the lock."""
+    lock = _lock(**{"o/p": {"a.md": _digest(b"edited-lock")}})
+    recorded = {"v": 1, "files": {"a.md": ["0" * 64, "0" * 64]}, "ascii_only": True, "body": []}
+    deploy = SimpleNamespace(package_record=lambda *args: recorded)
+    with pytest.raises(Decline, match="no matching package record"):
+        diff_apply._package_records(lock, ["copilot"], deploy)
+
+
+def test_non_ascii_deployed_bytes_take_the_full_run(tmp_path: Path) -> None:
+    data = "zero\u200bwidth\n".encode()
+    lock = _lock(**{"o/p": {"a.md": _digest(data)}})
+    records = {"o/p": {"files": {"a.md": [_digest(data)[7:], hashlib.sha256(data).hexdigest()]}}}
+    deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: data)
+    with pytest.raises(Decline, match="non-ASCII"):
+        diff_apply._plan_files(tmp_path, lock, records, deploy, {})

@@ -42,7 +42,6 @@ _SKIP_DIRS = {"apm_modules", ".git", ".apm-local"}
 
 # Per-package integration body lines this process emitted (full run), by dependency key.
 _BODIES: dict[str, list[str]] = {}
-_BODY_DIR = "bodies"
 
 
 def package_body(package_name: str) -> list[str]:
@@ -50,20 +49,6 @@ def package_body(package_name: str) -> list[str]:
     body: list[str] = []
     _BODIES[str(package_name)] = body
     return body
-
-
-def _body_key(dep: Any, targets: list[str]) -> str:
-    from apm_cli.version import get_version
-
-    parts = [
-        get_version(),
-        str(getattr(dep, "repo_url", "")),
-        str(getattr(dep, "host", "")),
-        str(getattr(dep, "resolved_commit", "")),
-        str(getattr(dep, "content_hash", "")),
-        ",".join(sorted(targets)),
-    ]
-    return hashlib.sha256("\0".join(parts).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -185,30 +170,13 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
         if lock is None:
             return
         store = _store_root()
-        hashed: set[str] = set()
-        for dep in lock.dependencies.values():
-            for rel, digest in (getattr(dep, "deployed_file_hashes", None) or {}).items():
-                hashed.add(rel)
-                path = project_root / rel
-                if path.is_file() and not path.is_symlink():
-                    data = path.read_bytes()
-                    if _sha256(data) == digest:
-                        _store_put(store, data)
+        hashed = {
+            rel
+            for dep in lock.dependencies.values()
+            for rel in (getattr(dep, "deployed_file_hashes", None) or {})
+        }
         if before is None:
             return
-        targets = list(getattr(lock, "manifest_targets", None) or [])
-        for key, dep in lock.dependencies.items():
-            body = _BODIES.get(key)
-            files = getattr(dep, "deployed_file_hashes", None) or {}
-            # Only a package deployed fresh this run (none of its files existed) records its body.
-            if body is None or not files or any(rel in before for rel in files):
-                continue
-            path = store / _BODY_DIR / f"{_body_key(dep, targets)}.json"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".body.")
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(body, handle)
-            os.replace(tmp, path)
         after = _snapshot(project_root)
         extras = []
         for rel, digest in sorted(after.items()):
@@ -229,12 +197,11 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
         _trace(f"harvest skipped ({type(exc).__name__})")
 
 
-def _outcomes(lock: Any, files: list, store: Path) -> list[PackageOutcome]:
+def _outcomes(lock: Any, files: list, records: dict[str, dict]) -> list[PackageOutcome]:
     """Per dependency: all of its files written (replay its recorded body), none, or decline."""
     written: dict[str, int] = {}
     for _path, _data, _digest, owner in files:
         written[owner] = written.get(owner, 0) + 1
-    targets = list(getattr(lock, "manifest_targets", None) or [])
     out: list[PackageOutcome] = []
     for key, dep in lock.dependencies.items():
         total = len(getattr(dep, "deployed_file_hashes", None) or {})
@@ -244,12 +211,7 @@ def _outcomes(lock: Any, files: list, store: Path) -> list[PackageOutcome]:
             continue
         if count != total:
             raise Decline("partial package diff")
-        try:
-            body = json.loads(
-                (store / _BODY_DIR / f"{_body_key(dep, targets)}.json").read_text("utf-8")
-            )
-        except (OSError, ValueError):
-            raise Decline("no recorded output") from None
+        body = records.get(key, {}).get("body")
         if not isinstance(body, list) or not all(isinstance(line, str) for line in body):
             raise Decline("no recorded output")
         out.append(PackageOutcome(key, dep, True, tuple(body)))
@@ -273,9 +235,34 @@ def _within(root: Path, rel: str) -> Path:
     return path
 
 
+def _package_records(lock: Any, targets: Any, deploy: Any) -> dict[str, dict]:
+    """Each dependency's package-bound render record; it must equal the lock's hashes."""
+    from apm_cli.cache.deploy_store import record_matches
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.version import get_version
+
+    records: dict[str, dict] = {}
+    for key, dep in lock.dependencies.items():
+        record = deploy.package_record(
+            dep.repo_url,
+            dep.resolved_commit,
+            dep.content_hash,
+            targets,
+            get_version(),
+            InstallScope.PROJECT,
+        )
+        if not record_matches(record, getattr(dep, "deployed_file_hashes", None) or {}):
+            raise Decline("no matching package record")
+        records[key] = record
+    return records
+
+
 def _plan_files(
-    project_root: Path, lock: Any, store: Path, ascii_ok: list[bool], receipts: dict[str, str]
+    project_root: Path, lock: Any, records: dict[str, dict], deploy: Any, receipts: dict[str, str]
 ) -> list[tuple[Path, bytes, str, str]]:
+    """Missing deployed files with their exact recorded bytes; present ones must be untouched."""
+    from apm_cli.utils.content_hash import canonical_digest
+
     writes: list[tuple[Path, bytes, str, str]] = []
     for owner, dep in lock.dependencies.items():
         for rel, digest in (getattr(dep, "deployed_file_hashes", None) or {}).items():
@@ -284,15 +271,19 @@ def _plan_files(
                 raise Decline("symlinked deployed file")
             if path.exists():
                 data = path.read_bytes() if path.is_file() else b""
-                if not path.is_file() or _sha256(data) != digest:
+                if not path.is_file() or f"sha256:{canonical_digest(data)}" != digest:
                     raise Decline("edited deployed file")
                 if receipts.get(path.resolve().as_posix()) != digest:
                     raise Decline("deployed file without a receipt")
-                ascii_ok[0] = ascii_ok[0] and data.isascii()
-                continue
-            data = _store_get(store, digest)
-            ascii_ok[0] = ascii_ok[0] and data.isascii()
-            writes.append((path, data, digest, owner))
+            else:
+                hexd, raw = records[owner]["files"][rel]
+                data = deploy.get(hexd, raw_sha256=raw)
+                if data is None:
+                    raise Decline("store miss")
+                writes.append((path, data, digest, owner))
+            if not data.isascii():
+                # The content scanner flags only non-ASCII codepoints: such bytes take the full run.
+                raise Decline("non-ASCII deployed content")
     return writes
 
 
@@ -442,18 +433,21 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         _root, user_scope, targets = resolve_audit_scope(project_root, lock)
         if user_scope or not targets:
             raise Decline("scope")
+        from apm_cli.cache.deploy_store import DeployStore
+
         session = DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)
+        deploy = DeployStore.open_default()
+        if deploy is None:
+            raise Decline("no deploy store")
         store = _store_root()
         packages = _plan_packages(project_root, lock)
-        ascii_ok = [True]
         receipts = session.receipt_hashes()
         _refuse_orphans(project_root, lock, receipts)
-        files = _plan_files(project_root, lock, store, ascii_ok, receipts)
-        outcomes = _outcomes(lock, files, store)
+        records = _package_records(lock, targets, deploy)
+        files = _plan_files(project_root, lock, records, deploy, receipts)
+        outcomes = _outcomes(lock, files, records)
         extras = _plan_extras(project_root, lock_path.read_text(encoding="utf-8"), store)
-        ascii_ok[0] = ascii_ok[0] and all(data.isascii() for _p, data in extras)
-        if not ascii_ok[0]:
-            # The content scanner flags only non-ASCII codepoints: any such byte takes the full run.
+        if not all(data.isascii() for _p, data in extras):
             raise Decline("non-ASCII deployed content")
         for checkout, install_path, sha in packages:
             _copy_package(checkout, install_path, sha)
