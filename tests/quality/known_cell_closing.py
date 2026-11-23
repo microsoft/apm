@@ -3,9 +3,10 @@
 When a PR closes ("Fixes #N") an issue that a strict known cell still cites,
 the next snapshot refresh records the issue as closed and every later PR goes
 red on ``test_known_cells_cite_open_issues.py``. This gate fails the closing PR
-itself instead. CI pipes the PR body in:
+itself instead. CI passes the PR body and the PR's commit messages (a merge
+commit lands them on main, where their closing keywords close issues too):
 
-    python -m tests.quality.known_cell_closing [BODY_FILE]   # stdin without a file
+    python -m tests.quality.known_cell_closing [FILE ...]   # stdin without a file
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ import re
 import sys
 from pathlib import Path
 
+from markdown_it import MarkdownIt
+
 from tests.quality.known_cell_issues import REPO, known_cells
 
 # GitHub's closing keywords, then "#N" or "<owner>/<repo>#N"; one issue per keyword.
@@ -21,13 +24,26 @@ _CLOSING = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:(?P<repo>[\w.-]+/[\w.-]+))?#(?P<n>\d+)\b",
     re.IGNORECASE,
 )
-# Markdown GitHub does not render as text: no issue reference is linked there.
-_UNRENDERED = re.compile(r"<!--.*?-->|```.*?```|`[^`\n]*`", re.DOTALL)
+_BREAKS = {"softbreak": "\n", "hardbreak": "\n"}
+
+
+def _prose(markdown: str) -> str:
+    """The rendered text of *markdown*: code spans, code blocks and HTML link no issue."""
+    lines = []
+    for token in MarkdownIt("commonmark").parse(markdown):
+        if token.type == "inline":
+            children = token.children or ()
+            lines.append(
+                "".join(
+                    _BREAKS.get(c.type, c.content if c.type == "text" else "") for c in children
+                )
+            )
+    return "\n".join(lines)
 
 
 def closed_issues(body: str) -> set[int]:
-    """Issue numbers of ``REPO`` the PR body closes through a closing keyword."""
-    text = _UNRENDERED.sub(" ", body)
+    """Issue numbers of ``REPO`` that *body* closes through a closing keyword."""
+    text = _prose(body)
     return {
         int(match["n"])
         for match in _CLOSING.finditer(text)
@@ -45,8 +61,8 @@ def cells_closed_by(closed: set[int], cells: dict[str, str]) -> dict[str, str]:
 
 
 def main(argv: list[str]) -> int:
-    body = Path(argv[0]).read_text(encoding="utf-8") if argv else sys.stdin.read()
-    closed = closed_issues(body)
+    texts = [Path(arg).read_text(encoding="utf-8") for arg in argv] or [sys.stdin.read()]
+    closed = set().union(*map(closed_issues, texts))
     offenders = cells_closed_by(closed, known_cells()) if closed else {}
     if not offenders:
         print(f"[+] H4: no strict known cell cites an issue this PR closes {sorted(closed)}")

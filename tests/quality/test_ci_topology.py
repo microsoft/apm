@@ -3532,14 +3532,28 @@ def _run_train_gate(step: WorkflowNode, tmp_path: Path, env: dict[str, str]) -> 
 
 
 def _assert_h4_step(step: WorkflowNode) -> None:
-    """Rule H4 runs on every pull request and reads the PR body only through env."""
+    """Rule H4 runs on every pull request over the body (env only) and the PR's commits."""
     assert step["name"] == "Known cells cite no issue this PR closes"
     assert step["if"] == "github.event_name == 'pull_request'"
     assert "continue-on-error" not in step
-    assert step["env"] == {"PR_BODY": "${{ github.event.pull_request.body }}"}
+    assert step["env"] == {
+        "PR_BODY": "${{ github.event.pull_request.body }}",
+        "BASE_REF": "${{ github.event.pull_request.base.ref }}",
+        "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+    }
     assert "${{" not in step["run"], "the PR body must never be inlined in run"
     assert shell_commands(step) == [
         ["printf", "%s", "$PR_BODY", ">", "$RUNNER_TEMP/pr-body.md"],
+        [
+            "git",
+            "fetch",
+            "--no-tags",
+            "--quiet",
+            "--shallow-exclude=$BASE_REF",
+            "origin",
+            "$HEAD_SHA",
+        ],
+        ["git", "log", "--format=%B", "$HEAD_SHA", ">", "$RUNNER_TEMP/pr-commits.txt"],
         [
             "uv",
             "run",
@@ -3550,6 +3564,7 @@ def _assert_h4_step(step: WorkflowNode) -> None:
             "-m",
             "tests.quality.known_cell_closing",
             "$RUNNER_TEMP/pr-body.md",
+            "$RUNNER_TEMP/pr-commits.txt",
         ],
     ]
 

@@ -30,6 +30,8 @@ _CELLS = {
         ("Refs #4703; see #4742; related to #1", set()),
         ("Fixes other/repo#4703; hotfix #4742; prefixes #3", set()),
         ("<!-- Fixes #4703 -->\n```\nfixes #4742\n```\n`closes #1`", set()),
+        ("``closes #1 ` x``\n\n~~~~\nfixes #2\n~~~~\n\n    resolves #3\n", set()),
+        ("**Fixes** #4 and [fixes #5](https://example.com)", {4, 5}),
         ("Issue: Fixes #N | Refs #N", set()),
     ],
 )
@@ -62,6 +64,18 @@ def test_pr_closing_an_uncited_issue_passes(tmp_path, monkeypatch, capsys) -> No
     code, out = _run("Fixes #99\nRefs #4703", tmp_path, monkeypatch, capsys)
     assert code == 0
     assert out.startswith("[+] H4")
+
+
+def test_commit_message_closing_a_cited_issue_fails_despite_refs_body(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(known_cell_closing, "known_cells", lambda: dict(_CELLS))
+    body = tmp_path / "body.md"
+    body.write_text("Refs #4703", encoding="utf-8")
+    commits = tmp_path / "commits.txt"
+    commits.write_text("fix: route files\n\nFixes #4703\n", encoding="utf-8")
+    assert known_cell_closing.main([str(body), str(commits)]) == 1
+    assert "machine:install.fresh -> #4703" in capsys.readouterr().out
 
 
 def test_gate_reads_the_body_from_stdin(monkeypatch, capsys) -> None:
