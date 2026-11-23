@@ -7,6 +7,7 @@ Ubuntu spec shards would only skip it.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -56,3 +57,38 @@ def test_consent_reads_case_variant_spellings_as_one_file(tmp_path: Path) -> Non
     )
 
     assert path.exists() and result.deleted == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_case_variant_cowork_spellings_as_one_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under an external Cowork root a conflicting hash under ``Alpha`` blocks ``alpha`` (#4815)."""
+    cowork = tmp_path / "cowork-skills"
+    path = cowork / "alpha" / "notes.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# Notes\n", encoding="utf-8")
+    variant = cowork / "Alpha" / "notes.md"
+    if not variant.exists():
+        # A case-sensitive filesystem: a hard link makes both spellings one file.
+        variant.parent.mkdir()
+        try:
+            os.link(path, variant)
+        except OSError:
+            pytest.skip("hard links are unavailable")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+    claim = "cowork://skills/alpha/notes.md"
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path / "project",
+        receipts={},
+        render=lambda _owner: None,
+        kept=(),
+        recorded_hashes={
+            claim: frozenset({compute_file_hash(path)}),
+            "cowork://skills/Alpha/notes.md": frozenset({_OTHER}),
+        },
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    assert evidence.lockfile_consentable(claim, path) is False
+    assert evidence.refusals([claim])
