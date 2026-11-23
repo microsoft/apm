@@ -166,7 +166,7 @@ def test_unix_installer_env_keeps_psmodulepath(monkeypatch):
     monkeypatch.setattr(
         self_update,
         "external_process_env",
-        lambda: {"PSModulePath": "/opt/microsoft/powershell/7/Modules"},
+        lambda: {"PSModulePath": "/opt/microsoft/powershell/7/Modules", "PATH": _SYSTEM_DIR},
     )
 
     env = self_update._build_self_update_installer_env(
