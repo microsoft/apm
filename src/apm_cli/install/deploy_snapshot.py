@@ -43,10 +43,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
 from apm_cli.install.journal_modes import (
-    apply_mode,
+    apply_entry_modes,
+    apply_own_mode,
     recorded_mode,
     stage_private,
     verified_mode,
+    with_recorded_mode,
 )
 from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
@@ -620,7 +622,7 @@ def _validate_unit(
     mode = verified_mode(line.get("mode"), kind, copy)
     if mode is None:
         raise _Unproven(rel, "the journal does not record a verifiable mode")
-    prior = {**_state(copy), "mode": mode} if kind == "file" else _state(copy)
+    prior = with_recorded_mode(_state(copy), mode)
     return _Replay(rel, path, kind, copy, expected, ancestors, prior=prior, mode=mode)
 
 
@@ -723,10 +725,11 @@ def _apply(unit: _Replay) -> None:
         written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
         if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
-        apply_mode(staged, unit.mode)
+        apply_entry_modes(staged, unit.mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)
+        apply_own_mode(path, unit.mode)
     finally:
         robust_rmtree(staged.parent)
 

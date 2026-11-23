@@ -72,10 +72,34 @@ def stage_private(copy: Path, staged: Path, kind: str, read: Any) -> None:
             _write_private(target, read(entry))
 
 
-def apply_mode(staged: Path, mode: int | dict[str, int]) -> None:
-    """Give *staged* its verified recorded mode, deepest entries first."""
+def apply_entry_modes(staged: Path, mode: int | dict[str, int]) -> None:
+    """Give *staged* its verified recorded mode, deepest entries first.
+
+    A directory's own mode is applied by :func:`apply_own_mode` once it is in
+    place: a read-only directory cannot be renamed into another directory.
+    """
     if isinstance(mode, int):
         os.chmod(staged, mode)
         return
-    for rel in sorted(mode, key=lambda name: name.count("/") + bool(name), reverse=True):
-        os.chmod(staged / rel if rel else staged, mode[rel])
+    for rel in sorted((rel for rel in mode if rel), key=lambda n: n.count("/"), reverse=True):
+        os.chmod(staged / rel, mode[rel])
+
+
+def apply_own_mode(path: Path, mode: int | dict[str, int]) -> None:
+    if isinstance(mode, dict):
+        os.chmod(path, mode[""])
+
+
+def with_recorded_mode(state: dict[str, Any], mode: int | dict[str, int]) -> dict[str, Any]:
+    """*state* (read from the copy) with the recorded mode in place of the copy's bits.
+
+    Replay's keep-or-restore decision compares the path against this prior
+    state, so it never trusts a copy's mode bits either.
+    """
+    if isinstance(mode, int):
+        return {**state, "mode": mode}
+    entries = {
+        rel: f"{fingerprint.rsplit(':', 1)[0]}:{mode[rel]}" if rel in mode else fingerprint
+        for rel, fingerprint in state.get("dir", {}).items()
+    }
+    return {**state, "dir": entries, "mode": mode[""]}

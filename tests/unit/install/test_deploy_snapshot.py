@@ -1304,3 +1304,55 @@ def test_a_unit_without_a_verifiable_mode_is_kept_and_reported(
 
     assert kept.value.issues == [(".mcp.json", "the journal does not record a verifiable mode")]
     assert config.read_bytes() == b"killed\n"
+
+
+def _killed_skill(apm_home: Path, project: Path, mode: int):
+    """A skill directory with mode *mode*, journaled, then written by a killed install."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    skill = project / ".kiro" / "skills" / "s"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"prior\n")
+    (skill / "SKILL.md").chmod(0o600)
+    ledger = {".kiro/skills/s/SKILL.md": compute_file_hash(skill / "SKILL.md")}
+    skill.chmod(mode)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    skill.chmod(0o750)
+    (skill / "SKILL.md").write_bytes(b"killed\n")
+    journal.after_write(skill / "SKILL.md")
+    journal.after_write(skill)
+    assert journal.store is not None
+    return skill, ledger, journal.store
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_users_mode_change_after_the_kill_is_kept_whatever_the_copy_says(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The keep-or-restore decision compares against the recorded mode, never the copy's:
+    a copy whose mode matches the user's post-kill change does not make it APM's."""
+    skill, ledger, store = _killed_skill(apm_home, tmp_path / "project", 0o750)
+    skill.chmod(0o700)  # the user's own change after the kill
+    (store / "0").chmod(0o700)  # the copy now claims that mode
+
+    restored = _replay(apm_home, tmp_path / "project", lambda: ledger)
+
+    assert restored.kept == ((".kiro/skills/s", "it changed after the interrupted install"),)
+    assert skill.stat().st_mode & 0o7777 == 0o700
+    assert (skill / "SKILL.md").read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_read_only_directory_is_restored_with_its_recorded_mode(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o555)
+
+    restored = _replay(apm_home, tmp_path / "project", lambda: ledger)
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert (skill / "SKILL.md").read_bytes() == b"prior\n"
+    assert skill.stat().st_mode & 0o7777 == 0o555
+    skill.chmod(0o755)  # let pytest clean up
