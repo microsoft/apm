@@ -203,6 +203,103 @@ def test_extract_tar_gz_rejects_decompression_bomb(
         _extract_tar_gz(archive, str(tmp_path / "out"))
 
 
+# -- Tar metadata headers are bounded before tarfile reads them (#4973) ---------
+# tarfile reads a pax or GNU long-name header into memory at the size the header
+# declares, before APM sees a member. A crafted header declares far more than
+# it carries; the refusal must come before that allocation.
+
+_DECLARED_HEADER_BYTES = 128 * 1024 * 1024
+_HEADER_TYPES = {
+    "pax": tarfile.XHDTYPE,
+    "pax-global": tarfile.XGLTYPE,
+    "gnu-longname": tarfile.GNUTYPE_LONGNAME,
+    "gnu-longlink": tarfile.GNUTYPE_LONGLINK,
+}
+
+
+def _oversized_header_tar_gz(kind: str) -> bytes:
+    import gzip
+
+    info = tarfile.TarInfo("././@Header")
+    info.type = _HEADER_TYPES[kind]
+    info.size = _DECLARED_HEADER_BYTES
+    raw = info.tobuf(format=tarfile.USTAR_FORMAT) + b"x" * 512
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+        gz.write(raw)
+    return buf.getvalue()
+
+
+def _peak_while(action) -> tuple[BaseException | None, int]:
+    import tracemalloc
+
+    tracemalloc.start()
+    try:
+        action()
+        error = None
+    except BaseException as exc:
+        error = exc
+    finally:
+        _current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    return error, peak
+
+
+@pytest.mark.parametrize("kind", sorted(_HEADER_TYPES))
+def test_oversized_tar_header_is_refused_before_it_is_read(tmp_path: Path, kind: str) -> None:
+    data = _oversized_header_tar_gz(kind)
+
+    error, peak = _peak_while(lambda: _extract_tar_gz(data, str(tmp_path / "out")))
+
+    assert isinstance(error, ArchiveError), error
+    assert "header exceeds" in str(error)
+    assert peak < 32 * 1024 * 1024
+    assert not (tmp_path / "out").exists()
+
+
+def test_oversized_tar_header_is_refused_for_a_tar_gz_file(tmp_path: Path) -> None:
+    archive = tmp_path / "bundle.tar.gz"
+    archive.write_bytes(_oversized_header_tar_gz("pax"))
+
+    error, peak = _peak_while(
+        lambda: archive_mod._extract_tar_gz_file(archive, str(tmp_path / "out"))
+    )
+
+    assert isinstance(error, ArchiveError), error
+    assert "header exceeds" in str(error)
+    assert peak < 32 * 1024 * 1024
+
+
+def test_oversized_tar_header_is_refused_for_a_registry_tarball(tmp_path: Path) -> None:
+    import hashlib
+
+    from apm_cli.deps.registry.extractor import UnsafeTarballError, extract_tarball
+
+    data = _oversized_header_tar_gz("gnu-longname")
+    digest = hashlib.sha256(data).hexdigest()
+
+    error, peak = _peak_while(lambda: extract_tarball(data, digest, tmp_path / "out"))
+
+    assert isinstance(error, UnsafeTarballError), error
+    assert "header exceeds" in str(error)
+    assert peak < 32 * 1024 * 1024
+
+
+def test_tar_header_just_under_the_limit_extracts(tmp_path: Path) -> None:
+    limit = getattr(archive_mod, "_MAX_TAR_HEADER_BYTES", 1024 * 1024)
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.PAX_FORMAT) as tf:
+        info = tarfile.TarInfo("plugin/SKILL.md")
+        info.size = 7
+        info.pax_headers = {"comment": "c" * (limit - 64)}
+        tf.addfile(info, io.BytesIO(b"content"))
+
+    extracted = _extract_tar_gz(buf.getvalue(), str(tmp_path / "out"))
+
+    assert extracted == ["plugin/SKILL.md"]
+    assert (tmp_path / "out" / "plugin" / "SKILL.md").read_bytes() == b"content"
+
+
 def test_extract_zip_writes_safe_members(tmp_path: Path) -> None:
     archive = _zip_bytes({"plugin/SKILL.md": b"content"})
     out = tmp_path / "out"
