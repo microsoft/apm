@@ -35,21 +35,23 @@ def _git_files(root: Path, system: str) -> list[Path]:
         gitdir = cwd / env["GIT_DIR"]
         common = cwd / env["GIT_COMMON_DIR"] if env.get("GIT_COMMON_DIR") else gitdir
         files += [gitdir / "config", gitdir / "config.worktree", common / "config"]
+        files += [gitdir / "HEAD", gitdir / "commondir"]
     else:
         for base in (root, *root.parents):
             dot = base / ".git"
             if dot.is_dir():
-                files += [dot / "config", dot / "config.worktree"]
+                # HEAD names the branch an integration records (copilot_app_project).
+                files += [dot / "config", dot / "config.worktree", dot / "HEAD", dot / "commondir"]
                 break
             if dot.is_file():
                 text = dot.read_text(encoding="utf-8", errors="replace").strip()
                 if not text.startswith("gitdir:"):
                     break
                 gitdir = (base / text[len("gitdir:") :].strip()).resolve()
-                files += [dot, gitdir / "config", gitdir / "config.worktree"]
+                files += [dot, gitdir / "config", gitdir / "config.worktree", gitdir / "HEAD"]
                 common = gitdir / "commondir"
+                files.append(common)
                 if common.is_file():
-                    files.append(common)
                     files.append((gitdir / common.read_text(encoding="utf-8").strip()) / "config")
                 break
     if env.get("GIT_COMMON_DIR"):
@@ -178,6 +180,8 @@ def _git_config_bytes(digest: _Digest, root: Path, git_system: str) -> None:
         # Discovery also takes a bare repository (its HEAD) in each directory it walks.
         digest.put(f"git-head:{base}", _kind(str(base / "HEAD")))
         if os.path.lexists(base / ".git"):
+            for name in ("objects", "refs"):  # GitPython's repository test
+                digest.put(f"git-dir:{base}/{name}", _kind(str(base / ".git" / name)))
             break
     queue, seen = list(_git_files(root, git_system)), set()
     while queue:

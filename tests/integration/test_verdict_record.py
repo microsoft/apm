@@ -974,3 +974,31 @@ def test_every_input_the_read_set_audit_found_misses(project: Path, capsys, chan
 
     assert verdict_record.replay(["install"]) is False
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_a_branch_switch_after_the_record_misses(project: Path, capsys) -> None:
+    """The Copilot App integration records the project's branch name (from HEAD)."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is True
+    (project / ".git" / "HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_a_linked_worktree_is_never_recorded(project: Path) -> None:
+    """.git is a file naming the gitdir: the record fails closed (no record, so no hit),
+    whatever that gitdir's HEAD says."""
+    gitdir = project.parent / "gitdir"
+    gitdir.mkdir()
+    (gitdir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (project / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    _record()
+
+    assert not (_home(project) / "verdicts").exists()
