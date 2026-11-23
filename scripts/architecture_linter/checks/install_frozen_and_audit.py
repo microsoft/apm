@@ -712,6 +712,12 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "heal_retired_project_mcp_destinations",
             "delete_emptied_config",
         ),
+        # Crash recovery restores a shared config only on the owner's baseline (#5009).
+        (
+            "src/apm_cli/install/deploy_snapshot.py",
+            "_shared_config_vouched",
+            "vouches_for_current_bytes",
+        ),
     ):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)

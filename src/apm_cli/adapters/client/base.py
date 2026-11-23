@@ -711,7 +711,7 @@ class MCPClientAdapter(ABC):
         if not project and config_path.is_file():
             os.chmod(config_path, 0o600)  # tighten first: the atomic write keeps the mode
         mode = umask_file_mode(config_path) if project else 0o600
-        # An emptied config file is deleted later only if this records APM created it.
+        # The config file record (#4867) lands before the journal seals the write (#5009).
         with recorded_install_write(config_path, self.project_root, self.user_scope):
             write_json_config(
                 config_path, config, default_trailing_newline=trailing_newline, new_file_mode=mode

@@ -1021,6 +1021,36 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "(_install_lb)(",
             id="bundle-entry-unjournaled",
         ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "            write_seam.unlink(path)  # journaled like the deploy (#5130)\n",
+            "            path.unlink()\n",
+            id="bundle-canvas-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "                write_seam.unlink(hook_file)  # journaled like the deploy (#5130)\n",
+            "                hook_file.unlink()\n",
+            id="bundle-hook-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "                write_seam.unlink(path)\n                removed.setdefault(",
+            "                path.unlink()\n                removed.setdefault(",
+            id="bundle-script-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_pending.py",
+            "        write_seam.unlink(path, missing_ok=True)  # journaled like its write (#5130)\n",
+            "        path.unlink(missing_ok=True)\n",
+            id="bundle-pending-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "def _retire(\n",
+            "def _drop(path: Path) -> None:\n    path.unlink()\n\n\ndef _retire(\n",
+            id="bundle-retire-new-helper-raw-unlink",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
@@ -1060,6 +1090,47 @@ def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
     assert report.failures == ()
     assert {violation.rule_id for violation in report.violations} == {rule_id}
     assert {violation.path for violation in report.violations} == {path}
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "        if not install_path.is_dir() or local_source_matches_copy(\n",
+            "        if not install_path.is_dir() or current == compute_local_package_hash(\n",
+            id="survivor-refresh-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/local_reanchor.py",
+            "            and local_source_matches_copy(row, source, copy)\n",
+            "            and compute_local_package_hash(source, framed=True)\n",
+            id="reanchor-fresh-copy-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/local_reanchor.py",
+            "            if copy.is_dir() and not local_source_matches_copy(row, source, copy):\n",
+            "            if copy.is_dir() and not compute_local_package_hash(source, framed=True):\n",
+            id="reanchor-refresh-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/local_content.py",
+            "            _normalize_legacy_local_plugin_for_replay(lock_dep, image)\n",
+            "            pass\n",
+            id="source-compare-skips-normalization",
+        ),
+    ],
+)
+def test_local_source_compare_cannot_bypass_the_normalizing_owner(
+    path: str, old: str, new: str
+) -> None:
+    """#5049: uninstall judges a local source against its copy through one normalizing owner."""
+    rule_id = "install-deployment-single-file-materialization"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 @pytest.mark.parametrize(
@@ -3352,6 +3423,30 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A registry update download skips the locked-hash check for an unchanged version.",
     ),
     MutationCase(
+        guard_id="marketplace-catalog-origin-fetch-pin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/client.py",
+        old="        bound = require_origin_pin(source)",
+        new='        bound = source.ref or ""',
+        intent="A catalog is fetched at a ref the origin does not publish.",
+    ),
+    MutationCase(
+        guard_id="marketplace-catalog-origin-pin-tips",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/catalog_ref_pins.py",
+        old="        tips = origin_ref_tips(source)",
+        new="        tips = {}",
+        intent="A commit pin is accepted without the origin's branch and tag tips.",
+    ),
+    MutationCase(
+        guard_id="marketplace-catalog-origin-registration-pin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/registration.py",
+        old="                check_catalog_ref(explicit)",
+        new="                pass",
+        intent="A registration accepts a catalog ref outside the origin's branches and tags.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
         rule_id="marketplace-integrations-agent-plugin-contract",
         path="src/apm_cli/agent_plugins/ir.py",
@@ -3920,7 +4015,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-cached-repo-git",
         rule_id="transport-platform-cached-repo-git",
         path="src/apm_cli/cache/git_cache.py",
-        old="if not self._bare_trusted(bare_dir):\n            raise RuntimeError(",
+        old="if not self._bare_trusted(bare_dir, url=url, env=env):\n            raise RuntimeError(",
         new="if False:\n            raise RuntimeError(",
         intent="A fetch into a cached bare runs Git without the owner's trust check.",
     ),
@@ -5326,6 +5421,13 @@ def test_owner_rules_report_nothing_before_mutation(
             "if delete_emptied_config(path, root=project_root, empty=emptied):",
             "if emptied and not path.unlink():",
             id="retired-heal-deletes-an-emptied-file-without-provenance-4867",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/install/deploy_snapshot.py",
+            "        return vouches_for_current_bytes(path, prior)",
+            "        return True",
+            id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
         ),
         pytest.param(
             "install-deployment-outcome",

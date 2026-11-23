@@ -1,19 +1,39 @@
 """Integration tests for version update notification in CLI."""
 
-import os  # noqa: F401
+import os
+import shutil
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import click
 from click.testing import CliRunner
+
+# One HOME is shared by every test in a process or xdist worker (tests/conftest.py).
+_WORKER_HOME = Path.home()
+
+
+def _stamp_path(home: Path) -> Path:
+    """The daily-check stamp under *home*, as version_checker.get_update_cache_path lays it out."""
+    cache = ("AppData", "Local", "apm", "cache") if sys.platform == "win32" else (".cache", "apm")
+    return home.joinpath(*cache, "last_version_check")
 
 
 class TestVersionNotificationIntegration(unittest.TestCase):
     """Test version check notification in CLI commands."""
 
     def setUp(self):
-        """Set up test fixtures."""
+        """Give each test its own HOME, so no daily-check stamp leaks in from the worker."""
         self.runner = CliRunner()
+        self.home = Path(tempfile.mkdtemp(prefix="apm-notice-home-"))
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        # HOME for the pytest Path.home override, USERPROFILE for native Windows resolution.
+        home = {"HOME": str(self.home), "USERPROFILE": str(self.home)}
+        home_env = patch.dict("os.environ", home, clear=False)
+        home_env.start()
+        self.addCleanup(home_env.stop)
 
     @patch("apm_cli.commands._helpers.check_for_updates")
     @patch.dict("os.environ", {"APM_E2E_TESTS": ""}, clear=False)
@@ -31,6 +51,49 @@ class TestVersionNotificationIntegration(unittest.TestCase):
             self.assertIn("A new version", result.output)
             self.assertIn("0.7.0", result.output)
             self.assertIn("apm self-update", result.output)
+
+    @patch("apm_cli.commands._helpers.check_for_updates")
+    @patch.dict("os.environ", {"APM_E2E_TESTS": ""}, clear=False)
+    def test_notification_ignores_a_daily_stamp_another_test_left(self, mock_check):
+        """A daily-check stamp an earlier test on this worker wrote must not hide the notice."""
+        mock_check.return_value = "0.7.0"
+        stamp = _stamp_path(_WORKER_HOME)
+        times = (stamp.stat().st_atime_ns, stamp.stat().st_mtime_ns) if stamp.exists() else None
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+        try:
+            from apm_cli.cli import cli
+
+            with self.runner.isolated_filesystem():
+                result = self.runner.invoke(cli, ["init", "test-project", "--yes"])
+        finally:
+            # Leave the worker stamp exactly as found: absent, or with its own age.
+            if times is None:
+                stamp.unlink()
+            else:
+                os.utime(stamp, ns=times)
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("A new version", result.output)
+        self.assertIn("0.7.0", result.output)
+
+    @patch("apm_cli.commands._helpers.check_for_updates")
+    @patch.dict("os.environ", {"APM_E2E_TESTS": ""}, clear=False)
+    def test_a_fresh_daily_stamp_skips_the_check_and_the_notice(self, mock_check):
+        """Within a day of the last check the notice neither checks nor prints (620c6ea79)."""
+        mock_check.return_value = "0.7.0"
+        stamp = _stamp_path(self.home)
+        stamp.parent.mkdir(parents=True)
+        stamp.touch()
+
+        from apm_cli.cli import cli
+
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, ["init", "test-project", "--yes"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("A new version", result.output)
+        mock_check.assert_not_called()
 
     @patch("apm_cli.commands._helpers.check_for_updates")
     def test_no_notification_when_up_to_date(self, mock_check):

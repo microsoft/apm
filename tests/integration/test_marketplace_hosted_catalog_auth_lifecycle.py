@@ -442,20 +442,21 @@ def test_denied_access_fails_with_the_variable_to_set(
 
 
 @pytest.mark.parametrize("route", ["redir-cross", "redir-out"])
-def test_out_of_binding_redirect_carries_no_credential(
+def test_an_out_of_binding_redirect_is_refused_and_nothing_is_cached(
     tmp_path: Path, apm_binary_path: Path, route: str
 ) -> None:
     scenario = _scenario(tmp_path, apm_binary_path)
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         env = scenario.env(server, APM_MARKETPLACE_TOKEN_CORP=_TOKEN)
         url = f"{server.base}/{route}/marketplace.json"
-        _expect_ok(scenario.run(env, "marketplace", "add", url, "--name", _NAME, step=route))
+        result = scenario.run(env, "marketplace", "add", url, "--name", _NAME, step=route)
 
+    assert result.returncode == 1, _output(result)
+    assert "refused" in _output(result)
     hops = [(seen.path, seen.authorization) for seen in server.seen]
-    assert hops == [
-        (f"/{route}/marketplace.json", f"Bearer {_TOKEN}"),
-        ("/public/marketplace.json", None),
-    ]
+    assert hops == [(f"/{route}/marketplace.json", f"Bearer {_TOKEN}")]
+    cache = scenario.isolated.config_root / "cache" / "marketplace"
+    assert not cache.is_dir() or not any(cache.iterdir())
 
 
 def test_denied_refresh_keeps_the_cached_catalog_and_is_not_fresh(

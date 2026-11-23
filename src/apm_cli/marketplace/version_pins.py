@@ -25,8 +25,10 @@ an older APM are keyed ``alias/plugin/version``; they are read as belonging to
 the catalog the alias's registration currently names and move to that catalog's key when the
 alias is re-registered or removed, or when the pin is next recorded.
 
-All functions are **fail-open**: filesystem or JSON errors are logged
-and never block resolution.
+Reads fail closed: a pins file that exists but cannot be read or is not a
+JSON object raises :class:`RefPinStoreError`, so ref-swap detection is
+never silently disabled. A missing file starts an empty record. Writes are
+best effort.
 
 Resolution only *stages* a pin (:func:`stage_ref_pin`).  The install
 transaction owns one :class:`RefPinStage` per attempt and writes the
@@ -47,6 +49,17 @@ from .errors import MarketplaceError
 logger = logging.getLogger(__name__)
 
 _PINS_FILENAME = "version-pins.json"
+
+
+class RefPinStoreError(MarketplaceError):
+    """The version-pins file exists but cannot be read as a JSON object."""
+
+    def __init__(self, path: str, reason: str):
+        super().__init__(
+            f"Cannot read the marketplace version pins at {path}: {reason}. "
+            "Marketplace installs need them to detect a changed plugin ref. "
+            "Restore the file, or delete it to start a new record."
+        )
 
 
 class RefPinMismatchError(MarketplaceError):
@@ -115,8 +128,11 @@ def load_ref_pins(
 ) -> dict:
     """Load the ref-pins file from disk.
 
-    Returns an empty dict when the file is missing or contains invalid
-    JSON.  Never raises.
+    Returns an empty dict when the file is missing.
+
+    Raises:
+        RefPinStoreError: The file exists but cannot be read, is not valid
+            JSON, or is not a JSON object.
 
     Args:
         pins_dir: Override directory for the pins file.
@@ -134,15 +150,13 @@ def load_ref_pins(
             )
         return {}
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-        if not isinstance(data, dict):
-            logger.debug("version-pins file is not a JSON object; ignoring")
-            return {}
-        return data
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.debug("Failed to load version-pins: %s", exc)
-        return {}
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        raise RefPinStoreError(path, type(exc).__name__) from exc
+    if not isinstance(data, dict):
+        raise RefPinStoreError(path, "not a JSON object")
+    return data
 
 
 def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:

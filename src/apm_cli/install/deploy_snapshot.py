@@ -42,7 +42,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
-from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
+from apm_cli.install.deploy_state import ABSENT as _ABSENT
+from apm_cli.install.deploy_state import OTHER as _OTHER
+from apm_cli.install.deploy_state import entry_state as _entry
+from apm_cli.install.deploy_state import path_state as _state
+from apm_cli.install.deploy_state import tree_hashes as _tree_hashes
+from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -330,56 +335,6 @@ class DeployJournal:
             store.parent.rmdir()
 
 
-def _tree_hashes(directory: Path) -> dict[str, str]:
-    """POSIX path -> content hash of every entry below *directory* (a link maps to ``""``)."""
-    hashes: dict[str, str] = {}
-    for path in sorted(directory.rglob("*")):
-        rel = path.relative_to(directory).as_posix()
-        if path.is_symlink() or not (path.is_file() or path.is_dir()):
-            hashes[rel] = ""
-        elif path.is_file():
-            hashes[rel] = compute_file_hash(path)
-    return hashes
-
-
-def _state(path: Path) -> dict[str, Any]:
-    """What is at *path* now: content, modes and entries, as seals record it.
-
-    Broader than the ledger's content hashes: an empty directory or a mode a
-    user added after a kill changes it, so replay keeps that path.
-    """
-    if path.is_dir() and not path.is_symlink():
-        entries = {
-            entry.relative_to(path).as_posix(): _entry(entry) for entry in sorted(path.rglob("*"))
-        }
-        return {"dir": entries, "mode": _mode(path)}
-    if path.is_symlink():
-        return {"link": os.readlink(path)}
-    if path.is_file():
-        # Byte-exact, unlike the ledger: a line-ending-only edit is a user's edit.
-        return {"file": compute_exact_file_hash(path), "mode": _mode(path)}
-    return dict(_OTHER) if os.path.lexists(path) else dict(_ABSENT)
-
-
-def _entry(path: Path) -> str:
-    """One entry below a journaled directory, as a seal and a fingerprint record it."""
-    if path.is_symlink():
-        return f"link:{os.readlink(path)}"
-    if path.is_file():
-        return f"{compute_exact_file_hash(path)}:{_mode(path)}"
-    if path.is_dir():
-        return f"dir:{_mode(path)}"
-    return "absent" if not os.path.lexists(path) else "other"
-
-
-def _mode(path: Path) -> int:
-    return stat.S_IMODE(path.lstat().st_mode)
-
-
-_ABSENT: dict[str, Any] = {"absent": True}
-_OTHER: dict[str, Any] = {"other": True}
-
-
 def lockfile_identity(text: str) -> str:
     """Identify a lockfile document by its content, not its formatting.
 
@@ -574,7 +529,11 @@ class _Unproven(Exception):
 
 
 def _validate_unit(
-    line: Any, store: Path, bases: _Bases, ledger: Mapping[str, str | None]
+    line: Any,
+    store: Path,
+    bases: _Bases,
+    ledger: Mapping[str, str | None],
+    events: Mapping[str, Any] | None = None,
 ) -> _Replay:
     """Check one manifest line against the store and the ledger, without applying it.
 
@@ -583,7 +542,10 @@ def _validate_unit(
     records exactly its files. APM's own metadata under APM home
     (``base: apm_home``) is limited to deployment receipts, which have
     journal-only integrity: confined to the receipts directory and restored
-    only when they re-hash as journaled. Raise ``_Unproven`` otherwise.
+    only when they re-hash as journaled. A shared config file the ledger never
+    claims (hook settings, the hook sidecar, an MCP config) is restored when
+    the config file records vouch for it (:func:`_shared_config_vouched`).
+    Raise ``_Unproven`` otherwise.
     """
     if not isinstance(line, dict) or line.get("kind") not in _KINDS:
         raise _Unproven(store, "journal manifest holds a malformed unit")
@@ -606,7 +568,11 @@ def _validate_unit(
         return _Replay(rel, path, kind, None, {}, ancestors)
     copy, expected = _journaled_copy(line, store)
     if not metadata:
-        _check_vouched(rel, kind, expected, ledger)
+        try:
+            _check_vouched(rel, kind, expected, ledger)
+        except _Unproven:
+            if not _shared_config_vouched(rel, path, kind, copy, events, ledger):
+                raise
     return _Replay(rel, path, kind, copy, expected, ancestors, prior=_state(copy))
 
 
@@ -619,6 +585,43 @@ def _check_vouched(
         raise _Unproven(rel, "the deployment ledger does not record these bytes")
     if kind == "dir" and {k for k in ledger if k.startswith(f"{rel}/")} != set(keys.values()):
         raise _Unproven(rel, "the deployment ledger records other files under this directory")
+
+
+def _shared_config_vouched(
+    rel: str,
+    path: Path,
+    kind: str,
+    copy: Path,
+    events: Mapping[str, Any] | None,
+    ledger: Mapping[str, str | None],
+) -> bool:
+    """A file the ledger never claims, restorable from the config file records (#5009).
+
+    It still holds its journaled prior bytes (nothing to undo), or exactly the
+    bytes the interrupted install sealed and the records say APM wrote. Other
+    content after a seal is a later write, which :func:`_decide` keeps and
+    names. A sealed write the records do not vouch for (missing or tampered
+    baseline), an unsealed or missing file, or a link never qualifies.
+    """
+    from apm_cli.integration.config_file_provenance import vouches_for_current_bytes
+
+    if kind != "file" or rel in ledger or path.is_symlink():
+        return False
+    current = _state(path)
+    if "dir" in current:
+        return False  # a directory swapped in is never replaced by a config file
+    if current == _state(copy):
+        return True
+    sealed = (events or {}).get("")
+    if not isinstance(sealed, dict) or current == _ABSENT:
+        return False  # a write never sealed, or a missing file: nothing proves it
+    if current == sealed:
+        try:
+            prior = _read_no_follow(copy)
+        except OSError:
+            return False
+        return vouches_for_current_bytes(path, prior)
+    return True  # a later write: _decide keeps and names it, never replaces it
 
 
 def _check_receipt(rel: str, path: Path, kind: str) -> None:
@@ -896,7 +899,7 @@ def _validated(
     issues: list[tuple[str, str]] = []
     for index, line in enumerate(lines):
         try:
-            unit = _validate_unit(line, store, bases, ledger)
+            unit = _validate_unit(line, store, bases, ledger, seals.get(index))
             events = {"": _pending(line), **seals.get(index, {})}
         except _Unproven as exc:
             issues.append(exc.issue)
@@ -924,14 +927,23 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     return None
 
 
-def has_abandoned_journals(store_parent: Path) -> bool:
-    """Whether a killed install left a journal the next full install must handle."""
+def has_abandoned_journals(store_parent: Path, root: Any = None, workspace: Any = None) -> bool:
+    """Whether a killed install left a journal the next full install of *root* must handle."""
     with contextlib.suppress(OSError):
         return any(
-            store.is_dir() and not os.path.lexists(store / _RETAINED_MARKER)
+            store.is_dir()
+            and not os.path.lexists(store / _RETAINED_MARKER)
+            and (root is None or _replays_for(store, root, workspace))  # else any (#5064)
             for store in store_parent.glob(f"{_STORE_PREFIX}*")
         )
     return False
+
+
+def _replays_for(store: Path, root: Path, workspace: Path | None) -> bool:
+    """Replay for *root* handles *store*: no manifest, an unreadable identity, or its own."""
+    named = _store_identity(store) if os.path.lexists(store / _MANIFEST) else None
+    root = Path(os.path.abspath(root))
+    return named is None or named == (os.path.realpath(root), os.path.realpath(workspace or root))
 
 
 def replay_abandoned_journals(
@@ -960,7 +972,6 @@ def replay_abandoned_journals(
     replayed, after keeping it.
     """
     root = Path(os.path.abspath(root))
-    identity = (os.path.realpath(root), os.path.realpath(workspace or root))
     bases = _Bases(root, Path(os.path.abspath(receipts)))
     ledger, committed = functools.cache(ledger), functools.cache(committed)
     stores: list[Path] = []
@@ -975,8 +986,7 @@ def replay_abandoned_journals(
             # nothing replay can prove: reclaim it, as every install did before.
             shutil.rmtree(store, ignore_errors=True)
             continue
-        named = _store_identity(store)
-        if named is not None and named != identity:
+        if not _replays_for(store, root, workspace):
             continue
         outcome = _replay_store(store, bases, ledger, committed)
         restored += outcome.restored

@@ -105,7 +105,9 @@ def test_rebound_alias_fails_closed_on_cli_install_and_outdated(
 
     (_rebind, install, outdated) = runner.run_sequence(
         (
-            ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main"),
+            # The user rebinds the alias deliberately: replacing the catalog an
+            # alias names needs explicit consent (--yes) when nobody can answer.
+            ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main", "--yes"),
             ("install", *scope_args, f"{_PLUGIN}@{_ALIAS}", *_INSTALL_FLAGS),
             ("outdated", *scope_args),
         ),
