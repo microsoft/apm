@@ -24,7 +24,10 @@ from apm_cli.cache.git_cache import GitCache
 from apm_cli.cache.url_normalize import cache_shard_key
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-git-child-repository-isolation"),
+]
 
 _POSIX_ONLY = pytest.mark.skipif(
     sys.platform == "win32", reason="payload commands use a POSIX shell"
