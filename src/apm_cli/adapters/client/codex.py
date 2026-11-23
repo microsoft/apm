@@ -19,7 +19,13 @@ from ...utils.atomic_io import atomic_write_text
 from ...utils.net import is_loopback_host
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
-from .base import _ENV_PLACEHOLDER_RE, _ENV_VAR_RE, MCPClientAdapter
+from .base import (
+    _ENV_PLACEHOLDER_RE,
+    _ENV_VAR_RE,
+    _SYMLINKED_MCP_CONFIG,
+    MCPClientAdapter,
+    _warn_symlinked_mcp_config,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -192,11 +198,22 @@ class CodexClientAdapter(MCPClientAdapter):
             table.comment(entry.trivia.comment)
         return table
 
+    def _config_is_linked(self) -> bool:
+        """Whether the base link policy refuses this scope's ``config.toml``."""
+        user_root = self._get_codex_dir() if self.user_scope else None
+        return self._is_linked_config(Path(self.get_config_path()), user_root=user_root)
+
     def _write_config(self, config: dict) -> None:
-        """Validate serialized TOML before atomically replacing the native file."""
+        """Validate serialized TOML before atomically replacing the native file.
+
+        A config that is, or is reached through, a symlink is refused with
+        ``OSError``: it is never written or replaced by a regular file.
+        """
         serialized = tomlkit.dumps(config)
         tomlkit.parse(serialized)
         config_path = Path(self.get_config_path())
+        if self._config_is_linked():
+            raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         from .base import journal_config_write
 
         journal_config_write(config_path)
@@ -206,7 +223,7 @@ class CodexClientAdapter(MCPClientAdapter):
 
     def migrate_legacy_managed_servers(self, managed_names: set[str]) -> set[str]:
         """Remove unsupported IDs only from entries with recorded APM ownership."""
-        if not managed_names:
+        if not managed_names or self._config_is_linked():
             return set()
         config = self.get_current_config()
         if config is None:
@@ -309,6 +326,9 @@ class CodexClientAdapter(MCPClientAdapter):
         Args:
             config_updates (dict): Configuration updates to apply.
         """
+        if self._config_is_linked():
+            _warn_symlinked_mcp_config(Path(self.get_config_path()))
+            return False
         current_config = self.get_current_config()
         if current_config is None:
             return False

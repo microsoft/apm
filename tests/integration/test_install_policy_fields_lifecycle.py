@@ -216,6 +216,57 @@ def test_scripts_deny_judges_the_manifest_root_redirects_from(
     _assert_refused(world, _SCRIPTS, "--root", str(target), spec, extra=target)
 
 
+_MCP_ENTRY = ("--mcp", "srv", "--url", "https://mcp.example.com/mcp")
+
+
+def _entry(world: World, entry: str) -> tuple[str, ...]:
+    return _MCP_ENTRY if entry == "mcp" else (world.packages["p-skill:git"].spec,)
+
+
+@pytest.mark.parametrize("entry", ["mcp", "dependency"])
+def test_scripts_deny_is_read_from_the_source_manifest_under_root(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+) -> None:
+    """Only the source checkout carries the policy: --root still refuses its scripts: block."""
+    world = lifecycle_world
+    target = world.root / "redirected"
+    target.mkdir()
+    use_policy(world, "scripts-deny")
+    _apm(world, "audit", "--ci")  # discovers the policy once, so its cache is warm
+    _add_scripts(world.project / "apm.yml")
+
+    _assert_refused(world, _SCRIPTS, "--root", str(target), *_entry(world, entry), extra=target)
+
+
+@pytest.mark.parametrize("entry", ["mcp", "dependency"])
+def test_unmanaged_files_deny_is_judged_at_the_root_install_writes_to(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+) -> None:
+    """Only the --root destination carries the policy and holds an unmanaged file."""
+    world = lifecycle_world
+    target = world.root / "redirected"
+    target.mkdir()
+    _govern(world, target, "unmanaged-deny")
+    path = target / _HAND_WRITTEN
+    path.parent.mkdir(parents=True)
+    path.write_text("# hand written\n", encoding="utf-8")
+    # A preview discovers the destination's policy once, so its cache is warm.
+    _apm(world, "install", "--dry-run", "--root", str(target), *_entry(world, entry))
+
+    text = _assert_refused(
+        world,
+        _UNMANAGED,
+        "--root",
+        str(target),
+        *_entry(world, entry),
+        extra=target,
+        keep_git_cache=True,
+    )
+    assert _HAND_WRITTEN in text, text
+
+
 @pytest.mark.parametrize("offending", [True, False], ids=["unmanaged-file", "control"])
 def test_unmanaged_files_deny_refuses_an_install_that_would_leave_drift(
     lifecycle_world: World,  # noqa: F811
