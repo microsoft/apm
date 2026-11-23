@@ -1248,5 +1248,5 @@ def test_uninstall_bundle_refuses_an_unreadable_pending_record(
     refused = " ".join(output(world.apm(consumer, "uninstall", str(bundle), expect=1)).split())
 
     assert "apm_modules/.local-bundle-pending.json cannot be read" in refused, refused
-    assert "no changes were made" in refused, refused
+    assert "no hooks were removed" in refused, refused
     assert tree_bytes(consumer) == before

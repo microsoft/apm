@@ -293,7 +293,7 @@ def uninstall_local_bundles(
     except (OSError, ValueError) as exc:
         logger.error(
             f"Local bundle hooks were not removed: {_PENDING_RECORD} could not be updated "
-            f"({exc}); no changes were made. Fix access to that file, then retry."
+            f"({exc}); no hooks were removed. Fix access to that file, then retry."
         )
         sys.exit(1)
     unconfirmed: dict[str, tuple[str, ...]] = {}

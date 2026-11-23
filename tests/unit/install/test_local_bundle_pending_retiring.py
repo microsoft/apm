@@ -14,7 +14,7 @@ from apm_cli.install.local_bundle_pending import (
     retiring_bundle_slugs,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I7")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I7")]
 
 _RECORD = Path("apm_modules") / ".local-bundle-pending.json"
 
@@ -41,6 +41,7 @@ def test_a_note_marks_only_a_recorded_type_and_the_drop_clears_it(tmp_path: Path
         "pkg": {"approval_key": "pkg#1@sha256:aa", "exec_types": ["mcp"]},
     }
     assert retiring_bundle_slugs(tmp_path, "hooks") == set()
+    assert '"retiring"' not in (tmp_path / _RECORD).read_text(encoding="utf-8")
 
 
 def test_a_reinstall_replaces_the_note(tmp_path: Path) -> None:
@@ -50,7 +51,7 @@ def test_a_reinstall_replaces_the_note(tmp_path: Path) -> None:
     record_bundle_executables(tmp_path, "pkg", "pkg#1@sha256:aa", ["hooks"])
 
     assert retiring_bundle_slugs(tmp_path, "hooks") == set()
-    assert "retiring" not in _bundles(tmp_path)["pkg"]
+    assert '"retiring"' not in (tmp_path / _RECORD).read_text(encoding="utf-8")
 
 
 def test_a_failed_update_leaves_the_previous_record_intact(
