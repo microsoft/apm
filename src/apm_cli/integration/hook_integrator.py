@@ -986,7 +986,7 @@ class HookIntegrator(BaseIntegrator):
         """Integrate hooks from a package into hooks dir (Copilot target).
 
         Deploys hook JSON files with clean filenames and copies referenced
-        script files. Skips user-authored files unless force=True.
+        script files. Keeps user-authored and edited files unless force=True.
 
         Args:
             package_info: PackageInfo with package metadata and install path
@@ -1074,6 +1074,12 @@ class HookIntegrator(BaseIntegrator):
                 contract="copilot-hooks-v1",
                 errors=tuple(errors),
             )
+            locator = DeploymentLedgerCodec.locator_for_path(
+                target_path,
+                project_root=project_root,
+                target=target or KNOWN_TARGETS["copilot"],
+                scope=InstallScope.PROJECT,
+            )
             if not validation.valid:
                 if diagnostics is not None:
                     diagnostics.error(
@@ -1083,12 +1089,7 @@ class HookIntegrator(BaseIntegrator):
                     )
                 materializations.append(
                     MaterializationResult(
-                        locator=DeploymentLedgerCodec.locator_for_path(
-                            target_path,
-                            project_root=project_root,
-                            target=target or KNOWN_TARGETS["copilot"],
-                            scope=InstallScope.PROJECT,
-                        ),
+                        locator=locator,
                         owners=frozenset({package_info.get_canonical_dependency_string()}),
                         status=MaterializationStatus.FAILED,
                         content_hash=None,
@@ -1097,42 +1098,40 @@ class HookIntegrator(BaseIntegrator):
                 )
                 continue
 
-            # Write rewritten JSON; byte-identical output is unchanged (#4184).
-            if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
-                self.note_rendered_write(target_path)
-                hooks_integrated += 1
-            elif not self.receipted_unchanged(target_path):
-                # A managed file already holding the render is APM's bytes (#3701).
-                if managed_files and rel_path in managed_files:
+            # An edited hook file is kept (#4626); its scripts are gated one by one below.
+            if not self.keeps_edited_output(
+                target_path,
+                hook_file,
+                rel_path,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=json.dumps(rewritten, indent=2) + "\n",
+            ):
+                # Write rewritten JSON; byte-identical output is unchanged (#4184).
+                if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
                     self.note_rendered_write(target_path)
-                scripts_adopted += 1
-            target_paths.append(target_path)
-            materializations.append(
-                MaterializationResult(
-                    locator=DeploymentLedgerCodec.locator_for_path(
-                        target_path,
-                        project_root=project_root,
-                        target=target or KNOWN_TARGETS["copilot"],
-                        scope=InstallScope.PROJECT,
-                    ),
-                    owners=frozenset({package_info.get_canonical_dependency_string()}),
-                    status=(
-                        MaterializationStatus.WRITTEN
-                        if validation.valid
-                        else MaterializationStatus.FAILED
-                    ),
-                    content_hash=compute_file_hash(target_path),
-                    validation=validation,
+                    hooks_integrated += 1
+                elif not self.receipted_unchanged(target_path):
+                    # A managed file already holding the render is APM's bytes (#3701).
+                    if managed_files and rel_path in managed_files:
+                        self.note_rendered_write(target_path)
+                    scripts_adopted += 1
+                target_paths.append(target_path)
+                materializations.append(
+                    MaterializationResult(
+                        locator=locator,
+                        owners=frozenset({package_info.get_canonical_dependency_string()}),
+                        status=MaterializationStatus.WRITTEN,
+                        content_hash=compute_file_hash(target_path),
+                        validation=validation,
+                    )
                 )
-            )
-            display_payloads.append(
-                self._build_display_payload(
-                    f"{root_dir}/hooks/",
-                    target_path.name,
-                    hook_file,
-                    rewritten,
+                display_payloads.append(
+                    self._build_display_payload(
+                        f"{root_dir}/hooks/", target_path.name, hook_file, rewritten
+                    )
                 )
-            )
 
             copy_result = copy_deployed_hook_bundle(
                 self,

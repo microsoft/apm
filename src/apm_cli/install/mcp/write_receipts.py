@@ -280,6 +280,12 @@ class McpWriteReceipts:
             ):
                 key = None
             write = McpWrite(runtime, name, self._config(runtime), key, content_hash)
+            if key is not None:
+                # A located rewrite supersedes the key-less record of the same
+                # runtime, config and name (#4861); other profiles' records stay.
+                stale = self.writes.get((runtime, write.config or "", name))
+                if stale is not None and stale.key is None:
+                    del self.writes[(runtime, write.config or "", name)]
             self.writes[_ident(write)] = write
             self._dirty = True
 
@@ -379,8 +385,14 @@ class McpWriteReceipts:
             _native_config_key(client, name, stored_config=configs.get(name)) for name in declared
         }
 
-    def kept(self, managed: set[str]) -> list[tuple[McpWrite, str]]:
-        """Kept records of unmanaged servers in the selected configs whose entry is still present."""
+    def kept(
+        self, managed: set[str], configs: dict[str, Any] | None = None
+    ) -> list[tuple[McpWrite, str]]:
+        """Kept records of unmanaged servers in the selected configs whose entry is still present.
+
+        A record whose native entry a managed server now deploys to is not kept
+        (#4861): install and audit share this one filter.
+        """
         return [
             (write, self.display(write))
             for _, write in sorted(self.writes.items())
@@ -388,6 +400,10 @@ class McpWriteReceipts:
             and write.name not in managed
             and self._selected(write)
             and self._presence(write) is not False
+            and not (
+                write.key is not None
+                and write.key in self._declared_keys(write.runtime, managed, configs or {})
+            )
         ]
 
     def save(self) -> None:
@@ -439,21 +455,20 @@ def retire_undeclared_mcp_writes(
     """
     try:
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError):
         reason = unusable_mcp_evidence(project_root, user_scope=user_scope)
         if reason is None:
             _log.debug("No usable installation binding; every MCP entry is kept", exc_info=True)
         elif retire:
             _note_unusable(project_root, user_scope=user_scope, reason=reason)
-            if isinstance(exc, McpWriteEvidenceError):
-                logger.warning(f"Kept every MCP entry APM no longer deploys: {exc}")
+            logger.warning(f"Kept every MCP entry APM no longer deploys: {reason}")
         elif _unusable_noted(project_root, user_scope=user_scope):
             logger.warning(f"Kept every MCP entry APM no longer deploys: {reason}")
         return
     _clear_unusable_note(project_root, user_scope=user_scope)
     if not retire:
         included = store.included_runtimes(exclude)
-        for write, _ in store.kept(set(declared)):
+        for write, _ in store.kept(set(declared), declared_configs):
             if write.runtime in included:
                 store.warn_kept(write, logger)
         return
@@ -462,6 +477,29 @@ def retire_undeclared_mcp_writes(
     )
     if removed:
         logger.record_mcp_removed(removed)
+
+
+def announce_kept_mcp_writes(
+    lock_path: Path, *, project_root: Path, user_scope: bool, exclude: str | None, logger: Any
+) -> None:
+    """Announce-only: report kept entries against the lockfile's complete managed set.
+
+    For install paths that end before the MCP stage's announcement (local
+    bundles, ``--mcp NAME``, ``apm mcp install NAME``; #4861). Nothing is removed.
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.lockfile_write_authority import lockfile_exists
+
+    lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
+    retire_undeclared_mcp_writes(
+        set(lock.mcp_servers) if lock is not None else set(),
+        declared_configs=dict(lock.mcp_configs) if lock is not None else {},
+        project_root=project_root,
+        user_scope=user_scope,
+        exclude=exclude,
+        logger=logger,
+        retire=False,
+    )
 
 
 def forget_removed_mcp_writes(project_root: Path, *, user_scope: bool) -> None:
@@ -579,7 +617,11 @@ def _parses(config: str | None) -> bool:
 
 
 def kept_mcp_writes(
-    project_root: Path, *, user_scope: bool, managed: Iterable[str]
+    project_root: Path,
+    *,
+    user_scope: bool,
+    managed: Iterable[str],
+    configs: dict[str, Any] | None = None,
 ) -> list[tuple[McpWrite, str]]:
     """Read-only: ``(record, config)`` of entries install kept that are still present.
 
@@ -590,4 +632,4 @@ def kept_mcp_writes(
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
     except (OSError, ValueError):
         return []
-    return store.kept(set(managed))
+    return store.kept(set(managed), configs)
