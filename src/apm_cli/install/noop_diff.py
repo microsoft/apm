@@ -163,3 +163,29 @@ def try_noop(options: dict[str, Any], argv: list[str] | None, project_root: Path
     elapsed = time.perf_counter() - started
     _rich_info(f"No changes -- install state already up to date in {elapsed:.1f}s.", symbol="info")
     return True
+
+
+def sources_scan_clean(project_root: Path, lock: Any) -> bool:
+    """No package file the pre-deploy security scan reads carries any finding.
+
+    The full pipeline re-scans each package's deployable sources on every
+    install and prints its warnings even when nothing is redeployed. Scanning
+    every file of each copy (a superset) with the same scanner keeps that
+    verdict and output: any finding, of any severity, takes the full pipeline.
+    """
+    import os
+
+    from apm_cli.constants import APM_MODULES_DIR
+    from apm_cli.security.content_scanner import ContentScanner
+
+    modules = project_root / APM_MODULES_DIR
+    for key, dep in lock.dependencies.items():
+        if key == ".":
+            continue
+        root = dep.to_dependency_ref().get_install_path(modules)
+        for directory, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for name in filenames:
+                if ContentScanner.scan_file(Path(directory) / name):
+                    return False
+    return True

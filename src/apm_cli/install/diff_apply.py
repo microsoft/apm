@@ -433,9 +433,14 @@ def try_apply(
             raise Decline("local content or LSP")
         if (project_root / ".apm").exists():
             raise Decline("root project primitives")
-        admits, fetch = noop_diff._policy_admits(project_root)
+        from apm_cli.install.fast_output import quiet
+
+        with quiet():
+            admits, fetch = noop_diff._policy_admits(project_root)
         if not admits:
             raise Decline("policy")
+        if not noop_diff.sources_scan_clean(project_root, lock):
+            raise Decline("security scan findings")
         from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
         from apm_cli.core.scope import InstallScope
         from apm_cli.policy.ci_checks import resolve_audit_scope
@@ -465,11 +470,13 @@ def try_apply(
             _write(path, data)
         for path, data in extras:
             _write(path, data)
-        if not (
-            noop_diff._copies_valid(project_root, lock)
-            and _audit_passes(project_root, fetch, content_integrity=False)
-            and noop_diff._policy_checks_pass(project_root, fetch)
-        ):
+        with quiet():
+            verified = (
+                noop_diff._copies_valid(project_root, lock)
+                and _audit_passes(project_root, fetch, content_integrity=False)
+                and noop_diff._policy_checks_pass(project_root, fetch)
+            )
+        if not verified:
             raise Decline("post-apply audit")
         by_owner: dict[str, dict[Path, str]] = {}
         for path, _data, digest, owner in files:
@@ -484,26 +491,42 @@ def try_apply(
         _trace(f"full run (error: {type(exc).__name__})")
         return False
     count = len(files) + len(extras)
-    _trace(f"applied a verified diff ({count} files)")
-    try:
-        from apm_cli.install.fast_output import render
-    except ImportError:
-        render = None
-    if render is not None:
-        render(project_root, lock, outcomes, frozen_disposition=frozen_disposition, started=started)
-        return True
-    from apm_cli.utils.console import _rich_info, _rich_success
+    _trace(
+        f"applied a verified diff ({count} files)"
+        if count or packages
+        else "no-op (desired state already deployed)"
+    )
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.install import fast_output
+    from apm_cli.models.apm_package import APMPackage
 
-    if not (count or packages):
-        elapsed = time.perf_counter() - started
-        _rich_info(
-            f"No changes -- install state already up to date in {elapsed:.1f}s.", symbol="info"
-        )
-        return True
-
-    _rich_success(
-        f"Installed {len(lock.dependencies)} locked dependencies from the cache "
-        f"({len(packages)} packages, {count} files).",
-        symbol="success",
+    # The full run's own owners print the same lines (install/fast_output.py).
+    copied = {str(install_path) for _c, install_path, _s in packages}
+    bodies = {o.key: _body_printer(o.body) for o in outcomes}
+    installed = sum(
+        1 for o in outcomes if o.files_written or str(_install_path(project_root, o.dep)) in copied
+    )
+    fast_output.render(
+        project_root,
+        lock,
+        APMPackage.from_apm_yml(manifest_file(project_root)),
+        started=started,
+        bodies=bodies if (count or packages) else None,
+        installed=installed,
+        frozen_disposition=frozen_disposition,
     )
     return True
+
+
+def _body_printer(body: tuple[str, ...]) -> Any:
+    def emit(logger: Any) -> None:
+        for line in body:
+            logger.tree_item(line)
+
+    return emit
+
+
+def _install_path(project_root: Path, dep: Any) -> Path:
+    from apm_cli.constants import APM_MODULES_DIR
+
+    return dep.to_dependency_ref().get_install_path(project_root / APM_MODULES_DIR)

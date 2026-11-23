@@ -135,6 +135,7 @@
       "selectors": [
         "src/apm_cli/install/diff_apply.py",
         "src/apm_cli/install/fast_entry.py",
+        "src/apm_cli/install/fast_output.py",
         "src/apm_cli/install/noop_diff.py",
         "src/apm_cli/install/pipeline_entry.py"
       ],
