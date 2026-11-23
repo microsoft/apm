@@ -137,7 +137,7 @@ class DeployJournal:
 
     def _store(self) -> Path:
         if self.store is None:
-            self.store_parent.mkdir(parents=True, exist_ok=True)
+            _modes.private_dir(self.store_parent)
             self.store = Path(tempfile.mkdtemp(prefix=_STORE_PREFIX, dir=self.store_parent))
             if self.root is not None:
                 header = {
@@ -152,8 +152,7 @@ class DeployJournal:
     def _append_line(self, line: dict[str, Any]) -> None:
         if self.store is None:
             raise RuntimeError("no store to write the journal manifest to")
-        with open(self.store / _MANIFEST, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, sort_keys=True) + "\n")
+        _modes.append_private(self.store / _MANIFEST, json.dumps(line, sort_keys=True) + "\n")
 
     def _relative(self, path: Path) -> tuple[str, str]:
         """``(base, path)``: *path* as POSIX under APM home or the deploy root.
@@ -405,6 +404,7 @@ class _Replay:
 
 def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
     """Parse ``journal.jsonl``; raise ``ValueError`` when it is not a journal."""
+    _modes.require_private_store(store)  # the store is this user's alone (#5134)
     try:
         text = (store / _MANIFEST).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -717,15 +717,15 @@ def _apply(unit: _Replay) -> None:
     if unit.copy is None:
         raise OSError("no journal copy to restore from")
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Beside its destination, so it gets every recorded mode before the rename.
-    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"
+    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"  # moded before the rename
     try:
         _modes.stage_private(unit.copy, staged, unit.kind, _read_no_follow)
         written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
         if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
-        _modes.apply_entry_modes(staged, unit.mode)
-        _modes.apply_own_mode(staged, unit.mode)
+        mode = _modes.for_destination(path, unit.mode, unit.copy)  # umask if recreated
+        _modes.apply_entry_modes(staged, mode)
+        _modes.apply_own_mode(staged, mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)

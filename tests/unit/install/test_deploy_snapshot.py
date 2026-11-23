@@ -2053,8 +2053,19 @@ def test_a_journal_that_is_a_link_is_kept_and_reported(tmp_path: Path, apm_home:
 
 
 def _with_umask(mask: int):
+    """Set the umask and forget the memoized read, so replay sees *mask*."""
+    from apm_cli.cache.deploy_store import process_umask
+
     previous = os.umask(mask)
+    process_umask.cache_clear()
     return previous
+
+
+def _restore_umask(previous: int) -> None:
+    from apm_cli.cache.deploy_store import process_umask
+
+    os.umask(previous)
+    process_umask.cache_clear()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
@@ -2074,7 +2085,7 @@ def test_a_file_recreated_from_absence_honors_the_umask(tmp_path: Path, apm_home
     try:
         outcome = _replay(apm_home, project, lambda: ledger)
     finally:
-        os.umask(previous)
+        _restore_umask(previous)
 
     assert (outcome.restored, outcome.kept) == (1, ())
     assert config.read_bytes() == _CONFIG_BYTES
@@ -2105,7 +2116,7 @@ def test_a_directory_recreated_from_absence_honors_the_umask(
     try:
         outcome = _replay(apm_home, project, lambda: ledger)
     finally:
-        os.umask(previous)
+        _restore_umask(previous)
 
     assert (outcome.restored, outcome.kept) == (1, ())
     assert skill.stat().st_mode & 0o7777 == 0o700
@@ -2130,7 +2141,7 @@ def test_a_planted_wider_mode_never_widens_a_recorded_0o644_file(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="acceptance cell for the optional journal seal (#5134): a same-user plant in a "
+    reason="#5134: acceptance cell for the optional journal seal; a same-user plant in a "
     "private store passes the store check, and a narrower mode passes the bound",
 )
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
@@ -2147,3 +2158,21 @@ def test_a_valid_but_different_recorded_mode_is_kept_and_reported(
     assert [rel for rel, _reason in outcome.kept] == [".mcp.json"]
     assert config.read_bytes() == b"killed\n"
     assert config.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_store_created_under_a_group_writable_umask_is_still_replayed(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The journal creates its store privately, so a 0o002 umask never makes it untrusted."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    previous = os.umask(0o002)
+    try:
+        _killed_journal(apm_home, project, config)
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        os.umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
