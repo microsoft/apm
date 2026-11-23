@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
-import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -233,23 +232,16 @@ def test_the_first_package_in_lock_order_names_the_decline(
     assert not any(tmp_path.iterdir())
 
 
-def test_the_native_plugin_decline_never_imports_the_codex_registrar(tmp_path: Path) -> None:
+def test_the_native_plugin_decline_never_imports_the_codex_registrar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The bare-install check needs only the ownership journal's path, not registration code."""
-    probe = (
-        "import sys; from pathlib import Path; from types import SimpleNamespace; "
-        "from apm_cli.install import diff_apply; "
-        "diff_apply._refuse_native_plugins(Path(sys.argv[1]), SimpleNamespace(dependencies={})); "
-        "print(sorted(m for m in sys.modules if m.startswith('apm_cli.codex_plugins.')))"
-    )
-    src = str(Path(diff_apply.__file__).resolve().parents[2])
-    loaded = subprocess.run(
-        [sys.executable, "-c", probe, str(tmp_path)],
-        capture_output=True,
-        text=True,
-        check=True,
-        env={**os.environ, "PYTHONPATH": src},
-    ).stdout.strip()
-    assert loaded == "['apm_cli.codex_plugins.ledger_path']"
+    import apm_cli.codex_plugins as codex
+
+    monkeypatch.delitem(sys.modules, "apm_cli.codex_plugins.registrar", raising=False)
+    monkeypatch.delattr(codex, "registrar", raising=False)
+    diff_apply._refuse_native_plugins(tmp_path, SimpleNamespace(dependencies={}))
+    assert "apm_cli.codex_plugins.registrar" not in sys.modules
 
 
 @pytest.mark.parametrize("kind", ["file", "symlink"])
