@@ -1,0 +1,18 @@
+{
+  "issue": 4744,
+  "fixed_in": "Unreleased",
+  "summary": "A user-scope install kept a native Claude plugin (its bin/, root and Claude registration) and its lock record after apm.yml dropped claude from targets; the dropped target's native plugin is now retired like its other files.",
+  "failure_modes": [
+    "cleanup",
+    "routing"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_frozen_refuses_a_dropped_claude_native_plugin",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_target_narrow_keeps_an_edited_plugin_bin_and_says_so",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_target_narrow_retires_a_user_scope_plugin_bin"
+  ]
+}

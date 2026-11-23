@@ -6624,11 +6624,8 @@ def test_bundle_lock_stamp_guard_rejects_other_writers(path: str, old: str, new:
         ),
         pytest.param(
             "src/apm_cli/security/trust.py",
-            "                grants_manifest, policy=None, logger=None, include_user=include_user",
-            '                Path(project_root) / "apm.yml",\n'
-            "                policy=None,\n"
-            "                logger=None,\n"
-            "                include_user=include_user,",
+            "                grants_manifest,\n                policy=None,\n",
+            '                Path(project_root) / "apm.yml",\n                policy=None,\n',
             id="registered-caller-derives-apm-yml-from-root",
         ),
     ],

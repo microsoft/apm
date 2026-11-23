@@ -583,6 +583,40 @@ class TestPruneCommand:
                 result.output.split()
             )
 
+    @pytest.mark.parametrize("dry_run", [False, True], ids=["prune", "dry-run"])
+    def test_prune_fails_closed_when_the_native_gate_check_errors(self, dry_run):
+        """#4754: a gate_retirements error stops prune with an error, never silently."""
+        from apm_cli.native_plugins.record import NativePluginRecord
+
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            orphan_dir = _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            dependency = LockedDependency(
+                repo_url="acme/tool", resolved_commit="a" * 40, package_type="marketplace_plugin"
+            )
+            dependency.native_plugin = NativePluginRecord(
+                "tool", "sha256:" + "0" * 64, "apm-p-00000000", "./.agents/plugins"
+            )
+            lock_path = tmp / "apm.lock.yaml"
+            LockFile(dependencies={"acme/tool": dependency}).write(lock_path)
+            lock_before = lock_path.read_bytes()
+
+            with patch(
+                "apm_cli.install.exec_gate.gate_retirements",
+                side_effect=RuntimeError("approval store unreadable"),
+            ):
+                args = ["prune", "--dry-run"] if dry_run else ["prune"]
+                result = self.runner.invoke(cli, args)
+
+            output = " ".join(result.output.split())
+            assert result.exit_code == 1, result.output
+            assert "Could not check locked native plugins" in output
+            assert "approval store unreadable" in output
+            assert "Prune stopped before removing packages" in output
+            assert "then run 'apm prune' to retire native plugins" in output
+            assert lock_path.read_bytes() == lock_before
+            assert orphan_dir.exists()
+
     # ------------------------------------------------------------------
     # Lockfile cleanup
     # ------------------------------------------------------------------
