@@ -44,6 +44,8 @@ def _frames(stack: str) -> list[tuple[str, str]]:
 
 
 def _apm(path: str) -> str | None:
+    if path.startswith("apm_cli/"):
+        return path[len("apm_cli/") :]
     return path.rsplit(_MARK, 1)[1] if _MARK in path else None
 
 
