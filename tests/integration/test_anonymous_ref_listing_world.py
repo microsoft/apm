@@ -10,6 +10,7 @@ configured helper survives and the listing must fall back to git.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -61,16 +62,17 @@ def _urls(fixture) -> list[str]:
     return [f"https://github.com/{fixture.slug(name)}" for name in sorted(fixture.packages)]
 
 
-def test_fast_path_answers_every_package_under_a_realistic_user_config(user_world):
+def test_fast_path_answers_every_package_under_a_realistic_user_config(user_world, caplog):
     fixture, world_env = user_world
     env = AuthResolver.build_public_github_anonymous_git_env(base_env=world_env)
     hits = 0
     for url in _urls(fixture):
-        listed = list_refs_anonymously(url, include_heads=True, env=env)
+        with caplog.at_level(logging.DEBUG, logger="apm_cli.deps.anonymous_ref_listing"):
+            listed = list_refs_anonymously(url, include_heads=True, env=env)
         git = git_remote_refs(url, env=dict(env), options=("--tags", "--heads"))
 
         assert git.returncode == 0, git.stderr
-        assert listed == git.stdout
+        assert listed == git.stdout, caplog.text
         hits += listed is not None
 
     assert hits == len(fixture.packages) == 10

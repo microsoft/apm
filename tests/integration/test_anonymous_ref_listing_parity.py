@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 import pytest
@@ -23,7 +24,7 @@ _REPOS = ("https://github.com/octocat/Hello-World", "https://github.com/actions/
 
 @pytest.mark.parametrize("url", _REPOS)
 @pytest.mark.parametrize("include_heads", [True, False], ids=["tags-heads", "tags"])
-def test_listing_matches_git_ls_remote(url, include_heads):
+def test_listing_matches_git_ls_remote(url, include_heads, caplog):
     # The env APM builds for the anonymous github.com attempt, from a caller env
     # without fallback triggers, so a None here is a real miss. The oracle is
     # the git path that attempt runs today (git_remote_refs, same env).
@@ -36,9 +37,10 @@ def test_listing_matches_git_ls_remote(url, include_heads):
     env = AuthResolver.build_public_github_anonymous_git_env(base_env=caller)
     options = ("--tags", "--heads") if include_heads else ("--tags",)
 
-    listed = list_refs_anonymously(url, include_heads=include_heads, env=env)
+    with caplog.at_level(logging.DEBUG, logger="apm_cli.deps.anonymous_ref_listing"):
+        listed = list_refs_anonymously(url, include_heads=include_heads, env=env)
     git = git_remote_refs(url, env=dict(env), options=options)
 
     assert git.returncode == 0, git.stderr
-    assert listed is not None
+    assert listed is not None, caplog.text
     assert listed == git.stdout
