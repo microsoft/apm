@@ -30,8 +30,13 @@ _REACH_REFSPECS = (
 )
 
 
+# Versioned: verdicts an earlier namespace recorded are never read, so a commit
+# an older build admitted without a check is verified again.
+_VERDICTS = "verified-v2"
+
+
 def _marker(cache_root: Path, shard_key: str, sha: str) -> Path:
-    return Path(cache_root) / "reachability" / shard_key / "verified" / sha
+    return Path(cache_root) / "reachability" / shard_key / _VERDICTS / sha
 
 
 class VerdictStage:
@@ -117,7 +122,7 @@ def _linked_dirs(path: Path, depth: int = 3) -> bool:
 def _write_marker(marker: Path, canonical: str) -> None:
     """Write a verdict as a new regular file, never through a planted link.
 
-    A linked ``verified``, shard or ``reachability`` directory records
+    A linked verdict, shard or ``reachability`` directory records
     nothing; the marker itself is replaced atomically, so a link at its
     path is replaced, never followed.
     """

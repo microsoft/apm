@@ -247,8 +247,8 @@ def test_an_upgraded_cache_without_a_verdict_fails_closed_offline(
     message = " ".join(str(excinfo.value).split())
     assert "needs network access once" in message
     assert "pin a branch or tag" in message
-    assert not (tmp_path / "cache" / "reachability" / "verified").exists()
-    assert not list((tmp_path / "cache").rglob("verified/*"))
+    assert not (tmp_path / "cache" / "reachability" / "verified-v2").exists()
+    assert not list((tmp_path / "cache").rglob("verified-v2/*"))
 
 
 def test_a_cached_checkout_with_foreign_config_is_rebuilt(tmp_path: Path) -> None:

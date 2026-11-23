@@ -267,7 +267,7 @@ class TestVerdictScope:
         root = tmp_path / "cache"
         require_reachable_commit(root, origin.url, cache_shard_key(origin.url), origin.m1)
 
-        assert not list((root / "reachability").rglob("verified/*"))
+        assert not list((root / "reachability").rglob("verified-v2/*"))
 
     def test_a_refusal_stops_the_plan_even_if_a_later_attempt_would_admit(
         self, tmp_path: Path, origin: _Origin
@@ -318,7 +318,7 @@ class TestVerdictScope:
 
         admit_pinned_commit(downloader, _Dep(), origin.m1)
         assert downloader.contacted == [missing, origin.url]
-        verified = [p.name for p in (tmp_path / "cache" / "reachability").rglob("verified/*")]
+        verified = [p.name for p in (tmp_path / "cache" / "reachability").rglob("verified-v2/*")]
         assert verified == [origin.m1]
 
 
@@ -475,7 +475,7 @@ def test_a_listed_tip_is_recorded_for_the_destination_that_answered(
     downloader = _RefDownloader(tmp_path / "cache", [missing, origin.url], predicted=missing)
 
     assert admit_ref_commit(downloader, _RefDep(), "main") == (origin.m2, origin.m2)
-    [marker] = (tmp_path / "cache" / "reachability").rglob("verified/*")
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
     recorded = marker.read_text(encoding="utf-8")
     assert recorded.endswith(origin.url.removesuffix(".git").removesuffix("/"))
     assert "missing" not in recorded
@@ -578,7 +578,7 @@ def test_admission_binds_a_hex_named_tag_before_any_commit_abbreviation(
     downloader = _CommitFirstDownloader(tmp_path / "cache", origin, expands_to=origin.f1)
 
     assert admit_ref_commit(downloader, _RefDep(), name) == (origin.m1, origin.m1)
-    [marker] = (tmp_path / "cache" / "reachability").rglob("verified/*")
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
     assert marker.name == origin.m1
 
 
@@ -588,7 +588,7 @@ def test_admission_expands_a_hex_name_no_ref_holds(tmp_path: Path, origin: _Orig
     downloader = _CommitFirstDownloader(tmp_path / "cache", origin, expands_to=origin.m1)
 
     assert admit_ref_commit(downloader, _RefDep(), origin.m1[:10]) == (origin.m1, origin.m1)
-    assert [m.name for m in (tmp_path / "cache" / "reachability").rglob("verified/*")] == [
+    assert [m.name for m in (tmp_path / "cache" / "reachability").rglob("verified-v2/*")] == [
         origin.m1
     ]
 
@@ -612,7 +612,7 @@ def test_admission_judges_the_full_commit_a_hex_name_resolves_to(
 
     admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
 
-    markers = [m.name for m in (tmp_path / "cache" / "reachability").rglob("verified/*")]
+    markers = [m.name for m in (tmp_path / "cache" / "reachability").rglob("verified-v2/*")]
     assert markers == [origin.m1]
 
 
@@ -635,7 +635,7 @@ def test_a_commit_the_commits_api_expanded_is_verified_where_git_fetches(
 
     with pytest.raises(CommitNotReachableError):
         admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
-    assert not list((tmp_path / "cache" / "reachability").rglob("verified/*"))
+    assert not list((tmp_path / "cache" / "reachability").rglob("verified-v2/*"))
 
 
 def test_an_api_observed_tip_is_verified_at_the_mirror_git_fetches_through(
@@ -662,7 +662,77 @@ def test_an_api_observed_tip_is_verified_at_the_mirror_git_fetches_through(
 
     with pytest.raises(CommitNotReachableError):
         admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
-    assert not list((tmp_path / "cache" / "reachability").rglob("verified/*"))
+    assert not list((tmp_path / "cache" / "reachability").rglob("verified-v2/*"))
+
+
+@pytest.mark.parametrize(
+    "spell",
+    [
+        lambda sha: sha[:7],
+        lambda sha: sha[:39],
+        lambda sha: sha[:12].upper(),
+        lambda sha: "".join(c.upper() if i % 2 else c for i, c in enumerate(sha[:12])),
+    ],
+    ids=["length-7", "length-39", "upper-case", "mixed-case"],
+)
+def test_every_spelling_of_an_expanded_abbreviation_is_verified_where_git_fetches(
+    tmp_path: Path, origin: _Origin, spell
+) -> None:
+    """#5056: no abbreviation length or case makes an API answer an observed tip."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    name = spell(origin.f1)
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+    resolved = ResolvedReference(
+        original_ref=name,
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit=origin.f1,
+        ref_name=name,
+    )
+
+    with pytest.raises(CommitNotReachableError):
+        admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
+    assert not list((tmp_path / "cache" / "reachability").rglob("verified*/*"))
+
+
+def test_a_branch_named_like_hex_resolves_and_is_verified(tmp_path: Path, origin: _Origin) -> None:
+    """A hex-named branch at a commit its branches reach is admitted and recorded."""
+    from apm_cli.cache.commit_reachability import admit_pinned_commit
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    name = "20241201"
+    origin.bare("update-ref", f"refs/heads/{name}", origin.m1)
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+    resolved = ResolvedReference(
+        original_ref=name,
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit=origin.m1,
+        ref_name=name,
+    )
+
+    admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
+
+    markers = [m.name for m in (tmp_path / "cache" / "reachability").rglob("verified*/*")]
+    assert markers == [origin.m1]
+
+
+def test_a_verdict_an_earlier_build_recorded_is_not_trusted(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """A verdict in the pre-versioned namespace is ignored; the commit is verified again."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
+
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+    admit_pinned_commit(downloader, _RefDep(), origin.m1)
+    [recorded] = (tmp_path / "cache" / "reachability").rglob("verified*/*")
+    stale = recorded.parent.parent / "verified" / origin.f1
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text(recorded.read_text(encoding="utf-8"), encoding="utf-8")
+
+    with pytest.raises(CommitNotReachableError):
+        admit_pinned_commit(downloader, _RefDep(), origin.f1)
+    assert stale.read_text(encoding="utf-8") == recorded.read_text(encoding="utf-8")
 
 
 class TestRefCacheLinks:
