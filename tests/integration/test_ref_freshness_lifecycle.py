@@ -301,7 +301,7 @@ def test_installed_cli_current_state_commands_bypass_stale_bare_cache(
     )
     assert _locked_commit(scenario) == scenario.commit_a.sha
     assert _deployed_bytes(scenario) == _skill_document("commit-a").encode("utf-8")
-    assert "legacy_clone=1" in _combined_output(initial)
+    assert "commits_api=1" in _combined_output(initial)
     installed_a = _capture(scenario)
 
     commit_b = _advance(scenario, "commit-b")
@@ -337,7 +337,7 @@ def test_installed_cli_current_state_commands_bypass_stale_bare_cache(
     )
     assert _locked_commit(scenario) == commit_b.sha
     assert _deployed_bytes(scenario) == _skill_document("commit-b").encode("utf-8")
-    assert "legacy_clone=1" in _combined_output(updated_b)
+    assert "commits_api=1" in _combined_output(updated_b)
     assert "bare_rev_parse=" not in _combined_output(updated_b)
     assert "Resolving refs from upstream; local cached refs bypassed" in (
         _combined_output(updated_b)
@@ -359,7 +359,7 @@ def test_installed_cli_current_state_commands_bypass_stale_bare_cache(
     )
     assert _locked_commit(scenario) == commit_c.sha
     assert _deployed_bytes(scenario) == _skill_document("commit-c").encode("utf-8")
-    assert "legacy_clone=1" in _combined_output(updated_c)
+    assert "commits_api=1" in _combined_output(updated_c)
     assert "bare_rev_parse=" not in _combined_output(updated_c)
     assert "Resolving refs from upstream; local cached refs bypassed" in (
         _combined_output(updated_c)

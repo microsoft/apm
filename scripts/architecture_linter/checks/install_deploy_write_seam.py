@@ -14,7 +14,8 @@ would leave it on disk. This guard keeps the seam closed-world:
 * only a closed list of functions outside the seam records a path itself,
   and each of them also reports its finished write;
 * the transaction listens at the seam;
-* the local-bundle deploy (#5046) writes through the seam too, and its
+* the local-bundle deploy (#5046) and its retire deletes (#5130) write
+  through the seam too, and its
   command entry runs it under the deploy journal inside its lockfile writer;
 * only the commit gate's write plan enters ``planning`` (#4381) and only the
   locked render's private scratch tree enters ``private_scratch``.
@@ -116,8 +117,14 @@ _DIRECT_RECORDERS = {
     ("src/apm_cli/adapters/client/hermes.py", "update_config"): "journal_config_written",
     ("src/apm_cli/adapters/client/intellij.py", "_write_config"): "journal_config_written",
 }
-# Deploy writers outside integration/ that write through the seam (#5046).
-_SEAMED_FUNCTIONS = {"src/apm_cli/install/services.py": frozenset({"integrate_local_bundle"})}
+# Deploy writers outside integration/ that write through the seam: named functions,
+# or None for every call in the module (the bundle route's retires, #5130).
+_SEAMED_FUNCTIONS: dict[str, frozenset[str] | None] = {
+    "src/apm_cli/install/services.py": frozenset({"integrate_local_bundle"}),
+    "src/apm_cli/install/local_bundle_canvas.py": None,
+    "src/apm_cli/install/local_bundle_hook_trust.py": None,
+    "src/apm_cli/install/local_bundle_pending.py": None,
+}
 _BUNDLE_ENTRY = "src/apm_cli/commands/install.py"
 _BUNDLE_JOURNALED = (
     "lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(journaled_local_bundle(_install_lb))("
