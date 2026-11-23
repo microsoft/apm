@@ -12,7 +12,8 @@ tests/lifecycle/oracles.py).
 CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=copilot.
 CELL: OP=install SCOPE=user LOCK=absent PRIM=mcp MCPOWN=copilot (two COPILOT_HOME
 profiles, #4801).
-CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=cursor DECL=retarget (#4784).
+CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=cursor DECL=retarget (#4784),
+and the same with no targets: in apm.yml (auto-detected: nothing is reported).
 OWNER: install/mcp/write_receipts.py -- per-entry write evidence bound to this
 installation, keyed by (runtime, config file, native key), read by install when
 the lockfile is absent; kept entries are announced on every later install.
@@ -82,6 +83,7 @@ CREDITS = credits(
         "test_an_apm_written_entry_for_a_runtime_no_longer_targeted_is_retired_without_the_lockfile": [
             _NO_LOCK_RETARGET
         ],
+        "test_auto_detected_targets_report_no_kept_entry_without_the_lockfile": [_NO_LOCK],
     },
 )
 
@@ -417,4 +419,31 @@ def test_an_apm_written_entry_for_a_runtime_no_longer_targeted_is_retired_withou
     assert "Kept MCP server" not in resolved.output, resolved.output
     assert SERVER in _servers(scenario), "the targeted runtime's entry must stay"
     scenario.run("audit --ci", read_only=True, exit=0)
+    scenario.finish()
+
+
+def test_auto_detected_targets_report_no_kept_entry_without_the_lockfile(lifecycle_world) -> None:
+    """No targets: in apm.yml: install keeps every entry quietly, as before (#4784).
+
+    Only the manifest's own targets: say a runtime is no longer targeted;
+    auto-detection never makes an entry look abandoned.
+    """
+    scenario = _start(lifecycle_world, targets=("copilot", "cursor"))
+    _deploy(scenario)
+    manifest = lifecycle_world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    del data["targets"]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    scenario.source_moved()
+    scenario.lock_path.unlink()
+    scenario.model = scenario.model.with_lock("absent")
+    before = {config: _servers(scenario, config) for config in (".mcp.json", _CURSOR)}
+
+    step = scenario.run("install", credit=[_NO_LOCK])
+
+    assert step.result.returncode == 0, step.output
+    assert "Kept MCP server" not in step.output, step.output
+    assert {config: _servers(scenario, config) for config in before} == before
+    audit = scenario.run("audit --ci", read_only=True)
+    assert "kept-mcp-entries" not in audit.output, audit.output
     scenario.finish()
