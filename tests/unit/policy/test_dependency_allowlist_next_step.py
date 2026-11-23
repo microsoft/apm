@@ -780,3 +780,38 @@ def test_a_hook_link_a_survivor_target_shrink_retires_keeps_the_advice(
     assert [r.to_json()["command"] for r in check.remediations] == ["apm uninstall acme/evil-pkg"]
     assert _uninstall_exit_code(root, monkeypatch) == 0
     assert not (root / deployed).is_symlink()
+
+
+def test_a_retired_hook_link_with_only_a_ledger_hash_withholds_the_advice(tmp_path: Path) -> None:
+    """#5035: the hook sync keeps a link whose canonical ledger row records a hash."""
+    deployed = ".github/hooks/bundle.json"
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        target_subset=["claude", "copilot"],
+        deployed_files=[deployed],
+        deployed_file_hashes={deployed: "sha256:" + "0" * 64},
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "targets": ["copilot"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "targets": ["claude"]}],
+        },
+        targets=["copilot", "claude"],
+    )
+    lock_path = root / "apm.lock.yaml"
+    data = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    assert any(row.get("content_hash") for row in data["deployments"]), data
+    for row in data["dependencies"]:
+        row.pop("deployed_file_hashes", None)
+    lock_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    _symlinked_claim(root, deployed, tmp_path / "outside.json")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()

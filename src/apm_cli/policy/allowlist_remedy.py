@@ -412,17 +412,16 @@ def _final_symlinks(
     """
     from ..commands.uninstall.engine import project_shrunk_selections
     from ..commands.uninstall.selection_shrink import uninstall_deletion_candidates
+    from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..integration.cleanup import final_link_handled, hook_sync_unlinks
 
     root = project.project_root
     lock = project.lock
-    hashes = {
-        path.replace("\\", "/"): content_hash
-        for dependency in lock.dependencies.values()
-        for path, content_hash in (dependency.deployed_file_hashes or {}).items()
-    }
     try:
         shrunk = project_shrunk_selections(lock, removed, project.modules_dir, manifest_file(root))
+        # Uninstall's own snapshot: canonical ledger hashes first, as the hook sync reads them.
+        owners = set(cleanup_keys) | set(shrunk)
+        hashes = DeploymentLedgerCodec.cleanup_snapshot(lock, owners).hashes
         # Removed owners' files go through stale cleanup; retired-only ones through the syncs.
         removed_paths = set(uninstall_deletion_candidates(lock, cleanup_keys))
         return [

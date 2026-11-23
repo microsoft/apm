@@ -44,6 +44,7 @@ _ROUTES = (
     (_REMEDY, "_final_symlinks", "project_shrunk_selections"),
     (_REMEDY, "_final_symlinks", "final_link_handled"),
     (_REMEDY, "_final_symlinks", "hook_sync_unlinks"),
+    (_REMEDY, "_final_symlinks", "cleanup_snapshot"),
     (_CLEANUP, "hook_sync_unlinks", "managed_hook_prefixes"),
     (_CLEANUP, "hook_sync_unlinks", "_stale_gate_passes"),
     (_CLEANUP, "hook_sync_unlinks", "_managed_link_unlinkable"),
