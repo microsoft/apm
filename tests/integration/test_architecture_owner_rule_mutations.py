@@ -96,6 +96,12 @@ def _shared_linter_session() -> Iterator[LinterSession]:
             "",
             id="unpack-skips-the-portable-name-check",
         ),
+        pytest.param(
+            "src/apm_cli/bundle/unpacker.py",
+            "                    if portable_name_problem(name) is not None:\n",
+            "                    if False:\n",
+            id="unpack-skips-nested-names",
+        ),
     ],
 )
 def test_archive_member_reads_cannot_bypass_the_limits_owner(

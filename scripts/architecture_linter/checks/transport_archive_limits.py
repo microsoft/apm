@@ -86,7 +86,10 @@ def _check_archive_extraction_limits(provider: FactsProvider) -> tuple[Violation
             inventory,
             _RULE_ID,
             _UNPACKER,
-            (("sub", "portable_name_problem(rel_path) is not None", 1, "eq"),),
+            (
+                ("sub", "portable_name_problem(rel_path) is not None", 1, "eq"),
+                ("sub", "portable_name_problem(name) is not None", 1, "eq"),
+            ),
             "bundle unpack must refuse lockfile paths the archive owner finds non-portable",
         )
     )

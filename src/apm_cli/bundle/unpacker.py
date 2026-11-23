@@ -382,6 +382,11 @@ def _validated_unpack_destinations(
         if src.is_dir() and not has_symlink_component(source_dir, src):
             for walk_root, dirs, files in os.walk(src):
                 for name in (*dirs, *files):
+                    if portable_name_problem(name) is not None:
+                        raise ValueError(
+                            f"Refusing to unpack unsafe path from bundle lockfile: {rel_path!r} "
+                            f"holds {name!r}"
+                        )
                     dest_file = dest / Path(walk_root).relative_to(src) / name
                     if has_symlink_component(output_dir, dest_file):
                         raise ValueError(
