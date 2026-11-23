@@ -710,15 +710,26 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
     assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
 
 
-@pytest.mark.parametrize(("user_scope", "expected"), [(False, ["."]), (True, [])])
+@pytest.mark.parametrize(
+    ("user_scope", "user_root_primitives", "expected"),
+    [
+        (False, (), ["."]),
+        (True, ("hooks",), ["."]),
+        (True, ("hooks", "agents"), []),
+        (True, (), []),
+    ],
+    ids=["project", "user-root-hooks-only", "user-root-with-agents", "user-root-empty"],
+)
 def test_run_replay_includes_root_apm_without_local_deployed_files(
-    monkeypatch, tmp_path, user_scope, expected
+    monkeypatch, tmp_path, user_scope, user_root_primitives, expected
 ):
-    """Project-scope replay integrates root .apm/ like install does (#3369).
+    """Replay integrates root .apm/ like install does (#3369, #4837).
 
     Root hooks merge into shared configs and record no local_deployed_files,
     so the lockfile synthesizes no self-entry. Replay must still integrate
-    the project's own .apm/ content, without rewriting the lockfile.
+    the root's own .apm/ content, without rewriting the lockfile. At user
+    scope only a hooks-only root qualifies: other primitives claim files, so
+    a user lock without a self-entry predates user-root recording.
     """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.drift import ReplayConfig, run_replay
@@ -726,6 +737,12 @@ def test_run_replay_includes_root_apm_without_local_deployed_files(
     project_root = tmp_path / "proj"
     (project_root / ".apm" / "hooks").mkdir(parents=True)
     (project_root / "apm.yml").write_text("name: proj\ntargets: [claude]\n", encoding="utf-8")
+    user_root = tmp_path / "home"
+    (user_root / ".apm").mkdir(parents=True)
+    for primitive in user_root_primitives:
+        (user_root / ".apm" / primitive).mkdir()
+        (user_root / ".apm" / primitive / "p.md").write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr("apm_cli.install.drift.get_source_root", lambda _scope: user_root)
     lockfile_path = project_root / "apm.lock.yaml"
     LockFile().write(lockfile_path)
     lock_bytes = lockfile_path.read_bytes()

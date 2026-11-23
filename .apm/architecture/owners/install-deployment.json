@@ -23,7 +23,7 @@
       "id": "orphan-package-selection",
       "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
       "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner)",
-      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py"],
+      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py"],
       "guards": ["install-deployment-orphan-selection"]
     },
     {
@@ -47,6 +47,7 @@
       "selectors": [
         "src/apm_cli/install/mcp/ownership.py",
         "src/apm_cli/install/mcp/native_entry.py",
+        "src/apm_cli/install/mcp/retirement.py",
         "src/apm_cli/install/mcp/write_receipts.py"
       ],
       "guards": [
@@ -144,7 +145,8 @@
         "src/apm_cli/install/deploy_snapshot.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",
-        "src/apm_cli/integration/write_seam.py"
+        "src/apm_cli/integration/write_seam.py",
+        "src/apm_cli/policy/depth_check.py"
       ],
       "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
     },
@@ -196,12 +198,13 @@
     },
     {
       "id": "bundle-native-layout-lowering",
-      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied",
-      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name) consumed by install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent",
+      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied, which one rendering of a primitive a plugin bundle carries and a target deploys, and which packed instructions convert to a rule format",
+      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name, PLUGIN_RENDERING_PREFERENCE, deployed_rendering_extension, deployed_file_extension, superseded_plugin_renderings) consumed by bundle/plugin_exporter.py and install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id, superseded_bundle_renderings, bundle_rule_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent; packed instructions convert in install/local_bundle_renderings.py through InstructionIntegrator.convert_rule_content",
       "selectors": [
         "src/apm_cli/bundle/plugin_layout.py",
         "src/apm_cli/install/local_bundle_paths.py",
-        "src/apm_cli/install/local_bundle_agents.py"
+        "src/apm_cli/install/local_bundle_agents.py",
+        "src/apm_cli/install/local_bundle_renderings.py"
       ],
       "guards": ["install-deployment-bundle-native-layout"]
     },

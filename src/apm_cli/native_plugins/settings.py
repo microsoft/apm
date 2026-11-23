@@ -55,6 +55,9 @@ class SettingsDeclaration:
     """Plugins whose enable value here APM owns whatever it is: those it declares
     to the harness whose file this one also reads. Their ``false`` is APM's
     suppression, flipped or retired as their targets change."""
+    catalog: frozenset[str] = frozenset()
+    """Plugins APM's catalog still deploys: a user's own ``true`` for one, in a
+    harness APM no longer declares it to, keeps the binding it loads through."""
 
     @property
     def marketplace_value(self) -> dict[str, Any]:
@@ -138,9 +141,6 @@ def apply_declaration(
     if declaration.plugins and current is None:
         marketplaces[name] = declaration.marketplace_value
         change.added.append(f"{MARKETPLACES_KEY}.{name}")
-    elif not declaration.plugins and current is not None and owned:
-        del marketplaces[name]
-        change.removed.append(f"{MARKETPLACES_KEY}.{name}")
     # Without a previous lock nothing existing is APM's to flip or retire.
     managed = declaration.managed if owned is not None else frozenset()
     for plugin in sorted(declaration.plugins):
@@ -165,6 +165,14 @@ def apply_declaration(
         if enabled.get(key) is True or (plugin in managed and enabled.get(key) is False):
             del enabled[key]
             change.removed.append(f"{ENABLED_KEY}.{key}")
+    # The binding goes once APM declares nothing here, unless a user's own
+    # enable of a plugin the catalog still deploys needs it (#4874).
+    if not declaration.plugins and current is not None and owned:
+        if not any(
+            enabled.get(declaration.plugin_key(plugin)) is True for plugin in declaration.catalog
+        ):
+            del marketplaces[name]
+            change.removed.append(f"{MARKETPLACES_KEY}.{name}")
     for key, section in ((MARKETPLACES_KEY, marketplaces), (ENABLED_KEY, enabled)):
         # An emptied section the user already had stays, as an empty object.
         if section or key in document:

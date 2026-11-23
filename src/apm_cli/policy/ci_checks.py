@@ -26,7 +26,7 @@ from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from typing import Any
 
     from ..deps.lockfile import LockFile
@@ -837,6 +837,85 @@ def _check_native_mcp_ownership(
             for name, runtime in pairs
         ],
     )
+
+
+def _native_mcp_plugin_roots(
+    project_root: Path,
+    manifest: APMPackage,
+    lock: LockFile,
+    *,
+    prepared_replay: PreparedCiAuditReplay | None,
+    no_policy: bool,
+) -> Mapping[str, str]:
+    """Each declared MCP server's package root, where its native entry points.
+
+    A scratch replay reads declarations from its own tree; a root inside it is
+    rebound to the live ``apm_modules/`` copy install rendered the entry at.
+    """
+    from ..constants import APM_MODULES_DIR
+
+    modules_root = prepared_replay.modules_root if prepared_replay is not None else None
+    view, _ = audit_mcp_view(manifest, lock, modules_root=modules_root, no_policy=no_policy)
+    roots = dict(view.plugin_roots)
+    if modules_root is None:
+        return roots
+    scratch = modules_root.resolve()
+    live = (project_root / APM_MODULES_DIR).resolve()
+    for name, root in roots.items():
+        bound = Path(root)
+        if bound.is_relative_to(scratch):
+            roots[name] = str(live.joinpath(*bound.parts[len(scratch.parts) :]))
+    return roots
+
+
+def _edited_native_mcp_entries(
+    project_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+    plugin_roots: Callable[[], Mapping[str, str]] | None = None,
+) -> tuple[CheckResult, ...]:
+    """Report recorded native MCP entries edited since APM wrote them (#4757).
+
+    Empty when none was edited, so audit output is unchanged for every other project.
+    *plugin_roots* is read only when a recorded declaration uses ``${CLAUDE_PLUGIN_ROOT}``.
+    """
+    from ..deps.plugin_root_render import contains_plugin_root
+    from ..install.mcp.native_entry import edited_recorded_native_mcp_entries
+
+    roots = (
+        plugin_roots()
+        if plugin_roots is not None and contains_plugin_root(lock.mcp_configs or {})
+        else None
+    )
+    edited = edited_recorded_native_mcp_entries(
+        lock,
+        [target.name for target in targets],
+        project_root=project_root,
+        user_scope=user_scope,
+        plugin_roots=roots,
+    )
+    if not edited:
+        return ()
+    fix = remediation.NATIVE_MCP_ENTRY_EDITED
+    if user_scope:
+        fix = fix.with_command("apm install -g")
+    check = CheckResult(
+        name="native-mcp-drift",
+        passed=False,
+        message=(
+            f"{len(edited)} native MCP entr(ies) recorded in apm.lock.yaml changed since "
+            f"APM wrote them -- {fix.clause()}"
+        ),
+        remediations=(fix,),
+        details=[
+            f"MCP server {name!a} in {config} ({runtime}): the entry differs from what "
+            "APM recorded writing"
+            for name, runtime, config in edited
+        ],
+    )
+    return (check,)
 
 
 def _kept_mcp_entries(
@@ -1819,7 +1898,27 @@ def run_baseline_checks(
         or _run(
             _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
         )
-        # 7c: MCP entries kept without a lockfile because they could not be proven (#4737)
+        # 7c: recorded native MCP entries edited since APM wrote them (#4757)
+        or any(
+            _run(check)
+            for check in _edited_native_mcp_entries(
+                project_root,
+                lock,
+                resolved_targets,
+                user_scope=user_scope,
+                # The scratch replay failed: config-consistency reports it.
+                plugin_roots=None
+                if prepared_replay_error is not None
+                else lambda: _native_mcp_plugin_roots(
+                    project_root,
+                    manifest,
+                    lock,
+                    prepared_replay=prepared_replay,
+                    no_policy=no_policy,
+                ),
+            )
+        )
+        # 7d: MCP entries kept without a lockfile because they could not be proven (#4737)
         or any(
             _run(check) for check in _kept_mcp_entries(deployment_root, lock, user_scope=user_scope)
         )

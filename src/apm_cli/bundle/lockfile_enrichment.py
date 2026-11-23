@@ -243,6 +243,7 @@ def enrich_lockfile_for_pack(
     *,
     bundle_files: dict[str, str] | None = None,
     packed_at: str | None = None,
+    renderings: dict[str, str] | None = None,
 ) -> str:
     """Create an enriched copy of the lockfile YAML with a ``pack:`` section.
 
@@ -265,6 +266,10 @@ def enrich_lockfile_for_pack(
             ``deployed_files`` paths and so requires a separate manifest
             for integrity verification at install time (see issue #1098).
         packed_at: Optional stable pack timestamp. Defaults to the current time.
+        renderings: Optional mapping of bundle-relative path -> the extension
+            the deploying target gave that packed file, embedded under
+            ``pack.renderings`` (#3686). When present it is authoritative: a
+            path without an entry has no rendering provenance.
 
     Returns:
         A YAML string with the ``pack:`` block followed by the original
@@ -340,6 +345,8 @@ def enrich_lockfile_for_pack(
         # ``verify_bundle_integrity()`` at install time. Sorted for
         # deterministic YAML output.
         pack_meta["bundle_files"] = dict(sorted(bundle_files.items()))
+    if renderings is not None:
+        pack_meta["renderings"] = dict(sorted(renderings.items()))
 
     from ..utils.yaml_io import yaml_to_str
 

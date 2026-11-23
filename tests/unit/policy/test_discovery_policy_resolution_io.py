@@ -383,7 +383,10 @@ class TestReadCacheEntryExpectedHash:
         """Write a minimal cache entry and return the repo_ref used."""
         repo_ref = "owner/.github"
         policy = _make_test_policy()
-        _write_cache(repo_ref, policy, tmp_path, raw_bytes_hash=raw_bytes_hash)
+        raw_content = VALID_POLICY_YAML if raw_bytes_hash else None
+        _write_cache(
+            repo_ref, policy, tmp_path, raw_bytes_hash=raw_bytes_hash, raw_content=raw_content
+        )
         return repo_ref
 
     def test_expected_hash_matches_cache(self, tmp_path: Path) -> None:
