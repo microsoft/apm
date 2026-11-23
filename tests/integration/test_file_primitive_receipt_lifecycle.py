@@ -348,6 +348,7 @@ def test_a_kept_edit_newly_claimed_locally_never_hashes_the_edit(
     kept = install()
 
     output = kept.stdout + kept.stderr
+    assert kept.returncode == 0, output
     assert edited.read_bytes() == edited_bytes, output
     lock = LockFile.read(project / "apm.lock.yaml")
     recorded = [
@@ -355,6 +356,11 @@ def test_a_kept_edit_newly_claimed_locally_never_hashes_the_edit(
         *(h for dep in lock.dependencies.values() for h in dep.deployed_file_hashes.values()),
     ]
     assert content_hash_of_bytes(edited_bytes) not in recorded, output
+    assert relative not in lock.local_deployed_files, output
+    # The receipt still proves the edit, so a repeat install keeps it with exit 0.
+    repeat = install()
+    assert repeat.returncode == 0, repeat.stdout + repeat.stderr
+    assert edited.read_bytes() == edited_bytes
 
 
 def test_a_differing_file_is_never_receipted_by_adoption(
