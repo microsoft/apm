@@ -71,6 +71,7 @@ jobs:
     needs: [base]
     permissions:
       contents: read
+      pull-requests: read
     uses: ./.github/workflows/ci.yml
     with:
       base_sha: ${{ needs.base.outputs.base_sha }}
