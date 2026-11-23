@@ -387,3 +387,34 @@ def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
     assert "_local/d" not in _rows(world)
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
     assert not (world.project / ".claude/skills/d-skill").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_reparents_under_the_locked_row_of_an_aliased_parent(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """g's surviving parent f is reached through a symlink alias; it records f's own row."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("g", ()),
+        ("f", ("../g",)),
+        ("e", ("../f", "../g")),
+        ("d", ("../e",)),
+        ("z", ("../f-link",)),
+        ("a", ("../z",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _link_dir(vendor / "f-link", vendor / "f")
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" not in rows, sorted(rows)
+    assert _row_named(world, "g")[1]["resolved_by"] in rows
+    assert (world.project / ".claude/skills/g-skill/SKILL.md").is_file()
+    _assert_frozen_then_no_frozen_converge(world)
