@@ -381,8 +381,6 @@ def test_a_no_clobber_publish_never_replaces_an_empty_directory(tmp_path: Path) 
 
 def test_rollback_keeps_a_directory_that_replaced_a_published_package(tmp_path: Path) -> None:
     """Rollback removes a published package only while it is still that directory."""
-    import shutil
-
     modules = tmp_path / "apm_modules"
     destination = modules / "o" / "p"
     session = ResolutionStagingSession(modules)
@@ -390,7 +388,8 @@ def test_rollback_keeps_a_directory_that_replaced_a_published_package(tmp_path: 
     replacement.mkdir(parents=True)
     (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
     session.publish_replacement(replacement, clobber=False)
-    shutil.rmtree(destination)
+    # Move ours aside (removing it could let the new directory reuse its inode).
+    destination.rename(tmp_path / "ours")
     destination.mkdir()
     (destination / "user.md").write_text("user\n", encoding="utf-8")
 
