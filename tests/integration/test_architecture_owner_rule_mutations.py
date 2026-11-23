@@ -1332,8 +1332,8 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hook_trust.py",
-            "        hook_scripts_parent(target.name, target.root_dir)\n",
-            '        f"{target.root_dir}/hooks/"\n',
+            "        Path(hook_scripts_parent(target.name, target.root_dir)).as_posix()",
+            '        Path(target.root_dir, "hooks").as_posix()',
         ),
         (
             "install-deployment-local-bundle-hook-trust",
