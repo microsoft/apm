@@ -369,6 +369,7 @@ def test_prune_reparents_a_survivor_whose_recorded_parent_goes(
     _assert_frozen_then_no_frozen_converge(world)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
 def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -376,10 +377,7 @@ def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
     world = _world(tmp_path, apm_binary_path)
     source = world.project / "vendor" / "e"
     shutil.rmtree(source)
-    try:
-        os.symlink(source, source, target_is_directory=True)
-    except OSError:
-        pytest.skip("this platform cannot create a self-referencing symlink")
+    os.symlink(source, source, target_is_directory=True)
 
     pruned = _output(world.apm("prune"))
 
@@ -387,3 +385,5 @@ def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
     assert "Traceback" not in pruned and "Failed to parse" not in pruned, pruned
     assert "_local/e" in _rows(world)
     assert "_local/d" not in _rows(world)
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert not (world.project / ".claude/skills/d-skill").exists()
