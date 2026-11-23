@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 from apm_cli.install.deployed_paths import deployed_path_entry
-from apm_cli.utils.path_security import first_symlink_component, has_symlink_component
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I7")]
 
@@ -47,21 +46,21 @@ def test_a_path_outside_the_root_keeps_its_refusal(tmp_path: Path) -> None:
         deployed_path_entry(tmp_path / "elsewhere" / "SKILL.md", root, [])
 
 
-def test_the_owner_names_the_first_linked_component_and_keeps_its_verdicts(
-    tmp_path: Path,
-) -> None:
+def test_the_message_names_the_first_linked_component_at_any_depth(tmp_path: Path) -> None:
+    # The owner's walk (first_symlink_component) picks the component; a deeper
+    # link below it is never the one reported.
     root, outside = tmp_path / "root", tmp_path / "outside"
-    (root / "plain" / "demo").mkdir(parents=True)
-    (outside / "demo").mkdir(parents=True)
+    (root / "plain").mkdir(parents=True)
+    (outside / "inner").mkdir(parents=True)
     try:
-        (root / "linked").symlink_to(outside, target_is_directory=True)
+        (root / "plain" / "linked").symlink_to(outside, target_is_directory=True)
+        (outside / "deeper").symlink_to(outside / "inner", target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("symbolic links are unavailable")
-    target = root / "linked" / "demo" / "SKILL.md"
 
-    assert first_symlink_component(root, target) == root / "linked"
-    assert first_symlink_component(root, root / "plain" / "demo" / "SKILL.md") is None
-    assert has_symlink_component(root, target) is True
-    assert has_symlink_component(root, root / "plain" / "demo" / "SKILL.md") is False
-    # Outside the base stays a refusal, as before.
-    assert has_symlink_component(root, tmp_path / "elsewhere") is True
+    with pytest.raises(RuntimeError) as refused:
+        deployed_path_entry(root / "plain" / "linked" / "deeper" / "SKILL.md", root, [])
+
+    assert str(refused.value).startswith(
+        "Refusing deployment through a symlinked path component: plain/linked. "
+    )
