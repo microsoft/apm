@@ -99,13 +99,14 @@ def _manifest_declarations_to_drop(declarations: list, packages_to_remove: list)
 
 
 class _StillNeededRepair(NamedTuple):
-    """Orphan-owner repair for still-needed rows: new parents and subtree depths."""
+    """Orphan-owner repair for still-needed rows: parents, subtree depth and dev status."""
 
     parents: dict
     depths: dict
+    dev: dict
 
 
-_NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {})
+_NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
 
 
 def _split_still_needed_packages(
@@ -134,7 +135,8 @@ def _split_still_needed_packages(
     parents = {
         key: repair for key, repair in decision.repairs.items() if key in decision.rescued_roots
     }
-    return removed, still_needed, _StillNeededRepair(parents, dict(decision.rescued_depths))
+    repair = _StillNeededRepair(parents, dict(decision.rescued_depths), dict(decision.rescued_dev))
+    return removed, still_needed, repair
 
 
 def _split_removals(
@@ -152,25 +154,27 @@ def _split_removals(
 
 
 def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
-    """Re-parent each still-needed row and move its subtree one level down."""
+    """Re-parent each still-needed row, then re-derive its subtree's depth and dev status."""
     updated = False
-    for key, (parent, local_path, dev_only) in repair.parents.items():
+    # Dev status comes only from ``repair.dev``: a partial walk proves
+    # production paths, never their absence.
+    for key, (parent, local_path, _dev_only) in repair.parents.items():
         kept = lockfile.get_dependency(key)
         if kept is None:
             continue
         kept.resolved_by = parent
-        kept.is_dev = dev_only
         if local_path is not None:
             kept.local_path = local_path
         if kept.replacement is not None:
             # The removed declaration's own request goes; surviving parents' stay.
             kept.replacement.drop_root_requests()
         updated = True
-    for key, depth in repair.depths.items():
-        kept = lockfile.get_dependency(key)
-        if kept is not None and kept.depth != depth:
-            kept.depth = depth
-            updated = True
+    for field_name, values in (("depth", repair.depths), ("is_dev", repair.dev)):
+        for key, value in values.items():
+            kept = lockfile.get_dependency(key)
+            if kept is not None and getattr(kept, field_name) != value:
+                setattr(kept, field_name, value)
+                updated = True
     return updated
 
 

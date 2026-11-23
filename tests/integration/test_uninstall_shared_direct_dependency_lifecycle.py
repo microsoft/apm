@@ -30,7 +30,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
-    pytest.mark.promise("P-INV-I3", "P-INV-I1"),
+    pytest.mark.promise("P-INV-I3", "P-INV-I1", "P-INV-I2"),
 ]
 
 
@@ -133,8 +133,9 @@ def test_uninstall_keeps_a_direct_dependency_another_package_still_needs(
     world.apm("audit", "--ci")
     assert lock_bytes(world.project) == lock_after
     assert tree_digest(world.project) == tree_after
-    # I2: a full install re-resolves the graph and writes the same lockfile.
-    world.apm("install")
+    # I2: a full install re-resolves the graph and writes the same lockfile
+    # (--no-frozen: under CI=true an install with a lockfile defaults to frozen).
+    world.apm("install", "--no-frozen")
     assert lock_bytes(world.project) == lock_after
 
 
@@ -153,3 +154,101 @@ def test_uninstall_still_removes_a_dependency_nothing_else_needs(
     assert not any((world.project / path).exists() for path in f_files)
     assert not (f_files & deployed_files(world.project))
     world.apm("install", "--frozen")
+
+
+def _graph_world(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    packages: tuple[tuple[str, str | None], ...],
+    direct: list[str],
+    dev: list[str] | None = None,
+) -> ReplayWorld:
+    """Publish ``(name, child)`` packages in order and install the project (#4804)."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    for name, child in packages:
+        world.publish(name, _parent_of(child) if child else _skill_package)
+    manifest = {
+        "name": "proj",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {"apm": direct},
+    }
+    if dev:
+        manifest["devDependencies"] = {"apm": dev}
+    dump_yaml(manifest, world.project / "apm.yml")
+    world.apm("install")
+    return world
+
+
+def _assert_install_rewrites_nothing(world: ReplayWorld) -> None:
+    """I2: the repaired lockfile is what a full install of the same graph writes."""
+    lock_after_uninstall = lock_bytes(world.project)
+    world.apm("install", "--no-frozen")
+    assert lock_bytes(world.project) == lock_after_uninstall
+
+
+def test_uninstall_reparents_to_the_nearest_parent_by_lowest_key(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4804: two parents at equal depth; install's tie rule picks the lowest key."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("e", None), ("b", "e"), ("a", "e")),
+        ["test/b", "test/a", "test/e"],
+    )
+    world.apm("uninstall", "test/e")
+    assert _rows(world)["test/e"]["resolved_by"] == "test/a"
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_of_chained_still_needed_roots_derives_depth_parent_first(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4804: d -> e -> f with all three direct; removing e and f nests f below e."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e")),
+        ["test/d", "test/e", "test/f"],
+    )
+    world.apm("uninstall", "test/e", "test/f")
+    rows = _rows(world)
+    assert (rows["test/e"]["resolved_by"], rows["test/e"]["depth"]) == ("test/d", 2)
+    assert (rows["test/f"]["resolved_by"], rows["test/f"]["depth"]) == ("test/e", 3)
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_under_a_dev_only_parent_moves_the_subtree_to_dev(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4804: production e -> f; once only dev d needs e, f is dev-only too."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e")),
+        ["test/e"],
+        dev=["test/d"],
+    )
+    assert not _rows(world)["test/f"].get("is_dev")
+    world.apm("uninstall", "test/e")
+    rows = _rows(world)
+    assert rows["test/e"].get("is_dev") is True
+    assert rows["test/f"].get("is_dev") is True
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_tie_rule_spans_production_and_dev_parents(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4804: production b and dev a both need e; install's tie ignores dev status."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("e", None), ("b", "e"), ("a", "e")),
+        ["test/b", "test/e"],
+        dev=["test/a"],
+    )
+    world.apm("uninstall", "test/e")
+    assert not _rows(world)["test/e"].get("is_dev")
+    _assert_install_rewrites_nothing(world)

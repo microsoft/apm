@@ -102,6 +102,12 @@ APM downloads into `apm_modules/`; harnesses load from `.agents/`.
   on each machine when it deploys from `apm_modules/`. `apm audit --ci` (from
   `~/.apm` with `claude` in its targets, for `-g`) reports drift when the
   source or the deployed copy no longer matches.
+- **Dropping a target retires it.** A one-shot `--target` run or
+  auto-detection keeps the record of a plugin it skips. When `targets:` drops
+  every harness that loads a plugin, the next `apm install` retires it like any
+  other dropped target's files: the root and its settings entries go, and an
+  edited root is kept with a warning. `apm lock` leaves the plugin in place
+  until that install, and `apm install --frozen` refuses the change.
 - **Your settings win.** APM adds only what the next lockfile needs and removes
   only entries the previous one produced. An explicit `false` in
   `enabledPlugins`, your own entries and a root you edited are kept. If the
