@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -248,7 +249,8 @@ def _plant_project_binary(directory: Path, name: str) -> Path:
         (directory / f"{name}.cmd").write_bytes(script.encode("ascii"))
     else:
         stand_in = directory / name
-        stand_in.write_text('#!/bin/sh\n: > "$(dirname "$0")/stand-in-ran"\n', encoding="utf-8")
+        # An absolute marker path needs no PATH lookup, so a run is always detected.
+        stand_in.write_text(f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
         stand_in.chmod(0o755)
     return marker
 
@@ -353,6 +355,8 @@ def test_ci_audit_never_runs_a_project_local_git(tmp_path: Path) -> None:
         check=False,
     )
 
+    # The audit must run to completion, so the probe it protects was reached.
+    assert result.returncode == 0, result.stdout + result.stderr
     assert not marker.exists(), result.stdout + result.stderr
 
 
@@ -472,3 +476,23 @@ def test_user_scripts_keep_the_users_working_directory_search(
     evidence = json.loads(result.stdout)
     assert evidence["apm"] == "1"
     assert evidence["script"] == ([] if user_value is None else [user_value])
+
+
+def test_runtime_launch_refuses_a_project_local_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With only a project-local runtime on PATH, ``apm run`` refuses and runs nothing."""
+    from apm_cli.core.script_runner import ScriptRunner
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    marker = _plant_project_binary(project, "codex")
+    _search_cwd_first(monkeypatch, *_system_dirs())
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.chdir(project)
+
+    with pytest.raises(RuntimeError, match="apm runtime setup codex"):
+        ScriptRunner()._execute_runtime_command("codex exec", "prompt", dict(os.environ))
+    assert not marker.exists()
