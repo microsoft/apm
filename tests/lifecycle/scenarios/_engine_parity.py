@@ -223,8 +223,9 @@ def _modes(world: World) -> dict[str, str]:
             mode = oct(path.lstat().st_mode & 0o7777)
             parts = rel.split("/")
             if _RECEIPTS in parts[:-1] and path.is_file():
-                receipts.setdefault(f"{name}:{path.parent.relative_to(root).as_posix()}", [])
-                receipts[f"{name}:{path.parent.relative_to(root).as_posix()}"].append(mode)
+                # Its own key: the receipt directory's mode stays compared under rel.
+                key = f"{name}:{path.parent.relative_to(root).as_posix()}/<receipt files>"
+                receipts.setdefault(key, []).append(mode)
             else:
                 modes[f"{name}:{rel}"] = mode
     modes.update({key: ",".join(sorted(values)) for key, values in receipts.items()})
