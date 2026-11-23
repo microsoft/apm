@@ -178,6 +178,10 @@ from scripts.architecture_linter.checks.install_policy_outcome_routing import (
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
 )
+from scripts.architecture_linter.checks.install_reanchor_receipts import (
+    GUARD_REANCHOR_RECEIPT_HISTORY,
+    check_reanchor_receipt_history,
+)
 from scripts.architecture_linter.checks.install_receipt_collection import (
     GUARD_RECEIPT_COLLECTION,
     check_receipt_collection,
@@ -292,6 +296,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_RECEIPT_COLLECTION,
         "Orphaned deployment receipts are collected only by the receipt owner.",
         check_receipt_collection,
+    ),
+    _rule(
+        GUARD_REANCHOR_RECEIPT_HISTORY,
+        "A re-anchored local owner's receipts keep their hash history.",
+        check_reanchor_receipt_history,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,

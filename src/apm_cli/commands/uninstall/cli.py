@@ -6,6 +6,7 @@ import sys
 import traceback
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import click
@@ -62,6 +63,13 @@ from .engine import (
     manifest_dependency_entries,
     project_shrunk_selections,
 )
+from .local_reanchor import (
+    _abort_unsaved_reanchor,
+    _plan_reanchor_or_exit,
+    _refuse_reanchor_refresh,
+    _refuse_unverifiable_local_survivors,
+    _rename_reanchored_receipts,
+)
 from .selection_shrink import (
     _shrink_surviving_selections,
     shrink_retired_paths,
@@ -116,13 +124,22 @@ class _StillNeededRepair(NamedTuple):
     depths: dict
     dev: dict
     roots: frozenset = frozenset()
+    reanchor: Any = None
 
 
 _NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
 
 
 def _split_still_needed_packages(
-    lockfile, packages_to_remove: list, modules_dir, apm_yml_path, logger
+    lockfile,
+    packages_to_remove: list,
+    modules_dir,
+    apm_yml_path,
+    logger,
+    *,
+    user_scope=False,
+    dry_run=False,
+    quiet=False,
 ) -> tuple[list, list, _StillNeededRepair]:
     """Split removals into full removals and declarations a survivor still needs.
 
@@ -131,6 +148,11 @@ def _split_still_needed_packages(
     declaration goes, and the orphan owner's repair re-parents the row
     (#4749). Returns ``(removed, still_needed, repair)``.
     """
+    if lockfile and packages_to_remove and not modules_dir.exists():
+        kept = _refuse_unverifiable_local_survivors(
+            lockfile, packages_to_remove, apm_yml_path, logger, dry_run=dry_run, quiet=quiet
+        )
+        packages_to_remove = [package for package in packages_to_remove if package not in kept]
     if not lockfile or not packages_to_remove or not modules_dir.exists():
         return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
     decision = _uninstall_orphan_decision(
@@ -143,15 +165,36 @@ def _split_still_needed_packages(
         for package in packages_to_remove
         if _removed_lock_key(package, lockfile) in decision.rescued_roots
     ]
-    _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
+    if user_scope:
+        _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
+    reanchor = _plan_reanchor_or_exit(
+        lockfile,
+        decision,
+        still_needed,
+        apm_yml_path,
+        logger,
+        others=removed,
+        shrinks=lambda: project_shrunk_selections(
+            lockfile, packages_to_remove, modules_dir, apm_yml_path
+        ),
+    )
     repair = _StillNeededRepair(
         dict(decision.rescued_parents),
         dict(decision.rescued_depths),
         dict(decision.rescued_dev),
         frozenset(decision.rescued_roots),
+        reanchor,
     )
     return removed, still_needed, repair
+
+
+def _cleanup_state_unless_reanchor_refreshes(lockfile, removed_keys, refreshed, repair, logger):
+    """Snapshot the files cleanup may touch; a re-anchor refuses any survivor refresh first."""
+    _refuse_reanchor_refresh(repair, refreshed, logger)
+    if not lockfile:
+        return set(), {}
+    return _collect_deployed_cleanup_state(lockfile, removed_keys | refreshed)
 
 
 def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
@@ -193,7 +236,14 @@ def _refuse_still_needed_local(still_needed: list, parents, lockfile, logger) ->
 
 
 def _split_removals(
-    packages_to_remove: list, lockfile, paths: tuple, logger, *, user_scope: bool
+    packages_to_remove: list,
+    lockfile,
+    paths: tuple,
+    logger,
+    *,
+    user_scope: bool,
+    dry_run=False,
+    quiet=False,
 ) -> tuple[list, list, list, _StillNeededRepair]:
     """Split the selection into full, selected-profile and declaration-only removals."""
     removed, retained = _split_selected_profile_packages(
@@ -201,7 +251,14 @@ def _split_removals(
     )
     modules_dir, apm_yml_path = paths
     removed, still_needed, repairs = _split_still_needed_packages(
-        lockfile, removed, modules_dir, apm_yml_path, logger
+        lockfile,
+        removed,
+        modules_dir,
+        apm_yml_path,
+        logger,
+        user_scope=user_scope,
+        dry_run=dry_run,
+        quiet=quiet,
     )
     return removed, retained, still_needed, repairs
 
@@ -232,6 +289,11 @@ def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
             if kept is not None and getattr(kept, field_name) != value:
                 setattr(kept, field_name, value)
                 updated = True
+    if repair.reanchor:
+        # Re-key still-needed local rows to the identity install records (#4889).
+        from .local_reanchor import apply_local_reanchor
+
+        updated |= apply_local_reanchor(lockfile, repair.reanchor, repair.dev)
     return updated
 
 
@@ -419,6 +481,17 @@ def _hold_native_registration(native_before, logger: CommandLogger) -> None:
         )
 
 
+def _persist_in_reanchor_transaction(
+    lockfile, lockfile_path, logger, integration_cleanup, repair
+) -> _LockPersistence:
+    """Persist survivors; post-commit binding is part of a re-anchor's transaction (#4889)."""
+    try:
+        return _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    except Exception:
+        _abort_unsaved_reanchor(repair, logger)
+        raise
+
+
 def _persist_lock_then_resync_native(
     *,
     lock_changed: bool,
@@ -431,6 +504,7 @@ def _persist_lock_then_resync_native(
     modules_dir,
     scope,
     native_before,
+    still_needed_repairs=_NO_STILL_NEEDED_REPAIR,
 ) -> None:
     """Persist survivors, converge native registrations, then drop an empty lock.
 
@@ -441,10 +515,14 @@ def _persist_lock_then_resync_native(
     """
     saved = None
     if lock_changed and persist_allowed:
-        saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+        saved = _persist_in_reanchor_transaction(
+            lockfile, lockfile_path, logger, integration_cleanup, still_needed_repairs
+        )
     if lock_changed and (saved is None or not saved.saved):
         _hold_native_registration(native_before, logger)
+        _abort_unsaved_reanchor(still_needed_repairs, logger)
         return
+    _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,
@@ -659,7 +737,6 @@ def _gate_denied_package_keys(
     apm_package: Any, lockfile: Any, modules_dir: Any, deploy_root: Any, user_scope: bool
 ) -> dict[str, str]:
     """Survivors the org policy now denies, with why, from the gate retirement owner (#4446)."""
-    from pathlib import Path
 
     from ...install.exec_gate import gate_retirements
     from ...install.lsp.integration import has_recorded_lsp_state
@@ -1265,6 +1342,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             (modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
+            dry_run=dry_run,
+            quiet=True,
         )
 
         # Fire scripts only after every requested identifier has selected one
@@ -1319,6 +1398,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             (modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
+            dry_run=dry_run,
         )
         surviving_deps = _surviving_declarations(
             current_deps, [*packages_to_remove, *still_needed_packages]
@@ -1539,13 +1619,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             user_scope=scope is InstallScope.USER,
             logger=logger,
         )
-        if lockfile:
-            all_deployed_files, all_deployed_file_hashes = _collect_deployed_cleanup_state(
-                lockfile,
-                removed_keys | refreshed_survivor_keys,
-            )
-        else:
-            all_deployed_files, all_deployed_file_hashes = set(), {}
+        all_deployed_files, all_deployed_file_hashes = _cleanup_state_unless_reanchor_refreshes(
+            lockfile, removed_keys, refreshed_survivor_keys, still_needed_repairs, logger
+        )
 
         # Step 9: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.
@@ -1705,6 +1781,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             modules_dir=modules_dir,
             scope=scope,
             native_before=native_before,
+            still_needed_repairs=still_needed_repairs,
         )
 
         # Final summary: count each package once, whichever stores it left.
