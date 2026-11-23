@@ -171,6 +171,17 @@ def test_a_parked_native_replacement_keeps_the_loose_claude_skill(
     assert (world.manifest.parent / "apm.lock.yaml").read_bytes() == lock_before
     assert (world.home / _CLAUDE_SKILL).read_text(encoding="ascii") == _skill("Initial skill.")
 
+    # The kept copy is still bound by its recorded hash: an edit fails the audit.
+    (world.home / _CLAUDE_SKILL).write_text(_skill("Tampered."), encoding="ascii")
+    tampered = world.runner.run(
+        ("audit", "--ci", "--no-policy"),
+        scenario_id="parked-native-replacement-tampered",
+        cwd=world.manifest.parent,
+        env=world.env,
+    )
+    assert tampered.returncode == 1, _evidence(tampered)
+    assert f"hash-drift: {_CLAUDE_SKILL}" in _text(tampered), _evidence(tampered)
+
 
 def test_an_admitted_native_replacement_still_retires_the_loose_claude_skill(
     tmp_path: Path, apm_binary_path: Path
