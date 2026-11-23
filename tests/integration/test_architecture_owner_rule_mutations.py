@@ -5250,6 +5250,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         new="    return tuple(sorted(retired))\n",
         intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
+    MutationCase(
+        guard_id="install-deployment-deploy-write-seam",
+        rule_id="install-deployment-deploy-write-seam",
+        path="src/apm_cli/install/transaction.py",
+        old="self._seal_deploy_write, journal=token)",
+        new="self._seal_deploy_write, journal=None)",
+        intent="The install transaction listens at the write seam without its journal token.",
+    ),
 )
 
 EXECUTABLE_MUTATIONS = MUTATIONS + USER_ROOT_ROUTING_MUTATIONS
