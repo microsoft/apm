@@ -3208,6 +3208,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The absence decision consults os.access beside the owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-binding",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="from .hook_absence import absence_proven, root_identity\n",
+        new=(
+            "from os.path import exists as absence_proven\n"
+            "\n"
+            "from .hook_absence import root_identity\n"
+        ),
+        intent="absence_proven is rebound to a plain path probe under the same spelling.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-absence-proof-helper",
         rule_id="install-deployment-uninstall-absence-proof",
         path="src/apm_cli/commands/uninstall/cli.py",

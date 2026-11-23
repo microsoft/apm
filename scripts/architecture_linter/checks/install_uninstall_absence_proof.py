@@ -8,6 +8,8 @@ direct filesystem probe there would follow a swapped link and drop the claim.
 
 from __future__ import annotations
 
+import ast
+
 from scripts.architecture_linter.checks.install_deployment_shared import _facts_for
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import source_text, violation
@@ -41,6 +43,63 @@ _OWNER_LITERALS = (
 )
 
 
+# The one import each allowlisted name may be bound by: (level, module).
+_BINDINGS = {"absence_proven": (1, "hook_absence"), "Path": (0, "pathlib")}
+
+
+def _bindings(tree: ast.AST) -> dict[str, list[object]]:
+    """Every binding of a _BINDINGS name: ``(level, module)`` for an import, else its node."""
+    found: dict[str, list[object]] = {name: [] for name in _BINDINGS}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                if bound in found:
+                    origin = (
+                        (node.level, node.module)
+                        if isinstance(node, ast.ImportFrom) and alias.name == bound
+                        else node
+                    )
+                    found[bound].append(origin)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            if node.name in found:
+                found[node.name].append(node)
+        elif isinstance(node, ast.arg) and node.arg in found:
+            found[node.arg].append(node)
+        elif (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Store | ast.Del)
+            and node.id in found
+        ):
+            found[node.id].append(node)
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            for name in node.names:
+                if name in found:
+                    found[name].append(node)
+    return found
+
+
+def _binding_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Bind each allowlisted name only through its owner import (keyed by binding)."""
+    index = provider.tree_index(_CLI)
+    tree = index.root if index is not None else None
+    if tree is None:
+        return [violation(rule_id, _CLI, "uninstall/cli.py must parse")]
+    findings: list[Violation] = []
+    for name, bindings in _bindings(tree).items():
+        if bindings != [_BINDINGS[name]]:
+            level, module = _BINDINGS[name]
+            source = f"{'.' * level}{module}"
+            findings.append(
+                violation(
+                    rule_id,
+                    _CLI,
+                    f"{name} must be bound only by 'from {source} import {name}'",
+                )
+            )
+    return findings
+
+
 def _calls_in(facts, name: str) -> list[str] | None:
     definitions = [item for item in facts.definitions if item.name == name]
     if len(definitions) != 1:
@@ -72,6 +131,7 @@ def check_uninstall_absence_proof(provider: FactsProvider) -> tuple[Violation, .
                 )
                 for name in sorted(set(retain) - _ALLOWED_CALLS)
             )
+        findings.extend(_binding_violations(provider, rule_id))
         command = _calls_in(facts, "uninstall")
         if command is None or "root_identity" not in command:
             findings.append(

@@ -302,6 +302,7 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(
             GUARD_UNINSTALL_ABSENCE_PROOF,
             f"{GUARD_UNINSTALL_ABSENCE_PROOF}-access",
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-binding",
             f"{GUARD_UNINSTALL_ABSENCE_PROOF}-helper",
         ),
         description="An aborted uninstall sync proves a removed file absent only through its owner.",
