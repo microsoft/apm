@@ -30,6 +30,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tests.benchmarks import journeys  # noqa: E402
+from tests.fixtures.perf import offline  # noqa: E402
+
+# The served bench policy blocks tree-10's transitive MCP server, so its no-op is
+# never verified; trusting transitive servers keeps discovery and enforcement on.
+offline.POLICY_DOCUMENT["mcp"]["trust_transitive"] = True
 
 new_apm, work = sys.argv[1], Path(sys.argv[2]).resolve()
 fixture_names = sys.argv[3:]
@@ -43,6 +48,9 @@ ALLOW = [
     ("path lookup", "executable lookup along PATH (PATH is keyed); reported by name below"),
     ("record", "the record, its key and the lifecycle lock: the record machinery itself"),
     ("tmp", "the run's own temp files"),
+    ("path resolution", "ancestors of the project, HOME, APM_HOME, the cache and the program"),
+    ("deploy cache", "deploy_v1/records: a missing record only declines the fast path to the"
+     " full pipeline, whose output equals it (engine-parity scenarios)"),
 ]
 
 _LINE = re.compile(r"^(\d+)\s+(\w+)\((.*)\)\s+=\s+(-?\d+|\?)(.*)$")
@@ -102,6 +110,7 @@ def parse(log: Path, start_cwd: str) -> tuple[dict[str, set[str]], set[str], lis
 
 def covered_from_record(record: dict, root: Path, env: dict) -> tuple[set[str], list[str]]:
     """Files the MAC keys, and the trees the record walks or proves."""
+    trees_listed: set[str] = set()
     home = Path(env["HOME"])
     apm_home = Path(env["APM_HOME"])
     cache = Path(env.get("APM_CACHE_DIR") or "")
@@ -122,11 +131,17 @@ def covered_from_record(record: dict, root: Path, env: dict) -> tuple[set[str], 
         elif kind == "listing":
             trees.append(str(root / rest))
         elif kind == "target":
-            files.add(str(root / rest))
+            trees.append(str(root / rest))  # existence keyed; contents keyed by listing
+        elif kind in ("parent", "git-head") and rest.startswith("/"):
+            files.add(os.path.normpath(rest if kind == "parent" else rest + "/HEAD"))
+        elif kind == "modules":
+            trees_listed.add(str(root / rest))
     files.add(str(root / "apm.lock.yaml"))
     if record.get("notice"):
         files.add(record["notice"])
     trees.append(str(apm_home))  # walked, minus the record and cache below
+    trees.append("/etc/apm/policy.d")  # the lifecycle policy-script tree (listing and bytes)
+    files |= trees_listed
     if str(cache):
         trees.append(str(cache / "policy_v1"))
     return files, trees
@@ -160,13 +175,21 @@ def classify(path, calls, *, files, trees, writes, env, venv, prefixes, git_dirs
         return "self"
     if path in files:
         return "keyed"
+    if os.path.basename(path) == ".git" and any(under(env["_ROOT"], os.path.dirname(path)) for _ in [0]):
+        return "keyed"  # git discovery: verdict_git repeats the walk (a new .git changes the MAC)
+    if any(under(env["_ROOT"], path) or under(k, path) for k in env["_ANCHORS"]):
+        return "path resolution"
+    if path in env["_FILE_ANCESTORS"]:
+        return "keyed"
+    if "/deploy_v1" in path and under(path, env.get("APM_CACHE_DIR", "/nonexistent")):
+        return "deploy cache"
     if under(path, apm_home) and not under(path, apm_home + "/cache"):
         return "keyed"
     if any(under(path, t) for t in trees if t != apm_home):
         return "keyed"
     if path.startswith(("/dev", "/proc", "/sys")) or path in ("/", ""):
         return "kernel"
-    if any(under(path, p) for p in prefixes) or path.endswith((".py", ".pyc", ".so", ".pth")):
+    if any(under(path, p) for p in prefixes) or path.endswith((".py", ".pyc", ".so", ".pth", ".zip")):
         return "code"
     if any(under(path, g) for g in git_dirs):
         return "git install"
@@ -177,7 +200,7 @@ def classify(path, calls, *, files, trees, writes, env, venv, prefixes, git_dirs
                         "/etc/passwd", "/etc/group", "/usr/share/i18n", "/etc/host.conf",
                         "/etc/resolv.conf", "/etc/hosts", "/etc/gai.conf", "/usr/local/lib")):
         return "system libs"
-    if os.path.dirname(path) in path_dirs:
+    if os.path.dirname(path) in path_dirs or path in path_dirs:
         return "path lookup"
     tmp = os.environ.get("RUNNER_TEMP", "/tmp")
     if any(under(path, w) for w in writes if os.path.isdir(w) is False) or path.startswith("/tmp/"):
@@ -196,10 +219,11 @@ def interpreter_prefixes(apm: str) -> list[str]:
     return sorted({str(venv), *out, str(Path(out[0]).resolve())})
 
 
-def git_dirs() -> list[str]:
+def git_dirs(env: dict | None = None) -> list[str]:
     git = shutil.which("git") or "/usr/bin/git"
     exec_path = subprocess.run([git, "--exec-path"], capture_output=True, text=True).stdout.strip()
-    return [git, exec_path, "/usr/share/git-core", "/usr/share/gitweb"]
+    extra = [env["GIT_EXEC_PATH"]] if env and env.get("GIT_EXEC_PATH") else []
+    return [git, exec_path, "/usr/share/git-core", "/usr/share/gitweb", *extra]
 
 
 gaps_total = 0
@@ -241,12 +265,26 @@ for name in fixture_names:
         trees += ltrees
         reads, writes, execs = parse(log, str(ctx.project))
         path_dirs = {os.path.normpath(p) for p in env.get("PATH", "").split(os.pathsep) if p}
+        env["_ROOT"] = str(root)
+        anchors = [env["HOME"], env["APM_HOME"], env.get("APM_CACHE_DIR", ""), *prefixes,
+                   str(Path(new_apm).resolve().parent), os.path.dirname(new_apm)]
+        env["_ANCHORS"] = [a for a in anchors if a]
+        ancestors = set()
+        stops = {str(root), env["HOME"], "/"}
+        for f in files:
+            if os.path.lexists(f):
+                parent = os.path.dirname(f)
+                while parent not in stops and parent not in ancestors and parent != "/":
+                    ancestors.add(parent)
+                    parent = os.path.dirname(parent)
+        env["_FILE_ANCESTORS"] = ancestors
+        gdirs_here = gdirs + git_dirs(env)[4:]
         classes: Counter[str] = Counter()
         gaps: list[str] = []
         lookups: Counter[str] = Counter()
         for path, calls in sorted(reads.items()):
             c = classify(path, calls, files=files, trees=trees, writes=writes, env=env,
-                         venv=None, prefixes=prefixes, git_dirs=gdirs, path_dirs=path_dirs)
+                         venv=None, prefixes=prefixes, git_dirs=gdirs_here, path_dirs=path_dirs)
             classes[c] += 1
             if c == "GAP":
                 gaps.append(f"{path}  [{','.join(sorted(calls))}]")
