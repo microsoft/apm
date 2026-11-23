@@ -187,26 +187,58 @@ def live_query(numbers: Iterable[int], repo: str = REPO) -> str:
 
 
 def _gh_graphql(query: str) -> Mapping:
-    out = subprocess.run(
-        ["gh", "api", "graphql", "-f", f"query={query}"],
-        capture_output=True,
-        text=True,
-        check=False,
+    """The decoded ``gh api graphql`` response, even when gh exits nonzero.
+
+    gh exits nonzero for any GraphQL error, including a per-issue ``NOT_FOUND``
+    that still returns ``data``; ``live_states`` classifies the errors. Only an
+    undecodable reply is a transport failure here.
+    """
+    try:
+        out = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as error:
+        raise RuntimeError(f"gh api graphql could not run: {error}") from error
+    try:
+        payload = json.loads(out.stdout)
+    except ValueError as error:
+        detail = out.stderr.strip() or out.stdout.strip()
+        raise RuntimeError(f"gh api graphql failed ({out.returncode}): {detail}") from error
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"gh api graphql returned {type(payload).__name__}, not an object")
+    return payload
+
+
+def _issue_not_found(error: object) -> bool:
+    """A GraphQL error for one aliased issue lookup that does not exist."""
+    if not isinstance(error, dict) or error.get("type") != "NOT_FOUND":
+        return False
+    path = error.get("path")
+    return (
+        isinstance(path, list)
+        and len(path) == 2
+        and path[0] == "repository"
+        and re.fullmatch(r"i\d+", str(path[1])) is not None
     )
-    if out.returncode != 0:
-        raise RuntimeError(f"gh api graphql failed: {out.stderr.strip() or out.stdout.strip()}")
-    return json.loads(out.stdout)
 
 
 def live_states(numbers: Iterable[int], transport: Transport = _gh_graphql) -> dict[str, str]:
-    """``{"<n>": "OPEN" | "CLOSED" | "MERGED" | "MISSING"}`` read live from GitHub."""
+    """``{"<n>": "OPEN" | "CLOSED" | "MERGED" | "MISSING"}`` read live from GitHub.
+
+    An issue that does not exist is ``MISSING``; any other GraphQL error
+    (authorization, rate limit, a missing repository) is a RuntimeError.
+    """
     numbers = sorted(set(numbers))
     if not numbers:
         return {}
     payload = transport(live_query(numbers))
-    if payload.get("errors") and not payload.get("data"):
-        raise RuntimeError(f"GitHub GraphQL error: {payload['errors']}")
-    found = (payload.get("data") or {}).get("repository") or {}
+    errors = [error for error in payload.get("errors") or () if not _issue_not_found(error)]
+    found = (payload.get("data") or {}).get("repository")
+    if errors or not isinstance(found, dict):
+        raise RuntimeError(f"GitHub GraphQL error: {errors or payload.get('errors') or payload}")
     return {str(n): ((found.get(f"i{n}") or {}).get("state") or "MISSING") for n in numbers}
 
 
@@ -224,7 +256,7 @@ def check_live(cells: Mapping[str, str] | None = None, transport: Transport = _g
     cells = known_cells() if cells is None else cells
     try:
         states = live_states(cited_issues(cells), transport)
-    except RuntimeError as error:
+    except (RuntimeError, OSError, ValueError) as error:
         print(f"[x] could not read issue state: {error}")
         return 2
     closed = closed_cells(cells, states)

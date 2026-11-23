@@ -346,6 +346,8 @@ _FROZEN_PARAMETER_SITES = frozenset(
         ("src/apm_cli/deps/apm_resolver.py", "__init__"),
         ("src/apm_cli/deps/immutable_requirements.py", "__init__"),
         ("src/apm_cli/install/dry_run_plan.py", "with_resolved_dependencies"),
+        ("src/apm_cli/install/fast_entry.py", "_run"),
+        ("src/apm_cli/install/fast_entry.py", "run"),
         ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
         ("src/apm_cli/install/pipeline.py", "run_install_pipeline"),
     }
@@ -488,6 +490,7 @@ def check_frozen_flag_reader(provider: FactsProvider) -> tuple[Violation, ...]:
 
 
 _MCP_OWNERSHIP_OWNER = "src/apm_cli/install/mcp/ownership.py"
+_MCP_RETIREMENT_OWNER = "src/apm_cli/install/mcp/retirement.py"
 
 
 _MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator_install.py"
@@ -522,6 +525,16 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         pattern=re.compile(r"^[ \t]*def resolve_mcp_target_servers\("),
         owner=_MCP_OWNERSHIP_OWNER,
         message="Legacy MCP target ownership adoption must stay owned by install/mcp/ownership.py",
+        respect_exempt=False,
+    )
+    # Refused MCP retirements persist what reached disk through one owner (#4792).
+    duplicates += _duplicate_definition_lines(
+        provider,
+        rule_id=rule_id,
+        prefix=_SRC_PREFIX,
+        pattern=re.compile(r"^[ \t]*def (?:retire_mcp_claims|record_refused_retirement)\("),
+        owner=_MCP_RETIREMENT_OWNER,
+        message="MCP claim retirement must stay owned by install/mcp/retirement.py",
         respect_exempt=False,
     )
     findings = list(duplicates)
@@ -603,6 +616,17 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "_refuse_native_mcp_collisions",
             "refuse_projected_mcp_collisions",
         ),
+        # A direct ``install --mcp`` entry refuses before apm.yml is written (#4759).
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "run_mcp_install",
+            "_refuse_native_mcp_collision",
+        ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "_refuse_native_mcp_collision",
+            "refuse_projected_mcp_collisions",
+        ),
         (
             "src/apm_cli/install/mcp/integration.py",
             "run_mcp_integration",
@@ -629,6 +653,15 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "project_mcp_cleanup_reachable",
         ),
         (_MCP_OWNERSHIP_OWNER, "compare_native_mcp_connection", "mcp_native_hash"),
+        # A refused retirement records the run's writes before it propagates (#4792).
+        ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration", "retire_mcp_claims"),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "run_mcp_integration",
+            "record_refused_retirement",
+        ),
+        (_MCP_RETIREMENT_OWNER, "retire_mcp_claims", "on_refusal"),
+        (_MCP_RETIREMENT_OWNER, "record_refused_retirement", "MCPIntegrator.update_lockfile"),
         (
             "src/apm_cli/install/mcp/integration.py",
             "run_mcp_integration",
@@ -652,6 +685,32 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "src/apm_cli/install/phases/lockfile.py",
             "_preserve_existing_mcp_state",
             "DeploymentLedgerCodec.mcp_native_hashes",
+        ),
+        # A config file APM emptied is deleted only by the provenance owner (#4867).
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "_write_cleaned_json_config",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_ownership.py",
+            "remove_emptied_hook_file",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_source_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_entries_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/install/mcp/retired_destinations.py",
+            "heal_retired_project_mcp_destinations",
+            "delete_emptied_config",
         ),
     ):
         facts, failures = _facts_for(provider, path, rule_id)
@@ -919,8 +978,9 @@ def _check_project_self_entry(
         )
     if not (
         _body_has(run_replay_body, "lock.project_self_entry()")
-        and _body_has(run_replay_body, "_project_has_root_primitives(project_root)")
-        and _body_has(run_replay_body, "not config.user_scope")
+        and _body_has(run_replay_body, "else _project_has_root_primitives(project_root)")
+        and _body_has(run_replay_body, "_root_holds_only_hook_primitives(self_source_root)")
+        and _body_has(run_replay_body, "if config.user_scope")
     ):
         findings.append(
             _summary(

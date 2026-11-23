@@ -20,6 +20,7 @@ import pytest
 
 import apm_cli.security.executables as ex
 from apm_cli.core.remediation import MCP_EXECUTABLES_UNTRUSTED
+from apm_cli.security import exec_kinds
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
@@ -863,3 +864,134 @@ def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> No
         approve_command("owner/repo", user_scope=True, user_store=True)
         == "apm approve -g --user owner/repo"
     )
+
+
+@pytest.mark.parametrize(
+    ("deployed", "deployed_files", "expected"),
+    [
+        pytest.param(("mcp",), [], (), id="mcp-only-is-not-a-rebuild-kind"),
+        pytest.param(
+            ("hooks", "bin"), [".claude/skills/p/SKILL.md"], ("hooks",), id="bin-not-deployed"
+        ),
+        pytest.param(("bin",), [".claude/skills/p/bin/tool"], ("bin",), id="bin-deployed"),
+        pytest.param(
+            ("hooks", "bin"),
+            [".github/skills/bin/SKILL.md"],
+            ("hooks",),
+            id="skill-named-bin-is-not-bin-evidence",
+        ),
+        pytest.param(
+            ("bin",), [".github/skills/bin/bin/tool"], ("bin",), id="skill-named-bin-with-bin-dir"
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            ["agent-data/workflows/bin/SKILL.md"],
+            ("hooks",),
+            id="grok-skill-named-bin",
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            [".github/hooks/scripts/bin/scripts/run.sh"],
+            ("hooks",),
+            id="hook-scripts-bin-dir",
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            [".agents/skills/p/references/skills/bin/tool"],
+            ("hooks",),
+            id="nested-bin-is-not-the-withheld-bin",
+        ),
+        pytest.param(("bin",), [".agents/skills/p/bin/tool"], ("bin",), id="agents-skill-bin"),
+        pytest.param(
+            ("lsp", "canvas"),
+            [".github/extensions/c/extension.mjs"],
+            ("lsp", "canvas"),
+            id="declared-order",
+        ),
+        pytest.param(("hooks", "canvas"), [], ("hooks",), id="canvas-not-deployed"),
+        pytest.param(
+            ("canvas",), [".copilot/extensions/c/extension.mjs"], ("canvas",), id="canvas-user"
+        ),
+        pytest.param(
+            ("hooks", "canvas"),
+            [".github/extensions"],
+            ("hooks",),
+            id="extensions-root-alone-is-not-canvas-evidence",
+        ),
+    ],
+)
+def test_rebuild_retired_kinds_needs_deployment_evidence(deployed, deployed_files, expected):
+    """#4567/#4816: only kinds the rebuild removes; bin/ and canvas need a deployed file."""
+    withheld = set(deployed)
+    assert exec_kinds.rebuild_retired_kinds(deployed, withheld, deployed_files) == expected
+
+
+@pytest.mark.parametrize(
+    ("env", "deployed_file"),
+    [
+        pytest.param({}, ".copilot/skills/p/bin/tool", id="copilot-user-legacy-root"),
+        pytest.param(
+            {"CLAUDE_CONFIG_DIR": "{home}/.config/test-claude"},
+            ".config/test-claude/skills/p/bin/tool",
+            id="claude-relocated-user-root",
+        ),
+        pytest.param(
+            {"CLAUDE_CONFIG_DIR": "{home}"},
+            "skills/p/bin/tool",
+            id="claude-config-dir-is-home",
+        ),
+    ],
+)
+def test_rebuild_retired_kinds_sees_user_scope_bin(tmp_path, monkeypatch, env, deployed_file):
+    """#4567: bin/ under a user-scope skills root, relocated homes included, counts."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value.format(home=tmp_path))
+
+    assert exec_kinds.rebuild_retired_kinds(
+        ("hooks", "bin"), {"hooks", "bin"}, [deployed_file]
+    ) == (
+        "hooks",
+        "bin",
+    )
+
+
+def test_rebuild_retired_kinds_skips_dynamic_root_resolution(monkeypatch):
+    """#4567: a Cowork root that cannot resolve never blocks naming other kinds."""
+    import dataclasses
+
+    from apm_cli.integration import targets
+
+    def unresolvable():
+        raise RuntimeError("several OneDrive mounts")
+
+    cowork = targets.KNOWN_TARGETS["copilot-cowork"]
+    broken = dataclasses.replace(cowork, user_root_resolver=unresolvable)
+    monkeypatch.setitem(targets.KNOWN_TARGETS, "copilot-cowork", broken)
+
+    assert exec_kinds.rebuild_retired_kinds(("hooks",), {"hooks"}, []) == ("hooks",)
+
+
+@pytest.mark.parametrize(
+    ("root", "recorded"),
+    [
+        pytest.param("./skills", "skills/p/bin/tool", id="user-root-is-home"),
+        pytest.param("..\\cfg\\skills", "../cfg/skills/p/bin/tool", id="windows-outside-home"),
+    ],
+)
+def test_skill_root_matches_recorded_bin_path(root, recorded):
+    """#4567: roots normalize like recorded lock paths (no ".", forward slashes)."""
+    assert exec_kinds._deployed_bin_file(recorded, (exec_kinds._root_parts(root),))
+
+
+@pytest.mark.parametrize(
+    ("kinds", "expected"),
+    [
+        (("hooks",), "hooks"),
+        (("hooks", "lsp", "hooks"), "hooks and LSP server(s)"),
+        (("hooks", "lsp", "canvas"), "hooks, LSP server(s) and canvas extension(s)"),
+        ((), ""),
+    ],
+)
+def test_exec_kinds_phrase_names_each_kind_once(kinds, expected):
+    assert exec_kinds.exec_kinds_phrase(kinds) == expected

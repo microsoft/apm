@@ -57,6 +57,7 @@
         "src/apm_cli/models/dependency/replacement.py",
         "src/apm_cli/primitives/discovery.py",
         "src/apm_cli/deps/apm_resolver.py",
+        "src/apm_cli/commands/deps/_inventory.py",
         "src/apm_cli/commands/deps/cli.py",
         "src/apm_cli/install/phases/download.py",
         "src/apm_cli/install/phases/integrate.py",
@@ -174,7 +175,8 @@
         "src/apm_cli/install/phases/services.py",
         "src/apm_cli/deps/lockfile_extensions.py",
         "src/apm_cli/models/extension_keys.py",
-        "src/apm_cli/deps/lockfile_container.py"
+        "src/apm_cli/deps/lockfile_container.py",
+        "src/apm_cli/deps/lockfile_document.py"
       ],
       "guards": ["contracts-tooling-lockfile-write-authority"]
     },

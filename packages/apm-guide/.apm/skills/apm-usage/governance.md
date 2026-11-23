@@ -40,7 +40,7 @@ enforcement: block                       # off | warn | block
 fetch_failure: warn                      # warn | block; org-side knob (see 9.5)
 
 cache:
-  ttl: 3600                             # policy cache in seconds
+  ttl: 3600                             # policy cache in seconds (max 86400)
 
 dependencies:
   allow: null                           # allowed patterns (null = no opinion; [] = allow nothing)
@@ -514,9 +514,10 @@ These checks run without a policy file:
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
 - `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
-- `kept-mcp-entries` -- reported only when an install without `apm.lock.yaml` kept an MCP entry it could not confirm it wrote for a server it no longer deploys; remove the entry or declare the server again, then run `apm install`
+- `native-mcp-drift` -- reported only when a native MCP entry the lockfile records APM writing for a self-defined server was edited since (detail names the server and config file); undo the edit or remove the entry, then run `apm install` (`-g` at user scope)
+- `kept-mcp-entries` -- reported only when an install without `apm.lock.yaml` kept an MCP entry it could not confirm it wrote for a server it no longer deploys, kept a declared server's entry for a runtime `targets:` no longer selects, or met an unusable MCP write record (still reported after the lockfile is rewritten; every later install announces kept entries); remove the entry, declare the server or target its runtime again, remove an unusable record file, then run `apm install`
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
-- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch. It also fails, naming the path, on a file the lockfile does not record at a denied or unapproved package's own hook path (`apm install` keeps it and warns; it never deletes it)
+- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch. It also fails, naming the path, on a file the lockfile does not record at a denied or unapproved package's own hook path, or on a merged hook config entry (`.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`, ...) matching that package's hook that no other source owns (`apm install` keeps it and warns; it never deletes it)
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
 Marketplace object declarations must match one locked coordinate through
@@ -619,16 +620,19 @@ relax an ancestor that requires an explicit `includes:` list.
 
 ### 4. What gets enforced
 
-- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth, require_pinned_constraint
+- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth (resolution stops at the limit; the resolved graph is judged, not the old lockfile), require_pinned_constraint
 - **Registry source:** require, allow_non_registry
 - **MCP:** allow, deny, transport.allow, self_defined (`trust_transitive` is parsed but not enforced)
 - **Compilation:** target.allow / target.enforce (target-aware). `target:`, `targets:`, and CSV forms are one declaration; aliases resolve before comparison (`vscode`/`agents` are `copilot`); `all` in `allow` allows everything. Install judges its effective selection; audit judges the targets `apm.yml` declares.
-- **Manifest:** require_explicit_includes
+- **Manifest:** require_explicit_includes, scripts (`deny` refuses a `scripts:` block in the installed manifest before any fetch or write, `--mcp` and local bundles included)
+- **Unmanaged files:** `action: deny` refuses an install that would leave a governed file no lockfile row claims (`--mcp` and local bundles before any write); deployed files and the lockfile are restored (an install killed before the restore leaves them unrecorded)
 - **Integrity:** security.integrity.require_hashes
 
-`manifest.required_fields`, `manifest.scripts`, `compilation.strategy`,
-`compilation.source_attribution` and `unmanaged_files` are checked only by
-`apm audit --ci`; `manifest.content_types` is not enforced.
+Each install refusal names the policy field and the fix; under
+`enforcement: warn` it is a warning. `manifest.required_fields`,
+`compilation.strategy` and `compilation.source_attribution` are checked only
+by `apm audit --ci`; `manifest.content_types` is not enforced. `apm run` does
+not consult `manifest.scripts`.
 
 ### 5. When enforcement runs
 

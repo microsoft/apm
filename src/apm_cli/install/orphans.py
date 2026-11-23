@@ -115,9 +115,10 @@ class OrphanRemovalDecision:
     ``superseded_roots`` pairs each released root with the retained package
     subtrees it still hosts. ``rescued_roots`` are an uninstall's own removal
     roots that a surviving package still reaches: only their declaration goes,
-    their lock row stays (re-parented through ``repairs``) with its content,
-    and ``rescued_depths`` gives the depth it and its subtree take below the
-    new parent.
+    their lock row stays with its content. ``rescued_parents``,
+    ``rescued_depths`` and ``rescued_dev`` give the parent, depth and dev
+    status every row the walk reaches from those roots takes, as a fresh
+    install records them (#4833).
     """
 
     operation: OrphanOperation
@@ -141,7 +142,11 @@ class OrphanRemovalDecision:
     repairs: Mapping[str, tuple[str, str | None, bool]] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    rescued_parents: Mapping[str, tuple[str, str | None]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     rescued_depths: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    rescued_dev: Mapping[str, bool] = field(default_factory=lambda: MappingProxyType({}))
     reachability: ReachabilityResult | None = None
 
     @property
@@ -607,27 +612,31 @@ def _decide_uninstall(
         # it is proof. Unreached roots go as before, and every descendant
         # candidate is kept because the walk cannot prove it unused.
         rescued_roots = candidate_roots & walk.reachable
-        repairs = _rescue_repairs(walk, rescued_roots)
+        parents, depths, dev = _rescued_metadata(lockfile, rescued_roots, walk, complete=False)
         return OrphanRemovalDecision(
             operation=operation,
             candidate_keys=candidate_orphans,
             retained_keys=candidate_orphans,
             rescued_roots=rescued_roots,
-            repairs=MappingProxyType(repairs),
-            rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
+            repairs=MappingProxyType(_rescue_repairs(walk, rescued_roots)),
+            rescued_parents=MappingProxyType(parents),
+            rescued_depths=MappingProxyType(depths),
+            rescued_dev=MappingProxyType(dev),
             reachability=walk if candidate_orphans else None,
         )
     rescued = candidate_orphans & walk.reachable
     rescued_roots = candidate_roots & walk.reachable
-    repairs = _rescue_repairs(walk, rescued | rescued_roots)
+    parents, depths, dev = _rescued_metadata(lockfile, rescued_roots, walk, complete=True)
     return OrphanRemovalDecision(
         operation=operation,
         candidate_keys=candidate_orphans,
         removed_keys=candidate_orphans - walk.reachable,
         rescued_keys=rescued,
         rescued_roots=rescued_roots,
-        repairs=MappingProxyType(repairs),
-        rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
+        repairs=MappingProxyType(_rescue_repairs(walk, rescued | rescued_roots)),
+        rescued_parents=MappingProxyType(parents),
+        rescued_depths=MappingProxyType(depths),
+        rescued_dev=MappingProxyType(dev),
         reachability=walk,
     )
 
@@ -641,36 +650,40 @@ def _rescue_repairs(walk, keys: frozenset[str]) -> dict:
     }
 
 
-def _rescued_root_depths(
-    lockfile: LockFile, rescued_roots: frozenset[str], repairs: Mapping
-) -> dict[str, int]:
-    """Depth each re-parented root and its locked subtree take (#4749).
+def _rescued_graph(lockfile: LockFile, rescued_roots: frozenset[str], walk) -> list[str]:
+    """Lock rows the walk reaches from the rescued roots, roots first (#4833).
 
-    A rescued root is no longer direct. As install records it, its depth is
-    its new parent's depth plus one, and each entry recorded under it follows.
+    Follows every declaring edge the walk saw, not the recorded
+    ``resolved_by`` chain, so a descendant another survivor also declares,
+    or one recorded under a different parent, is included.
     """
-    replacements = lockfile.replacements
-    dependencies = lockfile.get_package_dependencies()
-    by_identity = {lockfile_parent_identity(dep, replacements): dep for dep in dependencies}
-    children = _build_children_index(lockfile)
-    depths: dict[str, int] = {}
-    queue = []
-    for key in sorted(rescued_roots):
-        dep = lockfile.get_dependency(key)
-        if dep is None or key not in repairs:
-            continue
-        parent = by_identity.get(repairs[key][0])
-        depths[key] = max(parent.depth if parent is not None else 1, 1) + 1
-        queue.append(dep)
-    while queue:
-        dep = queue.pop()
-        depth = depths[dep.get_unique_key()] + 1
-        for child in children.get(lockfile_parent_identity(dep, replacements), ()):
-            child_key = child.get_unique_key()
-            if child_key not in depths:
-                depths[child_key] = depth
-                queue.append(child)
-    return depths
+    order = [key for key in sorted(rescued_roots) if key in lockfile.dependencies]
+    seen = set(order)
+    for key in order:
+        for child in sorted(walk.graph_children.get(key, ())):
+            if child not in seen and child in lockfile.dependencies:
+                seen.add(child)
+                order.append(child)
+    return order
+
+
+def _rescued_metadata(
+    lockfile: LockFile, rescued_roots: frozenset[str], walk, *, complete: bool
+) -> tuple[dict, dict, dict]:
+    """Parent, depth and dev status install would record for the rescued graph.
+
+    Returns ``(parents, depths, dev)``: ``parents`` maps a key to the
+    ``(parent_repo_url, local_path)`` of its nearest declaring parent. A
+    partial walk repairs only the rescued roots it reached (its depths may
+    miss a shorter path) and proves production paths, never their absence.
+    """
+    affected = _rescued_graph(lockfile, rescued_roots, walk) if complete else sorted(rescued_roots)
+    parents = {key: walk.reachable_via[key] for key in affected if key in walk.reachable_via}
+    depths = {key: walk.depths[key] for key in affected if key in walk.depths}
+    dev = {key: key in walk.dev_only for key in affected if key in walk.reachable}
+    if not complete:
+        dev = {key: is_dev for key, is_dev in dev.items() if not is_dev}
+    return parents, depths, dev
 
 
 def _locked_root_keys(lockfile: LockFile, roots: Sequence[object]) -> frozenset[str]:

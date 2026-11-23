@@ -796,6 +796,9 @@ def _handle_mcp_install(  # noqa: PLR0913
         target_decision=target_decision,
         registry=(resolved_registry_url, registry_source),
     )
+    from ..install.commit_gate import judge_mcp_install_files
+
+    judge_mcp_install_files(scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run)
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -848,6 +851,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         retry_args=builtins.tuple(retry_args),
         no_policy=no_policy,
     )
+    # Policy warnings this entry collected render as the pipeline's do (#4957).
+    logger.render_summary()
 
 
 @click.command(
@@ -1233,7 +1238,7 @@ def install(  # noqa: PLR0913
     )
     _source_root = Path.cwd()
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
-    _root_redirect.__enter__()
+    _created_root = _root_redirect.__enter__()
     try:
         check_current_cli(
             _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
@@ -1248,6 +1253,15 @@ def install(  # noqa: PLR0913
             legacy_skill_paths = should_use_legacy_skill_paths()
 
         create_user_config = not dry_run
+        from apm_cli.install.commit_gate import refuse_denied_install_entry
+
+        # Before any entry (local bundle, --mcp, dependency pipeline) writes.
+        refuse_denied_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT,
+            no_policy=no_policy,
+            dry_run=dry_run,
+            logger=logger,
+        )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
@@ -1691,7 +1705,7 @@ def install(  # noqa: PLR0913
     finally:
         # Restore cwd before summary rendering, regardless of the exit path.
         # Always close the transaction even if root restoration fails.
-        close_install_contexts(_root_redirect, transaction)
+        close_install_contexts(_root_redirect, transaction, _created_root, command_result)
         if dry_run_manifest_tmp is not None:
             dry_run_manifest_tmp.cleanup()
         # F5 (#1116): render minimal elapsed-time line on exit paths that
@@ -1786,6 +1800,7 @@ def _install_apm_packages(ctx, outcome):
                 scope=ctx.scope,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,
+                target=ctx.target or ctx.runtime,
             ),
             allow_pending_mcp=ctx.install_mode != InstallMode.MCP,
         )
@@ -1888,7 +1903,8 @@ def _install_apm_packages(ctx, outcome):
         logger=logger,
         dry_run=bool(getattr(ctx, "dry_run", False)),
     )
-    migrate_lockfile_if_needed(ctx.apm_dir)
+    if migrate_lockfile_if_needed(ctx.apm_dir) and ctx.transaction is not None:
+        ctx.transaction.undo_lockfile_migration_on_rollback(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
     old_mcp_servers: builtins.set = builtins.set()

@@ -1106,12 +1106,15 @@ class TestCleanApmEntriesFromJson:
     def test_deletes_empty_event_key(self, tmp_path):
         hooks_json = tmp_path / "hooks.json"
         hooks_json.write_text(
-            json.dumps({"hooks": {"evt": [{"command": "x", "_apm_source": "pkg"}]}})
+            json.dumps(
+                {"model": "user-choice", "hooks": {"evt": [{"command": "x", "_apm_source": "pkg"}]}}
+            )
         )
         stats = {"files_removed": 0}
         HookIntegrator._clean_apm_entries_from_json(hooks_json, stats)
         data = json.loads(hooks_json.read_text())
         assert "evt" not in data.get("hooks", {})
+        assert data["model"] == "user-choice"
 
     def test_noop_when_file_absent(self, tmp_path):
         stats = {"files_removed": 0}

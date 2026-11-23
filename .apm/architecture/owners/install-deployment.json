@@ -23,7 +23,7 @@
       "id": "orphan-package-selection",
       "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
       "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner)",
-      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py"],
+      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py"],
       "guards": ["install-deployment-orphan-selection"]
     },
     {
@@ -43,11 +43,13 @@
     {
       "id": "legacy-mcp-ownership-key-migration",
       "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption; machine-local per-entry MCP write evidence and its use when apm.lock.yaml is absent",
-      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints) + install/mcp/write_receipts.py (per-entry write evidence bound like the deployment receipts through DeploymentMaterializationSession.binds/binding; without a lockfile it retires only entries it proves unchanged and keeps and reports the rest, read by apm audit --ci kept-mcp-entries)",
+      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints) + install/mcp/write_receipts.py (per-entry write evidence bound like the deployment receipts through DeploymentMaterializationSession.binds/binding; without a lockfile it retires only entries it proves unchanged and keeps and reports the rest, read by apm audit --ci kept-mcp-entries) + integration/config_file_provenance.py (single owner of deleting a native MCP or hook config file APM emptied: delete_emptied_config deletes only a file this machine recorded APM creating, still a bare skeleton, with the record outside any VCS tree; recorded_config_write records creation at each write, #4867)",
       "selectors": [
         "src/apm_cli/install/mcp/ownership.py",
         "src/apm_cli/install/mcp/native_entry.py",
-        "src/apm_cli/install/mcp/write_receipts.py"
+        "src/apm_cli/install/mcp/retirement.py",
+        "src/apm_cli/install/mcp/write_receipts.py",
+        "src/apm_cli/integration/config_file_provenance.py"
       ],
       "guards": [
         "install-deployment-mcp-ownership-migration",
@@ -60,6 +62,7 @@
       "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; each receipt key keeps a short history of earlier hashes this installation wrote (core/receipt_history.py, read only by the session's trusted-baseline decision, never deletion evidence; #4428); cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
+        "src/apm_cli/core/_deployment_queries.py",
         "src/apm_cli/core/legacy_lock_evidence.py",
         "src/apm_cli/core/receipt_history.py",
         "src/apm_cli/integration/skill_support.py",
@@ -130,9 +133,15 @@
     },
     {
       "id": "install-entry-routing",
-      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage",
+      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage; the one exception is the locked fast path (install/fast_entry.py then install/diff_apply.py), which serves only a bare 'apm install' or 'apm install --frozen', writes only files the verified lockfile, caches and package-bound records prove, never deletes, and runs the full pipeline on any doubt",
       "owner": "install/pipeline_entry.py (pipeline_preview, PipelinePreview, record_preview_resolution): run_install_pipeline is entered only through install/service.py InstallService, from a closed list of _install_apm_dependencies callers (commands/install.py, update.py, lock.py, deps/cli.py); dry_run=True stops before the first write and the preview projects its plan; install --mcp and apm mcp install hand their server to install/service_integration.py run_service_integrations, whose run_mcp_integration installs and records only that entry (install/mcp/entry_integration.py), so the command keeps no integrator or lockfile writes",
-      "selectors": ["src/apm_cli/install/pipeline_entry.py"],
+      "selectors": [
+        "src/apm_cli/install/diff_apply.py",
+        "src/apm_cli/install/fast_entry.py",
+        "src/apm_cli/install/fast_output.py",
+        "src/apm_cli/install/noop_diff.py",
+        "src/apm_cli/install/pipeline_entry.py"
+      ],
       "guards": ["install-deployment-install-entry-routing"]
     },
     {
@@ -144,7 +153,8 @@
         "src/apm_cli/install/deploy_snapshot.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",
-        "src/apm_cli/integration/write_seam.py"
+        "src/apm_cli/integration/write_seam.py",
+        "src/apm_cli/policy/depth_check.py"
       ],
       "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
     },
@@ -196,12 +206,13 @@
     },
     {
       "id": "bundle-native-layout-lowering",
-      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied",
-      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name) consumed by install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent",
+      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied, which one rendering of a primitive a plugin bundle carries and a target deploys, and which packed instructions convert to a rule format",
+      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name, PLUGIN_RENDERING_PREFERENCE, deployed_rendering_extension, deployed_file_extension, superseded_plugin_renderings) consumed by bundle/plugin_exporter.py and install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id, superseded_bundle_renderings, bundle_rule_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent; packed instructions convert in install/local_bundle_renderings.py through InstructionIntegrator.convert_rule_content",
       "selectors": [
         "src/apm_cli/bundle/plugin_layout.py",
         "src/apm_cli/install/local_bundle_paths.py",
-        "src/apm_cli/install/local_bundle_agents.py"
+        "src/apm_cli/install/local_bundle_agents.py",
+        "src/apm_cli/install/local_bundle_renderings.py"
       ],
       "guards": ["install-deployment-bundle-native-layout"]
     },
@@ -236,7 +247,7 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text) and for command writers (CommandIntegrator._rendered_command); a differing managed file is replaced only with this checkout's trusted receipt or bytes equal to the locked render (OverwriteGate bound by recorded_writes, #4360), never on a lockfile hash; case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text) and for command writers (CommandIntegrator._rendered_command); a differing managed file is replaced only with this checkout's trusted receipt or bytes equal to the locked render (OverwriteGate bound by recorded_writes, #4360), never on a lockfile hash, decided by keeps_unproven_file for file primitives (_check_adopt_or_skip) and for hook files, copied hook scripts and canvas bundles (keeps_edited_output; a bundle with a kept member is left whole, #4626); case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
       "selectors": [
         "src/apm_cli/integration/base_integrator.py",
         "src/apm_cli/integration/cleanup.py",
@@ -247,6 +258,7 @@
       "guards": [
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
+        "install-deployment-cleanup-spelling-aliases",
         "install-deployment-cleanup-target-roots",
         "install-deployment-cleanup-retains-kept-members",
         "install-deployment-codex-agent-link-resolution",
@@ -258,9 +270,10 @@
     {
       "id": "executable-trust-context",
       "decision": "Executable trust context and per-package approval, including the approve command parked notices print and the store identity a CLI spec names",
-      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision, authorized_exec_map, package_type_approved, compose_trust_bin); install/exec_gate.py adapters consume it and never treat a missing map as authorization; every deploy-path allow-map consumer receives an owner-produced map (#4018); security/executables.py canonical_approval_spec resolves every approve/deny/explain spec to the store identity (#4189); security/trust.py approve_command names the install scope (apm approve -g) and approval_scan_dir reads the unit the install gate parked (#4154); install/exec_skip_reasons.py words why install or pack withheld a parked executable and names that command (#4714)",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision, authorized_exec_map, package_type_approved, compose_trust_bin); install/exec_gate.py adapters consume it and never treat a missing map as authorization; every deploy-path allow-map consumer receives an owner-produced map (#4018); security/executables.py canonical_approval_spec resolves every approve/deny/explain spec to the store identity (#4189); security/trust.py approve_command names the install scope (apm approve -g) and approval_scan_dir reads the unit the install gate parked (#4154); install/exec_skip_reasons.py words why install or pack withheld a parked executable and names that command (#4714); security/exec_kinds.py names the kinds a gate retirement removes in install's words (#4567)",
       "selectors": [
         "src/apm_cli/security/executables.py",
+        "src/apm_cli/security/exec_kinds.py",
         "src/apm_cli/install/local_bundle_pending.py",
         "src/apm_cli/install/exec_skip_reasons.py"
       ],
@@ -271,12 +284,13 @@
     {
       "id": "executable-item-admission",
       "decision": "Admission of one dependency-declared executable item (MCP server or hook file): org/user/project deny ladder AND manifest approval AND definition fingerprint match, for install, update, install --frozen, apm audit --ci, apm approve and the install prompt; the lockfile is evidence, never consent (#3902)",
-      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins, recorded_hook_pin_mismatches); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it; install --frozen (InstallService.enforce_frozen_hook_pins) and audit --ci (hook-approval-pins) verify locked hook pins through install/exec_gate.py locked_hook_pin_mismatches (#4188); unrecorded files at a withheld package's hook path are named by install/withheld_hooks.py (install warns, audit --ci hook-approval-pins fails, nothing deleted)",
+      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins, recorded_hook_pin_mismatches); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it; install --frozen (InstallService.enforce_frozen_hook_pins) and audit --ci (hook-approval-pins) verify locked hook pins through install/exec_gate.py locked_hook_pin_mismatches (#4188); unrecorded files at a withheld package's hook path are named by install/withheld_hooks.py, and matching merged-config hook entries no other source owns by install/withheld_merged_hooks.py (install warns, audit --ci hook-approval-pins fails, nothing deleted)",
       "selectors": [
         "src/apm_cli/security/trust.py",
         "src/apm_cli/install/exec_gate.py",
         "src/apm_cli/install/installed_dependencies.py",
         "src/apm_cli/install/withheld_hooks.py",
+        "src/apm_cli/install/withheld_merged_hooks.py",
         "src/apm_cli/install/plan_admission.py"
       ],
       "guards": [
@@ -378,7 +392,8 @@
       "selectors": [
         "src/apm_cli/integration/mcp_transport_resolution.py",
         "src/apm_cli/policy/parser.py",
-        "src/apm_cli/policy/policy_checks.py"
+        "src/apm_cli/policy/policy_checks.py",
+        "src/apm_cli/policy/content_types_check.py"
       ],
       "guards": ["install-deployment-policy-mcp-transport-projection"]
     },
@@ -436,7 +451,7 @@
     {
       "id": "policy-outcome-routing",
       "decision": "How every policy-discovery outcome is handled (enforce, report and skip, or block) for every command that reads org policy, over a closed outcome set where an unknown outcome blocks; including which org policy an executables-trust reader applies when discovery does not return a usable policy, and that a wrongly typed policy field is a malformed policy (#4027, #4084, #4140)",
-      "owner": "policy/outcome_routing.py (POLICY_DISCOVERY_OUTCOMES and _OUTCOME_ROUTES; classify_discovery_outcome decides, route_discovery_outcome logs and raises, classify_project_policy and resolve_trust_policy serve readers with policy.fetch_failure_default); consumers: install/phases/policy_gate.py, policy/install_preflight.py, commands/audit.py _audit_ci_gate, commands/approve.py _load_org_policy, commands/update.py _executables_need_reconcile, security/trust.py McpAdmission.for_project, security/executables.py resolve_project_exec_allow_map, install/exec_gate.py ReplayExecAllowMap, install/local_bundle_handler.py effective_bundle_allow_map, commands/audit.py _audit_ci_gate drift replay; policy/parser.py validate_policy type-checks every field (_ENUM_FIELDS, _check_enums) so a wrongly typed field routes as malformed, core/lifecycle_scripts.py build_runner_from_context",
+      "owner": "policy/outcome_routing.py (POLICY_DISCOVERY_OUTCOMES and _OUTCOME_ROUTES; classify_discovery_outcome decides, route_discovery_outcome logs and raises, classify_project_policy and resolve_trust_policy serve readers with policy.fetch_failure_default); consumers: install/phases/policy_gate.py, policy/install_preflight.py, commands/audit.py _audit_ci_gate, commands/approve.py _load_org_policy, commands/update.py _executables_need_reconcile, security/trust.py McpAdmission.for_project, security/executables.py resolve_project_exec_allow_map, install/exec_gate.py ReplayExecAllowMap, install/local_bundle_handler.py effective_bundle_allow_map, commands/audit.py _audit_ci_gate drift replay, commands/audit.py _resolve_fail_on_drift; policy/parser.py validate_policy type-checks every field (_ENUM_FIELDS, _check_enums) so a wrongly typed field routes as malformed, core/lifecycle_scripts.py build_runner_from_context",
       "selectors": ["src/apm_cli/policy/outcome_routing.py"],
       "guards": ["install-deployment-policy-field-types", "install-deployment-policy-outcome-routing", "install-deployment-trust-policy-outcome"]
     },
@@ -476,6 +491,13 @@
       "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
       "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py"],
       "guards": ["install-deployment-claude-agents-md-routing"]
+    },
+    {
+      "id": "mcp-lsp-server-name-rule",
+      "decision": "Which MCP and LSP server names are valid: one character allowlist and the reserved object keys __proto__, constructor and prototype (any case), checked before any config write (#4984)",
+      "owner": "models/dependency/server_names.py (validate_server_name, RESERVED_OBJECT_KEYS); consumers: models/dependency/mcp.py MCPDependency.validate, models/dependency/lsp.py LSPDependency.validate",
+      "selectors": ["src/apm_cli/models/dependency/server_names.py"],
+      "guards": ["install-deployment-server-name-rule"]
     }
   ]
 }

@@ -392,3 +392,68 @@ def test_the_new_target_advice_names_apm_install():
         "Run 'apm install' to deploy the remaining packages to claude and record them "
         "in apm.lock.yaml."
     )
+
+
+@pytest.mark.parametrize(
+    ("hook_entry", "noticed"),
+    [
+        pytest.param(("not approved", ()), True, id="bin-only-native-no-kinds"),
+        pytest.param(("not approved", ("hooks",)), False, id="hooks-already-named"),
+    ],
+)
+def test_native_survivor_notice_follows_named_kinds(hook_entry, noticed):
+    """A native survivor whose hook retirement named no kind still gets its notice (#4567)."""
+    from apm_cli.native_plugins.uninstall import retire_disallowed_native_survivors
+
+    key = "acme/plugin"
+    lockfile = SimpleNamespace(dependencies={key: SimpleNamespace(native_plugin=object())})
+    retirements = SimpleNamespace(denied_packages={}, native_packages={key: "not approved"})
+    logger = MagicMock()
+
+    retired = retire_disallowed_native_survivors(
+        lockfile, retirements, set(), {key: hook_entry}, logger
+    )
+
+    assert retired == {key}
+    assert lockfile.dependencies[key].native_plugin is None
+    notice = f"{key} native plugin is no longer allowed (not approved); removing it"
+    warnings = [call.args[0] for call in logger.warning.call_args_list]
+    assert (notice in warnings) is noticed
+
+
+def test_prune_names_an_empty_kind_native_survivor_once(monkeypatch, tmp_path):
+    """Prune's fallback notice skips a native survivor the helper already named (#4567)."""
+    from apm_cli.native_plugins.uninstall import retire_gated_native_plugins
+
+    key = "acme/plugin"
+    lockfile = SimpleNamespace(dependencies={key: SimpleNamespace(native_plugin=object())})
+    retirements = SimpleNamespace(
+        denied_packages={},
+        native_packages={key: "not approved"},
+        hook_packages={key: ("not approved", ())},
+    )
+    monkeypatch.setattr("apm_cli.install.exec_gate.gate_retirements", lambda *a, **k: retirements)
+    monkeypatch.setattr(
+        "apm_cli.models.apm_package.APMPackage.from_apm_yml", lambda *_a, **_k: object()
+    )
+    logger = MagicMock()
+
+    assert retire_gated_native_plugins(lockfile, tmp_path, tmp_path / "apm.yml", tmp_path, logger)
+
+    warnings = [call.args[0] for call in logger.warning.call_args_list]
+    assert warnings == [f"{key} native plugin is no longer allowed (not approved); removing it"]
+
+
+def test_refusal_names_an_absolute_local_parent_portably():
+    """A still-needed refusal never prints a machine-specific parent path (#4882)."""
+    from apm_cli.commands.uninstall.cli import _locked_parent_label, lockfile_parent_identity
+
+    lockfile = LockFile()
+    parent = LockedDependency(repo_url="_local/d", source="local", local_path="/home/user/vendor/d")
+    lockfile.add_dependency(parent)
+    identity = lockfile_parent_identity(parent, lockfile.replacements)
+
+    label = _locked_parent_label(lockfile, identity)
+
+    assert "/home/user" not in label
+    assert label.startswith("_local/")

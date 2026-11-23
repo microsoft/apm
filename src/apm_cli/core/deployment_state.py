@@ -8,6 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.receipt_history import is_canonical_bundle_hash
+
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -88,6 +90,49 @@ class DeploymentLedger:
     """Immutable deployment record collection keyed by locator key."""
 
     records: Mapping[str, DeploymentRecord]
+
+
+def require_local_bundle_hash(path: str, content_hash: str | None) -> None:
+    """Reject imperative provenance without one canonical SHA-256 digest."""
+    if not is_canonical_bundle_hash(content_hash):
+        raise ValueError(
+            f"Local bundle deployment {path!r} requires a canonical sha256:<hex> content hash"
+        )
+
+
+def validate_deployment_rows(rows: object) -> None:
+    """Reject any malformed deployment row before ledger construction."""
+    if not isinstance(rows, list):
+        raise ValueError("Lockfile deployments must be a list")
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"Lockfile deployment row {index} must be a mapping")
+        try:
+            LocatorKind(str(row["kind"]))
+            target = row["target"]  # architecture-authority-exempt: ledger-row
+            value = row["value"]
+            scope = row["scope"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Lockfile deployment row {index} has invalid locator") from exc
+        if not all(isinstance(item, str) and item for item in (target, value, scope)):
+            raise ValueError(
+                f"Lockfile deployment row {index} locator fields must be non-empty strings"
+            )
+        owners = row.get("owners")
+        active_owner = row.get("active_owner")
+        if (
+            not isinstance(owners, list)
+            or not owners
+            or not all(isinstance(owner, str) and owner for owner in owners)
+            or not isinstance(active_owner, str)
+            or active_owner not in owners
+        ):
+            raise ValueError(f"Lockfile deployment row {index} has invalid owners")
+        content_hash = row.get("content_hash")
+        if content_hash is not None and not isinstance(content_hash, str):
+            raise ValueError(
+                f"Lockfile deployment row {index} content_hash must be a string or null"
+            )
 
 
 @dataclass(frozen=True)
@@ -276,6 +321,18 @@ class DeploymentReconciler:
             proofs = successful.get(key)
             if proofs is None:
                 proofs = self._superseding_generic_proofs(prior, successful_by_value)
+            if self._departing_only(proofs, intent):
+                # A departing owner's proof neither establishes nor erases
+                # ownership: keep the row's remaining owners, else drop it, and
+                # the per-key pass must not process those proofs again (#4703).
+                superseded_success_keys.update(proof.locator.key for proof in proofs or ())
+                preserved = self._filter_absent_owners(prior, intent)
+                if preserved is None:
+                    removed.append(prior.locator)
+                else:
+                    next_records[key] = preserved
+                    retained.append(prior.locator)
+                continue
             if proofs:
                 next_record = self._record_from_proofs(proofs, intent)
                 if next_record is None:
@@ -488,6 +545,20 @@ class DeploymentReconciler:
             ):
                 proven.add(value)
         return frozenset(proven)
+
+    @staticmethod
+    def _departing_only(
+        proofs: list[MaterializationResult] | None, intent: DeploymentIntent
+    ) -> bool:
+        """Whether every current proof comes from an owner this run removes (#4703).
+
+        An ownerless proof is not departing: it still reaches the ownership error.
+        """
+        if not proofs or intent.desired_owners is None:
+            return False
+        if not all(proof.owners for proof in proofs):
+            return False
+        return not any(owner in intent.desired_owners for proof in proofs for owner in proof.owners)
 
     def _record_from_proofs(
         self,

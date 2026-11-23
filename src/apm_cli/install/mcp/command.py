@@ -218,6 +218,50 @@ def _reconcile_mcp_entry(
     )
 
 
+def _refuse_native_mcp_collision(
+    dep,
+    *,
+    apm_dir: Path,
+    scope: InstallScope | None,
+    runtime: str | None,
+    exclude: str | None,
+    target: str | list[str] | None,
+    target_decision: EffectiveTargetDecision | None,
+    logger,
+) -> None:
+    """Refuse a self-defined server that collides with a native connection, before apm.yml (#4759).
+
+    Runs the install's native collision projection (#4745) on the entry, so a
+    refused ``--mcp`` install writes neither the manifest nor any target file.
+    A lockfile or target set the projection cannot read is left to the MCP
+    stage, which keeps the same comparison as its backstop.
+    """
+    from apm_cli.core.scope import is_user_scope
+
+    from ...deps.lockfile import resolve_lockfile_path_for_read
+    from ..errors import MCPNativeConflictError
+    from .collision_preflight import refuse_projected_mcp_collisions
+
+    try:
+        refuse_projected_mcp_collisions(
+            [dep],
+            lockfile=LockFile.read(resolve_lockfile_path_for_read(apm_dir, read_only=True)),
+            project_root=apm_dir,
+            user_scope=is_user_scope(scope),
+            logger=logger,
+            runtime=runtime,
+            exclude=exclude,
+            apm_config=None,
+            explicit_target=target,
+            target_decision=target_decision,
+            scope=scope,
+        )
+    except MCPNativeConflictError:
+        raise
+    except Exception as exc:
+        logger.verbose_detail(f"MCP collision preflight deferred to install: {exc}")
+
+
 def run_mcp_install(  # noqa: PLR0913
     *,
     mcp_name: str,
@@ -328,6 +372,18 @@ def run_mcp_install(  # noqa: PLR0913
             f"would add MCP server '{mcp_name}' to {manifest_label(manifest_path)}"
         )
         return
+
+    if APM_DEPS_AVAILABLE and is_self_defined:
+        _refuse_native_mcp_collision(
+            dep,
+            apm_dir=apm_dir,
+            scope=scope,
+            runtime=runtime,
+            exclude=exclude,
+            target=target,
+            target_decision=target_decision,
+            logger=logger,
+        )
 
     if initial_manifest_config is not None:
         from ...models.manifest_bootstrap import write_minimal_manifest

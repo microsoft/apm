@@ -184,6 +184,10 @@ RESTORE_EDITED = _entry(
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+# A managed config entry (an LSP server) install kept the same way (#4626).
+KEPT_ENTRY_RESTORE = _entry(
+    "kept-entry-restore", "apm install", "restore it", before="remove the entry"
+)
 # A skill copy a --target-narrowed install kept stale in an inactive target (#4692).
 KEPT_SKILL_REFRESH = _entry("kept-skill-refresh", "apm install --target {targets}", "refresh it")
 # Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
@@ -353,6 +357,12 @@ UNINSTALL_EVIDENCE_REMOVE = _entry(
     "apm uninstall",
     "finish the uninstall",
     before="if the source is unreachable, move each listed file aside or delete it",
+)
+UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
+    "uninstall-evidence-trust-lockfile",
+    "apm uninstall {packages} --trust-lockfile",
+    "delete the files marked deletable and keep the rest",
+    before="if the source is gone for good",
 )
 # -- end W2 integration --
 # -- W2 marketplace --
@@ -694,6 +704,12 @@ PRUNE_PARTIAL = _entry(
     "apm prune",
     "finish the filesystem cleanup",
     then="run 'apm audit'",
+)
+PRUNE_NATIVE_GATE_UNCHECKED = _entry(
+    "prune-native-gate-unchecked",
+    "apm prune",
+    "retire native plugins the current approvals and policy no longer allow",
+    before="fix the reported error",
 )
 LIFECYCLE_SCRIPTS_UNTRUSTED = _entry(
     "lifecycle-scripts-untrusted",
@@ -1315,17 +1331,32 @@ NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
     "record the native MCP entries' ownership in apm.lock.yaml",
     before="make each entry match its declaration or remove it",
 )
+NATIVE_MCP_ENTRY_EDITED = _entry(
+    "native-mcp-entry-edited",
+    "apm install",
+    "write each removed MCP entry again as APM recorded it",
+    before="undo your edit to each entry or remove the entry",
+)
 KEPT_MCP_ENTRIES = _entry(
     "kept-mcp-entries",
     "apm install",
     "forget the record of each kept MCP entry",
-    before="remove each kept entry you no longer use, or declare its server again",
+    before=(
+        "remove each kept entry you no longer use, or declare its server or target its "
+        "runtime again"
+    ),
 )
 WITHHELD_HOOK_FILE_UNRECORDED = _entry(
     "withheld-hook-file-unrecorded",
     "apm audit --ci",
     "confirm no unrecorded file remains at a withheld package's hook path",
     before="delete each named file you did not write yourself",
+)
+WITHHELD_HOOK_ENTRY_UNRECORDED = _entry(
+    "withheld-hook-entry-unrecorded",
+    "apm audit --ci",
+    "confirm no unattributed entry matching a withheld package's hook remains",
+    before="remove each named hook entry you did not add yourself",
 )
 WITHHELD_HOOK_PATHS_UNCHECKED = _entry(
     "withheld-hook-paths-unchecked",

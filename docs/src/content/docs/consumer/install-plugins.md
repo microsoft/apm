@@ -70,7 +70,9 @@ APM downloads into `apm_modules/`; harnesses load from `.agents/`.
   (without `.git`, a root `apm.yml` or a root `.apm/`) to the plugin folder and
   lists them in a generated `.agents/plugins/.claude-plugin/marketplace.json`.
   At project scope it also writes `.agents/plugins/.gitattributes` (`* -text`),
-  so a checkout with `core.autocrlf` keeps the bytes the lock pins.
+  so a checkout with `core.autocrlf` keeps the bytes the lock pins. APM keeps
+  your own file there, but refuses to deploy unless it has a `* -text` (or
+  `* binary`) rule that no later rule setting `text` overrides.
   `${CLAUDE_PLUGIN_ROOT}` in commands and hooks resolves to that folder.
 - **Declared, not installed by the harness.** APM writes only
   `extraKnownMarketplaces.<name>` and `enabledPlugins["<plugin>@<name>"]: true`.
@@ -102,6 +104,15 @@ APM downloads into `apm_modules/`; harnesses load from `.agents/`.
   on each machine when it deploys from `apm_modules/`. `apm audit --ci` (from
   `~/.apm` with `claude` in its targets, for `-g`) reports drift when the
   source or the deployed copy no longer matches.
+- **Dropping a target retires it.** A one-shot `--target` run or
+  auto-detection keeps the record of a plugin it skips. When `targets:` drops
+  every harness that loads a plugin, the next `apm install` retires it like any
+  other dropped target's files: the root and its settings entries go, and an
+  edited root is kept with a warning. `apm lock` leaves the plugin in place
+  until that install, and `apm install --frozen` refuses the change. When
+  `targets:` drops only some of those harnesses, the plugin stays and the next
+  `apm install` removes the entries APM wrote in the dropped harness's
+  settings (`--frozen` refuses); an entry you added there yourself is kept.
 - **Your settings win.** APM adds only what the next lockfile needs and removes
   only entries the previous one produced. An explicit `false` in
   `enabledPlugins`, your own entries and a root you edited are kept. If the

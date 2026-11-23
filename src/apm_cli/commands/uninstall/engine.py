@@ -39,7 +39,7 @@ from ...models.dependency.selection import (
 from ...native_plugins.scopes import native_harnesses, native_source_current
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
-from .local_survivors import _surviving_local_refs_at_install_path
+from .local_survivors import _reintegration_error_detail, _surviving_local_refs_at_install_path
 
 if TYPE_CHECKING:
     from ...core.deployment_ledger import DeploymentMaterializationSession
@@ -221,17 +221,6 @@ def _dependency_public_label(dep_entry: object) -> str:
 def _is_private_local_identity(value: str) -> bool:
     """Return whether a diagnostic identity can expose a declared local path."""
     return value.startswith(("local:", "_local/")) or DependencyReference.is_local_path(value)
-
-
-def _reintegration_error_detail(
-    dependency: DependencyReference,
-    error: Exception,
-) -> str:
-    """Return verbose failure detail without exposing a local declaration."""
-    error_type = type(error).__name__
-    if dependency.is_local:
-        return error_type
-    return f"{error_type}: {error}"
 
 
 class _LocalRefreshLogger:
@@ -1349,6 +1338,7 @@ class IntegrationCleanupOutcome:
     failed_paths: list[str]
     error_count: int
     materialization_session: "DeploymentMaterializationSession | None" = None
+    package_failures: int = 0
 
     @property
     def complete(self) -> bool:
@@ -1766,6 +1756,7 @@ def _sync_integrations_after_uninstall(
         failed_paths=failed_hook_paths,
         error_count=result.get("errors", 0),
         materialization_session=materialization_session,
+        package_failures=reintegration_diagnostics.failed_package_count,
     )
 
 
@@ -1849,6 +1840,7 @@ def gate_retired_hook_survivors(
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
     from ...native_plugins.uninstall import retire_disallowed_native_survivors
+    from ...security.exec_kinds import retired_kinds_warnings
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
@@ -1875,12 +1867,11 @@ def gate_retired_hook_survivors(
         for k, why in retirements.denied_packages.items()
         if k not in removed_keys and survivor_ships_hooks(lockfile, k, modules_dir)
     }
-    hooks = {k: why for k, why in retirements.hook_packages.items() if k not in removed_keys}
+    hooks = {k: v for k, v in retirements.hook_packages.items() if k not in removed_keys}
     for key, why in sorted(denied.items()):
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
-    for key, why in sorted(hooks.items()):
-        if key not in denied:
-            logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
+    for line in retired_kinds_warnings(hooks, skip=denied):
+        logger.warning(line)
     native = retire_disallowed_native_survivors(lockfile, retirements, removed_keys, hooks, logger)
     return refreshed | set(denied) | set(hooks) | native, set(denied)
 
@@ -1965,6 +1956,8 @@ def _cleanup_stale_mcp(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.trust import McpAdmission
 
+    from .mcp_survivors import surviving_package_keys
+
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
     deploy_root = Path(project_root) if project_root is not None else Path.cwd()
     # A survivor the current gates no longer allow loses its servers, as on
@@ -1974,17 +1967,14 @@ def _cleanup_stale_mcp(
         lockfile, apm_modules_path, apm_package, deploy_root, user_scope=user_scope
     )
     denied = retirements.denied_packages if retirements is not None else {}
-    for key, why in sorted(denied.items()):
-        if logger is not None:
-            logger.warning(f"{key} is no longer allowed ({why}); removing its MCP servers")
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
         admission=McpAdmission.for_project(deploy_root, user_scope=user_scope),
         logger=logger,
-        active_package_keys=(
-            frozenset(key for key in lockfile.dependencies if key not in denied) if denied else None
+        active_package_keys=surviving_package_keys(
+            lockfile, apm_package, apm_modules_path, denied, logger
         ),
     )
     # Uninstall never admits a server: only previously managed servers survive.

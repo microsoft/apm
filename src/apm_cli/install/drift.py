@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from apm_cli.core import remediation as _advice
-from apm_cli.core.scope import manifest_file
+from apm_cli.core.scope import InstallScope, get_source_root, manifest_file
 from apm_cli.core.target_detection import (
     read_manifest_target as _read_apm_yml_target,  # noqa: F401 -- compatibility re-export
 )
@@ -534,7 +534,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
-    from apm_cli.install.phases.local_content import _project_has_root_primitives
+    from apm_cli.install.phases.local_content import (
+        _project_has_root_primitives,
+        _root_holds_only_hook_primitives,
+    )
     from apm_cli.install.project_package import build_project_local_package_info
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
     from apm_cli.integration.targets import resolve_audit_targets
@@ -550,14 +553,17 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         raise CacheMissError(f"lockfile at {config.lockfile_path} is empty or unreadable")
 
     project_root = config.project_root.resolve()
-    if (
-        not config.user_scope
-        and _SELF_KEY not in lock.dependencies
-        and _project_has_root_primitives(project_root)
-    ):
+    self_source_root = get_source_root(InstallScope.USER) if config.user_scope else project_root
+    replays_root = (
+        _root_holds_only_hook_primitives(self_source_root)
+        if config.user_scope
+        else _project_has_root_primitives(project_root)
+    )
+    if _SELF_KEY not in lock.dependencies and replays_root:
         # Install integrates root .apm/ content whenever the directory exists,
         # even when it only merges hooks into shared configs and so records no
         # local_deployed_files (#3369). Replay the same root package in memory.
+        # At user scope only a hooks-only ~/.apm qualifies (#4837).
         lock.dependencies[_SELF_KEY] = lock.project_self_entry()
     scratch_root = (
         config.scratch_root.resolve()
@@ -610,6 +616,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
+    if config.user_scope:
+        # Scratch writes, but hook commands name the live user root install -g wrote.
+        integrators["hook"].replay_command_root = deployment_frame[1]
 
     # Pre-create target root dirs in scratch so integrators with
     # auto_create=False do not skip non-skill primitives during replay.
@@ -647,18 +656,20 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
     from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.integration import config_file_provenance
 
     try:
         with native_registration_scope(targets):
             with (
                 integrators["skill"].ownership_snapshot(replay_lockfile=lock),
                 _ReadOnlyProjectGuard(project_root, protected_subpaths),
+                config_file_provenance.replay_render(),
             ):
                 for lock_dep in lock.get_all_dependencies():
                     if lock_dep.local_path == _SELF_KEY:
-                        # Synthesized self-entry: project's own local content.
-                        # Re-integrate from project_root itself.
-                        install_path = project_root
+                        # Synthesized self-entry: the root's own local content,
+                        # read where install reads it (#3772: $HOME at user scope).
+                        install_path = self_source_root
                     else:
                         install_path = _materialize_install_path(
                             lock_dep,
@@ -684,14 +695,17 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
                     if lock_dep.local_path == _SELF_KEY:
                         package_info = build_project_local_package_info(install_path)
-                        package_info.root_local_project_root = project_root
-                        package_info.deployment_package_root = scratch_root
+                        package_info.root_local_project_root = self_source_root
+                        # The root package deploys from where install read it;
+                        # its links render in the live frame like any dependency
+                        # (#4832: a user-root context link from ~/.apm).
+                        package_info.deployment_package_root = self_source_root
                     else:
                         package_info = _build_package_info(lock_dep, install_path)
                         package_info.deployment_package_root = (
                             lock_dep.to_dependency_ref().get_install_path(deployment_modules_dir)
                         )
-                        package_info.deployment_frame = deployment_frame
+                    package_info.deployment_frame = deployment_frame
                     dep_key = lock_dep.get_unique_key()
 
                     # Replay deploys the locked selection, as uninstall does (#3760).

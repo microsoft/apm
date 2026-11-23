@@ -8,8 +8,8 @@ import shlex
 import subprocess
 import sys
 import tomllib
-from collections import Counter
-from collections.abc import Sequence
+from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from itertools import pairwise, product
 from pathlib import Path
@@ -101,16 +101,22 @@ LIFECYCLE_SMOKE_SHARD_JOBS = (
     "lifecycle-smoke-shard-2",
     "lifecycle-smoke-shard-3",
     "lifecycle-smoke-shard-4",
+    "lifecycle-smoke-shard-5",
 )
 LIFECYCLE_SMOKE_SHARDS = tuple(range(1, len(LIFECYCLE_SMOKE_SHARD_JOBS) + 1))
 # The aggregate also requires the cross-shard GATE cell coverage check (#4031).
 LIFECYCLE_SMOKE_GATE_COVERAGE_JOB = "gate-cell-coverage"
 LIFECYCLE_SMOKE_AGGREGATE_NEEDS = (*LIFECYCLE_SMOKE_SHARD_JOBS, LIFECYCLE_SMOKE_GATE_COVERAGE_JOB)
 LIFECYCLE_SMOKE_AGGREGATE_STEP = "Require every lifecycle shard"
-LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/linux-x86_64.json"
+LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/lifecycle-smoke.json"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
+LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 20
+# A balanced shard must expect to finish within this fraction of its cap (#4943):
+# its measured serial seconds over four workers plus the measured job overhead.
+LIFECYCLE_SMOKE_CAP_FRACTION = 0.6
+LIFECYCLE_SMOKE_WORKERS = 4
+LIFECYCLE_SMOKE_OVERHEAD_SECONDS = 75
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 # The lifecycle family core (#4093) runs beside the integration lifecycle modules.
 LIFECYCLE_SMOKE_ROOTS = ("tests/integration", "tests/lifecycle")
@@ -1281,7 +1287,7 @@ def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
     timeout = job.get("timeout-minutes")
     assert isinstance(timeout, int)
     assert timeout == LIFECYCLE_SMOKE_TIMEOUT_MINUTES, (
-        "lifecycle-smoke needs its measured 15-minute whole-job budget, "
+        "lifecycle-smoke needs its measured 20-minute whole-job budget, "
         "without an inadequate deadline or an unbounded increase"
     )
 
@@ -1339,19 +1345,100 @@ def test_lifecycle_shards_collect_exact_required_union() -> None:
     )
 
 
+def _largest_serial_unit(
+    shard: Sequence[str], sources: Mapping[str, str], durations: Mapping[str, float]
+) -> float:
+    """The longest work one worker must run alone: one test or one xdist group."""
+    members = set(shard)
+    largest = 0.0
+    groups: dict[str, float] = defaultdict(float)
+    for node, seconds in durations.items():
+        module, test = ci_sharding._entry_of(node)
+        if module not in members and f"{module}::{test}" not in members:
+            continue
+        if test is not None:
+            largest = max(largest, seconds)
+        for group in set(ci_sharding._GROUP_NAME.findall(sources.get(module, ""))):
+            groups[group] += seconds
+    return max([largest, *groups.values()])
+
+
+def _assert_lifecycle_shard_budget(
+    shards: Sequence[tuple[float, float]], timeout_minutes: int
+) -> None:
+    """Every balanced shard must expect to finish well inside its job timeout.
+
+    A shard takes its serial seconds over its workers, or its longest serial
+    unit when that is longer, plus the measured job overhead.
+    """
+    budget = LIFECYCLE_SMOKE_CAP_FRACTION * timeout_minutes * 60
+    expected = [
+        ci_sharding.estimated_wall(seconds, largest, LIFECYCLE_SMOKE_WORKERS)
+        + LIFECYCLE_SMOKE_OVERHEAD_SECONDS
+        for seconds, largest in shards
+    ]
+    assert max(expected) <= budget, (
+        f"the largest lifecycle smoke shard is expected to take {max(expected):.0f}s, over "
+        f"{budget:.0f}s ({LIFECYCLE_SMOKE_CAP_FRACTION:.0%} of {timeout_minutes} minutes); "
+        f"re-measure {LIFECYCLE_SMOKE_DURATIONS} or add a shard"
+    )
+
+
+def test_lifecycle_shards_fit_their_timeout() -> None:
+    roots = list(LIFECYCLE_SMOKE_ROOTS)
+    durations = ci_sharding.load_durations(REPO_ROOT / LIFECYCLE_SMOKE_DURATIONS)
+    sources = ci_sharding.select_test_modules(roots, LIFECYCLE_SMOKE_REQUIRED_EXPRESSION, REPO_ROOT)
+    plan = ci_sharding.shard_test_files(
+        roots,
+        LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
+        len(LIFECYCLE_SMOKE_SHARD_JOBS),
+        durations,
+        REPO_ROOT,
+    )
+    _assert_lifecycle_shard_budget(
+        [
+            (seconds, _largest_serial_unit(shard, sources, durations))
+            for shard, seconds in zip(plan.shards, plan.seconds, strict=True)
+        ],
+        LIFECYCLE_SMOKE_TIMEOUT_MINUTES,
+    )
+
+
+@pytest.mark.parametrize(
+    ("shards", "timeout_minutes"),
+    [
+        ([(2400.0, 0.0)] * 5, 15),
+        ([(1600.0, 0.0)] * 4 + [(4000.0, 0.0)], 20),
+        ([(1900.0, 0.0)] * 4 + [(1900.0, 700.0)], 20),
+    ],
+)
+def test_lifecycle_shard_budget_overrun_fails(
+    shards: list[tuple[float, float]], timeout_minutes: int
+) -> None:
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_shard_budget(shards, timeout_minutes)
+
+
+def test_largest_serial_unit_counts_tests_and_whole_xdist_groups() -> None:
+    sources = {"a.py": "", "b.py": 'xdist_group("home")', "c.py": 'xdist_group("home")'}
+    durations = {"a.py::test_x": 50.0, "b.py::test_y": 40.0, "c.py::test_z": 30.0, "d.py::t": 99.0}
+    assert _largest_serial_unit(["a.py"], sources, durations) == 50.0
+    assert _largest_serial_unit(["a.py", "b.py", "c.py"], sources, durations) == 70.0
+
+
 @pytest.mark.parametrize(
     "shards",
     [
-        [[], ["a"], ["b"], ["c"]],
-        [["a"], ["a"], ["b"], ["c"]],
-        [["a", "a"], ["b"], ["c"], ["d"]],
-        [["a"], ["b"], ["c"], ["e"]],
-        [["a"], ["b"], ["c", "d"]],
+        [[], ["a"], ["b"], ["c"], ["d"]],
+        [["a"], ["a"], ["b"], ["c"], ["d"]],
+        [["a", "a"], ["b"], ["c"], ["d"], ["e"]],
+        [["a"], ["b"], ["c"], ["d"], ["f"]],
+        [["a"], ["b"], ["c"], ["d", "e"]],
     ],
 )
 def test_lifecycle_shard_partition_drift_fails(shards: list[list[str]]) -> None:
     with pytest.raises(AssertionError):
-        _assert_lifecycle_shard_partition(["a", "b", "c", "d"], shards)
+        _assert_lifecycle_shard_partition(["a", "b", "c", "d", "e"], shards)
 
 
 @pytest.mark.parametrize("missing_job", LIFECYCLE_SMOKE_AGGREGATE_NEEDS)
@@ -1426,9 +1513,9 @@ def test_lifecycle_shard_binding_drift_fails(
         ("python -m pytest", "pytest"),
         ('--shard-index "$LIFECYCLE_SHARD"', ""),
         (f"@{SHARD_FILE_LIST}", " ".join(LIFECYCLE_SMOKE_ROOTS)),
-        ("--durations=20", "--durations=20 -p scripts.ci_sharding --shard-count 4"),
+        ("--durations=20", "--durations=20 -p scripts.ci_sharding --shard-count 5"),
         ('--shard-index "$LIFECYCLE_SHARD"', "--shard-index 1"),
-        ("--shard-count 4", "--shard-count 3"),
+        ("--shard-count 5", "--shard-count 4"),
         (f"--shard-durations {LIFECYCLE_SMOKE_DURATIONS}", ""),
         ("--durations=20", "--durations=20 --splits 2 --group 1"),
         ("--durations=20", "--durations=20 -k partial"),
@@ -1480,7 +1567,7 @@ def provisional_lifecycle_job(
     return workflow_job(provisional_ci, request.param)
 
 
-@pytest.mark.parametrize("timeout", [None, 0, 8, 11])
+@pytest.mark.parametrize("timeout", [None, 0, 8, 15, 30])
 def test_lifecycle_smoke_timeout_drift_fails(
     provisional_lifecycle_job: WorkflowNode, timeout: int | None
 ) -> None:
@@ -3531,18 +3618,61 @@ def _run_train_gate(step: WorkflowNode, tmp_path: Path, env: dict[str, str]) -> 
     return result.returncode
 
 
+def _assert_h4_step(step: WorkflowNode) -> None:
+    """Rule H4 runs on every pull request over the body (env only) and the PR's commits."""
+    assert step["name"] == "Known cells cite no issue this PR closes"
+    assert step["if"] == "github.event_name == 'pull_request'"
+    assert "continue-on-error" not in step
+    assert step["env"] == {
+        "PR_BODY": "${{ github.event.pull_request.body }}",
+        "PR_COMMITS_API": (
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits"
+        ),
+        "PR_COMMIT_COUNT": "${{ github.event.pull_request.commits }}",
+        "GH_TOKEN": "${{ github.token }}",
+    }
+    assert "${{" not in step["run"], "the PR body must never be inlined in run"
+    commands = shell_commands(step)
+    assert commands[0] == ["printf", "%s", "$PR_BODY", ">", "$RUNNER_TEMP/pr-body.md"]
+    # Fail closed: an API error stops the step instead of checking the body alone.
+    api = ["gh", "api", "$PR_COMMITS_API", "--paginate", "--jq", ".[].commit.message | @json"]
+    assert commands[1][: len(api) + 3] == [*api, ">", "$RUNNER_TEMP/pr-commits.jsonl", "||"]
+    assert commands[1][-2:] == ["1;", "}"]
+    assert commands[2] == [
+        "uv",
+        "run",
+        "--frozen",
+        "--extra",
+        "dev",
+        "python",
+        "-m",
+        "tests.quality.known_cell_closing",
+        "$RUNNER_TEMP/pr-body.md",
+        "--commits",
+        "$RUNNER_TEMP/pr-commits.jsonl",
+        "--commit-count",
+        "$PR_COMMIT_COUNT",
+    ]
+    assert len(commands) == 3
+
+
 def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> None:
     """ci.yml's Lint job and the train guard run the one lint-chain action."""
     lint = workflow_job(ci, "lint")
     assert lint["name"] == "Lint"
+    # The chain reads the live state of known-cell issues (GraphQL).
+    assert lint["permissions"] == {"contents": "read", "issues": "read", "pull-requests": "read"}
     lint_steps = _run_steps(lint)
     assert [str(step.get("uses", "")).partition("@")[0] for step in lint_steps] == [
         "actions/checkout",
         "astral-sh/setup-uv",
         LINT_CHAIN_ACTION,
+        "",
     ]
     assert lint_steps[2]["with"] == {"base-sha": LINT_CHAIN_BASE}
+    _assert_h4_step(lint_steps[3])
     guard = workflow_job(train, TRAIN_GUARD_JOB)
+    assert guard["permissions"] == lint["permissions"], guard["permissions"]
     chain = [step for step in _run_steps(guard) if step.get("uses") == LINT_CHAIN_ACTION]
     assert len(chain) == 1 and chain[0]["with"] == {"base-sha": TRAIN_BASE}
     action_steps = _lint_chain_steps()

@@ -28,7 +28,7 @@ import pytest
 import yaml
 
 from apm_cli.integration.targets import KNOWN_TARGETS
-from tests.lifecycle.scenarios._kit import Known, Scenario, credits, known_defect, skill_package
+from tests.lifecycle.scenarios._kit import Scenario, credits, skill_package
 from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.utils.local_package import LocalPackageFactory
@@ -114,7 +114,21 @@ def _marked(root: Path) -> set[str]:
     return found
 
 
-def _assert_route(scenario: Scenario, route: str, *, compiled: bool = False) -> None:
+def _instruction_root(name: str) -> str:
+    target = KNOWN_TARGETS[name]
+    return f"{target.root_dir}/{target.primitives['instructions'].subdir}/"
+
+
+def _assert_route(
+    scenario: Scenario,
+    route: str,
+    *,
+    compiled: bool = False,
+    targets: tuple[str, ...] = (),
+    dropped: tuple[str, ...] = (),
+) -> None:
+    """The instruction follows its route; a deployed one sits under every current
+    target's instruction root and under no dropped target's."""
     marked = _marked(scenario.world.project)
     staged = [
         path.relative_to(scenario.world.project).as_posix()
@@ -123,6 +137,12 @@ def _assert_route(scenario: Scenario, route: str, *, compiled: bool = False) -> 
     if route == "deployed":
         assert marked, "a deployed instruction is a target file carrying the marker"
         assert not any(name.endswith(("AGENTS.md", "GEMINI.md")) for name in marked), marked
+        for name in targets:
+            root = _instruction_root(name)
+            assert any(path.startswith(root) for path in marked), (name, root, sorted(marked))
+        for name in dropped:
+            root = _instruction_root(name)
+            assert not any(path.startswith(root) for path in marked), (name, root, sorted(marked))
         return
     assert staged, "a compile-staged instruction stays under apm_modules"
     if compiled:
@@ -146,7 +166,8 @@ def test_install_routes_file_primitives(lifecycle_world, route, tgt) -> None:
         scenario.set_targets(*after)
     scenario.run("install", credit=_assignments("install", tgt, route))
     scenario.assert_deployed()
-    _assert_route(scenario, route)
+    dropped = tuple(name for name in before if name not in after)
+    _assert_route(scenario, route, targets=after, dropped=dropped)
     scenario.finish()
 
 
@@ -170,7 +191,7 @@ def test_operations_keep_the_file_route(lifecycle_world, route) -> None:
     kinds = {name: ["skill"] for name in specs}
     scenario = Scenario(lifecycle_world, specs, kinds=kinds, targets=targets, policy="allow")
     scenario.run("install f-doc f-two", credit=_assignments("install", _SINGLE, route))
-    _assert_route(scenario, route)
+    _assert_route(scenario, route, targets=targets)
     scenario.run("compile", credit=_assignments("compile", _SINGLE, route))
     _assert_route(scenario, route, compiled=True)
     scenario.run("update --yes", credit=_assignments("update", _SINGLE, route))
@@ -195,15 +216,13 @@ def test_operations_keep_the_file_route(lifecycle_world, route) -> None:
     scenario.finish()
 
 
-# uninstall of a path dependency deletes an instruction a local bundle still owns,
-# leaving the lock recording a missing file (I1); strict until #4703 is fixed.
-_BUNDLE_OWNED = Known(
-    "#4703", r"^recorded file is missing: \.github/instructions/f-doc\.instructions\.md"
-)
-
-
 def test_uninstall_keeps_a_bundle_owned_instruction(lifecycle_world) -> None:
-    """Strict known cell uninstall-keeps-a-bundle-owned-instruction (#4703)."""
+    """Required cell uninstall-keeps-a-bundle-owned-instruction (#4703).
+
+    Uninstalling a path dependency keeps the instruction a local bundle still
+    owns, so the lock stays equal to disk (I1), and never reports a package
+    failure while exiting 0 (I8).
+    """
     use_policy(lifecycle_world, "allow")
     bundle_root = lifecycle_world.root / "route-only" / "f-doc"
     instruction = bundle_root / ".apm" / "instructions" / "f-doc.instructions.md"
@@ -224,10 +243,10 @@ def test_uninstall_keeps_a_bundle_owned_instruction(lifecycle_world) -> None:
     scenario.run(("install", str(bundle)))
     scenario.source_moved()
     scenario.run("install f-doc")
-    scenario.run("uninstall f-doc", known={"I1": _BUNDLE_OWNED})
-    kept = scenario.lock_path.parent / ".github" / "instructions" / "f-doc.instructions.md"
-    with known_defect("#4703", r"^uninstall deleted the bundle-owned instruction"):
-        assert kept.is_file(), "uninstall deleted the bundle-owned instruction"
+    step = scenario.run("uninstall f-doc")
+    shared = scenario.world.project / ".github" / "instructions" / "f-doc.instructions.md"
+    assert shared.is_file(), step.output
+    assert step.result.returncode != 0 or "[x]" not in step.output, step.output
     scenario.finish()
 
 

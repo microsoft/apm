@@ -37,6 +37,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle import driver
 from tests.lifecycle.generator.witnesses import implied
 from tests.lifecycle.known import TRACKING
@@ -57,21 +58,118 @@ from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
+
+@dataclass(frozen=True)
+class JsonEntry:
+    """A shared JSON file whose *key* object must hold the entry *name* (``{pkg}``)."""
+
+    glob: str
+    key: str
+    name: str
+
+
+@dataclass(frozen=True)
+class MergedHooks:
+    """Hooks merged into one settings file (*glob*) under *container*; the
+    ``apm-hooks.json`` sidecar beside it records which entries APM owns. A package's
+    hook counts only when a registered entry carries its ownership marker."""
+
+    glob: str
+    container: str = "hooks"
+
+
+def _owned_by(marker: object, name: str) -> bool:
+    """Whether a hook ownership marker names package *name* (dependency or bundle)."""
+    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
+
+    bundle = parse_local_bundle_hook_source(marker)
+    if bundle is not None:
+        return bundle[0] == name
+    return isinstance(marker, str) and (marker == name or marker.endswith("/" + name))
+
+
+def _registered_hook_sources(path: Path, container: str) -> list[object]:
+    """``_apm_source`` of every hook registered in *path*, sidecar ownership restored."""
+    from apm_cli.integration.hook_ownership import reinject_apm_source_from_sidecar
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        sidecar_path = path.with_name("apm-hooks.json")
+        sidecar = (
+            json.loads(sidecar_path.read_text(encoding="utf-8")) if sidecar_path.is_file() else {}
+        )
+    except ValueError:
+        return []
+    hooks = data.get(container) if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return []
+    if isinstance(sidecar, dict):
+        reinject_apm_source_from_sidecar(hooks, sidecar)
+    return [
+        entry.get("_apm_source")
+        for entries in hooks.values()
+        if isinstance(entries, list)
+        for entry in entries
+        if isinstance(entry, dict)
+    ]
+
+
 # Where a package's surface lands, per (scope, kind, target): a glob relative
-# to the deploy root, or (glob, marker) for a shared file that must name the
-# package's entry. Same world conventions as rows.py.
-SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
+# to the deploy root, or a shared file that must hold the package's own entry
+# (JsonEntry, MergedHooks). Same world conventions as rows.py.
+SURFACE_GLOBS: Mapping[tuple[str, str, str], str | JsonEntry | MergedHooks] = {
     ("project", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("project", "hook", "copilot"): ".github/hooks/{pkg}-*.json",
-    ("project", "mcp", "copilot"): (".mcp.json", '"{pkg}-mcp"'),
-    ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
+    ("project", "mcp", "copilot"): JsonEntry(".mcp.json", "mcpServers", "{pkg}-mcp"),
+    ("project", "lsp", "copilot"): JsonEntry(".github/lsp.json", "lspServers", "{pkg}-server"),
     ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
+    # Claude reads project LSP servers from APM's plugin (lsp_integrator.py, "claude"),
+    # and MCP servers from the project .mcp.json: a surface counts only when the
+    # named entry sits under that key (JsonEntry).
+    ("project", "lsp", "claude"): JsonEntry(
+        ".claude/skills/apm-lsp/.claude-plugin/plugin.json", "lspServers", "{pkg}-server"
+    ),
+    ("project", "mcp", "claude"): JsonEntry(".mcp.json", "mcpServers", "{pkg}-mcp"),
+    # Claude merges hooks into .claude/settings.json; the apm-hooks.json sidecar marks
+    # each entry with its dependency or local bundle (hook_ownership.py).
+    ("project", "hook", "claude"): MergedHooks(".claude/settings.json"),
+    # A declared Gemini target merges hooks into .gemini/settings.json the same way,
+    # with its own apm-hooks.json sidecar (hook_integrator.py, "gemini").
+    ("project", "hook", "gemini"): MergedHooks(".gemini/settings.json"),
+    # The root half of a whole Claude plugin (#3921); NATIVE_DECLARATIONS is the other.
+    ("project", "native", "copilot"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
+    ("project", "native", "claude"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
+    ("user", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
-    ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
-    # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
+    ("user", "mcp", "copilot"): JsonEntry(".copilot/mcp-config.json", "mcpServers", "{pkg}-mcp"),
+    ("user", "lsp", "copilot"): JsonEntry(".copilot/lsp-config.json", "lspServers", "{pkg}-server"),
+    ("user", "canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
+    # bin/ of a Claude marketplace or native plugin under HOME (user scope).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
+}
+# Surfaces a native Claude plugin never uses: its skills load from the plugin.
+_NATIVE_ELSEWHERE = frozenset({("user", "skill", "claude")})
+
+
+def _skill_root(target: str) -> str | None:
+    """Where *target* deploys skills (``deploy_root`` or its root dir, plus ``skills``)."""
+    profile = KNOWN_TARGETS.get(target)
+    mapping = profile.primitives.get("skills") if profile is not None else None
+    if mapping is None:
+        return None
+    return f"{mapping.deploy_root or profile.root_dir}/{mapping.subdir}"
+
+
+# The file each declared target reads the scope's MCP servers from (Gemini's
+# project-scope file is opt-in: adapters/client/gemini.py).
+MCP_CONFIGS: Mapping[tuple[str, str], str] = {
+    ("project", "copilot"): ".mcp.json",
+    ("project", "claude"): ".mcp.json",
+    # The retired vscode alias resolves to copilot, which owns .mcp.json (#4100).
+    ("project", "vscode"): ".mcp.json",
+    ("user", "copilot"): ".copilot/mcp-config.json",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
 PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
@@ -96,19 +194,62 @@ class Known:
 # The observation still looks for them, so a loose deploy fails the model.
 _CLAUDE_NATIVE = frozenset({"p-native-claude", "p-native-claude-bin"})
 _WHOLE_PLUGIN_TARGETS = frozenset({"claude", "copilot"})
+# There each such plugin is one gated native cell (#4808) of two halves: its root
+# (the SURFACE_GLOBS entry) and the target's enabledPlugins declaration of it.
+# Either half observes the cell, so a denied plugin left active fails I4; an
+# install that succeeds must leave every allowed native cell whole.
+NATIVE_DECLARATIONS: Mapping[str, str] = {
+    "claude": ".claude/settings.json",
+    "copilot": ".github/copilot/settings.json",
+}
+# The enable key is ``<plugin>@<marketplace>``; APM's project-scope marketplace
+# name carries this prefix (native_plugins/scopes.py), a user's own does not.
+_APM_PROJECT_MARKETPLACE = "apm-p-"
+
+
+def whole_plugin(scope: str, package: str, target: str) -> bool:
+    """True when *package* installs whole for *target* at *scope* (#3921)."""
+    return (
+        scope == "project"
+        and package.split(":")[0] in _CLAUDE_NATIVE
+        and target in _WHOLE_PLUGIN_TARGETS
+    )
 
 
 def projected_cells(model: ModelState, kinds: Mapping[str, frozenset[str]]):
-    """``expected_deployed`` with the #3921 project-scope native projection applied."""
+    """``expected_deployed`` with the #3921 project-scope native projection applied:
+    a plugin installed whole keeps only its native cell.
+
+    Other targets still get APM's loose copy (#4559). Gemini deploys skills to the
+    cross-tool .agents/skills root copilot also reads, so with such a target current
+    the native package's loose skill is expected there too.
+    """
+    cells = expected_deployed(model, kinds)
+    loose_roots = {
+        (cell[0], _skill_root(cell[2]))
+        for cell in cells
+        if cell[1] == "skill" and not whole_plugin(model.scope, cell[0], cell[2])
+    }
     return frozenset(
         cell
-        for cell in expected_deployed(model, kinds)
-        if not (
-            model.scope == "project"
-            and cell[0].split(":")[0] in _CLAUDE_NATIVE
-            and cell[2] in _WHOLE_PLUGIN_TARGETS
-        )
+        for cell in cells
+        if cell[1] == "native"
+        or not whole_plugin(model.scope, cell[0], cell[2])
+        or (cell[1] == "skill" and (cell[0], _skill_root(cell[2])) in loose_roots)
     )
+
+
+def native_declaration(root: Path, target: str, plugin: str) -> str | None:
+    """The settings file under *root* in which *target* enables *plugin*, or None."""
+    relative = NATIVE_DECLARATIONS[target]
+    path = root / relative
+    if not path.is_file():
+        return None
+    enabled = json.loads(path.read_text(encoding="utf-8")).get("enabledPlugins") or {}
+    owned = f"{plugin}@{_APM_PROJECT_MARKETPLACE}"
+    if any(key.startswith(owned) and value for key, value in enabled.items()):
+        return relative
+    return None
 
 
 @dataclass
@@ -207,6 +348,40 @@ def assert_changes(changed: Iterable[str], patterns: Iterable[str], *, label: st
     assert not extra and not missing, (
         f"{label}: changed set differs\n  unexpected: {extra}\n  missing: {missing}"
     )
+
+
+def mcp_server_problems(scenario: Scenario, names: Iterable[str]) -> list[str]:
+    """Why a requested MCP server (any of its *names*) is not fully installed.
+
+    It must be declared in apm.yml, recorded in the lockfile and configured in
+    the MCP file of every declared target that has one.
+    """
+    names = frozenset(names)
+    shown = sorted(names)[0]
+    manifest = yaml.safe_load((scenario.manifest_root / "apm.yml").read_text(encoding="utf-8"))
+    declared = {
+        str(entry.get("name") if isinstance(entry, Mapping) else entry)
+        for entry in ((manifest.get("dependencies") or {}).get("mcp") or [])
+    }
+    problems = []
+    if not names & declared:
+        problems.append(f"{shown} is not declared in apm.yml")
+    lock = scenario.lock()
+    if lock is None or not names & set(lock.mcp_servers):
+        problems.append(f"{shown} is not recorded in the lockfile")
+    for target in sorted(scenario.model.targets):
+        relative = MCP_CONFIGS.get((scenario.scope, target))
+        if relative is None:
+            continue
+        path = scenario.deploy_root / relative
+        servers = (
+            json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {}
+            if path.is_file()
+            else {}
+        )
+        if not names & set(servers):
+            problems.append(f"{shown} is not configured in {relative} ({target})")
+    return problems
 
 
 @contextmanager
@@ -349,7 +524,6 @@ class Scenario:
 
     def deployed(self) -> tuple[frozenset[str], frozenset[str], dict[str, frozenset[str]]]:
         """(``pkg/kind/target`` cells found, package-owned paths, each cell's paths)."""
-        root = self.deploy_root
         deployed: set[str] = set()
         managed: set[str] = set()
         cell_paths: dict[str, frozenset[str]] = {}
@@ -357,27 +531,137 @@ class Scenario:
         for package, kinds in self.kinds.items():
             for kind in kinds:
                 for target in self.model.targets:
-                    surface = SURFACE_GLOBS.get((self.scope, kind, target))
-                    if surface is None:
-                        continue
-                    pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
-                    name = package.split(":")[0]
-                    marker = marker.format(pkg=name)
-                    hits = [
-                        path
-                        for path in root.glob(pattern.format(pkg=name))
-                        if path.is_file()
-                        and marker in path.read_text(encoding="utf-8")
-                        and path.relative_to(root).as_posix() not in users
-                    ]
-                    if hits:
+                    found, owned = self._surface_hits(package, kind, target, users)
+                    if found:
                         cell = f"{package}/{kind}/{target}"
                         deployed.add(cell)
-                        found = frozenset(path.relative_to(root).as_posix() for path in hits)
                         cell_paths[cell] = found
-                        if not marker:
-                            managed.update(found)
+                        managed.update(owned)
         return frozenset(deployed), frozenset(managed), cell_paths
+
+    def _surface_hits(
+        self, package: str, kind: str, target: str, users: frozenset[str]
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """(paths found for one cell, those the package owns whole)."""
+        surface = SURFACE_GLOBS.get((self.scope, kind, target))
+        native = kind == "native"
+        if surface is None or (native and not whole_plugin(self.scope, package, target)):
+            return frozenset(), frozenset()
+        if not self._observable(package, kind, target):
+            return frozenset(), frozenset()
+        root = self.deploy_root
+        found = frozenset(
+            path.relative_to(root).as_posix() for path in self._hits(package, surface, users)
+        )
+        # A shared file names its entry; only an own file is a managed path.
+        owned = frozenset() if isinstance(surface, (JsonEntry, MergedHooks)) else found
+        declaration = native_declaration(root, target, package.split(":")[0]) if native else None
+        return (found | {declaration} if declaration else found), owned
+
+    def _observable(self, package: str, kind: str, target: str) -> bool:
+        """Whether *package*'s *kind* for *target* lands on its SURFACE_GLOBS path.
+
+        A native Claude plugin's skills stay inside the registered plugin
+        (Claude loads them from there), never under ~/.claude/skills.
+        """
+        native = "native" in self.kinds.get(package, ())
+        return not (native and (self.scope, kind, target) in _NATIVE_ELSEWHERE)
+
+    def _hits(self, package: str, surface, users) -> list[Path]:
+        """Files at *surface* that carry *package*, minus the user's own files."""
+        root = self.deploy_root
+        name = package.split(":")[0]
+        if isinstance(surface, MergedHooks):
+            pattern = surface.glob
+
+            def carries(path: Path) -> bool:
+                sources = _registered_hook_sources(path, surface.container)
+                return any(_owned_by(source, name) for source in sources)
+
+        elif isinstance(surface, JsonEntry):
+            pattern = surface.glob
+            entry = surface.name.format(pkg=name)
+
+            def carries(path: Path) -> bool:
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except ValueError:
+                    return False
+                block = data.get(surface.key) if isinstance(data, dict) else None
+                return isinstance(block, dict) and entry in block
+
+        else:
+            pattern = surface
+
+            def carries(path: Path) -> bool:
+                return True
+
+        return [
+            path
+            for path in root.glob(pattern.format(pkg=name))
+            if path.is_file() and carries(path) and path.relative_to(root).as_posix() not in users
+        ]
+
+    def undeclared_target_cells(self) -> frozenset[str]:
+        """``pkg/kind/target`` cells deployed for a target apm.yml no longer declares.
+
+        Only surfaces exclusive to that target count: a path a declared target
+        shares (the same glob, skills root or MCP file) belongs to the declared one.
+        """
+        users = self._user_files()
+        found = set()
+        skill_roots = {_skill_root(target) for target in self.model.targets}
+        mcp_files = {MCP_CONFIGS.get((self.scope, target)) for target in self.model.targets}
+        for package, kinds in self.kinds.items():
+            for kind in kinds:
+                live = {SURFACE_GLOBS.get((self.scope, kind, t)) for t in self.model.targets}
+                for (scope, surface_kind, target), surface in SURFACE_GLOBS.items():
+                    if scope != self.scope or surface_kind != kind:
+                        continue
+                    if target in self.model.targets:
+                        continue
+                    # A whole plugin's root is shared, but each harness's enable entry is
+                    # its own: a dropped target that still enables the plugin keeps it.
+                    if (
+                        kind == "native"
+                        and whole_plugin(self.scope, package, target)
+                        and native_declaration(self.deploy_root, target, package.split(":")[0])
+                    ):
+                        found.add(f"{package}/{kind}/{target}")
+                        continue
+                    if surface in live:
+                        continue
+                    if kind == "skill" and _skill_root(target) in skill_roots:
+                        continue
+                    if kind == "mcp" and MCP_CONFIGS.get((self.scope, target)) in mcp_files:
+                        continue
+                    if not self._observable(package, kind, target):
+                        continue
+                    if self._hits(package, surface, users):
+                        found.add(f"{package}/{kind}/{target}")
+        return frozenset(found)
+
+    def native_gaps(self, observation: Observation, *, trust_bin: bool = True) -> list[str]:
+        """Allowed native cells not deployed whole: a root without its declaration,
+        or neither (#4808).
+
+        A declaration file that holds declared user bytes is the user's (I1-X2
+        forbids APM to change it), so its cell needs only the root. Without
+        *trust_bin* a plugin that ships bin/ is parked whole (claude_plugins/
+        admission.py), so its cell is not required.
+        """
+        gaps = []
+        for cell in sorted(self.expected_cells()):
+            package, kind, target = cell.split("/")
+            if kind != "native" or not (trust_bin or "bin" not in self.kinds[package]):
+                continue
+            found = observation.cell_paths.get(cell, frozenset())
+            wanted = {SURFACE_GLOBS[(self.scope, kind, target)].format(pkg=package.split(":")[0])}
+            if NATIVE_DECLARATIONS[target] not in self.user_bytes:
+                wanted.add(NATIVE_DECLARATIONS[target])
+            if not wanted <= found:
+                gaps.append(f"{cell}: found {sorted(found)}, wanted {sorted(wanted)}")
+        return gaps
 
     def _user_files(self) -> frozenset[str]:
         """I1-X2: declared user writes the lock does not record: the user's files.
@@ -429,12 +713,23 @@ class Scenario:
             "/".join(cell)
             for cell in projected_cells(self.model, self.kinds)
             if (self.scope, cell[1], cell[2]) in SURFACE_GLOBS
+            and self._observable(cell[0], cell[1], cell[2])
+            and (cell[1] != "native" or whole_plugin(self.scope, cell[0], cell[2]))
         )
 
-    def assert_deployed(self) -> None:
+    def assert_deployed(self, *, unproven_kept: bool = False) -> None:
+        """The model's cells are deployed, and no target apm.yml dropped keeps any.
+
+        *unproven_kept*: the lockfile was lost before this reconcile, so APM cannot
+        prove it wrote a dropped target's files and keeps them (DEPLOYED=
+        present-provenance-unknown, P-LAW-ownership.preserve_unowned).
+        """
         observed, _, _ = self.deployed()
         wanted = self.expected_cells()
         assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
+        if not unproven_kept:
+            left = self.undeclared_target_cells()
+            assert not left, f"an undeclared target keeps {sorted(left)}"
 
     # -- steps -------------------------------------------------------------------
 
@@ -490,6 +785,9 @@ class Scenario:
         self._check_exit(args, result, allowed_exit, exit_cell)
         check_cross_cutting(before, after, result, model, op)
         self._advance(op, args, requested, result)
+        if self._reconciled(op, result) and not (known or exit_cell):
+            gaps = self.native_gaps(after, trust_bin="--trust-bin" in args)
+            assert not gaps, f"{' '.join(args)}: allowed native plugins not whole: {gaps}"
         step = Step(" ".join(args), result, before, after)
         self.steps.append(step)
         if not (known or exit_cell):
@@ -520,6 +818,13 @@ class Scenario:
         assert not missing, f"strict expected failures that no longer fail: {missing}"
 
     # -- internals ---------------------------------------------------------------
+
+    @staticmethod
+    def _reconciled(op: Operation, result: CommandResult) -> bool:
+        """A successful install or update that wrote what the model allows."""
+        return (
+            result.returncode == 0 and op.command in _RECONCILING and "DRYRUN" not in op.modifiers
+        )
 
     def _check_exit(
         self,
@@ -707,7 +1012,7 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
 # Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
-SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
+SCENARIO_LANES = frozenset({"T-3", "T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
 NODE_ROOT = "tests/lifecycle/scenarios"
 
 
@@ -795,6 +1100,7 @@ POLICY_BLOCK = ExpectedRefusal(
     "docs reference/cli/install.md: a blocked install exits 1 and changes nothing",
 )
 POLICY_REFUSALS = (
+    "pair|DEPLOYED=absent|GATE=denied-dependency",
     "pair|DEPLOYED=clean|GATE=denied-dependency",
     "pair|DEPLOYED=edited|GATE=denied-dependency",
     "pair|DEPLOYED=present-provenance-unknown|GATE=denied-dependency",
@@ -818,10 +1124,56 @@ POLICY_REFUSALS = (
     "pair|SRC=pkg-registry|GATE=denied-dependency",
     "pair|SRC=mcp-registry|GATE=denied-dependency",
     "pair|SRC=inline-mcp|GATE=denied-dependency",
+    # T-3: whatever the lockfile says, a deny refuses before anything is written,
+    # and so does a deployed set the user deleted (a lock older than this APM
+    # refuses first: NEWER_LOCK_REFUSALS).
+    *(f"pair|LOCK={lock}|GATE=denied-dependency" for lock in ("absent", "consistent", "stale")),
+    "pair|DEPLOYED=absent|GATE=denied-dependency",
+)
+# T-3 (#4097): a lockfile a newer APM wrote is refused by every command that
+# resolves, writes or packs it, before any other check (deps/lockfile_generator.py).
+NEWER_LOCK = ExpectedRefusal(
+    1,
+    # A command that resolves nothing new reaches the lock write before it refuses
+    # (install/helpers/plan_inputs.py); the oracle's unchanged state is the evidence.
+    r"apm\.lock\.yaml: it was written by APM \S+, newer than this APM",
+    "P-OWN-lockfile-generator-compatibility",
+    "deps/lockfile_generator.py: a newer generator's lock refuses every writer (M-SCOPE-LOCK)",
+)
+_NEWER_PARTNERS = (
+    "OP=pack",
+    *(f"SRC={src}" for src in ("git", "marketplace-git", "marketplace-local", "marketplace-file")),
+    *(f"SRC={src}" for src in ("pkg-registry", "inline-mcp", "native-plugin")),
+    *(f"PRIM={prim}" for prim in ("hook", "bin", "canvas")),
+    "SCOPE=project",
+)
+_NEWER_AFTER = (
+    *(f"DEPLOYED={state}" for state in ("absent", "edited", "unowned")),
+    *(f"GATE={gate}" for gate in ("allowed", "denied-executable", "denied-dependency")),
+    "GATE=revoked-after-deploy",
+    *(
+        f"TGT={shape}-{change}"
+        for shape in ("single", "multi")
+        for change in ("unchanged", "widened", "narrowed")
+    ),
+    "NET=offline",
+    *(f"{modifier}=on" for modifier in ("DRYRUN", "FORCE", "UPDATE", "NOPOLICY")),
+)
+NEWER_LOCK_REFUSALS = (
+    *(f"pair|{partner}|LOCK=newer-generator" for partner in _NEWER_PARTNERS),
+    *(f"pair|LOCK=newer-generator|{partner}" for partner in _NEWER_AFTER),
+    "T4|OP=pack|SCOPE=project|LOCK=newer-generator",
 )
 
 EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
     **dict.fromkeys(POLICY_REFUSALS, POLICY_BLOCK),
+    **dict.fromkeys(NEWER_LOCK_REFUSALS, NEWER_LOCK),
+    "pair|LOCK=stale|FROZEN=on": ExpectedRefusal(
+        1,
+        r"--frozen: apm\.lock\.yaml is out of sync with apm\.yml\.",
+        "P-INV-I3",
+        "req-lk-006: --frozen refuses a lockfile the manifest has moved past (install/service.py)",
+    ),
     "pair|DEPLOYED=edited|FROZEN=on": ExpectedRefusal(
         1,
         r"--frozen: deployed files do not match the hashes recorded in apm\.lock\.yaml",
@@ -846,6 +1198,12 @@ EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
         "P-LAW-ownership.preserve_unowned",
         "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
     ),
+    "pair|SRC=inline-mcp|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-INV-I7",
+        "install/mcp/collision_preflight.py: install --mcp refuses before any write (#4759)",
+    ),
     "pair|SRC=mcp-registry|DEPLOYED=edited": ExpectedRefusal(
         1,
         r"conflicts with the existing copilot connection .* Preserved that connection",
@@ -869,6 +1227,15 @@ EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
         r"already exists and the previous apm\.lock\.yaml does not record it",
         "P-LAW-ownership.preserve_unowned",
         "claude_plugins/registrar.py: a plugin root APM did not deploy is never replaced",
+    ),
+    **dict.fromkeys(
+        ("pair|LOCK=stale|DEPLOYED=unowned", "pair|LOCK=absent|DEPLOYED=unowned"),
+        ExpectedRefusal(
+            1,
+            r"Installation refused: skill 'p-skill'",
+            "P-LAW-ownership.preserve_unowned",
+            "install/phases/integrate.py skill collision refusal (#4101)",
+        ),
     ),
     "pair|OP=install|DEPLOYED=unowned": ExpectedRefusal(
         1,

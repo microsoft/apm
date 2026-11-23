@@ -193,7 +193,9 @@ class _Scenario:
             )
 
     def servers(self, target: str) -> dict:
-        """Read actual native entries, retaining empty-file post-prune evidence."""
+        """Read actual native entries; an emptied .mcp.json APM created is gone (#4852)."""
+        if target == "claude" and not self.path(target).exists():
+            return {}
         text = self.path(target).read_text(encoding="utf-8")
         if target == "claude":
             return json.loads(text).get("mcpServers", {})
@@ -277,9 +279,19 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     requested = _http()["url"]
     scenario.write(foreign_target, requested if identical else "http://127.0.0.1:9/personal")
     before = scenario.path(foreign_target).read_bytes()
+    manifest_before = (scenario.root / "apm.yml").read_bytes()
     added = scenario.install("--mcp", "notes", "--url", requested)
     assert (added.returncode == 0) is identical, added.stdout + added.stderr
     other = "codex" if foreign_target == "claude" else "claude"
+    if not identical:
+        # A refused direct add writes nothing (#4759). Record the entry on the
+        # other target alone, then the repeats below exercise the two-target
+        # reconciliation against that recorded claim.
+        assert (scenario.root / "apm.yml").read_bytes() == manifest_before
+        assert not scenario.path(other).exists()
+        assert scenario.path(foreign_target).read_bytes() == before
+        scenario.declare([_http()])
+        _success(scenario.install(targets=other))
     assert scenario.path(foreign_target).read_bytes() == before
     assert scenario.servers(other)["notes"]["url"] == requested
     assert scenario.lock().mcp_target_servers == {other: ["notes"]}
@@ -445,7 +457,11 @@ def test_partial_install_retains_deferred_names_in_active_target(
     apm_binary_path: Path,
     target: str,
 ) -> None:
-    """A user-edited recorded claim refuses before any write, then retires cleanly (#4741)."""
+    """A user-edited recorded claim refuses before any write, then retires cleanly (#4741).
+
+    The later refused retirement records the entry it wrote, so APM owns it
+    and the final removal retires it (#4792).
+    """
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.declare([{**_http(), "name": "old"}, _http()])
     _success(scenario.install(targets=target))
@@ -466,6 +482,8 @@ def test_partial_install_retains_deferred_names_in_active_target(
     assert "Preserved MCP connection(s) notes" in kept_output, kept_output
     assert set(scenario.servers(target)) == {"new", "notes", "old"}
     assert scenario.servers(target)["notes"] == personal
+    # The refused retirement still records the entry it wrote (#4792).
+    assert scenario.lock().mcp_target_servers == {target: ["new", "notes", "old"]}
     path = scenario.path(target)
     if target == "claude":
         document = json.loads(path.read_text(encoding="utf-8"))
@@ -477,6 +495,229 @@ def test_partial_install_retains_deferred_names_in_active_target(
         path.write_text(tomlkit.dumps(document), encoding="utf-8")
     _success(scenario.install(targets=target))
     assert set(scenario.servers(target)) == {"new"}
+    assert scenario.lock().mcp_target_servers == {target: ["new"]}
+    scenario.declare([])
+    _success(scenario.install(targets=target))
+    assert scenario.servers(target) == {}
+    assert scenario.lock().mcp_target_servers == {}
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_refused_retirement_records_the_entry_it_wrote(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+    target: str,
+) -> None:
+    """A preserved edit stops retirement after a write; the lock still claims it (#4792).
+
+    The install writes ``new``, then refuses to retire the user-edited ``notes``.
+    The lockfile records ``new`` as APM's and keeps the ``notes`` claim it did
+    not remove, so once the user resolves ``notes`` the next install converges
+    and a later removal retires ``new`` too.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install(targets=target))
+    personal = {**scenario.servers(target)["notes"], "url": "http://127.0.0.1:9/personal"}
+    scenario.edit(target, "notes", personal)
+    scenario.declare([{**_http(), "name": "new"}])
+
+    refused = scenario.install(targets=target)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert set(scenario.servers(target)) == {"new", "notes"}
+    assert scenario.servers(target)["notes"] == personal
+    assert scenario.lock().mcp_target_servers == {target: ["new", "notes"]}
+
+    path = scenario.path(target)
+    if target == "claude":
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["mcpServers"].pop("notes")
+        path.write_text(json.dumps(document), encoding="utf-8")
+    else:
+        document = tomlkit.parse(path.read_text(encoding="utf-8"))
+        document["mcp_servers"].pop("notes")
+        path.write_text(tomlkit.dumps(document), encoding="utf-8")
+    _success(scenario.install(targets=target))
+    assert set(scenario.servers(target)) == {"new"}
+    assert scenario.lock().mcp_target_servers == {target: ["new"]}
+
+    scenario.declare([])
+    _success(scenario.install(targets=target))
+    assert scenario.servers(target) == {}
+    assert scenario.lock().mcp_target_servers == {}
+
+
+def test_a_refused_legacy_cleanup_keeps_the_runtime_it_did_not_clean(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """A lock without per-target ownership cleans claude, then codex's edit refuses (#4792).
+
+    Recording ``new`` gives the lock ownership, which ends legacy cleanup, so
+    the codex retirement that did not run stays claimed: once the user
+    restores APM's entry, the next install retires it.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    if scenario.user_scope:
+        pytest.skip("legacy cleanup is project scope only")
+    scenario.declare([_http()])
+    _success(scenario.install())
+    lock_path = scenario.root / "apm.lock.yaml"
+    legacy = load_yaml(lock_path)
+    legacy.pop("mcp_target_servers", None)
+    legacy.pop("deployment_ledger", None)
+    dump_yaml(legacy, lock_path)
+    written = scenario.servers("codex")["notes"]
+    scenario.edit("codex", "notes", {**written, "url": "http://127.0.0.1:9/personal"})
+    scenario.declare([{**_http(), "name": "new"}])
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert "notes" not in scenario.servers("claude")
+    assert scenario.lock().mcp_target_servers["codex"] == ["new", "notes"]
+
+    scenario.edit("codex", "notes", written)
+    _success(scenario.install())
+    assert set(scenario.servers("codex")) == {"new"}
+    assert scenario.lock().mcp_target_servers == {"claude": ["new"], "codex": ["new"]}
+
+
+def test_a_refused_deselection_keeps_the_claim_it_did_not_remove(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """``targets:`` drops claude, but its entry was edited: the claude claim stays (#4792).
+
+    Once the user restores APM's entry, the next install retires it.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install())
+    assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
+    written = scenario.servers("claude")["notes"]
+    scenario.edit("claude", "notes", {**written, "url": "http://127.0.0.1:9/personal"})
+    scenario.declare([{**_http(), "targets": ["codex"]}])
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
+
+    scenario.edit("claude", "notes", written)
+    _success(scenario.install())
+    assert "notes" not in scenario.servers("claude")
+    assert "notes" in scenario.servers("codex")
+    assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
+
+
+def test_a_refused_deselection_keeps_its_baseline_across_a_declaration_change(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """The URL changes and ``targets:`` drops claude while claude holds the new URL (#4792).
+
+    The refusal keeps the recorded baseline for the pending claude retirement,
+    so an identical retry refuses again instead of deleting the user's entry.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install())
+    updated = "http://127.0.0.1:8000/updated"
+    edited = {**scenario.servers("claude")["notes"], "url": updated}
+    scenario.edit("claude", "notes", edited)
+    scenario.declare([{**_http(updated), "targets": ["codex"]}])
+
+    for _attempt in range(2):
+        refused = scenario.install()
+        output = " ".join((refused.stdout + refused.stderr).split())
+        assert refused.returncode == 1, output
+        assert "Preserved MCP connection(s) notes" in output, output
+        assert scenario.servers("claude")["notes"] == edited
+        assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
+    assert scenario.servers("codex")["notes"]["url"] == updated
+
+
+def test_a_refused_deselection_without_a_recorded_declaration_keeps_the_new_one(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """The lock claims ``notes`` on both runtimes but lost its declaration (#4792).
+
+    A missing baseline cannot vouch for the refused claude retirement, so the
+    unverifiable claude claim is dropped and the new declaration is recorded:
+    codex's entry stays retirable and a later removal retires it.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install())
+    lock_path = scenario.root / "apm.lock.yaml"
+    document = load_yaml(lock_path)
+    document["mcp_configs"].pop("notes")
+    dump_yaml(document, lock_path)
+    edited = {**scenario.servers("claude")["notes"], "url": "http://127.0.0.1:9/personal"}
+    scenario.edit("claude", "notes", edited)
+    scenario.declare([{**_http(), "targets": ["codex"]}])
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
+    assert "notes" in scenario.lock().mcp_configs
+
+    scenario.declare([])
+    _success(scenario.install())
+    assert "notes" not in scenario.servers("codex")
+    assert scenario.servers("claude")["notes"] == edited
+    assert scenario.lock().mcp_target_servers == {}
+
+
+@pytest.mark.parametrize("targets", ["claude,codex", "codex"])
+def test_a_refused_deselection_never_vouches_for_a_newly_targeted_runtime(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+    targets: str,
+) -> None:
+    """The URL changes and the server moves to codex for the first time (#4792).
+
+    APM never wrote the old URL in codex, so the refused claude baseline must
+    not vouch for it there: the edited claude entry stays (unowned) and a
+    later user edit to codex is still refused, never overwritten. With
+    ``--target codex`` claude is not active, and its claim is still dropped.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([{**_http(), "targets": ["claude"]}])
+    _success(scenario.install())
+    assert scenario.lock().mcp_target_servers == {"claude": ["notes"]}
+    original = scenario.servers("claude")["notes"]
+    updated = "http://127.0.0.1:8000/updated"
+    edited = {**original, "url": updated}
+    scenario.edit("claude", "notes", edited)
+    scenario.declare([{**_http(updated), "targets": ["codex"]}])
+
+    refused = scenario.install(targets=targets)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert scenario.servers("claude")["notes"] == edited
+    assert scenario.servers("codex")["notes"]["url"] == updated
+    assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
+
+    codex_edit = {**scenario.servers("codex")["notes"], "url": original["url"]}
+    scenario.edit("codex", "notes", codex_edit)
+    retried = scenario.install(targets=targets)
+    assert retried.returncode == 1, retried.stdout + retried.stderr
+    assert scenario.servers("codex")["notes"] == codex_edit
+    assert scenario.servers("claude")["notes"] == edited
 
 
 @pytest.mark.parametrize("cwd_mode", ["absent", "declared", "native-only"])

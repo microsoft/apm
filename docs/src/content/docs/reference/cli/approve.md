@@ -170,8 +170,8 @@ Naming a package lifts its deny in the store you write (`apm.yml`, or
 matching allow: approve prints `Cleared deny for <pkg>`. `--all` and
 `--recommended` skip a package that any layer denies (project, `--user` or org
 policy), say why, write no approval for it, and approve the rest. When a named
-package is still blocked by a deny in another layer, approve exits 1 and names
-that layer and how to lift it.
+package is still blocked by a deny in another layer, approve exits 1, names
+that layer and how to lift it, and writes nothing.
 
 ## Options
 
@@ -319,9 +319,10 @@ apm install ./hookpkg-1.0.0                  # rerun the install to deploy
 This writes the same grant as adding the key under `executables.allow` in
 `apm.yml` (or `$APM_HOME/config.json` with `--user`; use `-g` for a bundle
 installed with `apm install -g`). Either path works. `apm approve --pending`
-lists parked bundles with their keys. A key with a wrong digest, or a key
-printed before the bundle's bytes changed, is refused: `apm approve` exits 1
-with an `[x]` line and writes nothing.
+lists parked bundles with their keys. A key with a wrong digest, a key
+printed before the bundle's bytes changed, or a key another layer (org policy
+or the other store) still denies is refused: `apm approve` exits 1 with an
+`[x]` line and writes nothing.
 
 ## Examples
 

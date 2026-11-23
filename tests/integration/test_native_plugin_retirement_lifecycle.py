@@ -13,6 +13,8 @@ deployed root under ``.agents/plugins/`` and its ``enabledPlugins`` entry in
   names it;
 - #4444: ``apm update`` after the plugin's definition changed since approval
   retires it.
+- #4754: ``apm prune --dry-run`` after the approval is revoked names the root
+  and settings declaration a real prune removes, and changes nothing.
 """
 
 from __future__ import annotations
@@ -168,6 +170,56 @@ def test_update_refuses_a_native_plugin_the_org_policy_denies(
     assert _PLUGIN in output, _evidence(result)
     assert "denied by pattern" in output, _evidence(result)
     assert _native_surface(lifecycle_world), "a refused update keeps the deployed state"
+
+
+def _durable_bytes(world: World) -> dict[str, bytes]:
+    """Every file under the project and APM_HOME (personal approvals included)."""
+    return {
+        f"{label}:{path.relative_to(root).as_posix()}": path.read_bytes()
+        for label, root in (("project", world.project), ("apm_home", world.apm_home))
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    }
+
+
+@pytest.mark.parametrize("edited", (False, True), ids=("pristine", "edited-root"))
+def test_prune_dry_run_previews_a_native_plugin_the_gate_would_retire(
+    lifecycle_world: World,  # noqa: F811
+    edited: bool,
+) -> None:
+    """#4754: prune --dry-run names what a real prune retires and changes nothing."""
+    _arrange(lifecycle_world)
+    _revoke(lifecycle_world)
+    root = lifecycle_world.project / ".agents/plugins" / _PLUGIN
+    if edited:
+        (root / "NOTES.md").write_text("edited after deploy\n", encoding="ascii")
+    # A legacy personal approvals store must not be migrated by a preview.
+    legacy = lifecycle_world.apm_home / "approvals.yml"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("acme/unrelated:\n  hooks: true\n", encoding="ascii")
+    before = _durable_bytes(lifecycle_world)
+
+    preview = _apm(lifecycle_world, "prune", "--dry-run")
+
+    assert preview.returncode == 0, _evidence(preview)
+    assert _durable_bytes(lifecycle_world) == before, "a dry run changes nothing"
+    output = " ".join(preview.stdout.split())
+    assert f"[dry-run] retire native plugin {_PLUGIN}" in output, _evidence(preview)
+    action = "keep" if edited else "remove"
+    assert f"{action} .agents/plugins/{_PLUGIN}" in output, _evidence(preview)
+    # A Claude-only plugin is also switched off for Copilot; retirement updates both.
+    declarations = "update native plugin declarations in .claude/settings.json, "
+    assert declarations + ".github/copilot/settings.json" in output, _evidence(preview)
+    assert "Nothing to prune" not in output, _evidence(preview)
+
+    result = _apm(lifecycle_world, "prune")
+
+    assert result.returncode == 0, _evidence(result)
+    assert root.exists() is edited, _evidence(result)
+    if not edited:
+        assert not _native_surface(lifecycle_world), _evidence(result)
+    copilot = lifecycle_world.project / ".github/copilot/settings.json"
+    assert f"{_PLUGIN}@" not in (copilot.read_text(encoding="utf-8") if copilot.exists() else "")
 
 
 def test_update_retires_a_native_plugin_whose_definition_changed(

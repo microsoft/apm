@@ -16,7 +16,7 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 import requests
 import yaml
 
-from ..cache.paths import get_cache_root
+from ..cache.paths import cache_writes_allowed, get_cache_root
 from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..core.invocation_memo import memoized_per_invocation
 from ..utils.file_ops import robust_replace
@@ -35,6 +35,10 @@ from ._cache_verify import (
     _stale_fallback_or_error,
     _unverifiable_cache_pin,
     _unverified_pinned_cache,
+    cached_document,
+    capped_ttl,
+    load_cache_meta,
+    store_raw_leaf,
 )
 from ._policy_http import policy_get
 from ._remote import (  # noqa: F401  -- re-exported for callers/tests
@@ -46,6 +50,7 @@ from ._remote import (  # noqa: F401  -- re-exported for callers/tests
     _remote_url_parts,
 )
 from .explicit_source import compose_explicit_policy
+from .outcome_routing import keep_policy_answer
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
     _DEFAULT_HASH_ALGORITHM,
@@ -58,12 +63,9 @@ from .schema import ApmPolicy
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Policy repo discovery: cascading candidate repos per host profile
-# ---------------------------------------------------------------------------
-
-# Candidate repo names in precedence order (first valid policy wins).
-# Host profiles select which candidates are valid for a given git host.
+# -- Policy repo discovery: cascading candidate repos per host profile ----------
+# Candidate repo names in precedence order (first valid policy wins); host
+# profiles select which candidates are valid for a given git host.
 _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
 
 # Azure DevOps project and repository names cannot begin with ``_``.
@@ -169,7 +171,7 @@ def _verify_hash_pin(
 POLICY_CACHE_DIR = "policy_v1"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "6"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "7"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -253,6 +255,7 @@ def policy_disabled_by_env() -> bool:
     return os.environ.get("APM_POLICY_DISABLE", "").strip() == "1"
 
 
+@memoized_per_invocation("policy-chain", keep=keep_policy_answer)
 def discover_policy_with_chain(
     project_root: Path,
     *,
@@ -284,12 +287,10 @@ def discover_policy_with_chain(
 
     Notes
     -----
-    The escape hatch (``--no-policy`` flag, ``APM_POLICY_DISABLE=1``
-    env var) is enforced by the **callers** (the install pipeline gate
-    and the preflight helpers in ``install_preflight``) **before** this
-    function is invoked, so neither needs a ``no_policy`` parameter
-    here.  The env-var check below remains as a defence-in-depth so
-    third-party callers cannot accidentally bypass the disable switch.
+    The escape hatch (``--no-policy``, ``APM_POLICY_DISABLE=1``) is enforced by
+    the **callers** (the pipeline gate and ``install_preflight``) **before** this
+    function is invoked, so neither needs a ``no_policy`` parameter here. The
+    env-var check below stays as defence-in-depth for third-party callers.
 
     Returns
     -------
@@ -370,10 +371,9 @@ def _discover_one_with_chain(
         _resolve_and_persist_chain(
             fetch_result,
             project_root,
-            no_cache=no_cache,
+            no_cache=no_cache or expected_hash is not None,  # pinned: parents never from cache
             cache_only=cache_only,
         )
-
     return fetch_result
 
 
@@ -1201,6 +1201,7 @@ def _fetch_from_url(
             chain_refs=chain_refs,
             raw_bytes_hash=actual_hash,
             warnings=warnings,
+            raw_content=content,
         )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1288,6 +1289,7 @@ def _fetch_from_repo(
             chain_refs=chain_refs,
             raw_bytes_hash=actual_hash,
             warnings=warnings,
+            raw_content=content,
         )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1474,6 +1476,7 @@ def _fetch_from_ado_repo(
             chain_refs=chain_refs,
             raw_bytes_hash=actual_hash,
             warnings=warnings,
+            raw_content=content,
         )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1807,7 +1810,7 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
             policy.mcp.allow is not None,
             policy.mcp.transport.allow is not None,
             policy.mcp.self_defined != "warn",
-            policy.mcp.trust_transitive,
+            policy.mcp.trust_transitive is not None,
             policy.compilation.target.allow is not None,
             policy.compilation.target.enforce is not None,
             policy.compilation.strategy.enforce is not None,
@@ -1931,13 +1934,9 @@ def _read_cache_entry(
     * ``None``                     -- no cache file, corrupt, past MAX_STALE_TTL,
                                        or pin verification failure (#827).
 
-    When *expected_hash* is provided the cached ``raw_bytes_hash`` is
-    compared against it; a mismatch invalidates the cache entry so the
-    caller falls through to a fresh fetch where the pin can be verified
-    against authoritative bytes off the wire.
-
-    When *ttl* is omitted, staleness follows the cached effective policy's
-    ``cache.ttl``. Callers may pass an explicit TTL for diagnostics or tests.
+    With *expected_hash* the entry's stored leaf bytes must hash to the pin
+    and are parsed; otherwise the caller fetches again (#827). Without an
+    explicit *ttl*, staleness follows ``cache.ttl`` bounded by ``capped_ttl``.
     """
     cache_dir = _get_cache_dir(project_root)
     key = _cache_key(repo_ref)
@@ -1948,11 +1947,12 @@ def _read_cache_entry(
         return None
 
     try:
-        meta = json.loads(meta_file.read_text(encoding="utf-8"))
-
-        # Schema version check -- auto-invalidate on format change
+        meta = load_cache_meta(meta_file)
+        if meta is None:
+            return None
         if meta.get("schema_version") != CACHE_SCHEMA_VERSION:
-            meta_file.unlink(missing_ok=True)
+            if cache_writes_allowed():
+                meta_file.unlink(missing_ok=True)
             return None
 
         cached_at = meta.get("cached_at", 0)
@@ -1964,14 +1964,14 @@ def _read_cache_entry(
             return None  # Past MAX_STALE_TTL, unusable
 
         raw_bytes_hash = meta.get("raw_bytes_hash", "") or ""
-        serialized = policy_file.read_text(encoding="utf-8")
+        serialized = cached_document(policy_file, meta, expected_hash, repo_ref)
         if not _cached_policy_verified(serialized, meta, expected_hash):
             return None
 
         # The sidecar preserves warnings from the authored cold input. Parser
         # warnings from canonical cache YAML are intentionally not user-facing.
         policy, _warnings = load_policy(serialized)
-        effective_ttl = policy.cache.ttl if ttl is None else ttl
+        effective_ttl = capped_ttl(policy.cache.ttl) if ttl is None else ttl
         cached_warnings = meta.get("warnings", [])
         if not isinstance(cached_warnings, list):
             cached_warnings = []
@@ -2034,6 +2034,7 @@ def _write_cache(
     chain_refs: list[str] | None = None,
     raw_bytes_hash: str | None = None,
     warnings: list[str] | None = None,
+    raw_content: str | bytes | None = None,
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
@@ -2041,14 +2042,13 @@ def _write_cache(
     installs.  Both the policy file and metadata sidecar are written
     atomically and independently.
 
-    The optional ``raw_bytes_hash`` (canonical ``"<algo>:<hex>"``) is the
-    digest of the leaf bytes off the wire and is persisted to the meta
-    sidecar so subsequent cached reads can verify against the project's
-    pin without re-fetching (#827).
+    ``raw_content`` is the fetched leaf document (only for unextended
+    leaves); a pinned read verifies and parses it instead (#827).
     """
+    if not cache_writes_allowed():
+        return
     cache_dir = _get_cache_dir(project_root)
     cache_dir.mkdir(parents=True, exist_ok=True)
-
     key = _cache_key(repo_ref)
     policy_file = cache_dir / f"{key}.yml"
     meta_file = cache_dir / f"{key}.meta.json"
@@ -2077,8 +2077,7 @@ def _write_cache(
             except OSError:
                 pass
             return
-
-        # Atomic write: metadata sidecar
+        store_raw_leaf(policy_file, raw_content, uid)
         persisted_chain_refs = chain_refs if chain_refs is not None else [repo_ref]
         meta = {
             "repo_ref": _redact_policy_ref(repo_ref),

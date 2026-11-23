@@ -109,7 +109,7 @@ def check_cleanup_retains_kept_members(provider: FactsProvider) -> tuple[Violati
                 "stale -= set(kept)",
             ),
             "src/apm_cli/install/phases/post_deps_local.py": (
-                "_kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))",
+                "_kept = kept_prior_values(ctx, _prior_files)",
                 "retained_values=frozenset(_kept),",
             ),
             "src/apm_cli/install/phases/lockfile.py": (

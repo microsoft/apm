@@ -1,7 +1,8 @@
 """Project native MCP collisions before an install writes anything (#4268).
 
 The commit gate (install/commit_gate.py) calls :func:`project_native_mcp_conflicts`
-before the first deployed byte. It asks the canonical comparator
+before the first deployed byte, and ``apm install --mcp`` (install/mcp/command.py)
+before it writes apm.yml (#4759). It asks the canonical comparator
 (:func:`~apm_cli.install.mcp.ownership.compare_native_mcp_connection`) about
 every self-defined server the install will write, and reports a
 ``CONFLICT`` with the same diagnostic the MCP write path renders. The

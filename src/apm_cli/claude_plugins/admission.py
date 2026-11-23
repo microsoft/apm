@@ -23,6 +23,7 @@ from apm_cli.deps.plugin_parser import (
     parse_plugin_manifest,
 )
 from apm_cli.models.apm_package import PackageInfo, PackageType
+from apm_cli.models.dependency.server_names import is_reserved_server_name
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.native_plugins.record import is_safe_plugin_name
 from apm_cli.native_plugins.scopes import CLAUDE, COPILOT, plugin_harnesses, record_harnesses
@@ -142,13 +143,17 @@ def _escaping_component_path(root: Path, manifest: dict[str, Any]) -> str | None
     return None
 
 
-def _mcp_policy_violation(root: Path, manifest: dict[str, Any], policy: Any) -> str | None:
+def _mcp_policy_violation(
+    root: Path, manifest: dict[str, Any], policy: Any, *, transitive: bool = False
+) -> str | None:
     """Name the first MCP server org MCP policy rejects, else ``None``.
 
     Claude loads the plugin's servers itself, so the checks the install gate
     runs on loose servers (``policy_checks.mcp_policy_checks``) run here on
     every server Claude's loader would start (``claude_native_mcp_servers``).
     An entry APM cannot read never passes a policy that restricts anything.
+    A *transitive* plugin (lock depth > 1) declares transitive servers, which
+    org ``mcp.trust_transitive`` judges (req-sc-016).
     LSP servers have no org policy schema beyond ``executables``; the
     whole-plugin trust verdict is their policy.
     """
@@ -160,7 +165,9 @@ def _mcp_policy_violation(root: Path, manifest: dict[str, Any], policy: Any) -> 
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.policy.policy_checks import mcp_policy_checks, mcp_policy_restricts
 
-    if unmodeled and mcp_policy_restricts(policy):
+    # A transitive plugin's unreadable server cannot show it is in mcp.allow either.
+    restricts_transitive = transitive and not policy.mcp.trust_transitive
+    if unmodeled and (mcp_policy_restricts(policy) or restricts_transitive):
         return f"MCP {unmodeled[0]} cannot be checked against org MCP policy (APM cannot read it)"
     subjects = [
         MCPDependency(
@@ -169,6 +176,8 @@ def _mcp_policy_violation(root: Path, manifest: dict[str, Any], policy: Any) -> 
             registry=False,
             url=server["url"],
             command=server["command"],
+            resolved_by=root.name if transitive else None,
+            declared_depth=2 if transitive else 0,
         )
         for server in servers
     ]
@@ -188,7 +197,7 @@ class _Ineligible:
     name: str = ""
 
 
-def native_policy_violation(root: Path, policy: Any) -> str | None:
+def native_policy_violation(root: Path, policy: Any, *, transitive: bool = False) -> str | None:
     """The org MCP policy rejection that parks a native Claude plugin, else ``None``.
 
     Only ``enforcement: block`` parks; install and gate retirement share it.
@@ -200,17 +209,19 @@ def native_policy_violation(root: Path, policy: Any) -> str | None:
         manifest = parse_plugin_manifest(manifest_path)
     except (OSError, ValueError):
         return None
-    return _mcp_policy_violation(Path(root), manifest, policy)
+    return _mcp_policy_violation(Path(root), manifest, policy, transitive=transitive)
 
 
-def _native_retire_reason(verdict: Any, root: Path, package_info: Any, policy: Any) -> str | None:
+def _native_retire_reason(
+    verdict: Any, root: Path, package_info: Any, policy: Any, *, transitive: bool = False
+) -> str | None:
     """Why install would park this native plugin now, or ``None`` while it is admitted."""
     from apm_cli.install.exec_gate import bin_deploy_denial
 
     bin_rule = bin_deploy_denial(package_info, policy) if (root / "bin").exists() else None
     why = (
         (verdict.reason if not verdict.allowed else None)
-        or native_policy_violation(root, policy)
+        or native_policy_violation(root, policy, transitive=transitive)
         or (f"org policy {bin_rule} blocks its bin/ executables" if bin_rule else None)
     )
     return None if why is None else str(why)
@@ -284,10 +295,44 @@ def locked_native_retired(
             )
         except (ExecPolicyUnavailable, OSError, ValueError):
             continue
-        why = _native_retire_reason(verdict, root, package_info, policy)
+        why = _native_retire_reason(
+            verdict, root, package_info, policy, transitive=(dep.depth or 1) > 1
+        )
         if why is not None:
             retired[key] = why
     return retired
+
+
+def locked_transitive_native_refusals(lockfile: Any, modules_dir: Path, policy: Any) -> list[str]:
+    """Subjects of each locked transitive native plugin org ``mcp.trust_transitive`` withholds.
+
+    The audit counterpart of the install park (:func:`_mcp_policy_violation`):
+    a server ``mcp.allow`` does not list, and any MCP entry APM cannot read,
+    for a policy applied after deployment (req-sc-016).
+    """
+    from apm_cli.security.trust import unlisted_transitive_servers, withholds_transitive
+
+    if not withholds_transitive(policy):
+        return []
+    refused: list[str] = []
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.native_plugin is None or (dep.depth or 1) <= 1:
+            continue
+        root, unverified = _judged_root(
+            dep.native_plugin, dep.to_dependency_ref().get_install_path(modules_dir), modules_dir
+        )
+        if root is None:
+            refused.extend([f"{key}: MCP cannot be checked ({unverified})"] if unverified else [])
+            continue
+        try:
+            manifest = parse_plugin_manifest(root / ".claude-plugin/plugin.json")
+        except (OSError, ValueError):
+            refused.append(f"{key}: MCP cannot be checked (plugin.json cannot be read)")
+            continue
+        servers, unmodeled = claude_native_mcp_servers(root, manifest)
+        refused.extend(unlisted_transitive_servers([s["name"] for s in servers], policy))
+        refused.extend(f"{key}: MCP {entry} (APM cannot read it)" for entry in unmodeled)
+    return refused
 
 
 def refuse_disallowed_carried_native(ctx: Any, dep_key: str, package_info: Any) -> None:
@@ -304,7 +349,15 @@ def refuse_disallowed_carried_native(ctx: Any, dep_key: str, package_info: Any) 
     if verdict is None:
         return
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
-    why = _native_retire_reason(verdict, Path(package_info.install_path), package_info, policy)
+    from apm_cli.install.plan_admission import _is_transitive
+
+    why = _native_retire_reason(
+        verdict,
+        Path(package_info.install_path),
+        package_info,
+        policy,
+        transitive=_is_transitive(package_info, ctx),
+    )
     if why is not None:
         command = "apm install --global" if is_user_scope(ctx.scope) else "apm install"
         raise ClaudeNativePluginError(
@@ -376,7 +429,34 @@ def _unsupported_capability(root: Path, manifest: dict[str, Any]) -> _Ineligible
     escaping = _escaping_component_path(root, manifest)
     if escaping is not None:
         return _Ineligible(escaping, f"Ask the publisher to fix the manifest, {_EXCLUDE_CLAUDE}")
+    reserved = _reserved_server_name(root, manifest)
+    if reserved is not None:
+        return _Ineligible(
+            f"its server name '{reserved}' is a reserved object key "
+            "(__proto__, constructor, prototype)",
+            f"Ask the publisher to rename the server, {_EXCLUDE_CLAUDE}",
+        )
     return None
+
+
+def _reserved_server_name(root: Path, manifest: dict[str, Any]) -> str | None:
+    """The first MCP or LSP server key Claude could load that is a reserved key.
+
+    Reads raw keys from every source: all MCP declarations whatever their
+    transport, the manifest's ``lspServers`` and every LSP file at the root.
+    """
+    import logging
+
+    from apm_cli.deps.plugin_parser import _extract_lsp_servers, _read_lsp_file
+
+    names: list[str] = []
+    claude_native_mcp_servers(root, manifest, keys=names)
+    names.extend(str(name) for name in _extract_lsp_servers(root, manifest))
+    quiet = logging.getLogger("apm.native-admission")
+    for candidate in ("com.microsoft.apm/lsp.json", "lsp.json", ".lsp.json"):
+        if (root / candidate).is_file():
+            names.extend(str(name) for name in _read_lsp_file(root, candidate, quiet))
+    return next((name for name in names if is_reserved_server_name(name)), None)
 
 
 def plan_native_claude_plugin(
@@ -390,6 +470,7 @@ def plan_native_claude_plugin(
     skip_bin: bool,
     policy: Any = None,
     bin_denied: str | None = None,
+    transitive: bool = False,
 ) -> ClaudeNativePlugin | None:
     """Admit a complete, approved plugin without altering native selection.
 
@@ -454,7 +535,7 @@ def plan_native_claude_plugin(
     unsupported = _unsupported_capability(root, manifest)
     if unsupported is not None:
         return park(unsupported.why, unsupported.step, name, fingerprint)
-    violation = _mcp_policy_violation(root, manifest, policy)
+    violation = _mcp_policy_violation(root, manifest, policy, transitive=transitive)
     if violation is not None and getattr(policy, "enforcement", None) == "block":
         return park(
             violation,

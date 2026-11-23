@@ -26,7 +26,10 @@ from apm_cli.install.phases.lockfile_cache_pins import (
     sync_cache_pin_markers_from_disk,
     sync_cache_pin_markers_from_existing,
 )
-from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.install.phases.lockfile_deploy_records import (
+    stage_deployed_file,
+    stage_package_records,
+)
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -74,10 +77,11 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
         else:
             _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
-            try:  # noqa: SIM105
-                out[_rel] = compute_file_hash(_full)
-            except Exception:
-                pass
+            try:
+                data = _full.read_bytes()
+            except OSError:
+                continue
+            out[_rel] = f"sha256:{stage_deployed_file(_full, data)}"
     return out
 
 
@@ -142,11 +146,9 @@ class LockfileBuilder:
             and not self._has_orphan_lockfile_entries()
             and not self._replacement_table_changed()
         ):
-            # Even with nothing newly installed, a pre-existing
-            # lockfile may need its cache pin markers refreshed --
-            # e.g. user upgraded APM and their cache pre-dates the
-            # marker contract. Sync best-effort against the on-disk
-            # lockfile.
+            # Even with nothing newly installed, a pre-existing lockfile may need
+            # its cache pin markers refreshed (e.g. a cache that pre-dates the
+            # marker contract after an upgrade): sync best-effort against it.
             #
             # In lockfile_only mode (``apm lock``) we deliberately fall
             # through even with zero dependencies: the command's core
@@ -186,6 +188,8 @@ class LockfileBuilder:
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
+            # Bind this run's deployed bytes to each verified package (committed later).
+            stage_package_records(self.ctx, lockfile)
             # Intact native plugins deployed for their dependency (#3191); after
             # content hashes, which decide whether an existing record carries over.
             self._attach_native_plugins(lockfile)
@@ -212,6 +216,7 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            self._retire_undeclared_native_plugins(lockfile)
             self._attach_replacement_table(lockfile)
             # Restore local compatibility state first so the canonical ledger is
             # complete when MCP target rows are projected into it.
@@ -449,6 +454,9 @@ class LockfileBuilder:
         for dep_key, pkg_type in self.ctx.package_types.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].package_type = pkg_type
+        for dep_key, targets in self.ctx.package_targets.items():
+            if dep_key in lockfile.dependencies:
+                lockfile.dependencies[dep_key].package_targets = list(targets)
 
     def _attach_exec_status(self, lockfile: LockFile) -> None:
         """Attach the #1873 ``exec_status`` trust state computed at the gate.
@@ -508,6 +516,25 @@ class LockfileBuilder:
         from apm_cli.native_plugins.carry import carry_unevaluated_native_plugins
 
         carry_unevaluated_native_plugins(self.ctx, lockfile, existing)
+
+    def _retire_undeclared_native_plugins(self, lockfile: LockFile) -> None:
+        """Drop native records once contraction retires every harness that loads them (#4744).
+
+        The target-contraction rule (``target_governance.target_retired``):
+        apm.yml declares targets, and neither they nor this run's targets name
+        claude. Applied to the merged lock, so a partial install retires
+        untouched plugins too; native registration then removes their roots
+        and Claude declarations. ``apm lock`` touches no deployed state, so it
+        keeps them.
+        """
+        from apm_cli.install.phases.targets import declared_target_profiles
+        from apm_cli.install.target_governance import retired_native_plugins
+
+        if self.ctx.lockfile_only:
+            return
+        declared = declared_target_profiles(self.ctx)
+        for key in retired_native_plugins(lockfile, self.ctx.targets or (), declared):
+            lockfile.dependencies[key].native_plugin = None
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.

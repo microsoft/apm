@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import manifest_file
 
+from . import target_governance as governance
 from .helpers.reconciliation_scope import (
     _has_gated_resolver,
     _is_manifest_target,
@@ -708,13 +709,12 @@ def _dropped_target_of(
     """
     allowed = [*active_targets, *(declared_targets or [])]
     allowed_prefixes, allowed_schemes = install_governance(allowed)
-    allowed_names = {profile.name for profile in allowed}
     dropped = [
         (profile.name, *install_governance([profile]))
         for profile in _scoped_known_targets_for_reconciliation(
             user_scope=user_scope, active_targets=active_targets, declared_targets=declared_targets
         ).values()
-        if profile.name not in allowed_names
+        if governance.target_retired(profile.name, active_targets=(), declared_targets=allowed)
     ]
 
     def classify(path: str) -> str | None:
@@ -729,12 +729,13 @@ def _dropped_target_of(
 
 
 def dropped_target_files(
-    project_root: Path, lockfile: LockFile, *, user_scope: bool = False
+    project_root: Path,
+    lockfile: LockFile,
+    *,
+    user_scope: bool = False,
+    run_targets: Iterable[TargetProfile] = (),
 ) -> dict[str, str]:
-    """Map each lock-recorded file of a target apm.yml no longer declares to that target.
-
-    Empty when the manifest declares no targets (auto-detect keeps every row).
-    """
+    """``{path: target}`` of lock state for targets apm.yml dropped; {} without ``targets:``."""
     declared = declared_target_profiles(project_root, user_scope=user_scope)
     if declared is None:
         return {}
@@ -746,14 +747,12 @@ def dropped_target_files(
         *lockfile.local_deployed_files,
     ]
     dropped = {path: name for path in recorded if (name := classify(path)) is not None}
-    # A target apm.yml declared when the lock was written and no longer does is
-    # dropped; one only an explicit --target deployed is precedence (#4517).
-    # Without a recorded declaration (an older lock), every undeclared target counts.
-    if lockfile.manifest_targets:
-        dropped = {
-            path: name for path, name in dropped.items() if name in lockfile.manifest_targets
-        }
-    return dropped
+    dropped.update(dict(governance.retired_native_plugins(lockfile, (), declared).values()))
+    # A target apm.yml declared when the lock was written and no longer does is dropped; one
+    # only an explicit --target deployed is precedence (#4517); an older lock counts every one.
+    if recorded_targets := lockfile.manifest_targets:
+        dropped = {path: name for path, name in dropped.items() if name in recorded_targets}
+    return {**dropped, **governance.retired_native_declarations(lockfile, run_targets, declared)}
 
 
 def reconcile_target_deployed_files(
@@ -796,7 +795,7 @@ def reconcile_target_deployed_files(
         for dep_key, dependency in lockfile.dependencies.items()
         if dep_key not in (dependency_keys or set())
         for path in dependency.deployed_files
-    }
+    } | set(() if _SELF_KEY in (dependency_keys or ()) else lockfile.local_deployed_files)
     desired_owners = (
         DeploymentLedgerCodec.valid_owner_keys(
             lockfile,
@@ -858,7 +857,7 @@ def reconcile_target_deployed_files(
             diagnostics=diagnostics,
             evidence=evidence,
             prior_ledger=dependency_ledger,
-            on_cleanup=partial(surface_target_cleanup, logger, dep_key),
+            on_cleanup=SelectedCleanupOutcome.observer(selected_outcome, logger, dep_key),
             desired_owners=desired_owners,
             generic_governed_values=(
                 frozenset(prior_files) if selected_owner_removal else frozenset()

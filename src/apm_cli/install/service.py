@@ -364,6 +364,7 @@ class InstallService:
             self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
+            request.hold_deploy_evidence()  # before a post-install script resets the memos
             post_event = self._build_event("post-install", request)
             if request.post_install_after_services:
                 result.post_install = lambda: runner.fire("post-install", post_event)
@@ -464,13 +465,15 @@ class InstallService:
         with its own cause instead of the MCP drift its missing manifest
         would imply. Nothing has been deployed at this point.
         """
+        failures = list(failures)
         reasons = [f"  - {message}" for _, message in failures]
         if not reasons:
             return
         from apm_cli.install.errors import FrozenInstallError
 
+        names = ", ".join(dict.fromkeys(name for name, _ in failures))
         raise FrozenInstallError(
-            "--frozen: locked dependencies could not be restored.",
+            f"--frozen: locked dependencies could not be restored: {names}.",
             reasons=reasons,
             tip="Tip: nothing was deployed. Fix the cause above and re-run.",
         )
@@ -654,12 +657,22 @@ class InstallService:
         ``--frozen`` may not do; a refused frozen install changes nothing.
         """
         from apm_cli.core.scope import is_user_scope
+        from apm_cli.core.target_detection import FLAG_TARGET_SOURCE, EffectiveTargetDecision
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.manifest_reconcile import dropped_target_files
+        from apm_cli.integration.targets import KNOWN_TARGETS
 
         root = getattr(request.apm_package, "package_path", None) or lockfile_path.parent
+        # A harness this run's --target still names keeps its native declaration (#4874).
+        decision = request.target_decision or EffectiveTargetDecision(
+            request.target, FLAG_TARGET_SOURCE
+        )
+        flagged = decision.canonical_targets if decision.from_flag else ()
         dropped = dropped_target_files(
-            Path(root), lockfile, user_scope=is_user_scope(request.scope)
+            Path(root),
+            lockfile,
+            user_scope=is_user_scope(request.scope),
+            run_targets=[KNOWN_TARGETS[name] for name in flagged or () if name in KNOWN_TARGETS],
         )
         if not dropped:
             return

@@ -1,0 +1,14 @@
+{
+  "issue": 4759,
+  "fixed_in": "Unreleased",
+  "summary": "apm install --mcp NAME -- COMMAND refused a self-defined server that collides with the user's own .mcp.json entry only after it had added the server to apm.yml and written under .github/; the native collision preflight now runs before the manifest write, so a refused install leaves every durable file byte-identical.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name"
+  ]
+}
