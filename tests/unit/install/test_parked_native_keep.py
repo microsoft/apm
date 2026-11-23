@@ -10,13 +10,18 @@ carry_kept_loose_into_replay
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from apm_cli.claude_plugins.admission import ClaudeNativePlugin
-from apm_cli.install.deployment_plan import PackageDeploymentPlan, carry_kept_loose_into_replay
+from apm_cli.install.deployment_plan import (
+    PackageDeploymentPlan,
+    carry_kept_loose_into_replay,
+    parked_kept_values_after_writes,
+)
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I4")]
@@ -141,6 +146,80 @@ def test_replay_never_carries_a_kept_value_through_a_symlinked_parent(tmp_path: 
     assert not (scratch / ".claude/skills/demo/SKILL.md").exists()
 
 
+def test_a_claude_root_at_home_matches_claims_recorded_without_a_dot_prefix() -> None:
+    # CLAUDE_CONFIG_DIR=$HOME scopes the Claude root to "." while claims
+    # record as "skills/..." (#5092; the loose install itself is #5096).
+    from dataclasses import replace
+
+    plan = _plan(parked="Parked native plugin pkg: denied")
+    home_root = replace(KNOWN_TARGETS["claude"], root_dir=".")
+    plan.target_selection.targets[0] = home_root
+
+    kept = plan.kept_loose_values(
+        ("skills/demo", "skills/demo/SKILL.md", "settings.json", ".agents/skills/demo/SKILL.md"),
+        user_scope=True,
+    )
+
+    assert sorted(kept) == ["skills/demo", "skills/demo/SKILL.md"]
+
+
+def test_a_windows_claude_root_matches_claims_recorded_with_forward_slashes() -> None:
+    # for_scope() keeps an external Windows root with backslashes; claims are POSIX.
+    from dataclasses import replace
+
+    plan = _plan(parked="Parked native plugin pkg: denied")
+    plan.target_selection.targets[0] = replace(
+        KNOWN_TARGETS["claude"], root_dir="C:\\profiles\\claude-config"
+    )
+
+    kept = plan.kept_loose_values(
+        (
+            "C:/profiles/claude-config/skills/demo/SKILL.md",
+            "C:/profiles/claude-config/settings.json",
+        ),
+        user_scope=True,
+    )
+
+    assert kept == ("C:/profiles/claude-config/skills/demo/SKILL.md",)
+
+
+def _external_claude(tmp_path: Path) -> tuple[object, str, Path]:
+    from dataclasses import replace
+
+    root = tmp_path.resolve() / "claude-config"
+    (root / "skills/demo").mkdir(parents=True)
+    (root / "skills/demo/SKILL.md").write_text("kept", encoding="ascii")
+    claude = replace(KNOWN_TARGETS["claude"], root_dir=str(root))
+    return claude, (root / "skills/demo/SKILL.md").as_posix(), tmp_path.resolve() / "scratch"
+
+
+def test_replay_carries_a_kept_external_claim_into_its_replay_root(tmp_path: Path) -> None:
+    claude, value, scratch = _external_claude(tmp_path)
+    lock_dep = SimpleNamespace(deployed_files=[value], deployed_file_hashes={value: "sha256:a"})
+    result = {"deployment_plan": _plan(parked="Parked native plugin pkg: denied")}
+
+    carry_kept_loose_into_replay(result, lock_dep, tmp_path / "home", scratch, True, [claude])
+
+    replayed = scratch / ".apm-audit-targets/claude/skills/demo/SKILL.md"
+    assert replayed.read_text(encoding="ascii") == "kept"
+
+
+def test_replay_never_carries_a_kept_external_claim_through_a_symlinked_replay_root(
+    tmp_path: Path,
+) -> None:
+    claude, value, scratch = _external_claude(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (scratch / ".apm-audit-targets").mkdir(parents=True)
+    (scratch / ".apm-audit-targets/claude").symlink_to(outside, target_is_directory=True)
+    lock_dep = SimpleNamespace(deployed_files=[value], deployed_file_hashes={value: "sha256:a"})
+    result = {"deployment_plan": _plan(parked="Parked native plugin pkg: denied")}
+
+    carry_kept_loose_into_replay(result, lock_dep, tmp_path / "home", scratch, True, [claude])
+
+    assert list(outside.rglob("*")) == []
+
+
 def test_replay_never_replaces_a_copy_another_package_rendered(tmp_path: Path) -> None:
     # A path both packages claim (#5108): the writer's replayed copy stands, so
     # an edit to the live file still shows as drift.
@@ -157,3 +236,31 @@ def test_replay_never_replaces_a_copy_another_package_rendered(tmp_path: Path) -
     carry_kept_loose_into_replay(result, lock_dep, live, scratch, True)
 
     assert (scratch / ".claude/skills/demo/SKILL.md").read_text(encoding="ascii") == "writer render"
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("written", "kept"),
+    [
+        (".claude/skills/demo/SKILL.md", ".claude/skills/Demo/SKILL.md"),
+        (".claude/skills/caf\u00e9/SKILL.md", ".claude/skills/cafe\u0301/SKILL.md"),
+    ],
+    ids=["case-variant", "nfd-variant"],
+)
+def test_a_kept_spelling_of_a_written_path_follows_the_volume(
+    tmp_path: Path, written: str, kept: str
+) -> None:
+    # #5150: where the volume proves both spellings are one entry, the writer's
+    # claim wins (#5108); a case-sensitive or non-normalizing volume keeps both.
+    root = tmp_path / "home"
+    (root / written).parent.mkdir(parents=True)
+    (root / written).write_text("writer", encoding="ascii")
+    ctx = SimpleNamespace(
+        parked_native_kept_values=frozenset({kept}),
+        package_deployed_files={"writer": [written]},
+        project_root=root,
+    )
+    one_entry = (root / kept).exists() and os.path.samefile(root / kept, root / written)
+
+    expected = frozenset() if one_entry else frozenset({kept})
+    assert parked_kept_values_after_writes(ctx) == expected

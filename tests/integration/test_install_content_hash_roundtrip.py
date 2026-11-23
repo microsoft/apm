@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -362,6 +363,14 @@ def test_virtual_lock_replays_across_synthetic_manifest_newline_domains(
         _ghd.GitHubPackageDownloader,
         "download_raw_file",
         lambda self, dep_ref, file_path, ref: _VIRTUAL_SOURCE,
+    )
+    # The origin advertises the pinned commit as its main tip, as a real
+    # origin does for a commit it serves (the commit is synthetic here).
+    monkeypatch.setattr(
+        "apm_cli.utils.git_env.git_remote_refs",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["git"], 0, stdout=f"{_VIRTUAL_COMMIT}\trefs/heads/main\n", stderr=""
+        ),
     )
 
     runner = CliRunner()

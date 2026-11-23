@@ -66,6 +66,10 @@ _ORDERED = (
 
 _ORIGIN_ROUTES = (
     ("src/apm_cli/marketplace/resolver.py", "resolve_marketplace_plugin", "marketplace_origin"),
+    # A catalog ref names only the origin's own branches and tags.
+    ("src/apm_cli/marketplace/registration.py", "parse_registration_source", "check_catalog_ref"),
+    ("src/apm_cli/marketplace/catalog_ref_pins.py", "require_origin_pin", "check_catalog_ref"),
+    ("src/apm_cli/marketplace/catalog_ref_pins.py", "require_origin_pin", "origin_ref_tips"),
     ("src/apm_cli/marketplace/client.py", "_parse_catalog", "catalog_digest"),
     (
         "src/apm_cli/deps/apm_resolver.py",
@@ -104,6 +108,8 @@ _ORIGIN_ROUTES = (
 # check, first catalog call). The origin check must run before the catalog is
 # reached, so a rebound alias fails closed on every path, not only update.
 _ORIGIN_ENTRY_POINTS = (
+    # The ref pin is verified before any catalog contents request.
+    ("src/apm_cli/marketplace/client.py", "_fetch_file", "require_origin_pin", "fetcher"),
     (
         "src/apm_cli/marketplace/catalog_origin.py",
         "reverify_locked_provenance",
@@ -314,7 +320,12 @@ RULES = (
     Rule(
         id=ORIGIN_RULE_ID,
         group="marketplace_integrations",
-        guard_ids=(ORIGIN_RULE_ID,),
+        guard_ids=(
+            ORIGIN_RULE_ID,
+            "marketplace-catalog-origin-fetch-pin",
+            "marketplace-catalog-origin-pin-tips",
+            "marketplace-catalog-origin-registration-pin",
+        ),
         description=(
             "Marketplace lock evidence records the catalog origin, and alias resolution "
             "and registration compare that origin, never the alias (#3912)."

@@ -1252,6 +1252,20 @@ def validate_git_url_rewrite_safety(
     return effective_url
 
 
+def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
+    """Return the URL git contacts for *remote_url* after ``insteadOf`` rewrites.
+
+    Identification only (for example keying a cached verdict to the server
+    contacted); it never authorizes a contact. Use
+    :func:`validate_git_url_rewrite_safety` before contacting a remote.
+    """
+    child = git_subprocess_env(env)
+    # Merge the parent process config exactly as git_network_env does.
+    _append_parent_git_config(child)
+    snapshot = _read_effective_git_config(child)
+    return resolve_git_url_rewrite(remote_url, snapshot.rewrites) or remote_url
+
+
 def _append_git_url_rewrites(
     env: dict[str, str],
     rewrites: Sequence[tuple[str, str]],
@@ -1950,22 +1964,96 @@ def git_resolve_commit(
     env: dict[str, object] | None = None,
     bare: bool = False,
 ) -> str:
-    """Resolve a ref in a worktree or an explicitly selected bare repository."""
+    """Resolve a ref in a worktree or an explicitly selected bare repository.
+
+    ``HEAD`` and a full ``refs/`` name resolve as written; any other name
+    resolves exactly (see :func:`exact_named_commit`), never by a rev-parse
+    name expansion into another namespace.
+
+    Raises:
+        subprocess.CalledProcessError: Nothing in the repository has that name.
+    """
+    git = (get_git_executable(), "--git-dir" if bare else "-C", str(worktree))
+    child_env = git_subprocess_env(env)
+    if ref == "HEAD":
+        commit = _peeled_commit(git, child_env, ref)
+    elif ref.startswith("refs/") and not ref.startswith(("refs/heads/", "refs/tags/")):
+        commit = _listed_commit(git, (ref,), child_env)
+    else:
+        commit = exact_named_commit(git, ref, child_env)
+    if commit is None:
+        raise subprocess.CalledProcessError(128, [*git, "rev-parse", "--verify", ref])
+    return commit
+
+
+def git_exact_ref_commit(
+    worktree: Path,
+    refname: str,
+    *,
+    env: dict[str, object] | None = None,
+) -> str | None:
+    """The commit the full *refname* names, or ``None``; never a rev-parse name expansion."""
+    git = (get_git_executable(), "-C", str(worktree))
+    return _listed_commit(git, (refname,), git_subprocess_env(env))
+
+
+_HEX_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _git_out(git: Sequence[str], env: dict[str, str], *args: str) -> str:
     result = run_git_text(
-        [
-            get_git_executable(),
-            "--git-dir" if bare else "-C",
-            str(worktree),
-            "rev-parse",
-            "--verify",
-            f"{ref}^{{commit}}",
-        ],
-        check=True,
+        [*git, *args],
         capture_output=True,
         timeout=30,
-        env=git_subprocess_env(env),
+        env=env,
+        stdin=subprocess.DEVNULL,
     )
-    return result.stdout.strip()
+    return (result.stdout or "").strip() if result.returncode == 0 else ""
+
+
+def _peeled_commit(git: Sequence[str], env: dict[str, str], oid: str) -> str | None:
+    sha = _git_out(git, env, "rev-parse", "--verify", "--quiet", f"{oid}^{{commit}}").lower()
+    return sha if _FULL_SHA_RE.match(sha) else None
+
+
+def _listed_commit(git: Sequence[str], names: Sequence[str], env: dict[str, str]) -> str | None:
+    """The commit of the first of *names* that exists exactly as a ref."""
+    listing = _git_out(git, env, "for-each-ref", "--format=%(objectname) %(refname)", *names)
+    found = {}
+    for line in listing.splitlines():
+        oid, _, refname = line.partition(" ")
+        found[refname] = oid
+    for name in names:
+        if name in found:
+            return _peeled_commit(git, env, found[name])
+    return None
+
+
+def exact_named_commit(git: Sequence[str], ref: str, env: dict[str, str]) -> str | None:
+    """Resolve *ref* exactly in the repository *git* (a command prefix) addresses.
+
+    A full commit resolves as itself. Any other name resolves as
+    ``refs/heads/<ref>`` then ``refs/tags/<ref>`` (or a fully spelled
+    ``refs/heads/`` or ``refs/tags/`` name), as Git prefers a ref; only when
+    no such ref exists does a hex name expand as a unique commit
+    abbreviation. Never a ``rev-parse`` name expansion, so a ref in another
+    namespace cannot answer for *ref*.
+    """
+    if not ref:
+        return None
+    if _HEX_RE.match(ref) and len(ref) == 40:
+        return _peeled_commit(git, env, ref.lower())
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        return _listed_commit(git, (ref,), env)
+    if ref.startswith("refs/"):
+        return None
+    commit = _listed_commit(git, (f"refs/heads/{ref}", f"refs/tags/{ref}"), env)
+    if commit is not None or not _HEX_RE.match(ref):
+        return commit
+    matches = _git_out(git, env, "rev-parse", f"--disambiguate={ref.lower()}").split()
+    commits = [oid for oid in matches if _git_out(git, env, "cat-file", "-t", oid) == "commit"]
+    return commits[0].lower() if len(commits) == 1 else None
 
 
 def git_current_branch(
