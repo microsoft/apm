@@ -536,3 +536,26 @@ def test_a_package_named_like_a_staging_path_survives_rollback_and_commit(
 
     assert _restore_reanchored_dirs(moved, modules) == []
     assert _tree(modules) == before
+
+
+@pytest.mark.parametrize("prefix", [".apm-reanchor-fresh-", ".apm-reanchor-aside-"])
+def test_a_dangling_link_at_a_staging_path_keeps_the_plain_move(
+    tmp_path: Path, prefix: str
+) -> None:
+    """#5102: a dangling symlink where a fresh copy would be staged is never written through."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import _fresh_copy_moves
+
+    modules = tmp_path / "apm_modules"
+    current = _package(modules, "e")
+    target = modules / "_local" / "h1" / "e"
+    outside = tmp_path / "outside"
+    (current.parent / f"{prefix}e").symlink_to(outside, target_is_directory=True)
+    plan = SimpleNamespace(moves=((current, target),), fresh=((current, None, True),))
+    staged: list[Path] = []
+
+    assert _fresh_copy_moves(plan, modules, staged) == ((current, target),)
+    assert staged == []
+    assert not outside.exists()
+    assert (current.parent / f"{prefix}e").is_symlink()

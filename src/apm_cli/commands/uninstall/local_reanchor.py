@@ -26,6 +26,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -958,7 +959,8 @@ def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
     for current, target in plan.moves:
         stage = current.with_name(f"{_FRESH}{current.name}")
         aside = current.with_name(f"{_ASIDE}{current.name}")
-        if current not in fresh or stage.exists() or aside.exists():
+        # lexists: a dangling symlink there is in the way too, never written through.
+        if current not in fresh or os.path.lexists(stage) or os.path.lexists(aside):
             moves.append((current, target))
             continue
         # Registered before the copy starts, so an interrupt never strands it.
