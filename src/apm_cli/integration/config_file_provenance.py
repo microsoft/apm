@@ -136,6 +136,10 @@ class _UnreadableStore(ValueError):
     pass
 
 
+class _StoreBusy(OSError):
+    """Another apm holds APM_HOME's lifecycle lock (or the lock cannot be used)."""
+
+
 def _shard_id(key: str) -> str:
     """The record file of *key*: its directory, every case and Unicode spelling alike."""
     directory = unicodedata.normalize("NFC", key.rpartition("/")[0]).casefold()
@@ -167,6 +171,8 @@ class _Store:
     # The index marker's generation; a record file of another generation (left by a
     # store removed by hand, or an interrupted migration) is never read (#5037).
     generation: str = ""
+    # The index as this store last read or wrote it: a save re-reads it only if changed.
+    marker_stamp: tuple[int, int, int] | None = None
 
     def _shard_path(self, shard: str) -> Path:
         return self.path.parent / f"d-{shard}.json"
@@ -182,6 +188,7 @@ class _Store:
         if not os.path.lexists(store.path):
             return store
         try:
+            store._stamp_marker()
             data = _read_json(store.path)
             if data.get("version") == _V1 and isinstance(data.get("files"), list):
                 store.legacy_layout = True  # read whole; the next save migrates it
@@ -191,6 +198,9 @@ class _Store:
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{store.path}: {exc}") from exc
         return store
+
+    def _stamp_marker(self) -> None:
+        self.marker_stamp = _stamp(self.path)
 
     def _adopt(self, marker: dict[str, Any]) -> None:
         """Read the store through *marker* (a layout 2 index), or raise ``ValueError``."""
@@ -304,16 +314,31 @@ class _Store:
         another migrated it or started its index joins that index, so no record file
         is ever written under a generation the index does not name.
         """
-        from apm_cli.install.locking import lifecycle_lock
+        from filelock import Timeout
 
-        with lifecycle_lock():
+        from apm_cli.install.locking import LifecycleBusyError, lifecycle_lock
+
+        try:
+            lock = lifecycle_lock()
+            lock.acquire()
+        except Timeout as exc:
+            raise _StoreBusy("another apm is running on this APM_HOME") from exc
+        except LifecycleBusyError as exc:
+            raise _StoreBusy(f"another apm cannot be ruled out: {exc}") from exc
+        try:
             self._refresh()
             self._save_locked()
+        finally:
+            lock.release()
 
     def _refresh(self) -> None:
-        if not os.path.lexists(self.path):
+        stamp = _stamp(self.path)
+        if stamp is not None and stamp == self.marker_stamp:
+            return  # unchanged since this store read or wrote it (H20)
+        if stamp is None:
             self.indexed = self.legacy_layout = False
             return
+        self.marker_stamp = stamp
         try:
             data = _read_json(self.path)
             if data.get("version") == _V1 and isinstance(data.get("files"), list):
@@ -368,6 +393,7 @@ class _Store:
             atomic_write_text(self.path, text, create_only=True, new_file_mode=0o600)
         except FileExistsError:
             marker = _read_json(self.path)  # another writer started the store
+        self._stamp_marker()
         self._adopt(marker)
         self._loaded_generation_reset()
 
@@ -392,6 +418,7 @@ class _Store:
         if grouped:
             marker = {"version": _VERSION, "layout": _LAYOUT, "generation": self.generation}
             self._write(self.path, marker)
+            self._stamp_marker()
         else:
             unlink(self.path)
         self.legacy_layout, self.indexed = False, bool(grouped)
@@ -438,6 +465,14 @@ def _has_other_links(path: Path) -> bool:
         return os.lstat(path).st_nlink > 1
     except OSError:
         return False
+
+
+def _stamp(path: Path) -> tuple[int, int, int] | None:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return st.st_ino, st.st_mtime_ns, st.st_size
 
 
 def _origin(row: dict[str, Any] | None) -> Origin | None:
@@ -529,6 +564,11 @@ def _plan_write(path: Path, before: bytes | None, manifest_root: Path | None) ->
             store.files[key] = {"origin": origin.value, "hash": _digest(before)}
             store.save()
         return origin
+    except _StoreBusy as exc:
+        raise OSError(
+            f"Could not record that {path} existed before APM wrote to it: {exc}; "
+            "refusing to write it. Wait for the other apm to finish, then retry."
+        ) from exc
     except (OSError, ValueError) as exc:
         raise OSError(
             f"Could not record that {path} existed before APM wrote to it ({exc}); "
