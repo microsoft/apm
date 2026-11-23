@@ -19,7 +19,9 @@ _PERMISSION_BITS = 0o777
 
 
 def _bits(path: Path) -> int:
-    return stat.S_IMODE(path.lstat().st_mode) & _PERMISSION_BITS
+    # The full mode: a setuid, setgid or sticky bit fails validation, so such a path
+    # is kept and reported rather than restored without it.
+    return stat.S_IMODE(path.lstat().st_mode)
 
 
 def _entries(directory: Path) -> list[Path]:

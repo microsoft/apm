@@ -64,7 +64,7 @@ _RETAINED_PREFIX = "retained-"
 _RETAINED_MARKER = "RETAINED"
 _MANIFEST = "journal.jsonl"
 _FORMAT = "apm-deploy-journal"
-_VERSION = 1
+_VERSION = 2  # 2 records modes (#5111); version 1 readers refuse it
 _KINDS = ("absent", "file", "dir", "symlink")
 _COPY_NAME = re.compile(r"[0-9]+")
 # APM-home metadata the journal may restore: deployment receipts, files only.
