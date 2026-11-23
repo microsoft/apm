@@ -596,3 +596,30 @@ def test_user_scripts_keep_the_users_path(tmp_path: Path, monkeypatch: pytest.Mo
     env = _build_script_env(ScriptEntry(script_type="command", event="post-install", command="x"))
 
     assert _path_entries(env) == user_path.split(os.pathsep)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the POSIX shell searches an empty PATH")
+def test_apm_script_path_with_no_directory_outside_the_project_is_refused(tmp_path: Path) -> None:
+    """With only '.' and the project on PATH, no APM-authored script is launched."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    marker = _plant_project_binary(project, "probe")
+    original = os.getcwd()
+    os.chdir(project)
+    try:
+        try:
+            env = trusted_path_environment({"PATH": os.pathsep.join([".", str(project)])})
+        except FileNotFoundError:
+            env = None
+        if env is not None:
+            subprocess.run(
+                ("/bin/sh", "-c", "probe"), cwd=project, env=env, capture_output=True, check=False
+            )
+    finally:
+        os.chdir(original)
+
+    assert env is None
+    assert not marker.exists()
