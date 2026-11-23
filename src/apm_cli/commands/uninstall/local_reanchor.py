@@ -78,8 +78,13 @@ def _root_identities(
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its new declaring parent could not be determined"
             )
-        declared = walk.local_edge_repos.get((key, nearest[0]))
+        declared, alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))
         row = lockfile.get_dependency(key)
+        if alias != row.alias:
+            raise LocalReanchorRefused(
+                f"{label(key)} stays, but the package that still needs it declares it under "
+                f"another name ({alias or 'no alias'}), which installs elsewhere"
+            )
         if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
             # An alias spelling (a symlink) installs as another package directory.
             raise LocalReanchorRefused(
@@ -188,7 +193,9 @@ def _rekey_requests(binding: Any, renames: dict[str, str], dev: dict[str, bool])
     A re-anchored parent's request also takes the parent's new dev status,
     as install records the edge.
     """
-    if binding is None or not any(request.parent in renames for request in binding.requests):
+    if binding is None or not any(
+        request.parent in renames or request.parent in dev for request in binding.requests
+    ):
         return False
     binding.requests = {
         replace(
@@ -251,8 +258,9 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
                 row.declaring_parent = renames[row.declaring_parent]
             if row.resolved_by in renames:
                 row.resolved_by = renames[row.resolved_by]
-            _rekey_requests(row.replacement, renames, dev or {})
             lockfile.dependencies[renames.get(key, key)] = row
+    for row in lockfile.dependencies.values():
+        _rekey_requests(row.replacement, renames, dev or {})
     return True
 
 

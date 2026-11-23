@@ -20,12 +20,18 @@ from pathlib import Path
 from typing import Any
 
 from .deployment_ledger import DeploymentLedgerCodec, DeploymentMaterializationSession
+from .deployment_state import LocatorKind
 
 
 def _renamed_claims(lockfile: Any, renames: Mapping[str, str]):
-    """The lock's content-bearing records any renamed owner claims, shared ones included."""
+    """The lock's file records any renamed owner claims, shared ones included.
+
+    A missing lock hash never exempts a file: only a receipt proves who wrote it.
+    """
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
-        if record.content_hash is not None and any(owner in renames for owner in record.owners):
+        if record.locator.kind != LocatorKind.URI and any(
+            owner in renames for owner in record.owners
+        ):
             yield record
 
 
@@ -44,7 +50,8 @@ class _ReanchorSession(DeploymentMaterializationSession):
             value = DeploymentLedgerCodec.legacy_value(claim.locator)
             receipt = self._records.get(claim.locator.key)
             if receipt is None:
-                if claim.active_owner in renames:
+                # A directory claim has no hash and no receipt; a file claim must.
+                if claim.content_hash is not None and claim.active_owner in renames:
                     problems.append(value)
                 continue
             expected = [receipt.active_owner, self._claim_signature(value)]

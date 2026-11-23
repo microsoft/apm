@@ -124,6 +124,8 @@ def _split_still_needed_packages(
     declaration goes, and the orphan owner's repair re-parents the row
     (#4749). Returns ``(removed, still_needed, repair)``.
     """
+    if lockfile and packages_to_remove and not modules_dir.exists():
+        _refuse_unverifiable_local_survivors(lockfile, packages_to_remove, apm_yml_path, logger)
     if not lockfile or not packages_to_remove or not modules_dir.exists():
         return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
     decision = _uninstall_orphan_decision(
@@ -140,7 +142,15 @@ def _split_still_needed_packages(
         _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
     reanchor = _plan_reanchor_or_exit(
-        lockfile, decision, still_needed, apm_yml_path, logger, others=removed
+        lockfile,
+        decision,
+        still_needed,
+        apm_yml_path,
+        logger,
+        others=removed,
+        shrinks=lambda: project_shrunk_selections(
+            lockfile, packages_to_remove, modules_dir, apm_yml_path
+        ),
     )
     repair = _StillNeededRepair(
         dict(decision.rescued_parents),
@@ -152,8 +162,43 @@ def _split_still_needed_packages(
     return removed, still_needed, repair
 
 
+def _refuse_unverifiable_local_survivors(lockfile, packages: list, apm_yml_path, logger) -> None:
+    """Refuse a local removal another local package might need while apm_modules/ is gone.
+
+    Without the installed graph the still-needed split cannot run, and dropping
+    a still-needed local row would break the next frozen install (#4889).
+    """
+    from ...core.remediation import RESYNC_DEPLOYED
+    from .engine import _read_survivor_direct_refs
+
+    local = [
+        package
+        for package in packages
+        if (row := lockfile.get_dependency(_removed_lock_key(package, lockfile))) is not None
+        and row.source == "local"
+    ]
+    if not local:
+        return
+    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
+    if not any(ref.is_local for ref in (*direct_refs, *dev_refs)):
+        return
+    logger.error(
+        f"{_dependency_public_label(local[0])} was not removed: apm_modules/ is missing, so "
+        "APM cannot tell whether another local package still needs it; apm.yml and "
+        f"apm.lock.yaml were not changed. {RESYNC_DEPLOYED.sentence()}"
+    )
+    sys.exit(1)
+
+
 def _plan_reanchor_or_exit(
-    lockfile, decision, still_needed: list, apm_yml_path, logger, *, others: list = ()
+    lockfile,
+    decision,
+    still_needed: list,
+    apm_yml_path,
+    logger,
+    *,
+    others: list = (),
+    shrinks=dict,
 ):
     """Plan re-anchoring of still-needed local packages; refuse before any write (#4889)."""
     from ...core.deployment_reanchor import reanchor_receipt_problems
@@ -172,6 +217,11 @@ def _plan_reanchor_or_exit(
         problems = reanchor_receipt_problems(
             project_root, InstallScope.PROJECT, lockfile, plan.renames
         )
+        if shrunk := sorted(set(plan.renames) & set(shrinks())):
+            raise LocalReanchorRefused(
+                f"{label(shrunk[0])} stays, but the package that still needs it selects "
+                "fewer of its skills or targets, which would remove deployed files"
+            )
         if plan.renames and others:
             # Rollback restores apm.yml and the lock, never deleted content, so a
             # re-anchor runs alone.
@@ -195,6 +245,25 @@ def _plan_reanchor_or_exit(
         )
         sys.exit(1)
     return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+
+
+def _abort_unsaved_reanchor(repair, logger) -> None:
+    """A re-anchor whose lock was not saved restores apm.yml and exits nonzero (#4889)."""
+    plan = repair.reanchor
+    if not plan or not plan.renames:
+        return
+    from .local_reanchor import roll_back
+
+    try:
+        roll_back(plan)
+    except OSError as exc:
+        logger.error(f"apm.yml could not be restored after the lockfile was not saved ({exc}).")
+        sys.exit(1)
+    logger.error(
+        "The lockfile was not saved, so the re-anchored package was not kept under its new "
+        "parent; apm.yml and apm.lock.yaml were restored and every file is kept."
+    )
+    sys.exit(1)
 
 
 def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logger) -> None:
@@ -499,6 +568,7 @@ def _persist_lock_then_resync_native(
         saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
     if lock_changed and (saved is None or not saved.saved):
         _hold_native_registration(native_before, logger)
+        _abort_unsaved_reanchor(still_needed_repairs, logger)
         return
     _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
     _resync_native_registration_after_uninstall(

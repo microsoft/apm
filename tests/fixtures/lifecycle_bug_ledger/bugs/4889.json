@@ -18,18 +18,20 @@
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_that_would_need_the_network_refuses",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_an_edit_made_before_reanchoring_is_still_reported",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchoring_carries_the_receipt_hash_history",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_whitespace_and_non_ascii_local_paths",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_when_the_kept_package_directory_is_gone",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_through_a_symlinked_local_directory",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_a_symlink_loop",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_of_a_dependency_outside_the_project",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_rekeys_replacement_request_parents",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_case_and_decomposed_unicode_spellings",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_with_a_case_variant_parent_spelling",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_failed_receipt_rename_rolls_the_uninstall_back",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_the_first_declaring_edge",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_ranks_an_equal_depth_diamond_by_the_new_keys",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_an_alias_spelling_that_installs_elsewhere",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_mixed_with_another_removal_refuses"
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_mixed_with_another_removal_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_whitespace_case_and_unicode_local_paths",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_local_removal_without_apm_modules_refuses_when_a_local_survivor_could_need_it",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_whose_survivor_selects_fewer_skills_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_under_another_alias_refuses"
   ]
 }

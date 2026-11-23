@@ -247,11 +247,11 @@ def test_reanchoring_carries_the_receipt_hash_history(
     assert history() == before
 
 
-@pytest.mark.parametrize("e_dir", ["my e", "caf\u00e9-e"])
-def test_reanchor_keeps_whitespace_and_non_ascii_local_paths(
+@pytest.mark.parametrize("e_dir", ["my e", "caf\u00e9-e", "E-Pkg", "cafe\u0301-e"])
+def test_reanchor_keeps_whitespace_case_and_unicode_local_paths(
     tmp_path: Path, apm_binary_path: Path, e_dir: str
 ) -> None:
-    """#4889 cell 8a: a re-anchored path with whitespace or non-ASCII keeps one identity."""
+    """#4889 cells 8a/8d: whitespace, non-ASCII, mixed-case and NFD paths keep one identity."""
     world = _local_world(tmp_path, apm_binary_path, e_dir=e_dir)
     world.apm("uninstall", f"./vendor/{e_dir}")
     _assert_reanchored_like_a_full_install(world)
@@ -354,16 +354,6 @@ def test_reanchor_rekeys_replacement_request_parents(tmp_path: Path, apm_binary_
         for request in (row.get("replacement") or {}).get("requests") or []
     ]
     assert parents == ["local:vendor/e"], lock
-    _assert_reanchored_like_a_full_install(world)
-
-
-@pytest.mark.parametrize("e_dir", ["E-Pkg", "cafe\u0301-e"])
-def test_reanchor_keeps_case_and_decomposed_unicode_spellings(
-    tmp_path: Path, apm_binary_path: Path, e_dir: str
-) -> None:
-    """#4889 cell 8d: a mixed-case or NFD directory keeps the identity install records."""
-    world = _local_world(tmp_path, apm_binary_path, e_dir=e_dir)
-    world.apm("uninstall", f"./vendor/{e_dir}")
     _assert_reanchored_like_a_full_install(world)
 
 
@@ -498,3 +488,59 @@ def test_a_reanchor_mixed_with_another_removal_refuses(
     world.apm("uninstall", "./vendor/r")
     world.apm("uninstall", "./vendor/e")
     _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_local_removal_without_apm_modules_refuses_when_a_local_survivor_could_need_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: with apm_modules/ gone the still-needed split cannot run; refuse before writes."""
+    world = _local_world(tmp_path, apm_binary_path)
+    shutil.rmtree(world.project / "apm_modules")
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+def test_a_reanchor_whose_survivor_selects_fewer_skills_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a narrower surviving selection would delete deployed skills; refuse first."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    write(
+        vendor / "e/.apm/skills/extra-skill/SKILL.md",
+        "---\nname: extra-skill\ndescription: x\n---\n# x\n",
+    )
+    write(
+        vendor / "d/apm.yml",
+        "name: d\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        "    - path: ../e\n      skills: [e-skill]\n",
+    )
+    write(
+        vendor / "d/.apm/skills/d-skill/SKILL.md", "---\nname: d-skill\ndescription: d\n---\n# d\n"
+    )
+    _manifest(world, ["./vendor/e"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    assert (world.project / ".claude/skills/extra-skill/SKILL.md").is_file()
+
+    _assert_refused_before_any_write(world, "selects fewer of its skills or targets")
+
+
+def test_a_reanchor_under_another_alias_refuses(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4889: a surviving declaration with another alias installs elsewhere; refuse first."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    write(
+        vendor / "d/apm.yml",
+        "name: d\nversion: 1.0.0\ndependencies:\n  apm:\n    - path: ../e\n      alias: new-e\n",
+    )
+    write(
+        vendor / "d/.apm/skills/d-skill/SKILL.md", "---\nname: d-skill\ndescription: d\n---\n# d\n"
+    )
+    _manifest(world, ["./vendor/e"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    _assert_refused_before_any_write(world, "under another name (new-e)")

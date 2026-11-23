@@ -114,8 +114,9 @@ class ReachabilityResult:
         declaring_edges: Every parent key that declares a node, in the order
             the walk saw the edges, with that edge's ``(parent identity,
             local_path)`` (#4889).
-        local_edge_repos: The ``repo_url`` each local edge resolves to, by
-            ``(child key, parent key)``; an alias spelling names another one.
+        local_edge_repos: The ``(repo_url, alias)`` each local edge resolves
+            to, by ``(child key, parent key)``; another spelling or alias
+            installs elsewhere.
     """
 
     reachable: frozenset[str]
@@ -131,7 +132,9 @@ class ReachabilityResult:
     declaring_edges: dict[str, dict[str, tuple[str | None, str | None]]] = field(
         default_factory=dict
     )
-    local_edge_repos: dict[tuple[str, str | None], str] = field(default_factory=dict)
+    local_edge_repos: dict[tuple[str, str | None], tuple[str, str | None]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -391,7 +394,7 @@ def compute_forward_reachable_keys(
     )
     edge_selections: dict[str, list[EdgeSelection]] = {}
     local_dirs: dict[str, Path] = {}
-    local_edge_repos: dict[tuple[str, str | None], str] = {}
+    local_edge_repos: dict[tuple[str, str | None], tuple[str, str | None]] = {}
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
     marketplace_index = lockfile.marketplace_index()
@@ -450,7 +453,7 @@ def compute_forward_reachable_keys(
                 (parent_repo_url, None if ref.replacement is not None else ref.local_path),
             )
             local_edge_repos.setdefault(
-                (matched_key or ref.get_unique_key(), parent_key), ref.repo_url
+                (matched_key or ref.get_unique_key(), parent_key), (ref.repo_url, ref.alias)
             )
             if visit_key in visited:
                 continue
