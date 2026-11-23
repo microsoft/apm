@@ -41,6 +41,7 @@ from pathlib import Path
 
 from ..utils.git_env import git_subprocess_env
 from ..utils.git_sparse import _LINK_MODE, _TREE_MODE, _LinkResolver, _TreeEntry
+from ..utils.paths import relative_to
 from .cached_repo import cached_repo_env, inert_git_args
 
 _MODES = {"40000": _TREE_MODE, "160000": "160000"}
@@ -427,7 +428,7 @@ def _worktree_files(repo: Path) -> Iterator[tuple[str, Path]]:
         subdirs[:] = [d for d in subdirs if d not in links]
         for name in (*names, *links):
             path = here / name
-            yield path.relative_to(repo).as_posix(), path
+            yield relative_to(path, repo).as_posix(), path
 
 
 def _in_scope(path: str, scope: tuple[str, ...]) -> bool:
