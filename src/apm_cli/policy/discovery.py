@@ -35,6 +35,10 @@ from ._cache_verify import (
     _stale_fallback_or_error,
     _unverifiable_cache_pin,
     _unverified_pinned_cache,
+    cached_document,
+    capped_ttl,
+    load_cache_meta,
+    store_raw_leaf,
 )
 from ._policy_http import policy_get
 from ._remote import (  # noqa: F401  -- re-exported for callers/tests
@@ -370,10 +374,9 @@ def _discover_one_with_chain(
         _resolve_and_persist_chain(
             fetch_result,
             project_root,
-            no_cache=no_cache,
+            no_cache=no_cache or expected_hash is not None,  # pinned: parents never from cache
             cache_only=cache_only,
         )
-
     return fetch_result
 
 
@@ -1201,6 +1204,7 @@ def _fetch_from_url(
             chain_refs=chain_refs,
             raw_bytes_hash=actual_hash,
             warnings=warnings,
+            raw_content=content,
         )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1288,6 +1292,7 @@ def _fetch_from_repo(
             chain_refs=chain_refs,
             raw_bytes_hash=actual_hash,
             warnings=warnings,
+            raw_content=content,
         )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1474,6 +1479,7 @@ def _fetch_from_ado_repo(
             chain_refs=chain_refs,
             raw_bytes_hash=actual_hash,
             warnings=warnings,
+            raw_content=content,
         )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1931,13 +1937,9 @@ def _read_cache_entry(
     * ``None``                     -- no cache file, corrupt, past MAX_STALE_TTL,
                                        or pin verification failure (#827).
 
-    When *expected_hash* is provided the cached ``raw_bytes_hash`` is
-    compared against it; a mismatch invalidates the cache entry so the
-    caller falls through to a fresh fetch where the pin can be verified
-    against authoritative bytes off the wire.
-
-    When *ttl* is omitted, staleness follows the cached effective policy's
-    ``cache.ttl``. Callers may pass an explicit TTL for diagnostics or tests.
+    With *expected_hash* the entry's stored leaf bytes must hash to the pin
+    and are parsed; otherwise the caller fetches again (#827). Without an
+    explicit *ttl*, staleness follows ``cache.ttl`` bounded by ``capped_ttl``.
     """
     cache_dir = _get_cache_dir(project_root)
     key = _cache_key(repo_ref)
@@ -1948,9 +1950,9 @@ def _read_cache_entry(
         return None
 
     try:
-        meta = json.loads(meta_file.read_text(encoding="utf-8"))
-
-        # Schema version check -- auto-invalidate on format change
+        meta = load_cache_meta(meta_file)
+        if meta is None:
+            return None
         if meta.get("schema_version") != CACHE_SCHEMA_VERSION:
             meta_file.unlink(missing_ok=True)
             return None
@@ -1964,14 +1966,14 @@ def _read_cache_entry(
             return None  # Past MAX_STALE_TTL, unusable
 
         raw_bytes_hash = meta.get("raw_bytes_hash", "") or ""
-        serialized = policy_file.read_text(encoding="utf-8")
+        serialized = cached_document(policy_file, meta, expected_hash, repo_ref)
         if not _cached_policy_verified(serialized, meta, expected_hash):
             return None
 
         # The sidecar preserves warnings from the authored cold input. Parser
         # warnings from canonical cache YAML are intentionally not user-facing.
         policy, _warnings = load_policy(serialized)
-        effective_ttl = policy.cache.ttl if ttl is None else ttl
+        effective_ttl = capped_ttl(policy.cache.ttl) if ttl is None else ttl
         cached_warnings = meta.get("warnings", [])
         if not isinstance(cached_warnings, list):
             cached_warnings = []
@@ -2034,6 +2036,7 @@ def _write_cache(
     chain_refs: list[str] | None = None,
     raw_bytes_hash: str | None = None,
     warnings: list[str] | None = None,
+    raw_content: str | bytes | None = None,
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
@@ -2041,10 +2044,8 @@ def _write_cache(
     installs.  Both the policy file and metadata sidecar are written
     atomically and independently.
 
-    The optional ``raw_bytes_hash`` (canonical ``"<algo>:<hex>"``) is the
-    digest of the leaf bytes off the wire and is persisted to the meta
-    sidecar so subsequent cached reads can verify against the project's
-    pin without re-fetching (#827).
+    ``raw_content`` is the fetched leaf document (only for unextended
+    leaves); a pinned read verifies and parses it instead (#827).
     """
     cache_dir = _get_cache_dir(project_root)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -2077,8 +2078,7 @@ def _write_cache(
             except OSError:
                 pass
             return
-
-        # Atomic write: metadata sidecar
+        store_raw_leaf(policy_file, raw_content, uid)
         persisted_chain_refs = chain_refs if chain_refs is not None else [repo_ref]
         meta = {
             "repo_ref": _redact_policy_ref(repo_ref),

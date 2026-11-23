@@ -708,21 +708,25 @@ class MCPClientAdapter(ABC):
         journal_config_write(config_path)
         config_path.parent.mkdir(parents=True, exist_ok=True)
         trailing_newline = self.json_config_trailing_newline
-        if shared and self._is_project_config_path(config_path):
+        from ...integration.config_file_provenance import recorded_install_write
+
+        # An emptied config file is deleted later only if this records APM created it.
+        with recorded_install_write(config_path, self.project_root, self.user_scope):
+            if shared and self._is_project_config_path(config_path):
+                write_json_config(
+                    config_path,
+                    config,
+                    default_trailing_newline=trailing_newline,
+                    new_file_mode=umask_file_mode(config_path),
+                )
+                return
+            if config_path.is_file():
+                # Tighten first: the atomic write keeps an existing file's mode.
+                os.chmod(config_path, 0o600)
             write_json_config(
-                config_path,
-                config,
-                default_trailing_newline=trailing_newline,
-                new_file_mode=umask_file_mode(config_path),
+                config_path, config, default_trailing_newline=trailing_newline, new_file_mode=0o600
             )
-            return
-        if config_path.is_file():
-            # Tighten first: the atomic write keeps an existing file's mode.
             os.chmod(config_path, 0o600)
-        write_json_config(
-            config_path, config, default_trailing_newline=trailing_newline, new_file_mode=0o600
-        )
-        os.chmod(config_path, 0o600)
 
     @abstractmethod
     def configure_mcp_server(

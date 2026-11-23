@@ -1984,10 +1984,13 @@ def run_policy_checks(
         mcp_deps = list(view.kept_dependencies())
         mcp_brought_in_by = view.brought_in_by
         from ..claude_plugins.admission import locked_transitive_native_refusals
+        from ..codex_plugins.admission import locked_transitive_codex_refusals
 
-        native = locked_transitive_native_refusals(
-            lock, modules_root or project_root / "apm_modules", policy
-        )
+        modules = modules_root or project_root / "apm_modules"
+        native = [
+            *locked_transitive_native_refusals(lock, modules, policy),
+            *locked_transitive_codex_refusals(lock, modules, policy),
+        ]
         trust_check = _parked_trust_transitive(view, native)
 
     try:
