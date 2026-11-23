@@ -616,6 +616,55 @@ def test_admission_judges_the_full_commit_a_hex_name_resolves_to(
     assert markers == [origin.m1]
 
 
+def test_a_commit_the_commits_api_expanded_is_verified_where_git_fetches(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """#5056: an API answer is not a tip of the Git destination; it is verified there."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    name = origin.f1[:10]
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+    # The resolver reports an abbreviation the commits API expanded as a branch-like ref.
+    resolved = ResolvedReference(
+        original_ref=name,
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit=origin.f1,
+        ref_name=name,
+    )
+
+    with pytest.raises(CommitNotReachableError):
+        admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
+    assert not list((tmp_path / "cache" / "reachability").rglob("verified/*"))
+
+
+def test_an_api_observed_tip_is_verified_at_the_mirror_git_fetches_through(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """#5056: a tip the API saw upstream is verified at the mirror before admission."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    mirror = tmp_path / "mirror.git"
+    _REAL_RUN(["git", "clone", "-q", "--mirror", str(origin.path), str(mirror)], check=True)
+    _REAL_RUN(
+        ["git", "--git-dir", str(mirror), "update-ref", "refs/heads/main", origin.m1], check=True
+    )
+    _REAL_RUN(["git", "--git-dir", str(mirror), "update-ref", "-d", "refs/pull/1/head"], check=True)
+    name = origin.m2[:10]
+    downloader = _RefDownloader(tmp_path / "cache", [mirror.as_uri()], predicted=origin.url)
+    resolved = ResolvedReference(
+        original_ref=name,
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit=origin.m2,
+        ref_name=name,
+    )
+
+    with pytest.raises(CommitNotReachableError):
+        admit_pinned_commit(downloader, _RefDep(), name, resolved=resolved)
+    assert not list((tmp_path / "cache" / "reachability").rglob("verified/*"))
+
+
 class TestRefCacheLinks:
     """The ref cache never follows a link."""
 
