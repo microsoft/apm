@@ -1156,6 +1156,49 @@ class TestSecurityScanFailClosed:
         assert not target.exists()
 
 
+class TestNonStringFrontmatterKeys:
+    """A non-string frontmatter key skips that command, never the batch (#4922)."""
+
+    @pytest.mark.parametrize(
+        ("raw_key", "shown_key"),
+        [("1", "1 (int)"), ("true", "True (bool)")],
+        ids=["int-key", "bool-key"],
+    )
+    def test_bad_command_kept_and_batch_continues(self, tmp_path, raw_key, shown_key):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        (tmp_path / ".claude").mkdir()
+        pkg_info = _make_package(
+            tmp_path,
+            {
+                "bad.prompt.md": f"---\ndescription: Bad\n{raw_key}: x\n---\nBad body\n",
+                "good.prompt.md": "---\ndescription: Good\n---\nGood body\n",
+            },
+        )
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"], pkg_info, tmp_path, diagnostics=diag
+        )
+
+        assert result.files_integrated == 1
+        assert result.files_skipped == 1
+        commands_dir = tmp_path / ".claude" / "commands"
+        assert sorted(p.name for p in commands_dir.iterdir()) == ["good.md"]
+        good = frontmatter.loads((commands_dir / "good.md").read_text(encoding="utf-8"))
+        assert good.metadata == {"description": "Good"}
+        assert good.content == "Good body"
+
+        warnings = [
+            item.message
+            for item in diag.by_category().get(CATEGORY_WARNING, [])
+            if "bad.prompt.md" in item.message
+        ]
+        assert len(warnings) == 1, warnings
+        assert warnings[0].startswith("Skipped command bad.prompt.md:")
+        assert f"non-string frontmatter key {shown_key}" in warnings[0]
+
+
 # ===================================================================
 # Gemini CLI Command Integration (.toml format)
 # ===================================================================
