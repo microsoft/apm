@@ -167,6 +167,28 @@ def test_scripts_deny_refuses_an_install_with_no_dependency_work(
     _assert_refused(world, _SCRIPTS)
 
 
+def test_scripts_deny_refuses_an_mcp_install(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "scripts-deny")
+    _apm(world, "audit", "--ci")  # discovers the policy once, so its cache is warm
+    _add_scripts(world.project / "apm.yml")
+
+    _assert_refused(world, _SCRIPTS, "--mcp", "srv", "--url", "https://mcp.example.com/mcp")
+
+
+def test_scripts_deny_refuses_a_local_bundle_install(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "scripts-deny")
+    _seed(world)
+    _add_scripts(world.project / "apm.yml")
+
+    _assert_refused(world, _SCRIPTS, world.packages["p-exec:bundle"].spec)
+
+
 def test_scripts_deny_judges_the_manifest_root_redirects_from(
     lifecycle_world: World,  # noqa: F811
 ) -> None:
@@ -205,6 +227,43 @@ def test_unmanaged_files_deny_refuses_an_install_that_would_leave_drift(
     else:
         _assert_ok(world, "install", spec)
         assert (world.project / ".agents" / "skills" / "p-skill" / "SKILL.md").is_file()
+
+
+@pytest.mark.parametrize("offending", [True, False], ids=["unmanaged-file", "control"])
+def test_unmanaged_files_deny_refuses_a_local_bundle_install(
+    lifecycle_world: World,  # noqa: F811
+    offending: bool,
+) -> None:
+    world = lifecycle_world
+    bundle = world.packages["p-exec:bundle"].spec
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    if offending:
+        path = world.project / _HAND_WRITTEN
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# hand written\n", encoding="utf-8")
+
+        text = _assert_refused(world, _UNMANAGED, bundle)
+        assert _HAND_WRITTEN in text, text
+    else:
+        _assert_ok(world, "install", bundle)
+        _assert_ok(world, "audit", "--ci")
+
+
+def test_unmanaged_files_deny_refuses_an_mcp_install(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    path = world.project / _HAND_WRITTEN
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# hand written\n", encoding="utf-8")
+
+    text = _assert_refused(
+        world, _UNMANAGED, "--mcp", "srv", "--url", "https://mcp.example.com/mcp"
+    )
+    assert _HAND_WRITTEN in text, text
 
 
 def test_unmanaged_files_deny_keeps_files_root_local_content_deploys(
@@ -256,6 +315,18 @@ def test_max_depth_refuses_a_graph_deeper_than_the_limit(
         assert "p-child" in text, text
     else:
         _assert_ok(world, "install", world.packages["p-skill:git"].spec)
+
+
+def test_max_depth_refusal_keeps_a_legacy_lockfile_in_place(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "max-depth-1")
+    _seed(world, package="p-skill:git")
+    (world.project / "apm.lock.yaml").rename(world.project / "apm.lock")
+
+    _assert_refused(world, _DEPTH, world.packages["p-parent"].spec, keep_git_cache=True)
+    assert not (world.project / "apm.lock.yaml").exists()
 
 
 def test_max_depth_reuses_a_dependency_already_resolved_directly(

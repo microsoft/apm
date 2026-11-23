@@ -334,6 +334,37 @@ def _refuse_denied_scripts_before_fetch(ctx: InstallContext) -> None:
     )
 
 
+def refuse_denied_install_entry(scope: Any, *, no_policy: bool, dry_run: bool, logger: Any) -> None:
+    """Refuse an install a blocking policy forbids before any install entry writes (#4826).
+
+    Every ``apm install`` entry -- a local bundle, ``--mcp`` and the
+    dependency pipeline -- passes here first: the scope manifest's
+    ``scripts:`` block meets ``manifest.scripts: deny`` and the governed
+    files no row of the current lockfile claims meet
+    ``unmanaged_files.action: deny``. The deeper gates still judge the
+    claims each entry would leave; ``warn`` and ``--dry-run`` report there.
+    Policy is discovered only when there is something to judge: a
+    ``scripts:`` block, or a governed file in the default directories no
+    row claims.
+    """
+    if dry_run:
+        return
+    from apm_cli.core.scope import get_apm_dir, get_deploy_root, get_manifest_path
+    from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
+    from apm_cli.policy.install_preflight import prefetch_identity_policy
+    from apm_cli.policy.policy_checks import _check_unmanaged_files
+    from apm_cli.policy.schema import UnmanagedFilesPolicy
+
+    manifest_path = get_manifest_path(scope)
+    refuse_denied_manifest_scripts(manifest_path, no_policy=no_policy, dry_run=False, logger=logger)
+    root = get_deploy_root(scope)
+    lockfile = LockFile.read(resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True))
+    if _check_unmanaged_files(root, lockfile, UnmanagedFilesPolicy(action="deny")).passed:
+        return
+    policy = prefetch_identity_policy(manifest_path.parent, no_policy=no_policy)
+    refuse_unmanaged_files(logger, policy, root, lockfile, dry_run=False)
+
+
 def refuse_denied_manifest_scripts(
     manifest_path: Path, *, no_policy: bool, dry_run: bool, logger: Any
 ) -> None:
@@ -595,15 +626,36 @@ def check_before_release(ctx: InstallContext, lockfile: LockFile | None) -> None
     unmanaged. A refusal fails the install, and the transaction restores
     every file it deployed and discards the staged lockfile.
     """
-    policy = _enforced_install_policy(ctx)
+    refuse_unmanaged_files(
+        ctx.logger,
+        _enforced_install_policy(ctx),
+        ctx.project_root,
+        lockfile,
+        dry_run=ctx.dry_run,
+        source=getattr(getattr(ctx, "policy_fetch", None), "source", None),
+    )
+
+
+def refuse_unmanaged_files(
+    logger: Any,
+    policy: Any,
+    project_root: Path,
+    lockfile: LockFile | None,
+    *,
+    dry_run: bool,
+    source: str | None = None,
+) -> None:
+    """Refuse a governed file no row of *lockfile* claims under ``unmanaged_files: deny``."""
     if policy is None or policy.unmanaged_files.effective_action != "deny":
         return
     from apm_cli.policy.policy_checks import _check_unmanaged_files
 
-    _enforce_install_policy_checks(
-        ctx,
+    _report_install_policy_checks(
+        logger,
         policy,
-        [_check_unmanaged_files(ctx.project_root, lockfile, policy.unmanaged_files)],
+        [_check_unmanaged_files(project_root, lockfile, policy.unmanaged_files)],
+        dry_run=dry_run,
+        source=source,
     )
 
 

@@ -20,6 +20,7 @@ never deployed.
 
 from __future__ import annotations
 
+import functools
 import json
 import shutil
 from pathlib import Path
@@ -151,7 +152,12 @@ def install_local_bundle(
 
             targets = resolve_skill_layout(targets, legacy_skill_paths=True)
 
-        from .bundle_admission import admit_bundle, bundle_policy_subjects, plugin_bundle_integrity
+        from .bundle_admission import (
+            admit_bundle,
+            bundle_policy_subjects,
+            plugin_bundle_integrity,
+            refuse_unmanaged_bundle_files,
+        )
 
         verify_integrity = plugin_bundle_integrity(bundle_info, logger)
         integrity_verified = False
@@ -225,7 +231,7 @@ def install_local_bundle(
         deployment_decision = EffectiveTargetDecision(
             [resolved.name for resolved in targets], "bundle deployment targets"
         )
-        admit_bundle(
+        bundle_policy = admit_bundle(
             policy_root=manifest_root(source_root, user_scope=global_),
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
@@ -255,20 +261,22 @@ def install_local_bundle(
                 LSPIntegrator.supported_target_runtimes(target_names), bundle=True
             )
 
-        result = integrate_local_bundle(
+        deploy = functools.partial(
+            integrate_local_bundle,
             bundle_info,
             project_root,
             targets=targets,
             force=force,
-            dry_run=dry_run,
             diagnostics=None,
-            logger=logger,
             scope=scope,
             alias=alias,
             allow_executables=allow_executables,
             approval_key=bundle_approval_key,
-            create_config=create_config,
         )
+        refuse_unmanaged_bundle_files(
+            bundle_policy, deploy, user_scope=global_, logger=logger, dry_run=dry_run
+        )
+        result = deploy(dry_run=dry_run, logger=logger, create_config=create_config)
 
         deployed = result.get("deployed_files", [])
         deployed_hashes = result.get("deployed_file_hashes", {})

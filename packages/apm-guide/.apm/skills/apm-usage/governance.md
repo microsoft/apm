@@ -623,8 +623,8 @@ relax an ancestor that requires an explicit `includes:` list.
 - **Registry source:** require, allow_non_registry
 - **MCP:** allow, deny, transport.allow, self_defined (`trust_transitive` is parsed but not enforced)
 - **Compilation:** target.allow / target.enforce (target-aware). `target:`, `targets:`, and CSV forms are one declaration; aliases resolve before comparison (`vscode`/`agents` are `copilot`); `all` in `allow` allows everything. Install judges its effective selection; audit judges the targets `apm.yml` declares.
-- **Manifest:** require_explicit_includes, scripts (`deny` refuses a `scripts:` block in the installed manifest before any fetch)
-- **Unmanaged files:** `action: deny` refuses an install that would leave a governed file no lockfile row claims; deployed files and the lockfile are restored (an install killed before the restore leaves them unrecorded)
+- **Manifest:** require_explicit_includes, scripts (`deny` refuses a `scripts:` block in the installed manifest before any fetch or write, `--mcp` and local bundles included)
+- **Unmanaged files:** `action: deny` refuses an install (`--mcp` and local bundles included) that would leave a governed file no lockfile row claims, before writing when the file is already there; deployed files and the lockfile are restored (an install killed before the restore leaves them unrecorded)
 - **Integrity:** security.integrity.require_hashes
 
 Each install refusal names the policy field and the fix; under

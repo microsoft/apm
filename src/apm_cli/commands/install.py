@@ -1248,6 +1248,15 @@ def install(  # noqa: PLR0913
             legacy_skill_paths = should_use_legacy_skill_paths()
 
         create_user_config = not dry_run
+        from apm_cli.install.commit_gate import refuse_denied_install_entry
+
+        # Before any entry (local bundle, --mcp, dependency pipeline) writes.
+        refuse_denied_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT,
+            no_policy=no_policy,
+            dry_run=dry_run,
+            logger=logger,
+        )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
@@ -1525,12 +1534,6 @@ def install(  # noqa: PLR0913
                 )
             sys.exit(1)
 
-        from apm_cli.install.commit_gate import refuse_denied_manifest_scripts
-
-        # Before anything writes: marketplaces, validation, hooks, lockfile migration.
-        refuse_denied_manifest_scripts(
-            manifest_path, no_policy=no_policy, dry_run=dry_run, logger=logger
-        )
         reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
         outcome = None
         if packages:
@@ -1894,7 +1897,8 @@ def _install_apm_packages(ctx, outcome):
         logger=logger,
         dry_run=bool(getattr(ctx, "dry_run", False)),
     )
-    migrate_lockfile_if_needed(ctx.apm_dir)
+    if migrate_lockfile_if_needed(ctx.apm_dir) and ctx.transaction is not None:
+        ctx.transaction.undo_lockfile_migration_on_rollback(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
     old_mcp_servers: builtins.set = builtins.set()

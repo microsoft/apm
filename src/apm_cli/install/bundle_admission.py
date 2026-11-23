@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from functools import partial
+
     from apm_cli.bundle.unpacker import UnpackCandidate
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
@@ -75,6 +77,60 @@ def admit_bundle(
     policy = policy_fetch.policy if policy_fetch is not None else None
     integrity_check(require_hashes_enabled(policy.security.integrity if policy else None))
     return policy
+
+
+def refuse_unmanaged_bundle_files(
+    policy: ApmPolicy | None,
+    deploy: partial[Mapping[str, Any]],
+    *,
+    user_scope: bool,
+    logger: Any,
+    dry_run: bool,
+) -> None:
+    """Judge ``unmanaged_files.action: deny`` on the claims a bundle install leaves (#4826).
+
+    *deploy* is the bundle's ``integrate_local_bundle`` call, run here as a
+    dry run. Its claims, less the files the install skips because they exist
+    with other content, join the current lockfile's, so a governed file none
+    of them claims refuses the install before the bundle writes anything.
+    """
+    if policy is None or policy.enforcement == "off":
+        return
+    if policy.unmanaged_files.effective_action != "deny":
+        return
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.scope import InstallScope
+    from ..deps.lockfile import LockFile
+    from .commit_gate import refuse_unmanaged_files
+    from .local_bundle_handler import _bundle_lock_root, _home_relative_claims
+
+    project_root, force = deploy.args[1], deploy.keywords["force"]
+    result = deploy(dry_run=True, logger=None, create_config=False)
+    digests = result.get("deployed_file_hashes", {})
+    hashes = {
+        record: digests[record]
+        for record in result.get("deployed_files", [])
+        if record in digests and (force or _deploys_at(project_root / record, digests[record]))
+    }
+    files = sorted(hashes)
+    if user_scope:
+        files, hashes = _home_relative_claims(files, hashes, project_root)
+    lockfile = _recorded_lockfile(_bundle_lock_root(user_scope)) or LockFile()
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    DeploymentLedgerCodec.record_local_bundle_files(lockfile, files, hashes, scope=scope)
+    refuse_unmanaged_files(logger, policy, project_root, lockfile, dry_run=dry_run)
+
+
+def _deploys_at(dest: Path, digest: str) -> bool:
+    """Whether a bundle file lands at *dest*: absent or the same bytes, else skipped."""
+    import hashlib
+
+    try:
+        if not dest.exists():
+            return True
+        return f"sha256:{hashlib.sha256(dest.read_bytes()).hexdigest()}" == digest
+    except OSError:
+        return True
 
 
 def bundle_policy_subjects(bundle_info: Any) -> LocalBundleSubjects:
