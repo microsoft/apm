@@ -666,7 +666,7 @@ def _version_1_store(tmp_path: Path, apm_home: Path) -> tuple[Path, Path]:
     apms = tmp_path / "apms" / ".mcp.json"
     for config, text in ((users, _SKELETON), (apms, _WITH_ENTRY)):
         config.parent.mkdir()
-        config.write_text(text, encoding="utf-8")
+        config.write_bytes(text.encode("utf-8"))  # the bytes the seeded digest names
     rows = [
         {"path": config_file_key(users), "origin": "preexisting", "hash": "sha256:" + "0" * 64},
         {"path": config_file_key(apms), "origin": "created", "hash": _sha(_WITH_ENTRY)},
