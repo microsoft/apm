@@ -1,0 +1,16 @@
+{
+  "issue": 5057,
+  "fixed_in": "Unreleased",
+  "summary": "apm install removed an undeclared dependency's deployed files but left its merged hook entry in .claude/settings.json, so the hook kept running; install now retires the entries carrying that dependency's ownership marker, as uninstall does, and keeps entries APM did not write.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_undeclared_dependency_hooks_lifecycle.py::test_install_retires_the_hooks_of_an_undeclared_dependency",
+    "tests/integration/test_install_undeclared_dependency_hooks_lifecycle.py::test_install_keeps_an_edited_entry_of_an_undeclared_dependency"
+  ]
+}

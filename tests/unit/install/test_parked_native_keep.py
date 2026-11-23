@@ -139,3 +139,21 @@ def test_replay_never_carries_a_kept_value_through_a_symlinked_parent(tmp_path: 
 
     # Never stand in for the replay: drift then reports the linked copy.
     assert not (scratch / ".claude/skills/demo/SKILL.md").exists()
+
+
+def test_replay_never_replaces_a_copy_another_package_rendered(tmp_path: Path) -> None:
+    # A path both packages claim (#5108): the writer's replayed copy stands, so
+    # an edit to the live file still shows as drift.
+    live, scratch = tmp_path / "live", tmp_path / "scratch"
+    for root, body in ((live, "edited live bytes"), (scratch, "writer render")):
+        (root / ".claude/skills/demo").mkdir(parents=True)
+        (root / ".claude/skills/demo/SKILL.md").write_text(body, encoding="ascii")
+    lock_dep = SimpleNamespace(
+        deployed_files=[".claude/skills/demo/SKILL.md"],
+        deployed_file_hashes={".claude/skills/demo/SKILL.md": "sha256:a"},
+    )
+    result = {"deployment_plan": _plan(parked="Parked native plugin pkg: denied")}
+
+    carry_kept_loose_into_replay(result, lock_dep, live, scratch, True)
+
+    assert (scratch / ".claude/skills/demo/SKILL.md").read_text(encoding="ascii") == "writer render"

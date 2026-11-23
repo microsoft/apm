@@ -1561,7 +1561,7 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not BaseIntegrator.validate_deploy_path(
+            if not _stale_gate_passes(
                 stale_path,
                 project_root,
                 targets=targets,
@@ -1577,7 +1577,7 @@ def remove_stale_deployed_files(
                 continue
             stale_target = project_root / stale_path
 
-        if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
+        if _stale_target_absent(stale_target, allow_final_symlink=allow_final_symlink):
             # File already gone -- treat as cleaned (no-op success).
             absent_targets.append(stale_target)
             continue
@@ -1632,7 +1632,7 @@ def remove_stale_deployed_files(
         # Unlinking a managed final symlink removes no file content, so it
         # keeps its own rule (callers opt in via allow_final_symlink).
         if allow_final_symlink and stale_target.is_symlink():
-            if recorded_hashes.get(stale_path.replace("\\", "/")):
+            if not _managed_link_unlinkable(recorded_hashes.get(stale_path.replace("\\", "/"))):
                 result.skipped_user_edit.append(stale_path)
                 diagnostics.warn(
                     (
@@ -1770,3 +1770,85 @@ def remove_synced_files(
     )
     diagnostics.render_summary()
     return result
+
+
+def _stale_gate_passes(
+    stale_path: str, project_root: Path, *, targets, user_scope: bool, allow_final_symlink: bool
+) -> bool:
+    """Stale cleanup's path gate (traversal, allowed prefix, in-tree)."""
+    return BaseIntegrator.validate_deploy_path(
+        stale_path,
+        project_root,
+        targets=targets,
+        user_scope=user_scope,
+        allow_final_symlink=allow_final_symlink,
+    )
+
+
+def _stale_target_absent(stale_target: Path, *, allow_final_symlink: bool) -> bool:
+    """Whether stale cleanup counts a gated path as already gone."""
+    return not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink())
+
+
+def _managed_link_unlinkable(recorded_hash: str | None) -> bool:
+    """Whether a gated managed final symlink is unlinked: only one that replaced no hashed file."""
+    return not recorded_hash
+
+
+def managed_hook_prefixes(targets=None) -> tuple[str, ...]:
+    """Deployed-path prefixes whose files uninstall's hook sync removes (#5035)."""
+    from .targets import KNOWN_TARGETS
+
+    return tuple(
+        dict.fromkeys(
+            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
+            for t in (*KNOWN_TARGETS.values(), *(targets or ()))
+            if t.supports("hooks")
+        )
+    )
+
+
+def hook_sync_unlinks(rel_path: str, project_root: Path, *, recorded_hash: str | None) -> bool:
+    """Whether uninstall's hook sync removes a managed hook final symlink (#5035).
+
+    Read-only, through the same prefix, gate and link decisions the hook sync
+    applies with ``allow_final_symlink=True``.
+    """
+    from .targets import KNOWN_TARGETS
+
+    return (
+        rel_path.replace("\\", "/").startswith(managed_hook_prefixes())
+        and _stale_gate_passes(
+            rel_path,
+            project_root,
+            targets=list(KNOWN_TARGETS.values()),
+            user_scope=False,
+            allow_final_symlink=True,
+        )
+        and (project_root / rel_path).is_symlink()
+        and _managed_link_unlinkable(recorded_hash)
+    )
+
+
+def final_link_handled(
+    rel_path: str,
+    project_root: Path,
+    *,
+    targets=None,
+    user_scope: bool = False,
+    allow_final_symlink: bool = False,
+) -> bool:
+    """Whether stale cleanup finishes a final-symlink claim instead of keeping it (#5035).
+
+    Read-only, through the same gate and absence decisions as
+    :func:`remove_stale_deployed_files`: a dangling link the path gate accepts
+    counts as already gone. Any other final link is rejected or kept, so the
+    uninstall stops. The defaults match uninstall's selected-owner cleanup.
+    """
+    return _stale_gate_passes(
+        rel_path,
+        project_root,
+        targets=targets,
+        user_scope=user_scope,
+        allow_final_symlink=allow_final_symlink,
+    ) and _stale_target_absent(project_root / rel_path, allow_final_symlink=allow_final_symlink)

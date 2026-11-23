@@ -43,6 +43,8 @@ from apm_cli.integration.hook_bundle import (
     iter_deployable_hook_bundle_files,
 )
 from apm_cli.integration.hook_command_paths import (
+    SCRIPTS_SUBDIR_HOOK_TARGETS,
+    hook_scripts_parent,
     iter_plugin_root_paths,
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
@@ -610,11 +612,11 @@ class HookIntegrator(BaseIntegrator):
         command = normalize_quoted_plugin_root(command)
         edits: list[tuple[int, int, str]] = []
 
-        if target == "vscode":
-            scripts_base = f"{root_dir or '.github'}/hooks/scripts/{package_name}"
+        if target in SCRIPTS_SUBDIR_HOOK_TARGETS:
+            default_root = ".github"
         else:
             default_root = f".{target}" if target in _DOT_NAMED_HOOK_ROOTS else ".claude"
-            scripts_base = f"{root_dir or default_root}/hooks/{package_name}"
+        scripts_base = hook_scripts_parent(target, root_dir or default_root) + package_name
 
         def scoped(target_rel: str, quote: str) -> str:
             return self._project_scoped_command_path(
@@ -1881,20 +1883,18 @@ class HookIntegrator(BaseIntegrator):
         guard_targets = list(KNOWN_TARGETS.values())
         if targets is not None:
             guard_targets = guard_targets + list(targets)
-        hook_prefixes = [
-            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
-            for t in guard_targets
-            if t.supports("hooks")
-        ]
-        hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import consent_outcome, remove_synced_files
+            from apm_cli.integration.cleanup import (
+                consent_outcome,
+                managed_hook_prefixes,
+                remove_synced_files,
+            )
 
             # Deletion needs deployment evidence; None keeps every file (#3701).
             cleanup = remove_synced_files(
                 managed_files,
                 project_root,
-                prefixes=hook_prefix_tuple,
+                prefixes=managed_hook_prefixes(targets),
                 dep_key="<uninstall hooks>",
                 targets=guard_targets,
                 evidence=evidence,

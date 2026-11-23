@@ -705,7 +705,6 @@ class MCPClientAdapter(ABC):
             config_path,
             json_config_text(config_path, config, default_trailing_newline=trailing_newline),
         )
-        config_path.parent.mkdir(parents=True, exist_ok=True)
         from ...integration.config_file_provenance import recorded_install_write
 
         project = shared and self._is_project_config_path(config_path)
