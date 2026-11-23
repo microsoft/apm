@@ -31,7 +31,7 @@ _BRANCH_MERGE = re.compile(r"refs/heads/[A-Za-z0-9_./-]+")
 _APM_VALUE = re.compile(r"[a-z0-9-]+")
 _SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"([^"\\\n]*)")?\]')
 _KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
-_ALLOWED_PROTOCOLS = "file:git:http:https:ssh"
+_ALLOWED_PROTOCOLS = "file:http:https:ssh"
 
 OriginCheck = Callable[[str], bool]
 

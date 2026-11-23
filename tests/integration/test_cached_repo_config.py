@@ -295,3 +295,61 @@ def test_a_native_snapshot_with_foreign_config_is_refused_and_nothing_runs(
         repair_generation(NativeSnapshot(snapshot, commit, commit))
 
     assert not marker.exists()
+
+
+def _user_global(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+    """Give the user a global Git config (user-owned, outside the cache)."""
+    user_config = tmp_path / "user.gitconfig"
+    user_config.write_text(text, encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(user_config))
+
+
+@_POSIX_ONLY
+def test_a_local_filter_is_refused_even_when_the_user_defines_the_same_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    benign = tmp_path / "benign"
+    marker = tmp_path / "marker"
+    _user_global(
+        tmp_path,
+        monkeypatch,
+        f'[filter "lfs"]\n\tsmudge = "cat; echo hit >> \'{benign.as_posix()}\'"\n'
+        "\tclean = cat\n\trequired = false\n",
+    )
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    planted = f'[filter "lfs"]\n\tsmudge = "echo hit >> \'{marker.as_posix()}\'"\n'
+    with (checkout / ".git" / "config").open("a", encoding="utf-8") as config:
+        config.write(planted)
+
+    rebuilt = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+
+    assert planted not in (rebuilt / ".git" / "config").read_text(encoding="utf-8")
+    assert (rebuilt / "AGENTS.md").read_text(encoding="ascii") == "one\n"
+    assert not marker.exists(), "a filter from the cached repository ran"
+
+
+@_POSIX_ONLY
+def test_a_local_helper_is_refused_alongside_a_user_global_helper(
+    tmp_path: Path, server_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The user's own helper is configured; the clone still fails cleanly on the
+    # 401 (as it does without the planted keys), and only the user's config applies.
+    marker = tmp_path / "marker"
+    _user_global(
+        tmp_path, monkeypatch, f'[credential]\n\thelper = "{_helper(tmp_path / "benign")}"\n'
+    )
+    origin, first, second = _origin(tmp_path)
+    url = f"{server_url}/o/r.git"
+    bare = _cached_bare(tmp_path / "cache", origin, first, url)
+    with (bare / "config").open("a", encoding="utf-8") as config:
+        config.write(
+            f'[credential]\n\thelper = "{_helper(marker)}"\n'
+            f'[credential "{server_url}"]\n\thelper = "{_helper(marker)}"\n'
+        )
+
+    with pytest.raises(RuntimeError):
+        GitCache(tmp_path / "cache").get_checkout(url, None, locked_sha=second)
+
+    assert not marker.exists(), "a helper from the cached repository ran"
+    assert not bare.exists() or "credential" not in (bare / "config").read_text(encoding="utf-8")
