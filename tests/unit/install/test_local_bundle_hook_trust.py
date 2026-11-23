@@ -114,6 +114,10 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         ("cd . && " * 20 + "true", False),
         ("./tools/lint.sh", False),
         ("./tools/max.sh", False),
+        ("sh -c 'sh .claude/hooks/hookpkg/hooks/scripts/./x.sh'", True),
+        ('cmd /c "sh .claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        ("cd .claude && sh -c 'sh hooks/otherpkg/../hookpkg/hooks/scripts/x.sh'", True),
+        ("sh hooks/hookpkg/hooks/scripts/./x.sh", True),
     ],
     ids=[
         "project-dir-anchor",
@@ -139,6 +143,10 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         "many-cd",
         "unrelated",
         "longer-name",
+        "nested-with-space",
+        "cmd-slash-c",
+        "nested-inherits-cd-with-space",
+        "target-root-relative",
     ],
 )
 def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:
@@ -146,8 +154,9 @@ def test_script_references_resolve_under_any_spelling(command: str, runs: bool) 
     from apm_cli.install.hook_script_refs import runs_script, script_refs
 
     root = Path("/project")
+    refs = script_refs(root, [_SCRIPT])
 
-    assert runs_script(command, script_refs(root, [_SCRIPT]), root) is runs
+    assert runs_script(command, refs, (root, root / ".claude"), root) is runs
 
 
 def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> None:
@@ -155,8 +164,12 @@ def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> 
 
     spaced = Path("/tmp/my project")
     assert runs_script(
-        f'sh "{spaced.as_posix()}/{_SCRIPT}"', script_refs(spaced, [_SCRIPT]), spaced
+        f'sh "{spaced.as_posix()}/{_SCRIPT}"', script_refs(spaced, [_SCRIPT]), (spaced,), spaced
     )
     refs = (frozenset({"x.sh"}), frozenset({f"c:/project/{_SCRIPT}"}))
-    assert runs_script("C:/project/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, Path("/"))
-    assert runs_script("sh C:/project/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, Path("/"))
+    assert runs_script(
+        "C:/project/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (Path("/"),), Path("/")
+    )
+    assert runs_script(
+        "sh C:/project/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, (Path("/"),), Path("/")
+    )

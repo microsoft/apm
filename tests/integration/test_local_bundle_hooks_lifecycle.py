@@ -1630,8 +1630,10 @@ def _user_hook(consumer: Path, where: str, command: str) -> str:
         ("claude", "./x.sh"),
         ("claude", "cd .claude/hooks/hookpkg/hooks/scripts && ./x.sh"),
         ("claude", "sh .claude/hooks/hookpkg/hooks/scripts/./x.sh"),
+        ("claude", "sh hooks/hookpkg/hooks/scripts/./x.sh"),
+        ("claude", "sh -c 'sh .claude/hooks/hookpkg/hooks/scripts/./x.sh'"),
     ],
-    ids=["other-target", "dot-slash", "cd-prefix", "dot-segment"],
+    ids=["other-target", "dot-slash", "cd-prefix", "dot-segment", "target-root", "nested"],
 )
 def test_uninstall_bundle_keeps_a_script_a_user_hook_runs_under_any_spelling(
     tmp_path: Path, apm_binary_path: Path, where: str, command: str
