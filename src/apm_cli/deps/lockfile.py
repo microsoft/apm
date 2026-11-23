@@ -434,6 +434,13 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _recorded_package_targets(raw: object) -> list[str]:
+    """Decode ``package_targets``: only a list of strings is a recorded restriction (#4850)."""
+    if not isinstance(raw, list) or not all(isinstance(t, str) for t in raw):
+        return []
+    return sorted(raw)
+
+
 @dataclass
 class LockedDependency:
     """A resolved dependency with exact commit/version information."""
@@ -839,7 +846,7 @@ class LockedDependency:
             # Locks written before canonical recording may hold ``vscode``.
             target_subset=canonical_target_subset(data.get("target_subset")),
             subset_pairings=copy_subset_pairings(data.get("subset_pairings")),
-            package_targets=sorted(str(t) for t in data.get("package_targets") or ()),
+            package_targets=_recorded_package_targets(data.get("package_targets")),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
             constraint=data.get("constraint"),

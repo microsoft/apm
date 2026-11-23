@@ -298,10 +298,13 @@ def record_package_targets(ctx: Any, dep_key: str, install_path: Path) -> None:
     """
     from apm_cli.core.scope import manifest_file
     from apm_cli.install.target_filter import recorded_package_targets
-    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.apm_package import APMPackage, invalidate_apm_yml_cache_entry
 
+    manifest = manifest_file(install_path)
+    # Re-read after this run's rematerialization; the parse cache may hold the old manifest.
+    invalidate_apm_yml_cache_entry(manifest)
     try:
-        recorded = recorded_package_targets(APMPackage.from_apm_yml(manifest_file(install_path)))
+        recorded = recorded_package_targets(APMPackage.from_apm_yml(manifest))
     except Exception:
         return
     if recorded:
