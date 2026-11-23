@@ -34,7 +34,14 @@ from .engine import _dependency_public_label, _removed_lock_key
 
 
 class LocalReanchorRefused(ValueError):
-    """A still-needed local dependency cannot be re-anchored; nothing was written."""
+    """A still-needed local dependency cannot be re-anchored; nothing was written.
+
+    *next_step* replaces the generic advice when the refusal has its own fix.
+    """
+
+    def __init__(self, message: str, next_step: str | None = None) -> None:
+        super().__init__(message)
+        self.next_step = next_step
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,10 @@ class LocalReanchorPlan:
     resolved_by: dict[str, str | None] = field(default_factory=dict)
     # apm.yml and apm.lock.yaml as the command found them, for rollback.
     snapshot: tuple[tuple[Path, str], ...] = ()
+    # (current, re-anchored) install directory of each re-keyed root (#4999).
+    moves: tuple[tuple[Path, Path], ...] = ()
+    # Lock key -> install's breadth-first visit rank, for request order (#4999).
+    visit_order: dict[str, int] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.renames or self.declaring_parents)
@@ -81,21 +92,31 @@ def _root_identities(
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its new declaring parent could not be determined"
             )
-        declared, alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))
-        row = lockfile.get_dependency(key)
-        if alias != row.alias:
-            raise LocalReanchorRefused(
-                f"{label(key)} stays, but the package that still needs it declares it under "
-                f"another name ({alias or 'no alias'}), which installs elsewhere"
-            )
-        if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
-            # An alias spelling (a symlink) installs as another package directory.
-            raise LocalReanchorRefused(
-                f"{label(key)} stays, but the package that still needs it declares it as "
-                f"{declared or 'another package'}, which installs elsewhere"
-            )
+        declared = _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
         identities[key] = (via[1], nearest[0], real_dir, declared)
     return identities
+
+
+def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir: Path):
+    """Return the winning edge's repo spelling, or refuse when it installs elsewhere.
+
+    Install creates the node from its first shallowest edge; another alias or
+    another package spelling there names another directory (#4889, #4999).
+    """
+    declared, alias = walk.local_edge_repos.get((key, parent), (None, None))
+    row = lockfile.get_dependency(key)
+    if alias != row.alias:
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but the package that still needs it declares it under "
+            f"another name ({alias or 'no alias'}), which installs elsewhere"
+        )
+    if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
+        # An alias spelling (a symlink) installs as another package directory.
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but the package that still needs it declares it as "
+            f"{declared or 'another package'}, which installs elsewhere"
+        )
+    return declared
 
 
 def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
@@ -174,6 +195,7 @@ def plan_local_reanchor(
         )
         for key, node in nodes.items()
     }
+    moves = _materialization_moves(lockfile, nodes, modules_dir, label)
     declaring_parents: dict[str, tuple[str, str | None]] = {}
     resolved_by: dict[str, str | None] = {}
     for key in decision.rescued_parents:
@@ -184,30 +206,241 @@ def plan_local_reanchor(
         # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
         resolved_by[key] = edges[min(nearest, key=lambda parent: renames.get(parent, parent))][0]
         row = lockfile.get_dependency(key)
+        if row is not None and row.source == "local" and key not in nodes:
+            # A re-parented descendant must still install where its row says, from a copy.
+            _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
+            copy = row.to_dependency_ref().get_install_path(modules_dir)
+            _require_copy(copy, key, label, modules_dir)
+            _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label, modules_dir)
         if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
-    return LocalReanchorPlan(renames, identities, declaring_parents, resolved_by)
+    return LocalReanchorPlan(
+        renames,
+        identities,
+        declaring_parents,
+        resolved_by,
+        moves=moves,
+        visit_order=dict(getattr(walk, "visit_order", {}) or {}),
+    )
 
 
-def _rekey_requests(binding: Any, renames: dict[str, str], dev: dict[str, bool]) -> bool:
+def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
+    """Each re-keyed root's current install directory and the one install now uses.
+
+    A missing current copy, or a re-anchored directory that already exists,
+    refuses before any write: either leaves apm_modules unlike a fresh install.
+    """
+    moves = []
+    for key, node in nodes.items():
+        current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
+        target = node.get_install_path(modules_dir)
+        _require_copy(current, key, label, modules_dir)
+        if current == target:
+            continue
+        if target.exists():
+            raise LocalReanchorRefused(
+                f"{label(key)} stays, but its re-anchored directory "
+                f"{target.relative_to(modules_dir).as_posix()} in apm_modules already exists"
+            )
+        moves.append((current, target))
+    return tuple(moves)
+
+
+def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
+    """Refuse a kept package whose apm_modules copy is gone: install would recreate it."""
+    if path.is_symlink() or not path.is_dir():
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but its apm_modules copy "
+            f"{path.relative_to(modules_dir).as_posix()} is missing, so the re-anchor cannot "
+            "keep it as a fresh install would"
+        )
+
+
+def _require_fresh_copy(
+    row, source: Path | None, copy: Path, key: str, label, modules_dir: Path
+) -> None:
+    """Refuse a kept descendant whose local source no longer matches its copy (#4999).
+
+    Install recopies a changed local source, so keeping the old copy would not
+    leave apm_modules as a fresh install does. An unreadable source refuses too.
+    """
+    from ...install.phases.local_content import local_source_matches_copy
+
+    try:
+        fresh = (
+            source is not None
+            and local_source_matches_copy(row, source, copy)
+            and _unhashed_files_match(source, copy)
+        )
+    except (OSError, ValueError, TypeError):
+        fresh = False
+    if not fresh:
+        from ...core.remediation import UNINSTALL_REANCHOR_STALE_COPY
+
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but its local source differs from its apm_modules copy "
+            f"{copy.relative_to(modules_dir).as_posix()}, so the re-anchor cannot keep it as "
+            "a fresh install would",
+            next_step=UNINSTALL_REANCHOR_STALE_COPY.sentence(),
+        )
+
+
+def _unhashed_files_match(source: Path, copy: Path) -> bool:
+    """Whether the files the package hash skips (.git/, __pycache__/) match the copy.
+
+    Install copies them through the local copier, so a change there alone still
+    makes a fresh install rewrite apm_modules (#4999).
+    """
+    import filecmp
+    import tempfile
+
+    from ...config import get_apm_temp_dir
+    from ...install.phases.local_content import _copy_tree_dereferencing_validated
+
+    if not source.is_dir():
+        return True
+
+    def unhashed(root: Path) -> set[str]:
+        return {
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.is_file() and {".git", "__pycache__"} & set(path.relative_to(root).parts)
+        }
+
+    with tempfile.TemporaryDirectory(prefix="apm-reanchor-", dir=get_apm_temp_dir()) as stage:
+        image = Path(stage) / "package"
+        _copy_tree_dereferencing_validated(source, image, source)
+        names = unhashed(image)
+        # filecmp streams each pair in bounded chunks: no tree is held in memory.
+        return names == unhashed(copy) and all(
+            filecmp.cmp(image / name, copy / name, shallow=False) for name in sorted(names)
+        )
+
+
+def move_materializations(
+    moves: tuple[tuple[Path, Path], ...], modules_dir: Path
+) -> tuple[tuple[Path, Path, tuple[Path, ...]], ...]:
+    """Move each install directory to its re-anchored path inside *modules_dir*.
+
+    Every path is checked before the first move. The journal records each move
+    with the parent directories it created; a failed move removes the parents
+    it made and undoes the earlier moves, then re-raises, so apm_modules is
+    left as it was and nothing outside it changes.
+    """
+    from ...utils.path_security import PathTraversalError, ensure_path_within
+
+    root = Path(modules_dir)
+    for path in (path for move in moves for path in move):
+        try:
+            ensure_path_within(path, root)
+        except PathTraversalError as exc:
+            raise ValueError(f"{path} is outside apm_modules") from exc
+    # Every destination's missing parents are found before the first rename, so
+    # an error inspecting them cannot strand a directory already moved.
+    planned = [
+        (
+            current,
+            target,
+            tuple(
+                parent
+                for parent in reversed(target.parents)
+                if parent != root and root in parent.parents and not parent.exists()
+            ),
+        )
+        for current, target in moves
+    ]
+    done: list[tuple[Path, Path, tuple[Path, ...]]] = []
+    for current, target, created in planned:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            current.rename(target)
+        except BaseException:
+            _undo_failed_move(current, target, created, done, root)
+            raise
+        done.append((current, target, created))
+    return tuple(done)
+
+
+def _undo_failed_move(current, target, created, done: list, root: Path) -> None:
+    """Undo a failed or interrupted (Ctrl-C) move and every earlier one.
+
+    A rename that completed before the interrupt is moved back too; earlier
+    moves go back even when cleaning this move's parents fails.
+    """
+    try:
+        if target.is_dir() and not current.exists():
+            done.append((current, target, created))
+        else:
+            _remove_created(created)
+    finally:
+        if unrestored := restore_materializations(tuple(done), root):
+            raise OSError(f"could not move back {', '.join(unrestored)}")
+
+
+def _remove_created(created: tuple[Path, ...]) -> None:
+    """Remove the parents a move created, deepest first, while they stay empty."""
+    for parent in reversed(created):
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+
+
+def restore_materializations(
+    moved: tuple[tuple[Path, Path, tuple[Path, ...]], ...], modules_dir: Path
+) -> list[str]:
+    """Put each moved directory back and remove only the parents its move created.
+
+    Every move is attempted; returns the ``apm_modules/...`` directories that
+    could not be moved back (empty when all were), never raising part way.
+    """
+    unrestored: list[str] = []
+    for current, target, created in reversed(moved):
+        try:
+            target.rename(current)
+            _remove_created(created)
+        except OSError:
+            unrestored.append(_modules_path(target, modules_dir))
+    return unrestored
+
+
+def _modules_path(path: Path, modules_dir: Path) -> str:
+    try:
+        return f"apm_modules/{path.relative_to(modules_dir).as_posix()}"
+    except ValueError:
+        return str(path)
+
+
+def _rekey_requests(
+    binding: Any,
+    renames: dict[str, str],
+    dev: dict[str, bool],
+    visit_order: dict[str, int] | None = None,
+) -> bool:
     """Name each replacement request's parent by its re-anchored key (req-rpl-003).
 
     A re-anchored parent's request also takes the parent's new dev status,
-    as install records the edge.
+    as install records the edge. Requests follow the post-uninstall resolver
+    order (*visit_order*, keyed by the old parent keys): a root request first,
+    then each parent as install visits it (#4999).
     """
-    if binding is None or not any(
-        request.parent in renames or request.parent in dev for request in binding.requests
-    ):
+    if binding is None or not binding.requests:
         return False
-    binding.requests = {
+    rank = visit_order or {}
+    ordered = sorted(
+        binding.requests,
+        key=lambda request: -1 if request.parent is None else rank.get(request.parent, len(rank)),
+    )
+    rekeyed = {
         replace(
             request,
             parent=renames.get(request.parent, request.parent),
             dev=dev.get(request.parent, request.dev),
         ): None
-        for request in binding.requests
+        for request in ordered
     }
+    if list(rekeyed) == list(binding.requests):
+        return False
+    binding.requests = rekeyed
     return True
 
 
@@ -263,7 +496,7 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
                 row.resolved_by = renames[row.resolved_by]
             lockfile.dependencies[renames.get(key, key)] = row
     for row in lockfile.dependencies.values():
-        _rekey_requests(row.replacement, renames, dev or {})
+        _rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
     return True
 
 
@@ -321,7 +554,7 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
     Uninstall re-copies those before it rebuilds survivors, which a re-anchor
     rollback could not undo, so the re-anchor refuses them first (read-only).
     """
-    from ...install.phases.local_content import compute_local_package_hash
+    from ...install.phases.local_content import local_source_matches_copy
 
     stale = []
     for key, row in sorted(lockfile.dependencies.items()):
@@ -330,10 +563,8 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
         try:
             ref = row.to_dependency_ref()
             copy = ref.get_install_path(modules_dir)
-            framed = row.content_hash_framed
-            if copy.is_dir() and compute_local_package_hash(
-                (source_root / ref.local_path).resolve(), framed=framed
-            ) != compute_local_package_hash(copy, framed=framed):
+            source = (source_root / ref.local_path).resolve()
+            if copy.is_dir() and not local_source_matches_copy(row, source, copy):
                 stale.append(key)
         except (OSError, ValueError, TypeError):
             stale.append(key)
@@ -476,7 +707,8 @@ def _plan_reanchor_or_exit(
     except LocalReanchorRefused as exc:
         logger.error(f"{exc}; apm.yml and apm.lock.yaml were not changed.")
         logger.progress(
-            "Uninstall the package that still needs it first, or keep the local "
+            exc.next_step
+            or "Uninstall the package that still needs it first, or keep the local "
             "declaration in apm.yml."
         )
         sys.exit(1)
@@ -504,7 +736,65 @@ def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
         if len(record.owners) > 1 and any(owner in plan.renames for owner in record.owners):
             return f"it shares {DeploymentLedgerCodec.legacy_value(record.locator)} with another package"
+    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root)):
+        return f"{linked} links into its apm_modules copy"
     return None
+
+
+def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
+    """A recorded deployed file that names a copy the re-anchor moves (#4999).
+
+    Rendered links (a package's in-package assets, or the project's own skill
+    linking through apm_modules) point at or into the copy, so moving it would
+    leave them dangling until the next install rewrites them. Only paths the
+    deploy-path gate accepts are read; any other claim refuses too.
+    """
+    import re
+
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...utils.paths import portable_relpath
+
+    spellings = set()
+    for current, _target in getattr(plan, "moves", ()):
+        relpath = portable_relpath(current, project_root)
+        spellings.update((relpath, relpath.replace("/", "\\")))
+    if not spellings:
+        return None
+    # The copy's own path, not a longer sibling name such as ``_local/e2``.
+    names = re.compile(
+        b"(?:" + b"|".join(re.escape(s.encode()) for s in sorted(spellings)) + b")(?![\\w.-])"
+    )
+    for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
+        if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
+            return deployed
+    return None
+
+
+def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
+    """Whether a claim names the moving copy, or cannot be read safely (refuse)."""
+    from ...integration.base_integrator import BaseIntegrator
+
+    def gated(claim: str) -> bool:
+        return BaseIntegrator.validate_deploy_path(claim, project_root)
+
+    if not gated(deployed):
+        return True
+    path = project_root / deployed
+    try:
+        members = (
+            [
+                (f"{deployed.rstrip('/')}/{member.relative_to(path).as_posix()}", member)
+                for member in sorted(path.rglob("*"))
+            ]
+            if path.is_dir()
+            else [(deployed, path)]
+        )
+        return any(
+            not gated(claim) or (member.is_file() and names.search(member.read_bytes()))
+            for claim, member in members
+        )
+    except OSError:
+        return True  # an unreadable file cannot be cleared
 
 
 def _native_owned(lockfile) -> bool:
@@ -577,3 +867,61 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
             logger,
             f"Deployment receipts could not be moved to the re-anchored package ({exc})",
         )
+
+
+def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
+    """Move re-anchored roots' apm_modules directories before the lock commits (#4999)."""
+    plan = repair.reanchor
+    if not plan or not plan.moves:
+        return ()
+    try:
+        return move_materializations(plan.moves, modules_dir)
+    except (OSError, ValueError) as exc:
+        _roll_back_and_exit(
+            plan,
+            logger,
+            f"The re-anchored package's apm_modules directory could not be moved ({exc})",
+        )
+    except BaseException as exc:
+        _undo_reanchor(exc, (), modules_dir, repair, logger)
+        raise
+
+
+# The lock was not saved: the re-anchor rolls back, as for any non-exit failure.
+_UNSAVED_LOCK = RuntimeError("the lockfile was not saved")
+
+
+def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger) -> None:
+    """Move the re-anchored directories back; anything but a handled exit also restores
+    apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor.
+
+    The manifest rollback runs even when a directory cannot be moved back, and
+    anything left unrestored is named and exits 1, never silently.
+    """
+    unrestored: list[str] = []
+    try:
+        unrestored += _restore_reanchored_dirs(moved, modules_dir)
+    finally:
+        if not isinstance(exc, SystemExit) and repair.reanchor:
+            unrestored += roll_back(repair.reanchor) or []
+    _report_unrestored(unrestored, logger)
+
+
+def _report_unrestored(unrestored: list[str], logger) -> None:
+    """Name what a re-anchor rollback could not restore and exit 1 (#4999)."""
+    if not unrestored:
+        return
+    from ...core.remediation import RESYNC_DEPLOYED
+
+    logger.error(
+        f"The re-anchor did not complete and these could not be restored: "
+        f"{', '.join(unrestored)}. Every deployed file is kept. {RESYNC_DEPLOYED.sentence()}"
+    )
+    sys.exit(1)
+
+
+def _restore_reanchored_dirs(moved: tuple, modules_dir) -> list[str]:
+    """Undo the directory moves of a re-anchor whose transaction did not commit."""
+    if not moved:
+        return []
+    return restore_materializations(moved, modules_dir)

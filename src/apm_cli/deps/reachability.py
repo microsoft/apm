@@ -111,9 +111,10 @@ class ReachabilityResult:
         local_dirs: The anchored directory of every local node the walk
             reached, by its lock key, so a re-anchored local row takes the
             identity install records for it (#4889).
-        declaring_edges: Every parent key that declares a node, in the order
-            the walk saw the edges, with that edge's ``(parent identity,
-            local_path)`` (#4889).
+        declaring_edges: Every parent key that declares a node, in install's
+            breadth-first order across production and dev roots (#4999), with
+            that edge's ``(parent identity, local_path)`` (#4889).
+        visit_order: Each walked key's rank in that breadth-first order.
         local_edge_repos: The ``(repo_url, alias)`` each local edge resolves
             to, by ``(child key, parent key)``; another spelling or alias
             installs elsewhere.
@@ -135,6 +136,7 @@ class ReachabilityResult:
     local_edge_repos: dict[tuple[str, str | None], tuple[str, str | None]] = field(
         default_factory=dict
     )
+    visit_order: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -159,23 +161,43 @@ class _ParentGraph:
     node's parent is its nearest declaring parent, ties to the lowest parent
     key, as ``APMDependencyResolver._select_nearest_parent`` records it
     (#4804, #4823, #4833). Dev status stays with the walk's own propagation.
+
+    The walk drains production paths before dev ones; install visits every
+    root breadth-first, production then dev. :meth:`visit_order` replays that
+    order from the roots and each parent's declarations, so a node's first
+    declaring edge is the one install keeps (#4999).
     """
 
     def __init__(self) -> None:
-        self._roots: set[str] = set()
+        self._roots: dict[str, None] = {}
         self._parents: dict[str, dict[str, tuple[str, str | None]]] = {}
-        self._children: dict[str, set[str]] = {}
+        self._children: dict[str, dict[str, None]] = {}
 
     def edge(self, key: str, parent_key: str | None, via: tuple[str | None, str | None]) -> None:
         if parent_key is None:
-            self._roots.add(key)
+            self._roots.setdefault(key, None)
             return
         self._parents.setdefault(key, {}).setdefault(parent_key, via)
-        self._children.setdefault(parent_key, set()).add(key)
+        self._children.setdefault(parent_key, {}).setdefault(key, None)
+
+    def visit_order(self) -> dict[str, int]:
+        """Each node's rank in install's breadth-first visit from the ordered roots."""
+        order = {key: rank for rank, key in enumerate(self._roots)}
+        queue = deque(order)
+        while queue:
+            for child in self._children.get(queue.popleft(), ()):
+                if child not in order:
+                    order[child] = len(order)
+                    queue.append(child)
+        return order
 
     def edges(self) -> dict[str, dict[str, tuple[str | None, str | None]]]:
-        """Every non-root node's declaring parents, in the order the walk saw them."""
-        return {key: dict(parents) for key, parents in self._parents.items()}
+        """Every non-root node's declaring parents, in install's visit order."""
+        rank = self.visit_order()
+        return {
+            key: dict(sorted(parents.items(), key=lambda item: rank.get(item[0], len(rank))))
+            for key, parents in self._parents.items()
+        }
 
     def solve(self, lock_keys, reachable_via: dict) -> tuple[dict, dict, dict]:
         """Return ``(depths, parent_keys, children)`` and fill *reachable_via*."""
@@ -633,6 +655,7 @@ def compute_forward_reachable_keys(
         local_dirs=local_dirs,
         declaring_edges=parent_graph.edges(),
         local_edge_repos=local_edge_repos,
+        visit_order=parent_graph.visit_order(),
     )
 
 

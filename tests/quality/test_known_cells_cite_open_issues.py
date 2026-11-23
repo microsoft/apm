@@ -15,6 +15,7 @@ whose signature the lifecycle conftest enforces.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -159,3 +160,137 @@ def test_a_known_cell_whose_fixture_breaks_for_another_reason_fails(
     result = pytester.runpytest_inprocess("-q", "-o", "addopts=", "-p", "tests.lifecycle.known")
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(["*failed for a different reason*"])
+
+
+def _stub(states: dict[int, str], calls: list[str]):
+    """A GraphQL transport answering *states*; it records each query it receives."""
+
+    def transport(query: str) -> dict:
+        calls.append(query)
+        found = {f"i{n}": {"state": state} for n, state in states.items()}
+        return {"data": {"repository": found}}
+
+    return transport
+
+
+def test_check_live_fails_naming_a_cell_whose_issue_closed(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    cells = {"source:tests/lifecycle/a.py:10": "#11", "source:tests/lifecycle/b.py:20": "#12"}
+    calls: list[str] = []
+
+    code = check_live(cells, transport=_stub({11: "OPEN", 12: "CLOSED"}, calls))
+
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "[x] source:tests/lifecycle/b.py:20 cites #12 (CLOSED)" in out, out
+    assert "flip it to required" in out and "--write" in out, out
+    assert "a.py" not in out, out
+    assert len(calls) == 1 and "i11:" in calls[0] and "i12:" in calls[0], calls
+
+
+def test_check_live_passes_when_every_issue_is_open(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    cells = {"machine:G1|x": "#11", "generated:pair|y": "#11"}
+
+    code = check_live(cells, transport=_stub({11: "OPEN"}, []))
+
+    assert code == 0
+    assert "[+] 2 known cells cite 1 open issues" in capsys.readouterr().out
+
+
+def test_check_live_reports_an_issue_github_does_not_return(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    code = check_live({"rule:r": "#13"}, transport=_stub({}, []))
+
+    assert code == 1
+    assert "[x] rule:r cites #13 (MISSING)" in capsys.readouterr().out
+
+
+def test_check_live_fails_when_github_cannot_be_read(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    def broken(query: str) -> dict:
+        raise RuntimeError("HTTP 401")
+
+    assert check_live({"rule:r": "#13"}, transport=broken) == 2
+    assert "could not read issue state: HTTP 401" in capsys.readouterr().out
+
+
+def _gh_reply(monkeypatch, returncode: int, stdout: str) -> None:
+    """``gh api graphql`` exits *returncode* and prints *stdout*."""
+    import subprocess
+
+    def run(args, **_kwargs):
+        return subprocess.CompletedProcess(args, returncode, stdout=stdout, stderr="gh: error")
+
+    monkeypatch.setattr("subprocess.run", run)
+
+
+def test_check_live_reports_a_nonexistent_issue_from_ghs_nonzero_reply(monkeypatch, capsys) -> None:
+    """gh exits 1 on a per-issue NOT_FOUND but still prints the data: MISSING, exit 1."""
+    from tests.quality.known_cell_issues import check_live
+
+    reply = {
+        "data": {"repository": {"i11": {"state": "OPEN"}, "i13": None}},
+        "errors": [
+            {
+                "type": "NOT_FOUND",
+                "path": ["repository", "i13"],
+                "message": "Could not resolve to an issue or pull request with the number of 13.",
+            }
+        ],
+    }
+    _gh_reply(monkeypatch, 1, json.dumps(reply))
+
+    code = check_live({"rule:a": "#11", "rule:b": "#13"})
+
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "[x] rule:b cites #13 (MISSING)" in out, out
+    assert "rule:a" not in out, out
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    [
+        (
+            1,
+            '{"data": {"repository": null}, "errors": [{"type": "FORBIDDEN", '
+            '"message": "Resource not accessible by integration"}]}',
+        ),
+        (1, '{"data": {"repository": {"i13": null}}, "errors": [{"type": "RATE_LIMITED"}]}'),
+        (0, "not json"),
+        (0, "[]"),
+    ],
+    ids=["forbidden", "rate-limited", "unreadable", "not-an-object"],
+)
+def test_check_live_exits_2_when_github_cannot_be_read(
+    monkeypatch, capsys, returncode, stdout
+) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    _gh_reply(monkeypatch, returncode, stdout)
+
+    code = check_live({"rule:r": "#13"})
+
+    out = capsys.readouterr().out
+    assert code == 2, out
+    assert "could not read issue state" in out and "MISSING" not in out, out
+
+
+def test_check_live_exits_2_when_gh_is_not_installed(monkeypatch, capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    def missing(args, **_kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+    monkeypatch.setattr("subprocess.run", missing)
+
+    code = check_live({"rule:r": "#13"})
+
+    out = capsys.readouterr().out
+    assert code == 2, out
+    assert "could not read issue state: gh api graphql could not run" in out, out

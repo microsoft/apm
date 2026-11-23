@@ -67,6 +67,18 @@ def emit_check_violations(logger, check, *, severity: str, source: str | None) -
         )
 
 
+def emit_passed_check_warnings(logger, checks, *, source: str | None) -> None:
+    """Report the subjects of passing checks that carry warnings (#5070).
+
+    ``mcp.self_defined: warn`` and project-wins version pins pass with
+    subjects; every install entry reports them as warnings, as the pipeline
+    gate does, so warn mode never reads like ``allow``.
+    """
+    for check in checks:
+        if check.passed and check.details:
+            emit_check_violations(logger, check, severity="warn", source=source)
+
+
 def render_dry_run_verdicts(logger, audit_result, enforcement: str) -> None:
     """Render failed checks as a capped ``--dry-run`` preview per severity."""
     block_lines: list[tuple[str, str]] = []
@@ -218,6 +230,8 @@ def run_policy_preflight(
             bundled_deps=bundled_deps,
         )
 
+    if not dry_run:
+        emit_passed_check_warnings(logger, audit_result.checks, source=fetch_result.source)
     if not audit_result.passed:
         if dry_run:
             render_dry_run_verdicts(logger, audit_result, enforcement)

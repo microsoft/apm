@@ -4,7 +4,7 @@ import errno
 import os
 import re
 import stat
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -505,6 +505,32 @@ class BaseIntegrator:
             return None
         return edit_kind(expected, incoming)
 
+    @staticmethod
+    def unique_destinations(pairs: Iterable[tuple[Path, Path]]) -> dict[Path, Path] | None:
+        """``{destination: source}``, or ``None`` when two sources share a destination."""
+        planned: dict[Path, Path] = {}
+        for destination, source in pairs:
+            if planned.setdefault(destination, source) != source:
+                return None
+        return planned
+
+    def admitted_source_listing(
+        self, source: Path, ignore: Callable[[str, list[str]], list[str]]
+    ) -> Iterator[tuple[str, list[str]]]:
+        """Each directory of *source* a directory copy walks, with its admitted file names."""
+        for directory, directories, filenames in self.walk_source_tree(source):
+            ignored = set(ignore(directory, [*directories, *filenames]))
+            directories[:] = sorted(name for name in directories if name not in ignored)
+            yield directory, sorted(name for name in filenames if name not in ignored)
+
+    def admitted_source_members(
+        self, source: Path, ignore: Callable[[str, list[str]], list[str]]
+    ) -> Iterator[Path]:
+        """Every member of *source* a directory copy admits, in copy order."""
+        for directory, filenames in self.admitted_source_listing(source, ignore):
+            for name in filenames:
+                yield Path(directory) / name
+
     def copy_directory_files(
         self,
         source: Path,
@@ -533,12 +559,8 @@ class BaseIntegrator:
 
         copied: list[Path] = []
         destination_existed = destination.exists()
-        for directory, directories, filenames in self.walk_source_tree(source):
-            ignored = set(ignore(directory, [*directories, *filenames]))
-            directories[:] = sorted(name for name in directories if name not in ignored)
-            for name in sorted(filenames):
-                if name in ignored:
-                    continue
+        for directory, filenames in self.admitted_source_listing(source, ignore):
+            for name in filenames:
                 source_file = Path(directory) / name
                 target_file = destination / source_file.relative_to(source)
                 if has_symlink_component(destination.parent, target_file, raise_on_error=True):
@@ -1082,6 +1104,7 @@ class BaseIntegrator:
             # Resolve to absolute and validate containment against cowork root.
             try:
                 from apm_cli.integration.copilot_cowork_paths import (
+                    cowork_locator,
                     from_lockfile_path,
                     resolve_copilot_cowork_skills_dir,
                 )
@@ -1089,8 +1112,13 @@ class BaseIntegrator:
                 cowork_root = resolve_copilot_cowork_skills_dir()
                 if cowork_root is None:
                     return False
-                # from_lockfile_path internally calls ensure_path_within.
-                from_lockfile_path(rel_path, cowork_root)
+                if allow_final_symlink:
+                    # Contain the parent, refuse linked ancestors, never follow
+                    # the final link: the project gate's rule for cowork:// (#5022).
+                    cowork_locator(rel_path, cowork_root, reject_linked_ancestors=True)
+                else:
+                    # from_lockfile_path internally calls ensure_path_within.
+                    from_lockfile_path(rel_path, cowork_root)
                 return True
             except Exception:
                 return False
