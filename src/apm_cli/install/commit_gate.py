@@ -170,11 +170,18 @@ def prospective_lockfile(ctx: InstallContext) -> LockFile:
     only packages in the resolved graph are kept. ``--dry-run`` stops before
     acquisition, so its rows come from the resolved packages.
     """
+    return _lockfile_from_rows(ctx, _resolved_rows(ctx) if ctx.dry_run else ctx.installed_packages)
+
+
+def resolved_lockfile(ctx: InstallContext) -> LockFile:
+    """The package set of the resolved graph, before anything is downloaded (#4826)."""
+    return _lockfile_from_rows(ctx, _resolved_rows(ctx))
+
+
+def _lockfile_from_rows(ctx: InstallContext, rows: Any) -> LockFile:
     from apm_cli.deps.lockfile import LockFile
 
-    acquired = LockFile.from_installed_packages(
-        _resolved_rows(ctx) if ctx.dry_run else ctx.installed_packages, ctx.dependency_graph
-    )
+    acquired = LockFile.from_installed_packages(rows, ctx.dependency_graph)
     for key, dependency in acquired.dependencies.items():
         if key in ctx.package_hashes:
             dependency.content_hash = ctx.package_hashes[key]
@@ -253,6 +260,7 @@ def check_before_resolve(ctx: InstallContext, committed: LockFile | None) -> Non
     """
     from apm_cli.install.service import InstallService
 
+    _refuse_denied_scripts_before_fetch(ctx)
     if ctx.dry_run or ctx.no_policy or committed is None:
         return
     if not InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
@@ -295,18 +303,92 @@ def check_before_deploy(ctx: InstallContext, write_plan: Sequence[PlannedPackage
     _check_manifest_policy(ctx)
 
 
-def _check_manifest_policy(ctx: InstallContext) -> None:
-    """Judge ``manifest.scripts: deny`` on apm.yml before the first deployed byte (#4826)."""
-    policy = _enforced_install_policy(ctx)
-    if policy is None or policy.manifest.scripts != "deny":
+def blocking_install_policy(ctx: InstallContext) -> Any:
+    """The blocking org policy, known before resolution fetches anything, or ``None``.
+
+    The same policy the identity preflight uses to refuse a denied dependency
+    unfetched: ``None`` under ``--no-policy``, ``--dry-run``, or a policy that
+    does not block.
+    """
+    if ctx.dry_run:
+        return None
+    from apm_cli.core.scope import is_user_scope, manifest_root
+    from apm_cli.policy.install_preflight import prefetch_identity_policy
+
+    root = manifest_root(ctx.project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+    return prefetch_identity_policy(root, no_policy=ctx.no_policy)
+
+
+def _refuse_denied_scripts_before_fetch(ctx: InstallContext) -> None:
+    """Refuse ``manifest.scripts: deny`` before resolution writes a byte (#4826).
+
+    The verdict reads only apm.yml, so a blocking policy refuses before any
+    fetch, cache or deploy write. ``warn`` is reported at deploy time.
+    """
+    if not getattr(ctx.apm_package, "scripts", None):
         return
-    from apm_cli.policy.policy_checks import _check_scripts_policy, _load_raw_apm_yml
+    policy = blocking_install_policy(ctx)
+    if policy is not None and policy.manifest.scripts == "deny":
+        _enforce_install_policy_checks(ctx, policy, [_scripts_check(ctx, policy)])
+
+
+def policy_depth_limit(ctx: InstallContext) -> tuple[Any, int]:
+    """The resolver depth limit, and the blocking policy that set it (#4826).
+
+    A blocking ``dependencies.max_depth`` below the resolver's own cap stops
+    resolution at the limit, so nothing deeper is fetched; otherwise the
+    resolver keeps its default cap and the policy gate judges the resolved
+    graph.
+    """
+    from apm_cli.policy.schema import DependencyPolicy
+
+    cap = DependencyPolicy.max_depth
+    policy = blocking_install_policy(ctx)
+    if policy is None or policy.dependencies.max_depth >= cap:
+        return None, cap
+    return policy, policy.dependencies.max_depth
+
+
+def refuse_policy_depth_limit(ctx: InstallContext, policy: Any, chains: Sequence[str]) -> None:
+    """Refuse the chains resolution cut at the policy's ``max_depth``, before any deploy."""
+    if not chains:
+        return
+    from apm_cli.policy.policy_checks import depth_limit_check
 
     _enforce_install_policy_checks(
-        ctx,
-        policy,
-        [_check_scripts_policy(_load_raw_apm_yml(ctx.project_root), policy.manifest)],
+        ctx, policy, [depth_limit_check(chains, policy.dependencies.max_depth)]
     )
+
+
+def _scripts_check(ctx: InstallContext, policy: Any) -> Any:
+    """Judge the scripts of the manifest this install acts on, whatever its root or scope."""
+    from apm_cli.policy.policy_checks import _check_scripts_policy
+
+    scripts = getattr(ctx.apm_package, "scripts", None)
+    return _check_scripts_policy({"scripts": scripts}, policy.manifest)
+
+
+def _check_manifest_policy(ctx: InstallContext) -> None:
+    """Report org policy on files this install would leave, before deploy (#4826).
+
+    ``manifest.scripts: deny`` warns (or, under ``--dry-run``, previews the
+    refusal; a blocking real install refused it before resolution).
+    ``--dry-run`` also previews ``unmanaged_files.action: deny`` on the files
+    no row of the current lockfile claims.
+    """
+    policy = _enforced_install_policy(ctx)
+    if policy is None:
+        return
+    checks = []
+    if policy.manifest.scripts == "deny":
+        checks.append(_scripts_check(ctx, policy))
+    if ctx.dry_run and policy.unmanaged_files.effective_action == "deny":
+        from apm_cli.policy.policy_checks import _check_unmanaged_files
+
+        checks.append(
+            _check_unmanaged_files(ctx.project_root, ctx.existing_lockfile, policy.unmanaged_files)
+        )
+    _enforce_install_policy_checks(ctx, policy, checks)
 
 
 def _refuse_native_mcp_collisions(
@@ -453,43 +535,30 @@ def _planned_keeps(
 
 
 def check_before_lockfile(ctx: InstallContext, lockfile: LockFile | None) -> None:
-    """Run every check on the built lockfile before it is written.
-
-    ``unmanaged_files.action: deny`` is judged here, on the lockfile that
-    records every file this install deployed: a governed file no row claims
-    is one this install would leave unmanaged. A refusal fails the install,
-    and the transaction restores every file it deployed (#4826).
-    """
+    """Run every check on the built lockfile before it is written."""
     from apm_cli.install.integrity import enforce_installed_hash_policy
 
     enforce_installed_hash_policy(ctx, lockfile)
+
+
+def check_before_release(ctx: InstallContext, lockfile: LockFile | None) -> None:
+    """Judge ``unmanaged_files.action: deny`` while the deploy journal can still undo (#4826).
+
+    *lockfile* is the staged lockfile after local ``.apm/`` content recorded
+    its claims: a governed file no row claims is one this install would leave
+    unmanaged. A refusal fails the install, and the transaction restores
+    every file it deployed and discards the staged lockfile.
+    """
     policy = _enforced_install_policy(ctx)
-    if policy is not None and policy.unmanaged_files.effective_action == "deny":
-        from apm_cli.policy.policy_checks import _check_unmanaged_files
+    if policy is None or policy.unmanaged_files.effective_action != "deny":
+        return
+    from apm_cli.policy.policy_checks import _check_unmanaged_files
 
-        _enforce_install_policy_checks(
-            ctx,
-            policy,
-            [_check_unmanaged_files(ctx.project_root, lockfile, policy.unmanaged_files)],
-        )
-
-
-# Install-time refusals name the org policy field and the fix (#4826); the
-# checks themselves are the ones ``apm audit --ci`` runs, unchanged.
-_INSTALL_POLICY_FIELDS: dict[str, tuple[str, str]] = {
-    "scripts-policy": (
-        "manifest.scripts: deny",
-        "Remove the scripts: block from apm.yml, or ask your policy admin to allow scripts.",
-    ),
-    "unmanaged-files": (
-        "unmanaged_files.action: deny",
-        "Move or delete each listed file, or ask your policy admin to exclude it.",
-    ),
-    "transitive-depth": (
-        "dependencies.max_depth",
-        "Reduce the dependency nesting, or ask your policy admin to raise dependencies.max_depth.",
-    ),
-}
+    _enforce_install_policy_checks(
+        ctx,
+        policy,
+        [_check_unmanaged_files(ctx.project_root, lockfile, policy.unmanaged_files)],
+    )
 
 
 def _enforced_install_policy(ctx: InstallContext) -> Any:
@@ -502,28 +571,27 @@ def _enforced_install_policy(ctx: InstallContext) -> Any:
 def _enforce_install_policy_checks(ctx: InstallContext, policy: Any, checks: list[Any]) -> None:
     """Refuse (``block``) or warn (``warn``) on failed org-policy *checks*.
 
-    A ``--dry-run`` previews the verdict and never stops.
+    Violations are reported through the install policy reporter, which names
+    the policy field and the fix. A ``--dry-run`` previews the verdict and
+    never stops.
     """
+    from apm_cli.policy.install_preflight import emit_check_violations, render_dry_run_verdicts
+    from apm_cli.policy.models import CIAuditResult
+
     failed = [check for check in checks if not check.passed]
+    logger = ctx.logger
     if not failed:
         return
-    logger = ctx.logger
-    block = policy.enforcement == "block" and not ctx.dry_run
-    for check in failed:
-        field, fix = _INSTALL_POLICY_FIELDS[check.name]
-        lines = [f"Org policy {field}: {check.message}."]
-        lines += [f"  - {detail}" for detail in check.details or ()]
-        lines.append(f"  {fix}")
-        text = "\n".join(lines)
-        if logger is None:
-            continue
-        if block:
-            logger.refusal(text)
-        elif ctx.dry_run:
-            logger.warning(f"Would be blocked by policy: {text}")
-        else:
-            logger.warning(f"Policy warning: {text}")
-    if block:
+    if ctx.dry_run:
+        if logger is not None:
+            render_dry_run_verdicts(logger, CIAuditResult(checks=failed), policy.enforcement)
+        return
+    severity = "block" if policy.enforcement == "block" else "warn"
+    source = getattr(getattr(ctx, "policy_fetch", None), "source", None)
+    if logger is not None:
+        for check in failed:
+            emit_check_violations(logger, check, severity=severity, source=source)
+    if severity == "block":
         from apm_cli.install.errors import InstallFailureAlreadyRendered
 
         if logger is not None:

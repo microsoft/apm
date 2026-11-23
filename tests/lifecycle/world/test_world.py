@@ -914,6 +914,7 @@ _POLICY_EXIT = {
     "allow-list": 1,
     "scripts-deny": 0,
     "unmanaged-deny": 0,
+    "max-depth-1": 0,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",

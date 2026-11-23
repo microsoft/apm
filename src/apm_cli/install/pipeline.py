@@ -58,7 +58,7 @@ from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
-from .commit_gate import check_before_lockfile
+from .commit_gate import check_before_lockfile, check_before_release
 from .errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -930,6 +930,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             from .phases import post_deps_local as _post_deps_local_phase
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
+            check_before_release(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
             if materialization_session is not None:
                 after_lockfile_commit(
                     lambda: materialization_session.bind_committed_claims(

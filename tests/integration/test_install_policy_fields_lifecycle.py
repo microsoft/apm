@@ -1,15 +1,22 @@
-"""APMLifecycle: install applies manifest.scripts and unmanaged_files deny (#4826).
+"""APMLifecycle: install applies manifest.scripts, unmanaged_files and max_depth (#4826).
 
 PROMISE: P-INV-I7 -- a refused command leaves durable state as it found it.
-Under ``enforcement: block``, ``apm install`` refuses before committing
-anything when apm.yml carries a ``scripts:`` block that org policy
-``manifest.scripts: deny`` forbids, or when the install would leave a file in
-a governed directory that no lock row claims under ``unmanaged_files.action:
-deny``. Each refusal names the policy field and the fix; audit --ci reaches
-the same verdict. A control without the offending input installs.
+Under ``enforcement: block``, ``apm install`` refuses when the manifest it
+installs carries a ``scripts:`` block that ``manifest.scripts: deny`` forbids
+(before any fetch, also under ``--root``; ``-g`` is a commit_gate unit row), when the resolved
+graph is deeper than ``dependencies.max_depth`` (before anything past the
+limit is fetched), or when the install would leave a governed file no lock
+row claims under ``unmanaged_files.action: deny``. Each refusal names the
+policy field and the fix and leaves project, lockfile (and its deployment
+ledger), HOME, APM_HOME and the cache byte-identical; a refusal judged on
+acquired content may leave only the content-addressed git checkout cache.
+A control without the offending input installs.
 """
 
 from __future__ import annotations
+
+import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -22,6 +29,7 @@ from tests.lifecycle.world.fixtures import (  # noqa: F401
     lifecycle_world,
 )
 from tests.lifecycle.world.scopes import use_policy
+from tests.lifecycle.world.services import policy_org
 from tests.utils.apm_lifecycle_runner import CommandResult
 
 pytestmark = [
@@ -32,6 +40,9 @@ pytestmark = [
 ]
 
 _HAND_WRITTEN = ".github/instructions/hand-written.instructions.md"
+_SCRIPTS = ("manifest.scripts: deny", "Remove the scripts: block from apm.yml")
+_UNMANAGED = ("unmanaged_files.action: deny", "Move or delete each listed file")
+_DEPTH = ("dependencies.max_depth", "Reduce the dependency nesting")
 
 
 def _evidence(result: CommandResult) -> str:
@@ -41,54 +52,121 @@ def _evidence(result: CommandResult) -> str:
     )
 
 
-def _apm(world: World, *args: str) -> CommandResult:
-    return driver.run(world, list(args), entry_point=driver.driver_command("binary"))
+def _apm(world: World, *args: str, scope: str = "project") -> CommandResult:
+    return driver.run(world, list(args), scope=scope, entry_point=driver.driver_command("binary"))
 
 
 def _text(result: CommandResult) -> str:
     return " ".join(f"{result.stdout} {result.stderr}".split())
 
 
-def _state(world: World) -> dict[str, bytes]:
-    root = world.project
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
+def _assert_ok(world: World, *args: str, scope: str = "project") -> CommandResult:
+    result = _apm(world, *args, scope=scope)
+    assert result.returncode == 0, _evidence(result)
+    return result
+
+
+def _state(world: World, extra: Path | None, *, keep_git_cache: bool) -> dict[str, bytes]:
+    """Every byte a refused install could leave: project, HOME, APM_HOME and cache.
+
+    *keep_git_cache* drops only the content-addressed git checkout cache, which
+    a refusal judged on acquired content leaves as every such refusal does;
+    policy_v1, deploy_v1 and the rest of the cache stay in the oracle.
+    """
+    roots = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
+    if world.cache_root is not None:
+        roots["cache"] = world.cache_root
+    if extra is not None:
+        roots["extra"] = extra
+    state = {
+        f"{name}/{path.relative_to(root).as_posix()}": path.read_bytes()
+        for name, root in roots.items()
         for path in sorted(root.rglob("*"))
         if path.is_file() and ".git" not in path.relative_to(root).parts
     }
+    if keep_git_cache:
+        state = {key: data for key, data in state.items() if not key.startswith("cache/git/")}
+    return state
 
 
-def _refused(world: World, field: str, fix: str) -> str:
-    before = _state(world)
-    result = _apm(world, "install", world.packages["p-skill:git"].spec)
+def _assert_refused(
+    world: World,
+    expected: tuple[str, str],
+    *args: str,
+    scope: str = "project",
+    extra: Path | None = None,
+    keep_git_cache: bool = False,
+) -> str:
+    before = _state(world, extra, keep_git_cache=keep_git_cache)
+    result = _apm(world, "install", *args, scope=scope)
     text = _text(result)
     assert result.returncode == 1, _evidence(result)
-    assert f"Org policy {field}:" in text, text
-    assert fix in text, text
+    assert expected[0] in text, text
+    assert expected[1] in text, text
     assert text.isascii(), text
-    assert _state(world) == before
+    after = _state(world, extra, keep_git_cache=keep_git_cache)
+    assert sorted(set(after) ^ set(before)) == []
+    assert [key for key in before if after[key] != before[key]] == []
     return text
 
 
+def _seed(world: World, *args: str, scope: str = "project") -> None:
+    """Install one compliant package under the policy first.
+
+    apm.lock.yaml and its deployment ledger then exist, and the policy cache
+    holds the policy, so the refused install is judged against both unchanged.
+    """
+    _assert_ok(world, "install", *args, world.packages["p-child"].spec, scope=scope)
+
+
+def _add_scripts(manifest: Path) -> None:
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8")) if manifest.is_file() else None
+    data = data or {"name": "user", "version": "1.0.0"}
+    data["scripts"] = {"hello": "echo hi"}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _govern(world: World, directory: Path, variant: str) -> None:
+    """Give *directory* the org remote whose policy is *variant*, as use_policy does."""
+    git = ("git", "-C", str(directory))
+    subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
+    remote = f"https://github.com/{policy_org(variant)}/consumer.git"
+    subprocess.run((*git, "remote", "add", "origin", remote), env=world.env, check=True)
+
+
 @pytest.mark.parametrize("offending", [True, False], ids=["scripts-block", "control"])
-def test_scripts_deny_refuses_an_install_with_a_scripts_block(
+def test_scripts_deny_refuses_before_any_fetch(
     lifecycle_world: World,  # noqa: F811
     offending: bool,
 ) -> None:
     world = lifecycle_world
-    if offending:
-        manifest = world.project / "apm.yml"
-        data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-        data["scripts"] = {"hello": "echo hi"}
-        manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    spec = world.packages["p-skill:git"].spec
     use_policy(world, "scripts-deny")
+    if offending:
+        _seed(world)
+        assert (world.project / "apm.lock.yaml").is_file()
+        _add_scripts(world.project / "apm.yml")
 
     if offending:
-        text = _refused(world, "manifest.scripts: deny", "Remove the scripts: block from apm.yml")
-        assert "- hello" in text, text
+        text = _assert_refused(world, _SCRIPTS, spec)
+        assert "hello" in text, text
     else:
-        result = _apm(world, "install", world.packages["p-skill:git"].spec)
-        assert result.returncode == 0, _evidence(result)
+        _assert_ok(world, "install", spec)
+
+
+def test_scripts_deny_judges_the_manifest_root_redirects_from(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    target = world.root / "redirected"
+    target.mkdir()
+    _govern(world, target, "scripts-deny")
+    use_policy(world, "scripts-deny")
+    _seed(world, "--root", str(target))
+    _add_scripts(world.project / "apm.yml")
+
+    spec = world.packages["p-skill:git"].spec
+    _assert_refused(world, _SCRIPTS, "--root", str(target), spec, extra=target)
 
 
 @pytest.mark.parametrize("offending", [True, False], ids=["unmanaged-file", "control"])
@@ -97,19 +175,89 @@ def test_unmanaged_files_deny_refuses_an_install_that_would_leave_drift(
     offending: bool,
 ) -> None:
     world = lifecycle_world
+    spec = world.packages["p-skill:git"].spec
+    use_policy(world, "unmanaged-deny")
     if offending:
+        _seed(world)
         path = world.project / _HAND_WRITTEN
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# hand written\n", encoding="utf-8")
-    use_policy(world, "unmanaged-deny")
 
     if offending:
-        text = _refused(world, "unmanaged_files.action: deny", "Move or delete each listed file")
+        text = _assert_refused(world, _UNMANAGED, spec, keep_git_cache=True)
         assert _HAND_WRITTEN in text, text
         audit = _apm(world, "audit", "--ci")
         assert audit.returncode == 1, _evidence(audit)
         assert _HAND_WRITTEN in _text(audit), _evidence(audit)
     else:
-        result = _apm(world, "install", world.packages["p-skill:git"].spec)
-        assert result.returncode == 0, _evidence(result)
+        _assert_ok(world, "install", spec)
         assert (world.project / ".agents" / "skills" / "p-skill" / "SKILL.md").is_file()
+
+
+def test_unmanaged_files_deny_keeps_files_root_local_content_deploys(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    local = world.project / ".apm" / "instructions" / "house.instructions.md"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text("---\napplyTo: '**'\n---\n# House rules\n", encoding="utf-8")
+    use_policy(world, "unmanaged-deny")
+
+    _assert_ok(world, "install", world.packages["p-skill:git"].spec)
+
+    assert (world.project / ".github" / "instructions" / "house.instructions.md").is_file()
+    _assert_ok(world, "audit", "--ci")
+
+
+def test_unmanaged_files_deny_dry_run_previews_the_refusal(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    path = world.project / _HAND_WRITTEN
+    path.parent.mkdir(parents=True, exist_ok=True)
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    path.write_text("# hand written\n", encoding="utf-8")
+    before = _state(world, None, keep_git_cache=True)
+
+    result = _assert_ok(world, "install", "--dry-run", world.packages["p-skill:git"].spec)
+
+    text = _text(result)
+    assert "Would be blocked by policy" in text, text
+    assert _UNMANAGED[0] in text, text
+    assert _HAND_WRITTEN in text, text
+    assert _state(world, None, keep_git_cache=True) == before
+
+
+@pytest.mark.parametrize("offending", [True, False], ids=["too-deep", "control"])
+def test_max_depth_refuses_a_graph_deeper_than_the_limit(
+    lifecycle_world: World,  # noqa: F811
+    offending: bool,
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "max-depth-1")
+
+    if offending:
+        _seed(world)
+        text = _assert_refused(world, _DEPTH, world.packages["p-parent"].spec, keep_git_cache=True)
+        assert "p-child" in text, text
+    else:
+        _assert_ok(world, "install", world.packages["p-skill:git"].spec)
+
+
+def test_max_depth_judges_the_resolved_graph_not_the_old_lockfile(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    _assert_ok(world, "install", world.packages["p-parent"].spec)
+    _assert_ok(world, "install", world.packages["p-skill:git"].spec)
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    deps = data["dependencies"]["apm"]
+    data["dependencies"]["apm"] = [dep for dep in deps if "p-parent" not in str(dep)]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    use_policy(world, "max-depth-1")
+
+    _assert_ok(world, "install")
+
+    assert "p-child" not in (world.project / "apm.lock.yaml").read_text(encoding="utf-8")

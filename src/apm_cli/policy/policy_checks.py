@@ -559,6 +559,15 @@ def _check_required_package_version(
     )
 
 
+def depth_limit_check(chains: Sequence[str], max_depth: int) -> CheckResult:
+    """The ``transitive-depth`` verdict for chains resolution cut at *max_depth* (#4826)."""
+    return _subjects_result(
+        "transitive-depth",
+        f"{len(chains)} dependency chain(s) exceed max depth {max_depth}",
+        [PolicySubject(chain, f"exceeds limit {max_depth}", remedy=None) for chain in chains],
+    )
+
+
 def _check_transitive_depth(
     lock: LockFile | None,
     policy: DependencyPolicy,
@@ -1637,6 +1646,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     installing: bool = False,
     marketplace_origins: MarketplaceOrigins | None = None,
     bundled_deps: Iterable[DependencyReference] | LocalBundleSubjects = (),
+    depth_lockfile: LockFile | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1653,6 +1663,9 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     lockfile:
         An ``ApmLockfile`` / ``LockFile`` instance, or ``None``.  Needed
         for deployed-files and version-pin checks.
+    depth_lockfile:
+        Rows of the graph an install resolved; ``dependencies.max_depth``
+        judges these instead of *lockfile* when given.
     policy:
         The effective :class:`ApmPolicy` to enforce.
     mcp_deps:
@@ -1780,7 +1793,9 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         )
     ):
         return result
-    if _run(_check_transitive_depth(lockfile, policy.dependencies)):
+    # An install judges the graph it resolved, not the lockfile it replaces (#4826).
+    depth_lock = depth_lockfile if depth_lockfile is not None else lockfile
+    if _run(_check_transitive_depth(depth_lock, policy.dependencies)):
         return result
 
     # -- Registry source + pinned-constraint + MCP + tail checks -----

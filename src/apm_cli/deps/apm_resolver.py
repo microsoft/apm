@@ -228,6 +228,9 @@ class APMDependencyResolver:
         self._create_config = not (read_only or preview) if create_config is None else create_config
         self._preview = preview
         self.max_depth = max_depth
+        # Chains cut at ``max_depth``: an org-policy depth limit reports them
+        # as a policy refusal (#4826).
+        self.depth_limit_chains: list[str] = []
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
         self._download_callback = download_callback
@@ -814,18 +817,15 @@ class APMDependencyResolver:
             )
             return None
 
-    def _depth_limit_error(
-        self, dep_ref: DependencyReference, parent_node: DependencyNode | None
-    ) -> str:
-        """Name the chain that reached ``max_depth`` (req-rs-006)."""
+    @staticmethod
+    def _depth_limit_chain(dep_ref: DependencyReference, parent_node: DependencyNode | None) -> str:
+        """Name the chain that reached ``max_depth`` (req-rs-006), root first."""
         chain = [dep_ref.to_display_reference()]
         ancestor = parent_node
         while ancestor is not None:
             chain.append(ancestor.dependency_ref.to_display_reference())
             ancestor = ancestor.parent
-        return f"Dependency depth limit ({self.max_depth}) exceeded: " + " -> ".join(
-            reversed(chain)
-        )
+        return " -> ".join(reversed(chain))
 
     def build_dependency_tree(
         self,
@@ -1000,7 +1000,11 @@ class APMDependencyResolver:
                 # Check maximum depth to prevent infinite recursion. Exceeding
                 # the cap fails resolution naming the chain (req-rs-006, #4277).
                 if depth > self.max_depth:
-                    tree.resolution_errors.append(self._depth_limit_error(dep_ref, parent_node))
+                    chain = self._depth_limit_chain(dep_ref, parent_node)
+                    self.depth_limit_chains.append(chain)
+                    tree.resolution_errors.append(
+                        f"Dependency depth limit ({self.max_depth}) exceeded: {chain}"
+                    )
                     continue
 
                 # Check if we already processed this dependency at this level or higher

@@ -553,3 +553,44 @@ def test_a_context_without_a_scope_is_project_scope(
     del ctx.scope
     check_before_resolve(ctx, _lockfile())
     assert hashes["trust"].call_args.args == (tmp_path / "p",)
+
+
+# -- manifest.scripts: deny before resolution (#4826) ---------------------------------
+
+
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_scripts_deny_judges_the_installed_manifest_before_any_fetch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scope: InstallScope
+) -> None:
+    """``--root`` and ``-g`` leave no apm.yml at the deploy root; the refusal still holds."""
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+    policy = SimpleNamespace(enforcement="block", manifest=SimpleNamespace(scripts="deny"))
+    trust = Mock(return_value=policy)
+    monkeypatch.setattr("apm_cli.policy.outcome_routing.resolve_trust_policy", trust)
+    logger = Mock()
+    ctx = _ctx(
+        project_root=tmp_path / "deploy-root",
+        scope=scope,
+        logger=logger,
+        apm_package=SimpleNamespace(scripts={"hello": "echo hi"}),
+    )
+
+    with pytest.raises(InstallFailureAlreadyRendered, match="Install blocked by org policy"):
+        check_before_resolve(ctx, None)
+
+    violation = logger.policy_violation.call_args.kwargs
+    assert violation["dep_ref"] == "manifest.scripts: deny"
+    assert "hello" in violation["reason"]
+    assert "Remove the scripts: block from apm.yml" in violation["reason"]
+    assert violation["severity"] == "block"
+    expected_root = tmp_path / ("apm-home" if scope is InstallScope.USER else "deploy-root")
+    assert trust.call_args.args == (expected_root,)
+
+
+def test_a_manifest_without_scripts_never_looks_up_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    trust = Mock()
+    monkeypatch.setattr("apm_cli.policy.outcome_routing.resolve_trust_policy", trust)
+    check_before_resolve(_ctx(apm_package=SimpleNamespace(scripts=None)), None)
+    trust.assert_not_called()

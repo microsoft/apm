@@ -108,6 +108,7 @@ POLICY_VARIANTS = (
     "allow-list",
     "scripts-deny",
     "unmanaged-deny",
+    "max-depth-1",
 )
 DENIED_PACKAGE = "p-exec"
 # allow-list: only this package is allowed; ``**/`` also matches a bundle named after it.
@@ -184,6 +185,7 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
             **base,
             "unmanaged_files": {"action": "deny"},
         },
+        "max-depth-1": {"name": "max-depth-1", **base, "dependencies": {"max_depth": 1}},
         "allow-list": {
             "name": "allow-list",
             **base,
