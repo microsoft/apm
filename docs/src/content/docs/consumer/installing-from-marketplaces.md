@@ -225,7 +225,9 @@ The plugin appears with its primitive counts. Commit `apm.yml` and
 
 - **`ref changed: was '...', now '...'`.** The marketplace moved a plugin
   version you already installed to another ref. Confirm with the publisher,
-  then run `apm update` to accept it.
+  then run `apm update` to accept it. Pins belong to the marketplace name:
+  `apm marketplace remove` drops them, so re-adding the name for another
+  catalog starts without them.
 - **`marketplace.json` changed but my install did not.** Expected: run
   `apm outdated` to see it, then `apm update`.
 - **Refused bare cross-repo source on `*.ghe.com`.** The entry would fall back

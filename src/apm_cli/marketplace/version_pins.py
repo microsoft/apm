@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Iterable
 
 from ..core.remediation import MARKETPLACE_REF_SWAP_ACCEPT
 from .errors import MarketplaceError
@@ -204,6 +205,23 @@ def record_ref_pin(
     key = _pin_key(marketplace_name, plugin_name, version)
     pins[key] = ref
     save_ref_pins(pins, pins_dir)
+
+
+def forget_marketplace_ref_pins(
+    marketplace_names: Iterable[str], pins_dir: str | None = None
+) -> None:
+    """Drop every recorded pin of the given marketplace aliases (#4966).
+
+    A pin vouches for a ref from the catalog the alias named when it was
+    recorded, so it leaves with that registration.
+    """
+    prefixes = tuple(f"{name.lower()}/" for name in marketplace_names)
+    if not prefixes:
+        return
+    pins = load_ref_pins(pins_dir)
+    kept = {key: ref for key, ref in pins.items() if not key.lower().startswith(prefixes)}
+    if len(kept) != len(pins):
+        save_ref_pins(kept, pins_dir)
 
 
 # ------------------------------------------------------------------

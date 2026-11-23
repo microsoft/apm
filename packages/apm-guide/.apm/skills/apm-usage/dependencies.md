@@ -394,7 +394,8 @@ version). If the catalog later points that version at another ref, install
 refuses (exit 1) and names both refs; `apm update`
 accepts the new ref. A raw
 ref override (`version: main`) never checks or records a pin, and a failed or
-`--dry-run` install records nothing.
+`--dry-run` install records nothing. Removing a marketplace, or re-adding
+its name for another catalog, drops the pins recorded under that name.
 On a `*.ghe.com` marketplace, a plugin source of any type (`github`,
 `git-subdir`, `gitlab`, `url`) with a bare cross-repo `owner/repo` is refused
 as a dependency-confusion risk (#1326)

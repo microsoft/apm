@@ -182,3 +182,66 @@ def test_mixed_success_marketplace_install_pins_only_the_installed_plugin(
     assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}, _evidence(
         result
     )
+
+
+def _catalog_repository(repositories: LocalGitRepositoryFactory, name: str, remote: str, ref: str):
+    repository = repositories.create(name)
+    packages = LocalPackageFactory(repository.worktree / "plugins")
+    package = packages.create(_PLUGIN, targets=("codex",))
+    packages.add_skill(package, _PLUGIN, f"---\nname: {_PLUGIN}\ndescription: d\n---\nBody\n")
+    catalog_dir = repository.worktree / ".claude-plugin"
+    catalog_dir.mkdir()
+    entry = _plugin_entry(_PLUGIN, f"plugins/{_PLUGIN}")
+    entry["source"] = {**entry["source"], "url": remote, "ref": ref}
+    (catalog_dir / "marketplace.json").write_text(
+        json.dumps({"name": name, "owner": {"name": "APM Test"}, "plugins": [entry]}),
+        encoding="utf-8",
+    )
+    commit = repositories.commit(repository, message="publish catalog")
+    if ref != "main":
+        repositories.tag(repository, ref, commit)
+    return repository
+
+
+def test_removed_alias_re_added_for_another_catalog_installs_without_its_old_pins(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4966: removing a marketplace withdraws the ref pins recorded under its alias."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+    )
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    remote_b = f"https://{_HOST}/other/catalog"
+    env = repositories.url_rewrite_subprocess_env_many(
+        (
+            (_catalog_repository(repositories, "catalog", _REMOTE, "main"), _REMOTE),
+            (_catalog_repository(repositories, "catalog-b", remote_b, "v1"), remote_b),
+        )
+    )
+    pins = isolated.config_root / "cache" / "marketplace" / "version-pins.json"
+    projects = LocalPackageFactory(isolated.work_root)
+    first = projects.create("first", targets=("codex",)).root
+    second = projects.create("second", targets=("codex",)).root
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=300)
+
+    def apm(cwd: Path, *args: str) -> CommandResult:
+        result = runner.run(args, cwd=cwd, env=env)
+        _assert_output_oracles(result)
+        assert result.returncode == 0, _evidence(result)
+        return result
+
+    apm(first, "marketplace", "add", _REMOTE, "--name", _ALIAS, "--ref", "main")
+    apm(first, "install", f"{_PLUGIN}@{_ALIAS}", *_FLAGS)
+    assert json.loads(pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}
+
+    apm(first, "marketplace", "remove", _ALIAS, "--yes")
+    assert json.loads(pins.read_text(encoding="utf-8")) == {}
+
+    apm(second, "marketplace", "add", remote_b, "--name", _ALIAS, "--ref", "main")
+    apm(second, "install", f"{_PLUGIN}@{_ALIAS}", *_FLAGS)
+
+    assert (second / ".agents" / "skills" / _PLUGIN / "SKILL.md").is_file()
+    assert json.loads(pins.read_text(encoding="utf-8")) == {_PIN_KEY: "v1"}
+    assert (first / ".agents" / "skills" / _PLUGIN / "SKILL.md").is_file()

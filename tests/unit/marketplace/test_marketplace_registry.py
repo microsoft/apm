@@ -203,3 +203,52 @@ class TestRegistryUtf8RoundTrip:
         fetched = registry_mod.get_marketplace_by_name("cafe-mkt")
         assert fetched is not None
         assert fetched.repo == "repo-\u4e2d\u6587"
+
+
+class TestAliasRefPins:
+    """#4966: an alias's ref pins leave with the catalog they were recorded for."""
+
+    @pytest.fixture(autouse=True)
+    def _pins_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+        self.pins = tmp_path / "apm-home" / "cache" / "marketplace" / "version-pins.json"
+        self.pins.parent.mkdir(parents=True)
+        self.pins.write_text(
+            json.dumps({"team/tool/1.0.0": "v1", "team/other": "main", "teams/tool": "v9"})
+        )
+
+    def _pins(self) -> dict:
+        return json.loads(self.pins.read_text())
+
+    def test_remove_withdraws_only_that_alias_pins(self):
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+
+        registry_mod.remove_marketplace("TEAM")
+
+        assert self._pins() == {"teams/tool": "v9"}
+
+    def test_rebinding_an_alias_to_another_catalog_withdraws_its_pins(self):
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="b", repo="catalog"))
+
+        assert self._pins() == {"teams/tool": "v9"}
+
+    def test_re_adding_the_same_catalog_keeps_its_pins(self):
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        before = self._pins()
+
+        registry_mod.add_marketplace(
+            MarketplaceSource(name="team", owner="a", repo="catalog", ref="release")
+        )
+
+        assert self._pins() == before
+
+    def test_manifest_removal_withdraws_the_alias_pins(self):
+        registry_mod.register_manifest_marketplace(
+            MarketplaceSource(name="team", owner="a", repo="catalog", origin="manifest")
+        )
+
+        assert registry_mod.unregister_manifest_marketplace("team")
+
+        assert self._pins() == {"teams/tool": "v9"}
