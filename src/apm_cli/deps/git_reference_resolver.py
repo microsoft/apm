@@ -424,16 +424,14 @@ class GitReferenceResolver:
 
         Makes no request. The resolver tier reads branch and tag names from the
         origin's ref listing only where it would otherwise ask the commits API,
-        so other hosts and SSH keep the clone-based resolution.
+        so other hosts and SSH keep the clone-based resolution. Registry-only
+        mode is enforced by the listing and the commits API themselves.
         """
-        from .egress_route import EgressSurface, is_refused
         from .host_backends import backend_for
 
         host = self._host
         try:
             if dep_ref.is_artifactory() or dep_ref.is_azure_devops():
-                return False
-            if is_refused(EgressSurface.SOURCE_ENUMERATION):
                 return False
             if initial_transport_scheme(dep_ref, host._protocol_pref) != "https":
                 return False

@@ -527,34 +527,34 @@ def test_a_cached_bare_resolves_a_branch_name_only_as_that_branch(
 
     git("update-ref", "-d", "refs/heads/main")
     git("update-ref", "refs/tags/refs/heads/main", origin.m1)
+    git("update-ref", "refs/tags/heads/main", origin.m1)
 
     assert cache.bare_ref_sha(origin.url, ref) is None
+    assert not cache._resolved_ref_path(origin.url, ref).exists()
 
 
-@pytest.mark.parametrize("ref", ["side", "refs/heads/side"])
-def test_resolving_a_branch_name_never_answers_with_a_tag_in_another_namespace(
-    origin: _Origin, ref: str
-) -> None:
-    from apm_cli.utils.git_env import git_resolve_commit
-
-    origin.bare("update-ref", "refs/tags/refs/heads/side", origin.m1)
-    origin.bare("update-ref", "refs/tags/heads/side", origin.m1)
-
-    with pytest.raises(subprocess.CalledProcessError):
-        git_resolve_commit(origin.path, ref, bare=True)
-    assert git_resolve_commit(origin.path, "main", bare=True) == origin.m2
-    assert git_resolve_commit(origin.path, origin.m1[:10], bare=True) == origin.m1
-
-
+@trust_cached_repos()
 @pytest.mark.parametrize("namespace", ["tags", "heads"])
-def test_a_hex_named_ref_wins_over_a_commit_it_abbreviates(origin: _Origin, namespace: str) -> None:
-    from apm_cli.utils.git_env import git_resolve_commit
+def test_a_cached_bare_resolves_a_hex_named_ref_before_a_commit_it_abbreviates(
+    tmp_path: Path, origin: _Origin, namespace: str
+) -> None:
+    from apm_cli.cache.url_normalize import cache_shard_key
 
+    cache = _cache(tmp_path)
+    cache.get_checkout(origin.url, "main")
+    bare = cache._db_root / cache_shard_key(origin.url)
+    _REAL_RUN(
+        ["git", "--git-dir", str(bare), "fetch", "-q", str(origin.path), origin.f1], check=True
+    )
     name = origin.f1[:8]
-    origin.bare("update-ref", f"refs/{namespace}/{name}", origin.m1)
+    _REAL_RUN(
+        ["git", "--git-dir", str(bare), "update-ref", f"refs/{namespace}/{name}", origin.m1],
+        check=True,
+    )
 
-    assert git_resolve_commit(origin.path, name, bare=True) == origin.m1
-    assert git_resolve_commit(origin.path, origin.f1[:12], bare=True) == origin.f1
+    assert cache.bare_ref_sha(origin.url, name) == origin.m1
+    assert cache.bare_ref_sha(origin.url, origin.f1[:12]) == origin.f1
+    assert not cache._resolved_ref_path(origin.url, name).exists()
 
 
 class _CommitFirstDownloader(_RefDownloader):
@@ -578,6 +578,8 @@ def test_admission_binds_a_hex_named_tag_before_any_commit_abbreviation(
     downloader = _CommitFirstDownloader(tmp_path / "cache", origin, expands_to=origin.f1)
 
     assert admit_ref_commit(downloader, _RefDep(), name) == (origin.m1, origin.m1)
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified/*")
+    assert marker.name == origin.m1
 
 
 def test_admission_expands_a_hex_name_no_ref_holds(tmp_path: Path, origin: _Origin) -> None:
@@ -586,6 +588,9 @@ def test_admission_expands_a_hex_name_no_ref_holds(tmp_path: Path, origin: _Orig
     downloader = _CommitFirstDownloader(tmp_path / "cache", origin, expands_to=origin.m1)
 
     assert admit_ref_commit(downloader, _RefDep(), origin.m1[:10]) == (origin.m1, origin.m1)
+    assert [m.name for m in (tmp_path / "cache" / "reachability").rglob("verified/*")] == [
+        origin.m1
+    ]
 
 
 class TestRefCacheLinks:
