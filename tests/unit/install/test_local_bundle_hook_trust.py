@@ -92,17 +92,28 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         ("cd -- .claude/hooks/hookpkg/hooks && sh scripts/./x.sh", True),
         ("bash -c 'cd .claude/hooks/hookpkg/hooks/scripts && ./x.sh'", True),
         ("sh 'unterminated x.sh", True),
-        ('"${CLAUDE_PROJECT_DIR}/.claude/hooks/otherpkg/hooks/scripts/x.sh"', False),
-        ('cd "$HOME" && sh /opt/tools/x.sh', False),
-        ("cd . && " * 20 + "true", False),
-        (" && ".join(f"cd d{index}" for index in range(12)) + " && true", False),
-        ("./tools/lint.sh", False),
-        ("sh $(pwd)/.claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
-        ("sh `pwd`/.claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
-        ("(cd / && true); sh .claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
-        ("cd .claude/hooks/hookpkg/hooks && sh -c 'sh scripts/./x.sh'", True),
         ("sh $(pwd)/.claude/hooks/hookpkg/hooks/scripts/./x.sh; true", True),
         ("sh `pwd`/.claude/hooks/hookpkg/hooks/scripts/./x.sh; true", True),
+        ("(cd / && true); sh .claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ("cd .claude/hooks/hookpkg/hooks && sh -c 'sh scripts/./x.sh'", True),
+        (
+            'CLAUDE_PROJECT_DIR="$PWD/.claude/hooks/hookpkg/hooks"; '
+            'sh "$CLAUDE_PROJECT_DIR/scripts/./x.sh"',
+            True,
+        ),
+        ('HOME="$PWD/.claude/hooks/hookpkg/hooks"; sh "$HOME/scripts/./x.sh"', True),
+        ("cd - && sh scripts/./x.sh", True),
+        ("sh -c '.claude/hooks/hookpkg/hooks/scripts/./x.sh;true'", True),
+        ("sh .claude/hooks/hookpkg/hooks/script*/./x.sh", True),
+        ("sh ././x.sh", True),
+        ('script=.claude/hooks/hookpkg/hooks/scripts/./x.sh; sh "$script"', True),
+        ('"${CLAUDE_PROJECT_DIR}/.claude/hooks/otherpkg/hooks/scripts/x.sh"', False),
+        ("bash .github/hooks/otherpkg/scripts/x.sh", False),
+        ('cd "$HOME" && sh /opt/tools/x.sh', False),
+        ('sh "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', False),
+        ("cd . && " * 20 + "true", False),
+        ("./tools/lint.sh", False),
+        ("./tools/max.sh", False),
     ],
     ids=[
         "project-dir-anchor",
@@ -110,27 +121,33 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         "cd-terminator",
         "nested-shell",
         "unparsable",
-        "sibling-package",
-        "same-name-absolute",
-        "many-cd",
-        "distinct-cd",
-        "unrelated",
-        "unquoted-substitution",
-        "backtick-substitution",
-        "subshell-cd",
-        "nested-inherits-cd",
         "substitution-then-separator",
         "backtick-then-separator",
+        "subshell-cd",
+        "nested-inherits-cd",
+        "reassigned-project-dir",
+        "reassigned-home",
+        "cd-dash",
+        "nested-without-space",
+        "glob-directory",
+        "repeated-dot",
+        "assigned-script",
+        "sibling-package",
+        "sibling-relative",
+        "same-name-absolute",
+        "quoted-absolute-with-space",
+        "many-cd",
+        "unrelated",
+        "longer-name",
     ],
 )
 def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:
-    """#5106: a hook command runs a bundle script exactly when it may name it."""
+    """#5106: a hook command runs a bundle script unless it certainly names another file."""
     from apm_cli.install.hook_script_refs import runs_script, script_refs
 
     root = Path("/project")
-    refs = script_refs(root, [_SCRIPT])
 
-    assert runs_script(command, refs, (root, root / ".claude"), root) is runs
+    assert runs_script(command, script_refs(root, [_SCRIPT]), root) is runs
 
 
 def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> None:
@@ -138,11 +155,8 @@ def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> 
 
     spaced = Path("/tmp/my project")
     assert runs_script(
-        f'sh "{spaced.as_posix()}/{_SCRIPT}"', script_refs(spaced, [_SCRIPT]), (spaced,), spaced
+        f'sh "{spaced.as_posix()}/{_SCRIPT}"', script_refs(spaced, [_SCRIPT]), spaced
     )
-    drive = "C:/project"
     refs = (frozenset({"x.sh"}), frozenset({f"c:/project/{_SCRIPT}"}))
-    assert runs_script(f"{drive}/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (), Path("/"))
-    assert runs_script(
-        f"sh {drive}/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, (), Path("/")
-    )
+    assert runs_script("C:/project/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, Path("/"))
+    assert runs_script("sh C:/project/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, Path("/"))

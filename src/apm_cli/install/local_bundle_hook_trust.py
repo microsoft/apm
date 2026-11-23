@@ -573,7 +573,7 @@ def _per_file_configs_running(
                 continue
             texts = list(_hook_commands(document))
             if any(tail in text for text in texts for tail in tails) or any(
-                runs_script(text, refs, (project_root, target_root), project_root) for text in texts
+                runs_script(text, refs, project_root) for text in texts
             ):
                 found.add(value)
     return found
@@ -642,7 +642,7 @@ def _configs_still_running(
         ]
         texts = [text for entry in foreign for text in commands(entry)]
         if any(tail in text for text in texts for tail in tails) or any(
-            runs_script(text, refs, (project_root, target_root), project_root) for text in texts
+            runs_script(text, refs, project_root) for text in texts
         ):
             found.add(_record_value(json_path, project_root))
     return found

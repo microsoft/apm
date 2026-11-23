@@ -1,9 +1,10 @@
 """Whether a hook command may run a bundle's script, however it is spelled (#5106).
 
 ``apm uninstall <bundle>`` keeps a bundle's hook scripts while a hook it does
-not own still runs one of them; this module decides "runs one of them" over
-shell words, ``cd`` prefixes, nested shells and path spellings, and fails
-closed where the command's working directory or expansion is not certain.
+not own still runs one of them. Shell spellings are open-ended (``cd``,
+substitutions, globs, assignments, nested shells), so the decision is
+default-deny: a command that names a script's file name runs it, unless every
+such word is a plain path that certainly resolves to another file.
 """
 
 from __future__ import annotations
@@ -14,15 +15,17 @@ import re
 from collections.abc import Collection
 from pathlib import Path
 
-# Shell separators and quotes a substitution's path word may sit next to.
-_SEPARATORS = re.compile(r"[\s;&|()<>'\"`]+")
-# Variables a deployed hook command anchors its paths at, and their values.
+# Variables a deployed hook command anchors its paths at.
 _ANCHOR_VARIABLES = re.compile(
     r"\$\{(CLAUDE_PROJECT_DIR|HOME)\}|\$env:(CLAUDE_PROJECT_DIR|HOME)\b|\$(CLAUDE_PROJECT_DIR|HOME)\b"
 )
+_ASSIGNED_ANCHOR = re.compile(r"\b(CLAUDE_PROJECT_DIR|HOME)\s*=")
 _DRIVE = re.compile(r"^[A-Za-z]:/")
-# A working directory is tracked through at most this many distinct roots.
-_MAX_ROOTS = 16
+# Characters that make a word more than a plain path: expansion, globbing,
+# assignment, quoting or a command separator.
+_NOT_PLAIN = re.compile(r"[$`*?\[\]{}~=;&|()<>'\"\\\n]")
+# Words that change the working directory relative paths resolve from.
+_DIRECTORY_CHANGES = frozenset({"cd", "pushd", "popd"})
 
 
 def script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozenset, frozenset]:
@@ -58,79 +61,55 @@ def _words(command: str) -> list[str] | None:
         return None
 
 
-def runs_script(
-    command: str, refs: tuple[frozenset, frozenset], bases: Collection[Path], project_root: Path
-) -> bool:
-    """Whether *command* may run a bundle script under any spelling, in any target (#5106).
+def _name_pattern(names: Collection[str]) -> re.Pattern[str]:
+    """A file name standing alone, not inside a longer name (``max.sh`` is not ``x.sh``)."""
+    alternatives = "|".join(re.escape(name) for name in sorted(names))
+    return re.compile(rf"(?<![\w.-])(?:{alternatives})(?![\w.-])", re.IGNORECASE)
 
-    ``${CLAUDE_PROJECT_DIR}`` and ``$HOME`` anchors are resolved first. A
-    path word runs the script when it normalizes to it (``/./``, ``..``): an
-    absolute one (``/``, ``C:/``) as written, a relative one from any of
-    *bases* (the project root, the hook's target root) or a ``cd <dir>``
-    before it, nested shells included. A bare file name (``./x.sh``), a word
-    with another expansion, a command substitution, or a relative word under
-    a working directory that cannot be determined counts when its name
-    matches (fail closed); so does any command that cannot be parsed.
+
+def runs_script(command: str, refs: tuple[frozenset, frozenset], project_root: Path) -> bool:
+    """Whether *command* may run a bundle script, in any target and spelling (#5106).
+
+    Default-deny: a command naming a script's file name runs it, unless every
+    word naming it is a plain path (no expansion, glob, assignment, quote or
+    separator) that certainly resolves elsewhere. An absolute path resolves
+    as written; a relative one from the project root, and only when the
+    command never changes directory. ``${CLAUDE_PROJECT_DIR}`` and ``$HOME``
+    count as plain anchors unless the command assigns them.
     """
-    home = Path.home().as_posix()
-
-    def anchor(match: re.Match) -> str:
-        name = next(group for group in match.groups() if group)
-        return home if name == "HOME" else project_root.as_posix()
-
-    text = _ANCHOR_VARIABLES.sub(anchor, command)
-    roots = frozenset(_normalized(base.as_posix()) for base in bases)
-    return _scan_words(text, refs, roots, True)
-
-
-def _names_word(word: str, names: frozenset) -> bool:
-    name = word.rstrip("/").rsplit("/", 1)[-1]
-    if _folds(word):
-        return name.casefold() in {candidate.casefold() for candidate in names}
-    return name in names
-
-
-def _scan_words(
-    text: str, refs: tuple[frozenset, frozenset], roots: frozenset, certain: bool
-) -> bool:
-    """:func:`runs_script` over one shell string, from *roots* (#5106)."""
     names, paths = refs
-    pieces = _SEPARATORS.split(text)
-    if ("$(" in text or "`" in text) and any(_names_word(piece, names) for piece in pieces):
-        return True  # a command substitution may build the script path
+    pattern = _name_pattern(names)
+    if not pattern.search(command):
+        return False
+    text = command
+    if not _ASSIGNED_ANCHOR.search(command):
+        home = Path.home().as_posix()
+
+        def anchor(match: re.Match) -> str:
+            name = next(group for group in match.groups() if group)
+            return home if name == "HOME" else project_root.as_posix()
+
+        text = _ANCHOR_VARIABLES.sub(anchor, command)
+    if "$(" in text or "`" in text:
+        return True  # a command substitution may build the path around the name
     words = _words(text)
     if words is None:
-        return any(name.casefold() in text.casefold() for name in names)
-    tracked = set(roots)
-    for index, word in enumerate(words):
-        if word == "cd":
-            rest = [w for w in words[index + 1 :] if w != "--" and not w.startswith("-")]
-            target = rest[0] if rest else None
-            if target is None or target in ";&|()<>" or "$" in target or target.startswith("~"):
-                certain = False
-            elif certain:
-                # A cd in a subshell need not hold afterwards: roots only grow.
-                if target.startswith("/") or _DRIVE.match(target):
-                    tracked.add(_normalized(target))
-                else:
-                    tracked |= {_normalized(posixpath.join(root, target)) for root in tracked}
-                if len(tracked) > _MAX_ROOTS:
-                    certain = False
-            continue
-        if any(space in word for space in " \t\n") and _scan_words(
-            word, refs, frozenset(tracked), certain
-        ):
-            return True
-        if not _names_word(word, names):
-            continue
-        if word.startswith("/") or _DRIVE.match(word):
-            if "$" in word or _normalized(word) in paths:
-                return True
-            continue
-        if not certain or "$" in word or word.startswith("~"):
-            return True
-        if "/" not in word.removeprefix("./"):
-            return True
-        if any(_normalized(f"{root}/{word}") in paths for root in tracked):
-            return True
-    return False
+        return True
+    moves = any(word in _DIRECTORY_CHANGES for word in words)
+    named = [word for word in words if pattern.search(word)]
+    if not named:
+        return True  # the name sits in syntax the words lost: fail closed
+    return not all(_certainly_elsewhere(word, paths, project_root, moves) for word in named)
+
+
+def _certainly_elsewhere(word: str, paths: frozenset, project_root: Path, moves: bool) -> bool:
+    """Whether *word* is a plain path that resolves, with certainty, to no script."""
+    if _NOT_PLAIN.search(word.replace(" ", "")):
+        return False
+    absolute = word.startswith("/") or bool(_DRIVE.match(word))
+    if not absolute:
+        relative = posixpath.normpath(word)
+        if moves or "/" not in relative or relative.startswith(".."):
+            return False  # a bare name, or a directory that is not certain
+        word = f"{project_root.as_posix()}/{relative}"
+    return _normalized(word) not in paths
