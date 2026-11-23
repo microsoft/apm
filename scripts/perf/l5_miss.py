@@ -101,4 +101,18 @@ same_noop = outputs["base"]["noop"] == outputs["new"]["noop"]
 print("== noop stdout identical to base (replay of the install's output today):", same_noop)
 if not same_noop:
     print("--- base noop\n" + outputs["base"]["noop"] + "\n--- new noop\n" + outputs["new"]["noop"])
+# Interleave probe (the bench alternates builds in one world): new install, new noop,
+# base noop, new noop, new noop -- which inputs churn between runs?
+with journeys.open_world(fixture, work / "worlds" / "abab") as world:
+    world.rtt_ms = 30
+    ctx = journeys.Context(fixture, world, [new_py], work / "runs" / "abab")
+    ctx.work.mkdir(parents=True, exist_ok=True)
+    ctx.fresh_project()
+    root = ctx.roots()[0]
+    env = dict(world.env, APM_INSTALL_FAST_PATH="trace")
+    for label, python in (("new install", new_py), ("new noop", new_py), ("base noop", base_py),
+                          ("new noop", new_py), ("new noop", new_py), ("new noop", new_py)):
+        code, cpu, out, err = run(python, root, env)
+        trace = [line for line in err.splitlines() if "fast path:" in line or "verdict digest" in line]
+        print(f"== ABAB {label:<12} rc={code} cpu={cpu:.3f}s {trace}")
 sys.exit(0 if cell else 1)
