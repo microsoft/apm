@@ -3713,6 +3713,7 @@ def _assert_known_cells_live_placement(workflows: Mapping[str, WorkflowNode], ch
     lines = [line.strip() for line in live_step["run"].strip().splitlines()]
     assert any(line.startswith(_LIVE_KNOWN_CELLS + " ") for line in lines), lines
     assert lines[-1] == 'exit "$status"', "the step keeps the check's exit status"
+    assert 'delimiter="cells_$(openssl rand -hex 16)"' in lines, "an unguessable output delimiter"
     signal = workflow_job(ledger, "signal")
     assert signal["needs"] == ["check"], signal.get("needs")
     assert signal["permissions"] == {"issues": "write"}, signal.get("permissions")
@@ -3730,6 +3731,7 @@ def _assert_known_cells_live_placement(workflows: Mapping[str, WorkflowNode], ch
     script = step["with"]["script"]
     assert "ledger-state red" in script, "the issue names the classification"
     assert "### Affected cells" in script and "recorded > context.runId" in script, script
+    assert "['````', cells, '````']" in script, "a four-backtick fence: a cell line cannot close it"
 
 
 def _known_cells_workflows() -> dict[str, WorkflowNode]:

@@ -55,7 +55,8 @@ jobs:
           status=$?
           set -e
           cat "$RUNNER_TEMP/live.txt"
-          delimiter="cells_$(date +%s%N)"
+          # An unguessable delimiter: a cell line can never end the output early.
+          delimiter="cells_$(openssl rand -hex 16)"
           {
             echo "cells<<$delimiter"
             grep '^\[x\]' "$RUNNER_TEMP/live.txt" | head -n 50 || true
@@ -126,7 +127,7 @@ jobs:
                 '',
                 '### Affected cells',
                 '',
-                cells ? ['```', cells, '```'].join('\n') : 'No cell line was captured (the live state could not be read); see the run log.',
+                cells ? ['````', cells, '````'].join('\n') : 'No cell line was captured (the live state could not be read); see the run log.',
                 '',
                 'The run log names each cell. Rerun it; flip a cell that now passes to required (or re-key it to an open issue), then run `python -m tests.quality.known_cell_issues --write`.',
               ].join('\n');
