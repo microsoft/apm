@@ -24,8 +24,13 @@ def test_a_re_decomposing_spelling_shares_one_key(composed: str, decomposed: str
     assert spelling_key(f"rules/{composed}.md") == spelling_key(f"rules/{decomposed}.md")
 
 
+# Separator-free spellings: str(Path) uses the platform separator, the key uses "/".
 @pytest.mark.parametrize(
-    "spelling", ["Rules\\Guide.md", "caf\u00e9", "cafe\u0301", "\u0390", "\u0399\u0308\u0301"]
+    "spelling", ["Guide.md", "caf\u00e9", "cafe\u0301", "\u0390", "\u0399\u0308\u0301"]
 )
 def test_the_spelling_key_is_the_containment_key(spelling: str) -> None:
-    assert spelling_key(spelling) == _caseless(Path(spelling.replace("\\", "/")))
+    assert spelling_key(spelling) == _caseless(Path(spelling))
+
+
+def test_the_spelling_key_uses_forward_slashes() -> None:
+    assert spelling_key("Rules\\Guide.md") == spelling_key("rules/guide.md") == "rules/guide.md"
