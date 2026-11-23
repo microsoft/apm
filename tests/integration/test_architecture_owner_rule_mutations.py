@@ -1453,18 +1453,18 @@ def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, n
             "src/apm_cli/install/services.py",
             "                hooks_approved=_hooks_approved_bundle,\n"
             "                canvas_approved=_canvas_ok,\n"
-            "            )\n"
-            "            if _deploy_rel is None:",
+            "                rendering_extension=_renderings.get(_rel_norm),\n",
             "                canvas_approved=_canvas_ok,\n"
-            "            )\n"
-            "            if _deploy_rel is None:",
+            "                rendering_extension=_renderings.get(_rel_norm),\n",
             id="omitted-hooks-approved",
         ),
         pytest.param(
             "src/apm_cli/install/local_bundle_paths.py",
-            "    hooks_approved: bool,\n    canvas_approved: bool,\n) -> str | None:\n"
+            "    hooks_approved: bool,\n    canvas_approved: bool,\n"
+            "    rendering_extension: str | None = None,\n) -> str | None:\n"
             '    """Return a bundle path relative',
-            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n) -> str | None:\n"
+            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n"
+            "    rendering_extension: str | None = None,\n) -> str | None:\n"
             '    """Return a bundle path relative',
             id="fail-open-hooks-approved-default",
         ),
@@ -1808,6 +1808,102 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "        if self._keeps_edited_bundle(planned",
             "        if self._keeps_nothing(planned",
             id="canvas-bundle-not-left-whole",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                if integrator.keeps_edited_output(\n"
+            "                    target_path,\n"
+            "                    hook_file,\n"
+            "                    rel_path,\n"
+            "                    force,\n"
+            "                    diagnostics,\n"
+            "                    target_paths,\n"
+            "                    expected_content=rendered,\n"
+            "                ):\n"
+            "                    files_skipped += 1\n"
+            "                    continue\n",
+            "                integrator.keeps_edited_output(\n"
+            "                    target_path,\n"
+            "                    hook_file,\n"
+            "                    rel_path,\n"
+            "                    force,\n"
+            "                    diagnostics,\n"
+            "                    target_paths,\n"
+            "                    expected_content=rendered,\n"
+            "                )\n",
+            id="gate-result-ignored",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "            if not self.keeps_edited_output(",
+            "            if True or not self.keeps_edited_output(",
+            id="gate-short-circuited",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(source_file: Path, target_file: Path) -> None:\n"
+            "    write_seam.copy2(source_file, target_file)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-writer",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(source_file: Path, target_file: Path) -> None:\n"
+            "    write_seam.rename(source_file, target_file)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-rename",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(target_file: Path, data: dict) -> None:\n"
+            "    write_seam.write_json_config(target_file, data)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-json-config",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(target_file: Path) -> None:\n"
+            "    write_seam.open_for_write(target_file).close()\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-open-for-write",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                    target_path,\n                    hook_file,\n                    rel_path,",
+            "                    hook_file,\n                    hook_file,\n                    rel_path,",
+            id="gate-asks-about-another-path",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "        write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)\n",
+            "        write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)\n"
+            "        write_seam.copy2(json_path, target_dir / 'run.sh')\n",
+            id="executable-copy-in-exempt-function",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "        write_seam.copy2(source_file, checked)\n",
+            "        checked = source_file\n        write_seam.copy2(source_file, checked)\n",
+            id="destination-rebound-after-gate",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "            write_seam.copyfile(src, dest)\n",
+            "            write_seam.copyfile(dest, src)\n",
+            id="canvas-writes-the-unjudged-slot",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                atomic_write_text(target_path, rendered, new_file_mode=0o600)\n",
+            "                deferred = lambda: atomic_write_text(  # noqa: E731\n"
+            "                    target_path, rendered, new_file_mode=0o600\n"
+            "                )\n"
+            "                deferred()\n",
+            id="write-deferred-in-a-lambda",
         ),
     ],
 )
