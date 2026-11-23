@@ -262,6 +262,17 @@ class PolicyViolationError(RuntimeError):
         self.policy_source = policy_source
 
 
+def policy_transitive_refusals(view: CurrentMcpConfigView) -> list[str]:
+    """Transitive servers the trust owner withheld under org ``mcp.trust_transitive``."""
+    from apm_cli.security.trust import REASON_POLICY_TRANSITIVE
+
+    return sorted(
+        name
+        for name, evidence in view.omissions.items()
+        if isinstance(evidence, dict) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+    )
+
+
 def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission) -> None:
     """Fail the install when an org policy that blocks refuses transitive servers.
 
@@ -269,13 +280,7 @@ def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission
     transitive server ``mcp.allow`` does not list; with ``enforcement: block``
     the install stops before any write, as the direct mcp-allowlist check does.
     """
-    from apm_cli.security.trust import REASON_POLICY_TRANSITIVE
-
-    refused = sorted(
-        name
-        for name, evidence in view.omissions.items()
-        if isinstance(evidence, dict) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
-    )
+    refused = policy_transitive_refusals(view)
     policy = admission.org_policy()
     if not refused or getattr(policy, "enforcement", None) != "block":
         return

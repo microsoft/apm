@@ -56,6 +56,7 @@ def prepare_mcp_integration(  # noqa: PLR0913
     no_policy: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
     prospective_lock: "LockFile | None" = None,
+    dry_run: bool = False,
 ) -> PreparedMcpIntegration:
     """Collect and admit once, without native writes or ownership adoption.
 
@@ -100,9 +101,10 @@ def prepare_mcp_integration(  # noqa: PLR0913
             claude_native_keys=claude_native_keys,
         )
     if should_install and current_view is not None:
-        from apm_cli.install.errors import refuse_policy_transitive
+        if not dry_run:
+            from apm_cli.install.errors import refuse_policy_transitive
 
-        refuse_policy_transitive(current_view, admission)
+            refuse_policy_transitive(current_view, admission)
         root_count = len(apm_package.get_all_mcp_dependencies())
         transitive_count = max(0, len(current_view.dependencies) - root_count)
         if transitive_count:

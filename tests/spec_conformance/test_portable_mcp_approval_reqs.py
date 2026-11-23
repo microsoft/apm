@@ -183,7 +183,8 @@ def test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_
     tmp_path: Path, enforcement: str, deployed: bool
 ) -> None:
     assert_spec_contains(
-        "policy's `mcp.allow` matches the server name; (a), (b) and (c) do not",
+        "policy's `mcp.allow` matches the server name; a grant under (b) and an",
+        "makes the server the consuming project's own declaration, judged as a",
         "MUST emit a default-visible diagnostic naming the server, as for an",
         "such server as a policy violation. A policy that sets no field imposes",
     )

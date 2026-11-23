@@ -100,3 +100,26 @@ def test_a_missing_source_is_judged_on_the_verified_deployed_root(
     shutil.rmtree(modules)
     retired = locked_native_retired(lock, modules, lambda: None, _policy(deny_all=True))
     assert retired == expected
+
+
+@pytest.mark.parametrize(
+    ("transitive", "allow", "refused"),
+    [(True, None, True), (False, None, False), (True, ("srv",), False)],
+    ids=["transitive", "direct", "transitive-listed"],
+)
+def test_a_native_plugins_mcp_server_meets_org_trust_transitive(
+    tmp_path: Path, transitive: bool, allow: tuple[str, ...] | None, refused: bool
+) -> None:
+    """A transitive native plugin's server needs mcp.allow, as a loose one does (req-sc-016)."""
+    from apm_cli.claude_plugins.admission import native_policy_violation
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    root = tmp_path / "tool"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": {"srv": {"command": "npx", "args": ["x"]}}})
+    )
+    mcp = McpPolicy(deny=("unrelated",)) if allow is None else McpPolicy(allow=allow)
+    policy = ApmPolicy(enforcement="block", mcp=mcp)
+    violation = native_policy_violation(root, policy, transitive=transitive)
+    assert (violation is not None and "mcp-trust-transitive" in violation) is refused

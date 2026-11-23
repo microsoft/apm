@@ -142,13 +142,17 @@ def _escaping_component_path(root: Path, manifest: dict[str, Any]) -> str | None
     return None
 
 
-def _mcp_policy_violation(root: Path, manifest: dict[str, Any], policy: Any) -> str | None:
+def _mcp_policy_violation(
+    root: Path, manifest: dict[str, Any], policy: Any, *, transitive: bool = False
+) -> str | None:
     """Name the first MCP server org MCP policy rejects, else ``None``.
 
     Claude loads the plugin's servers itself, so the checks the install gate
     runs on loose servers (``policy_checks.mcp_policy_checks``) run here on
     every server Claude's loader would start (``claude_native_mcp_servers``).
     An entry APM cannot read never passes a policy that restricts anything.
+    A *transitive* plugin (lock depth > 1) declares transitive servers, which
+    org ``mcp.trust_transitive`` judges (req-sc-016).
     LSP servers have no org policy schema beyond ``executables``; the
     whole-plugin trust verdict is their policy.
     """
@@ -169,6 +173,8 @@ def _mcp_policy_violation(root: Path, manifest: dict[str, Any], policy: Any) -> 
             registry=False,
             url=server["url"],
             command=server["command"],
+            resolved_by=root.name if transitive else None,
+            declared_depth=2 if transitive else 0,
         )
         for server in servers
     ]
@@ -188,7 +194,7 @@ class _Ineligible:
     name: str = ""
 
 
-def native_policy_violation(root: Path, policy: Any) -> str | None:
+def native_policy_violation(root: Path, policy: Any, *, transitive: bool = False) -> str | None:
     """The org MCP policy rejection that parks a native Claude plugin, else ``None``.
 
     Only ``enforcement: block`` parks; install and gate retirement share it.
@@ -200,17 +206,19 @@ def native_policy_violation(root: Path, policy: Any) -> str | None:
         manifest = parse_plugin_manifest(manifest_path)
     except (OSError, ValueError):
         return None
-    return _mcp_policy_violation(Path(root), manifest, policy)
+    return _mcp_policy_violation(Path(root), manifest, policy, transitive=transitive)
 
 
-def _native_retire_reason(verdict: Any, root: Path, package_info: Any, policy: Any) -> str | None:
+def _native_retire_reason(
+    verdict: Any, root: Path, package_info: Any, policy: Any, *, transitive: bool = False
+) -> str | None:
     """Why install would park this native plugin now, or ``None`` while it is admitted."""
     from apm_cli.install.exec_gate import bin_deploy_denial
 
     bin_rule = bin_deploy_denial(package_info, policy) if (root / "bin").exists() else None
     why = (
         (verdict.reason if not verdict.allowed else None)
-        or native_policy_violation(root, policy)
+        or native_policy_violation(root, policy, transitive=transitive)
         or (f"org policy {bin_rule} blocks its bin/ executables" if bin_rule else None)
     )
     return None if why is None else str(why)
@@ -284,7 +292,9 @@ def locked_native_retired(
             )
         except (ExecPolicyUnavailable, OSError, ValueError):
             continue
-        why = _native_retire_reason(verdict, root, package_info, policy)
+        why = _native_retire_reason(
+            verdict, root, package_info, policy, transitive=(dep.depth or 1) > 1
+        )
         if why is not None:
             retired[key] = why
     return retired
@@ -304,7 +314,15 @@ def refuse_disallowed_carried_native(ctx: Any, dep_key: str, package_info: Any) 
     if verdict is None:
         return
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
-    why = _native_retire_reason(verdict, Path(package_info.install_path), package_info, policy)
+    from apm_cli.install.plan_admission import _is_transitive
+
+    why = _native_retire_reason(
+        verdict,
+        Path(package_info.install_path),
+        package_info,
+        policy,
+        transitive=_is_transitive(package_info, ctx),
+    )
     if why is not None:
         command = "apm install --global" if is_user_scope(ctx.scope) else "apm install"
         raise ClaudeNativePluginError(
@@ -390,6 +408,7 @@ def plan_native_claude_plugin(
     skip_bin: bool,
     policy: Any = None,
     bin_denied: str | None = None,
+    transitive: bool = False,
 ) -> ClaudeNativePlugin | None:
     """Admit a complete, approved plugin without altering native selection.
 
@@ -454,7 +473,7 @@ def plan_native_claude_plugin(
     unsupported = _unsupported_capability(root, manifest)
     if unsupported is not None:
         return park(unsupported.why, unsupported.step, name, fingerprint)
-    violation = _mcp_policy_violation(root, manifest, policy)
+    violation = _mcp_policy_violation(root, manifest, policy, transitive=transitive)
     if violation is not None and getattr(policy, "enforcement", None) == "block":
         return park(
             violation,

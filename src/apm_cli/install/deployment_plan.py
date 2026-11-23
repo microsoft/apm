@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.core.scope import is_user_scope
 
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
+from .plan_admission import _is_transitive
 from .target_filter import log_package_target_restriction, resolve_effective_package_targets
 
 if TYPE_CHECKING:
@@ -196,6 +197,7 @@ def prepare_package_deployment(  # noqa: PLR0913
             skip_bin=resolve_bin_skip(True, trust_bin, non_interactive=not sys.stdout.isatty())[0],
             policy=org_policy,
             bin_denied=bin_deploy_denial(package_info, org_policy),
+            transitive=_is_transitive(package_info, ctx),
         )
     )
     projection_targets = PackageDeploymentPlan(

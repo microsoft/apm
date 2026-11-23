@@ -223,6 +223,30 @@ def test_a_direct_dependency_server_is_not_transitive(lifecycle_world) -> None:
     assert audit.returncode == 0, _text(audit)
 
 
+def test_a_root_redeclared_server_is_judged_as_a_direct_one(lifecycle_world) -> None:
+    """A root re-declaration is the project's own server: mcp.deny governs it, not 10b."""
+    parent, _child, name = _author(lifecycle_world, "registry")
+    manifest = lifecycle_world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data.setdefault("dependencies", {}).setdefault("mcp", []).append(name)
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    _transitive_policy(lifecycle_world, "redeclared", deny=[name])
+    result = driver.run(lifecycle_world, ["install", parent])
+    assert result.returncode == 1, _text(result)
+    assert "mcp-denylist" in _text(result), _text(result)
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME["registry"]), _text(result)
+
+
+def test_a_dry_run_previews_the_trust_transitive_refusal(lifecycle_world) -> None:
+    """--dry-run names the refused transitive server and writes nothing (#4455 convention)."""
+    parent, _child, name = _author(lifecycle_world, "registry")
+    _transitive_policy(lifecycle_world, "dry-run", trust_transitive=False)
+    result = driver.run(lifecycle_world, ["install", parent, "--dry-run"])
+    assert result.returncode == 0, _text(result)
+    assert f"Would be blocked by policy: {name}" in _text(result), _text(result)
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME["registry"]), _text(result)
+
+
 # Policy activation (regent ruling): an explicit ``trust_transitive: false`` counts
 # as set; a policy that states nothing keeps no enforcement; any other non-default
 # field makes the default ``false`` apply. Shown on the registry path.
