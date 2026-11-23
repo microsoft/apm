@@ -109,11 +109,16 @@ def _regular_bytes(path: Path) -> bytes | None:
 
 def _canonical_key(key: str) -> bool:
     """Whether *key* is an absolute POSIX-spelled path with no ``.``/``..``/empty parts."""
-    if not Path(key).is_absolute() or "\\" in key:
+    if not Path(key).is_absolute():
         return False
-    # The parsed Windows anchor ("C:", "//server/share") is stripped, so a UNC key is
-    # checked below its share like any drive-letter key.
-    rest = key[len(PureWindowsPath(key).drive) :]
+    if "\\" in key:
+        if os.name == "nt":
+            return False  # a Windows key is POSIX-spelled
+        rest = key  # on POSIX a backslash is a filename character
+    else:
+        # The parsed Windows anchor ("C:", "//server/share") is stripped, so a UNC key
+        # is checked below its share like any drive-letter key.
+        rest = key[len(PureWindowsPath(key).drive) :]
     if not rest.startswith("/"):
         return False
     return all(part not in ("", ".", "..") for part in rest[1:].split("/"))
@@ -172,7 +177,9 @@ class _Store:
             # costs no identity checks however many records the machine holds.
             for other, row in self.files.items():
                 try:
-                    if os.path.samefile(other, path):
+                    # A key that now resolves elsewhere passes through a link: its
+                    # record never transfers to the file that link reaches.
+                    if config_file_key(other) == other and os.path.samefile(other, path):
                         return other, row
                 except OSError:
                     continue
