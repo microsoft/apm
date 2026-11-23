@@ -526,3 +526,300 @@ def test_emptying_a_required_dev_dependencies_field_falls_back_to_the_admin(
 
     assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'") is advised
     assert bool(check.remediations) is advised
+
+
+def test_the_selector_follows_the_manifest_default_host(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """#5007: under default_host gitlab.com a bare acme/evil-pkg is not the GitHub entry."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    declared = "https://github.com/acme/evil-pkg"
+    root = _project(
+        tmp_path,
+        [declared],
+        [LockedDependency(repo_url="acme/evil-pkg", host="github.com", depth=1)],
+        default_host="gitlab.com",
+    )
+
+    check = _allowlist(root)
+
+    assert [r.to_json()["command"] for r in check.remediations] == [f"apm uninstall {declared}"]
+    monkeypatch.chdir(root)
+    removed = CliRunner().invoke(cli, ["uninstall", declared], catch_exceptions=False)
+    assert removed.exit_code == 0, removed.output
+    assert yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))["dependencies"] == {
+        "apm": []
+    }
+
+
+@pytest.mark.parametrize("linked", [True, False], ids=["final-symlink", "regular-file"])
+def test_a_final_symlink_uninstall_would_keep_withholds_the_advice_and_names_it(
+    tmp_path: Path, capsys, linked: bool
+) -> None:
+    """#5008: target cleanup refuses a final symlink, so uninstall is not suggested."""
+    import hashlib
+
+    deployed = ".github/instructions/evil.instructions.md"
+    content = b"---\napplyTo: '**'\n---\n# evil rules\n"
+    project = tmp_path / "proj"
+    project.mkdir()
+    target = project / deployed
+    target.parent.mkdir(parents=True)
+    if linked:
+        outside = tmp_path / "outside.md"
+        outside.write_bytes(content)
+        target.symlink_to(outside)
+    else:
+        target.write_bytes(content)
+    root = _project(
+        project,
+        ["acme/evil-pkg"],
+        [
+            LockedDependency(
+                repo_url="acme/evil-pkg",
+                depth=1,
+                deployed_files=[deployed],
+                deployed_file_hashes={deployed: "sha256:" + hashlib.sha256(content).hexdigest()},
+            )
+        ],
+    )
+    if not linked:
+        from tests.utils.deployment_evidence import seed_receipts
+
+        # The receipt install would have written: the regular file is provably APM's.
+        seed_receipts(root, [target], target="copilot", owner="acme/evil-pkg")
+
+    check = _allowlist(root)
+
+    line = _stderr(capsys, check)[2]
+    if linked:
+        assert check.remediations == ()
+        assert line.startswith("    Ask your org admin to allow it"), line
+        assert f"{deployed} is a symbolic link" in line, line
+    else:
+        assert [r.to_json()["command"] for r in check.remediations] == [
+            "apm uninstall acme/evil-pkg"
+        ], line
+
+
+def _symlinked_claim(root: Path, deployed: str, link_to: Path) -> None:
+    target = root / deployed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    link_to.parent.mkdir(parents=True, exist_ok=True)
+    link_to.write_text("# rules\n", encoding="utf-8")
+    target.symlink_to(link_to)
+
+
+def test_a_final_symlink_inside_the_project_also_withholds_the_advice(
+    tmp_path: Path, capsys
+) -> None:
+    """#5008: cleanup keeps an in-project link it holds no evidence for, so no uninstall."""
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+    )
+    _symlinked_claim(root, deployed, root / "docs" / "rules.md")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert f"{deployed} is a symbolic link" in _stderr(capsys, check)[2]
+
+
+def test_a_final_symlink_a_survivor_still_claims_keeps_the_advice(tmp_path: Path, capsys) -> None:
+    """#5008: a path a surviving dependency also claims is kept, not deleted."""
+    deployed = ".github/instructions/shared.instructions.md"
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [
+            LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed]),
+            LockedDependency(repo_url="contoso/keep", depth=1, deployed_files=[deployed]),
+        ],
+    )
+    _symlinked_claim(root, deployed, tmp_path / "outside.md")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg' to remove")
+
+
+def _uninstall_exit_code(root: Path, monkeypatch) -> int:
+    """Run the advised ``apm uninstall`` for real, so the advice is checked against it."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    monkeypatch.chdir(root)
+    return CliRunner().invoke(cli, ["uninstall", "acme/evil-pkg"]).exit_code
+
+
+@pytest.mark.parametrize(
+    ("deployed", "dangling", "exit_code"),
+    [
+        (".github/instructions/evil.instructions.md", True, 0),
+        (".github/hooks/evil.json", False, 1),
+    ],
+    ids=["dangling-in-project-link-keeps-advice", "hook-link-withholds-advice"],
+)
+def test_the_advice_follows_whether_uninstall_removes_a_final_symlink(
+    tmp_path: Path, capsys, monkeypatch, deployed: str, dangling: bool, exit_code: int
+) -> None:
+    """#5035: cleanup counts a dangling in-project link as gone, but keeps a live hook link."""
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+        targets=["copilot"],
+    )
+    if dangling:
+        (root / deployed).parent.mkdir(parents=True)
+        (root / deployed).symlink_to(root / "docs" / "missing.md")
+    else:
+        _symlinked_claim(root, deployed, tmp_path / "outside.json")
+
+    check = _allowlist(root)
+
+    advised = [r.to_json()["command"] for r in check.remediations]
+    assert advised == (["apm uninstall acme/evil-pkg"] if exit_code == 0 else [])
+    if exit_code:
+        assert f"{deployed} is a symbolic link" in _stderr(capsys, check)[2]
+    assert _uninstall_exit_code(root, monkeypatch) == exit_code
+
+
+def test_a_final_symlink_a_survivor_shrink_retires_withholds_the_advice_and_names_it(
+    tmp_path: Path, capsys
+) -> None:
+    """#5035: a link at a path a shrinking survivor selection retires is checked too."""
+    skills = [".agents/skills/alpha", ".agents/skills/beta"]
+    files = [f"{skill}/SKILL.md" for skill in skills]
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        skill_subset=["alpha", "beta"],
+        deployed_files=[*skills, *files],
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "skills": ["beta"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "skills": ["alpha"]}],
+        },
+    )
+    (root / skills[0]).mkdir(parents=True)
+    (root / files[0]).write_text("# alpha\n", encoding="utf-8")
+    _symlinked_claim(root, files[1], tmp_path / "outside.md")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert f"{files[1]} is a symbolic link" in _stderr(capsys, check)[2]
+
+
+def test_a_looping_final_symlink_falls_back_to_the_admin(tmp_path: Path, capsys) -> None:
+    """#5035: a link that points at itself cannot be proven handled; the audit still reports."""
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+    )
+    (root / deployed).parent.mkdir(parents=True)
+    (root / deployed).symlink_to(root / deployed)
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+
+
+def test_a_hook_link_a_survivor_target_shrink_retires_keeps_the_advice(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """#5035: the hook sync unlinks an unhashed hook link a shrinking survivor retires."""
+    deployed = ".github/hooks/bundle.json"
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        target_subset=["claude", "copilot"],
+        deployed_files=[deployed],
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "targets": ["copilot"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "targets": ["claude"]}],
+        },
+        targets=["copilot", "claude"],
+    )
+    _symlinked_claim(root, deployed, tmp_path / "outside.json")
+    for survivor in ("contoso/keep", "contoso/bundle"):
+        rules = root / "apm_modules" / survivor / ".apm/instructions/x.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text("---\napplyTo: '**'\n---\n# x\n", encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert [r.to_json()["command"] for r in check.remediations] == ["apm uninstall acme/evil-pkg"]
+    assert _uninstall_exit_code(root, monkeypatch) == 0
+    assert not (root / deployed).is_symlink()
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["live-link", "dangling-link"])
+def test_a_retired_hook_link_with_only_a_ledger_hash_withholds_the_advice(
+    tmp_path: Path, dangling: bool
+) -> None:
+    """#5035: the hook sync keeps a link whose canonical ledger row records a hash,
+    dangling or not: it never counts a hook link as already gone."""
+    deployed = ".github/hooks/bundle.json"
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        target_subset=["claude", "copilot"],
+        deployed_files=[deployed],
+        deployed_file_hashes={deployed: "sha256:" + "0" * 64},
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "targets": ["copilot"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "targets": ["claude"]}],
+        },
+        targets=["copilot", "claude"],
+    )
+    lock_path = root / "apm.lock.yaml"
+    data = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    assert any(row.get("content_hash") for row in data["deployments"]), data
+    for row in data["dependencies"]:
+        row.pop("deployed_file_hashes", None)
+    lock_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    if dangling:
+        (root / deployed).parent.mkdir(parents=True)
+        (root / deployed).symlink_to(root / "docs" / "missing.json")
+    else:
+        _symlinked_claim(root, deployed, tmp_path / "outside.json")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()

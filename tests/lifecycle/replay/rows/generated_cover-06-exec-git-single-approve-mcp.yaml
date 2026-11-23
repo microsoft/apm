@@ -37,7 +37,6 @@ when:
   - pair|OP=pack|GATE=revoked-after-deploy
 - run: apm uninstall p-exec --dry-run
   cells:
-  - T1|OP=uninstall|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=uninstall|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=uninstall|PRIM=mcp|GATE=revoked-after-deploy
   - pair|OP=uninstall|GATE=revoked-after-deploy

@@ -698,6 +698,14 @@ failing pytest node ids from the failed jobs' logs and subtracts the
 publishes the run's own `train-failures.json`. A cancelled job, or a failure
 without node ids, is never excused.
 
+Strict known cells must cite open issues. Pull requests check the committed
+snapshot (`tests/quality/known_cell_issue_states.json`) only. A train's `guard`
+checks the live GitHub state, fail-closed. Every `main` push and a daily run
+check it in `.github/workflows/known-cells-live.yml`, outside the main push gate:
+a failure there is a ledger-state red (an issue changed state), not a code red,
+and opens one tracking issue. An API outage or a closed issue never reds open
+pull requests.
+
 Queue refs are real branches: only write-access users can push them, and every
 job tests the triggering commit. Train jobs restore caches (including `main`'s)
 read-only and never save one. After `train-gate` reports, the `cleanup` job

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import time
@@ -84,7 +85,40 @@ class ApmLifecycleRunner:
             budget_seconds=self._timeout_seconds,
         )
         _check_output(args, result, scenario_id=scenario_id, env=env)
+        self._check_audit_parity(
+            args,
+            result,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=self._timeout_seconds,
+            scenario_id=scenario_id,
+            budget_seconds=self._timeout_seconds,
+        )
         return result
+
+    def _check_audit_parity(
+        self,
+        args: Sequence[str],
+        result: CommandResult,
+        *,
+        cwd: Path,
+        env: Mapping[str, str],
+        timeout_seconds: float,
+        scenario_id: str,
+        budget_seconds: float,
+    ) -> None:
+        """Replay a read-only ``apm audit`` with records off; both must agree (#4940)."""
+        if not _audit_parity_applies(args, env):
+            return
+        live = self._run_with_timeout(
+            args,
+            cwd=cwd,
+            env={**env, _RECORDS_SWITCH: "0"},
+            timeout_seconds=timeout_seconds,
+            scenario_id=scenario_id,
+            budget_seconds=budget_seconds,
+        )
+        _assert_audit_parity(result, live)
 
     def _run_with_timeout(
         self,
@@ -169,6 +203,15 @@ class ApmLifecycleRunner:
             )
             results.append(result)
             _check_output(command, result, scenario_id=scenario_id, env=env)
+            self._check_audit_parity(
+                command,
+                result,
+                cwd=cwd,
+                env=env,
+                timeout_seconds=max(deadline - time.monotonic(), 1.0),
+                scenario_id=scenario_id,
+                budget_seconds=self._scenario_timeout_seconds,
+            )
             if result.returncode != expected_returncode:
                 raise AssertionError(
                     _unexpected_result_evidence(
@@ -178,6 +221,59 @@ class ApmLifecycleRunner:
                     )
                 )
         return tuple(results)
+
+
+# Drift replay served from render records must never change an audit (#4940):
+# every read-only ``apm audit`` a lifecycle test runs is replayed fully live too.
+_RECORDS_SWITCH = "APM_AUDIT_RECORDS"
+_RECORDS_SUMMARY = re.compile(r"^\[i\] drift replay(?: peak memory)?: .*\n?", re.M)
+# Flags that write: a second run would read what the first one wrote.
+_MUTATING_AUDIT_FLAGS = frozenset({"--strip", "--output", "-o"})
+
+
+def _writes(arg: str) -> bool:
+    if arg in _MUTATING_AUDIT_FLAGS or arg.startswith("--output="):
+        return True
+    return arg.startswith("-o") and not arg.startswith("--")
+
+
+def _audit_parity_applies(args: Sequence[str], env: Mapping[str, str]) -> bool:
+    return (
+        bool(args)
+        and args[0] == "audit"
+        and _RECORDS_SWITCH not in env
+        and not any(_writes(arg) for arg in args[1:])
+    )
+
+
+# Per-run noise: fresh temp and replay scratch directory names.
+_TEMP_NAME = re.compile(r"\b(?:tmp|apm_drift_)[A-Za-z0-9_]{8}\b")
+
+
+def _without_temp_names(text: str) -> str:
+    return _TEMP_NAME.sub("tmpXXXXXXXX", text)
+
+
+def _diagnostics(stderr: str) -> list[str]:
+    """The status-symbol lines of *stderr*, without the served/live summary."""
+    return [
+        _without_temp_names(line)
+        for line in _RECORDS_SUMMARY.sub("", stderr).splitlines()
+        if line.startswith("[")
+    ]
+
+
+def _assert_audit_parity(served: CommandResult, live: CommandResult) -> None:
+    pairs = (
+        ("exit", served.returncode, live.returncode),
+        ("stdout", _without_temp_names(served.stdout), _without_temp_names(live.stdout)),
+        ("diagnostics", _diagnostics(served.stderr), _diagnostics(live.stderr)),
+    )
+    for name, with_records, without in pairs:
+        assert with_records == without, (
+            f"audit {name} differs with render records on vs off (#4940)\n"
+            f"command={served.command!r}\nrecords={with_records!r}\nlive={without!r}"
+        )
 
 
 def _check_output(

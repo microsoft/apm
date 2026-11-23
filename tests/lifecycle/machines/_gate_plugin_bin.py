@@ -98,7 +98,9 @@ class GatePluginBin(StepRunner):
         self.credited.add(cell)
         requested = self._requested(op)
         if not self.dry:
-            fields: dict[str, object] = {"mutating": op != "marketplace"}
+            fields: dict[str, object] = {"mutating": op not in ("marketplace", "audit-ci")}
+            if op == "audit-ci":
+                fields["read_only"] = True
             if op == "marketplace":
                 fields.update(forbidden={"project": ("*",), "outside": ("*",)}, allowed={})
             step = self.step(
@@ -252,8 +254,10 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     """Deploy the plugin whole, then let prune retire it at each gate level."""
     install = ("install", "--trust-bin")
     machine.setup()
-    # none: an orphaned plugin is pruned whole.
+    # none: audit --ci replays the deployed root, bin/ included, and changes nothing;
+    # then an orphaned plugin is pruned whole.
     machine.run("install", *install, machine.spec())
+    machine.run("audit-ci", "audit", "--ci")
     machine.undeclare()
     machine.run("prune", "prune", retires=True)
     # unapproved-exec: the gate turns on over a plugin deployed with it off.

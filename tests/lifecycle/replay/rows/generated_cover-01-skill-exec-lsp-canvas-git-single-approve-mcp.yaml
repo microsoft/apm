@@ -146,13 +146,11 @@ given:
   - .github/extensions
 - run: apm install p-skill p-exec p-lsp p-canvas
   cells:
-  - T1|OP=install|PRIM=bin|GATE=unapproved-exec
   - T1|OP=install|PRIM=canvas|GATE=unapproved-exec
   - T1|OP=install|PRIM=hook|GATE=unapproved-exec
   - T1|OP=install|PRIM=lsp|GATE=unapproved-exec
   - T1|OP=install|PRIM=mcp|GATE=unapproved-exec
   - T1|OP=install|PRIM=skill|GATE=none
-  - T3|OP=install|SRC=git|PRIM=bin
   - T3|OP=install|SRC=git|PRIM=hook
   - T3|OP=install|SRC=git|PRIM=mcp
   - T3|OP=install|SRC=git|PRIM=skill
@@ -173,7 +171,6 @@ given:
   - pair|NET=online|SELECT=on
   - pair|OP=install|GATE=none
   - pair|OP=install|GATE=unapproved-exec
-  - pair|OP=install|PRIM=bin
   - pair|OP=install|PRIM=canvas
   - pair|OP=install|PRIM=hook
   - pair|OP=install|PRIM=lsp
@@ -182,12 +179,6 @@ given:
   - pair|OP=install|SELECT=on
   - pair|OP=install|SRC=git
   - pair|OP=install|SRC=local-path
-  - pair|PRIM=bin|DEPLOYED=absent
-  - pair|PRIM=bin|GATE=unapproved-exec
-  - pair|PRIM=bin|LOCK=absent
-  - pair|PRIM=bin|NET=online
-  - pair|PRIM=bin|SELECT=on
-  - pair|PRIM=bin|TGT=single-unchanged
   - pair|PRIM=canvas|DEPLOYED=absent
   - pair|PRIM=canvas|GATE=unapproved-exec
   - pair|PRIM=canvas|LOCK=absent
@@ -226,7 +217,6 @@ given:
   - pair|SRC=git|GATE=unapproved-exec
   - pair|SRC=git|LOCK=absent
   - pair|SRC=git|NET=online
-  - pair|SRC=git|PRIM=bin
   - pair|SRC=git|PRIM=hook
   - pair|SRC=git|PRIM=mcp
   - pair|SRC=git|PRIM=skill
@@ -246,12 +236,10 @@ given:
 when:
 - run: apm approve p-exec p-lsp p-canvas
   cells:
-  - T1|OP=approve-deny|PRIM=bin|GATE=unapproved-exec
   - T1|OP=approve-deny|PRIM=canvas|GATE=unapproved-exec
   - T1|OP=approve-deny|PRIM=hook|GATE=unapproved-exec
   - T1|OP=approve-deny|PRIM=lsp|GATE=unapproved-exec
   - T1|OP=approve-deny|PRIM=mcp|GATE=unapproved-exec
-  - T3|OP=approve-deny|SRC=git|PRIM=bin
   - T3|OP=approve-deny|SRC=git|PRIM=hook
   - T3|OP=approve-deny|SRC=git|PRIM=mcp
   - T3|OP=approve-deny|SRC=local-path|PRIM=canvas
@@ -269,7 +257,6 @@ when:
   - pair|OP=approve-deny|DEPLOYED=clean
   - pair|OP=approve-deny|GATE=unapproved-exec
   - pair|OP=approve-deny|LOCK=consistent
-  - pair|OP=approve-deny|PRIM=bin
   - pair|OP=approve-deny|PRIM=canvas
   - pair|OP=approve-deny|PRIM=hook
   - pair|OP=approve-deny|PRIM=lsp
@@ -277,8 +264,6 @@ when:
   - pair|OP=approve-deny|SELECT=on
   - pair|OP=approve-deny|SRC=git
   - pair|OP=approve-deny|SRC=local-path
-  - pair|PRIM=bin|DEPLOYED=clean
-  - pair|PRIM=bin|LOCK=consistent
   - pair|PRIM=canvas|DEPLOYED=clean
   - pair|PRIM=canvas|LOCK=consistent
   - pair|PRIM=hook|DEPLOYED=clean
@@ -295,7 +280,6 @@ when:
   - pair|SRC=local-path|LOCK=consistent
 - run: apm install
   cells:
-  - T1|OP=install|PRIM=bin|GATE=allowed
   - T1|OP=install|PRIM=canvas|GATE=allowed
   - T1|OP=install|PRIM=hook|GATE=allowed
   - T1|OP=install|PRIM=lsp|GATE=allowed
@@ -310,7 +294,6 @@ when:
   - pair|OP=install|DEPLOYED=clean
   - pair|OP=install|GATE=allowed
   - pair|OP=install|LOCK=consistent
-  - pair|PRIM=bin|GATE=allowed
   - pair|PRIM=canvas|GATE=allowed
   - pair|PRIM=hook|GATE=allowed
   - pair|PRIM=lsp|GATE=allowed
@@ -329,7 +312,6 @@ when:
   - pair|GATE=none|DRYRUN=on
   - pair|LOCK=consistent|DRYRUN=on
   - pair|OP=install|DRYRUN=on
-  - pair|PRIM=bin|DRYRUN=on
   - pair|PRIM=canvas|DRYRUN=on
   - pair|PRIM=hook|DRYRUN=on
   - pair|PRIM=lsp|DRYRUN=on
@@ -344,7 +326,6 @@ when:
   - pair|LOCK=consistent|FORCE=on
   - pair|NET=online|FORCE=on
   - pair|OP=install|FORCE=on
-  - pair|PRIM=bin|FORCE=on
   - pair|PRIM=canvas|FORCE=on
   - pair|PRIM=hook|FORCE=on
   - pair|PRIM=lsp|FORCE=on
@@ -362,7 +343,6 @@ when:
   - pair|LOCK=consistent|UPDATE=on
   - pair|NET=online|UPDATE=on
   - pair|OP=install|UPDATE=on
-  - pair|PRIM=bin|UPDATE=on
   - pair|PRIM=canvas|UPDATE=on
   - pair|PRIM=hook|UPDATE=on
   - pair|PRIM=lsp|UPDATE=on
@@ -380,7 +360,6 @@ when:
   - pair|LOCK=consistent|NOPOLICY=on
   - pair|NET=online|NOPOLICY=on
   - pair|OP=install|NOPOLICY=on
-  - pair|PRIM=bin|NOPOLICY=on
   - pair|PRIM=canvas|NOPOLICY=on
   - pair|PRIM=hook|NOPOLICY=on
   - pair|PRIM=lsp|NOPOLICY=on
@@ -401,7 +380,6 @@ when:
   - pair|GATE=allowed|FROZEN=on
   - pair|GATE=none|FROZEN=on
   - pair|LOCK=consistent|FROZEN=on
-  - pair|PRIM=bin|FROZEN=on
   - pair|PRIM=canvas|FROZEN=on
   - pair|PRIM=hook|FROZEN=on
   - pair|PRIM=lsp|FROZEN=on
@@ -435,13 +413,11 @@ when:
   - pair|UPDATE=on|NOPOLICY=on
 - run: apm update --dry-run
   cells:
-  - T1|OP=update|PRIM=bin|GATE=allowed
   - T1|OP=update|PRIM=canvas|GATE=allowed
   - T1|OP=update|PRIM=hook|GATE=allowed
   - T1|OP=update|PRIM=lsp|GATE=allowed
   - T1|OP=update|PRIM=mcp|GATE=allowed
   - T1|OP=update|PRIM=skill|GATE=none
-  - T3|OP=update|SRC=git|PRIM=bin
   - T3|OP=update|SRC=git|PRIM=hook
   - T3|OP=update|SRC=git|PRIM=mcp
   - T3|OP=update|SRC=git|PRIM=skill
@@ -454,7 +430,6 @@ when:
   - pair|OP=update|GATE=allowed
   - pair|OP=update|GATE=none
   - pair|OP=update|LOCK=consistent
-  - pair|OP=update|PRIM=bin
   - pair|OP=update|PRIM=canvas
   - pair|OP=update|PRIM=hook
   - pair|OP=update|PRIM=lsp
@@ -470,10 +445,8 @@ when:
   - pair|OP=update|FORCE=on
 - run: apm compile --dry-run
   cells:
-  - T1|OP=compile|PRIM=bin|GATE=allowed
   - T1|OP=compile|PRIM=canvas|GATE=allowed
   - T1|OP=compile|PRIM=skill|GATE=none
-  - T3|OP=compile|SRC=git|PRIM=bin
   - T3|OP=compile|SRC=git|PRIM=skill
   - T3|OP=compile|SRC=local-path|PRIM=canvas
   - T4|OP=compile|SCOPE=project|LOCK=consistent
@@ -483,7 +456,6 @@ when:
   - pair|OP=compile|GATE=allowed
   - pair|OP=compile|GATE=none
   - pair|OP=compile|LOCK=consistent
-  - pair|OP=compile|PRIM=bin
   - pair|OP=compile|PRIM=canvas
   - pair|OP=compile|PRIM=skill
   - pair|OP=compile|SRC=git
@@ -503,13 +475,11 @@ when:
   - rule|U10|compile-validate-reads-mcp
 - run: apm lock
   cells:
-  - T1|OP=lock|PRIM=bin|GATE=allowed
   - T1|OP=lock|PRIM=canvas|GATE=allowed
   - T1|OP=lock|PRIM=hook|GATE=allowed
   - T1|OP=lock|PRIM=lsp|GATE=allowed
   - T1|OP=lock|PRIM=mcp|GATE=allowed
   - T1|OP=lock|PRIM=skill|GATE=none
-  - T3|OP=lock|SRC=git|PRIM=bin
   - T3|OP=lock|SRC=git|PRIM=hook
   - T3|OP=lock|SRC=git|PRIM=mcp
   - T3|OP=lock|SRC=git|PRIM=skill
@@ -521,7 +491,6 @@ when:
   - pair|OP=lock|GATE=none
   - pair|OP=lock|LOCK=consistent
   - pair|OP=lock|NET=online
-  - pair|OP=lock|PRIM=bin
   - pair|OP=lock|PRIM=canvas
   - pair|OP=lock|PRIM=hook
   - pair|OP=lock|PRIM=lsp
@@ -542,13 +511,11 @@ when:
   - pair|OP=lock|SELECT=on
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=allowed
   - T1|OP=audit|PRIM=canvas|GATE=allowed
   - T1|OP=audit|PRIM=hook|GATE=allowed
   - T1|OP=audit|PRIM=lsp|GATE=allowed
   - T1|OP=audit|PRIM=mcp|GATE=allowed
   - T1|OP=audit|PRIM=skill|GATE=none
-  - T3|OP=audit|SRC=git|PRIM=bin
   - T3|OP=audit|SRC=git|PRIM=hook
   - T3|OP=audit|SRC=git|PRIM=mcp
   - T3|OP=audit|SRC=git|PRIM=skill
@@ -559,7 +526,6 @@ when:
   - pair|OP=audit|GATE=allowed
   - pair|OP=audit|GATE=none
   - pair|OP=audit|LOCK=consistent
-  - pair|OP=audit|PRIM=bin
   - pair|OP=audit|PRIM=canvas
   - pair|OP=audit|PRIM=hook
   - pair|OP=audit|PRIM=lsp
@@ -580,7 +546,6 @@ when:
   - pair|OP=audit|SELECT=on
 - run: apm approve --list
   cells:
-  - T1|OP=approve-deny|PRIM=bin|GATE=allowed
   - T1|OP=approve-deny|PRIM=canvas|GATE=allowed
   - T1|OP=approve-deny|PRIM=hook|GATE=allowed
   - T1|OP=approve-deny|PRIM=lsp|GATE=allowed
@@ -598,7 +563,6 @@ when:
   - T4|OP=mcp-install|SCOPE=project|LOCK=consistent
   - pair|OP=mcp-install|DEPLOYED=clean
   - pair|OP=mcp-install|LOCK=consistent
-  - pair|OP=mcp-install|PRIM=bin
   - pair|OP=mcp-install|PRIM=canvas
   - pair|OP=mcp-install|PRIM=hook
   - pair|OP=mcp-install|PRIM=lsp
@@ -640,7 +604,6 @@ when:
 - apm deny p-exec p-lsp p-canvas
 - run: apm install
   cells:
-  - T1|OP=install|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=install|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=install|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=install|PRIM=lsp|GATE=revoked-after-deploy
@@ -650,7 +613,6 @@ when:
   - pair|GATE=revoked-after-deploy|TGT=single-unchanged
   - pair|LOCK=consistent|GATE=revoked-after-deploy
   - pair|OP=install|GATE=revoked-after-deploy
-  - pair|PRIM=bin|GATE=revoked-after-deploy
   - pair|PRIM=canvas|GATE=revoked-after-deploy
   - pair|PRIM=hook|GATE=revoked-after-deploy
   - pair|PRIM=lsp|GATE=revoked-after-deploy
@@ -679,7 +641,6 @@ when:
   - pair|GATE=revoked-after-deploy|FROZEN=on
 - run: apm update --dry-run
   cells:
-  - T1|OP=update|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=update|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=update|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=update|PRIM=lsp|GATE=revoked-after-deploy
@@ -687,12 +648,10 @@ when:
   - pair|OP=update|GATE=revoked-after-deploy
 - run: apm compile --dry-run
   cells:
-  - T1|OP=compile|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=compile|PRIM=canvas|GATE=revoked-after-deploy
   - pair|OP=compile|GATE=revoked-after-deploy
 - run: apm lock
   cells:
-  - T1|OP=lock|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=lock|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=lock|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=lock|PRIM=lsp|GATE=revoked-after-deploy
@@ -700,7 +659,6 @@ when:
   - pair|OP=lock|GATE=revoked-after-deploy
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=audit|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=audit|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=audit|PRIM=lsp|GATE=revoked-after-deploy
@@ -708,7 +666,6 @@ when:
   - pair|OP=audit|GATE=revoked-after-deploy
 - run: apm approve --list
   cells:
-  - T1|OP=approve-deny|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=approve-deny|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=approve-deny|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=approve-deny|PRIM=lsp|GATE=revoked-after-deploy
@@ -718,13 +675,11 @@ when:
   - '*'
 - run: apm prune --dry-run
   cells:
-  - T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=lsp|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=mcp|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=skill|GATE=none
-  - T3|OP=prune|SRC=git|PRIM=bin
   - T3|OP=prune|SRC=git|PRIM=hook
   - T3|OP=prune|SRC=git|PRIM=mcp
   - T3|OP=prune|SRC=git|PRIM=skill
@@ -737,7 +692,6 @@ when:
   - pair|OP=prune|GATE=none
   - pair|OP=prune|GATE=revoked-after-deploy
   - pair|OP=prune|LOCK=consistent
-  - pair|OP=prune|PRIM=bin
   - pair|OP=prune|PRIM=canvas
   - pair|OP=prune|PRIM=hook
   - pair|OP=prune|PRIM=lsp

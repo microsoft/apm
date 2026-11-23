@@ -827,3 +827,22 @@ def test_a_users_config_under_a_non_utf8_directory_name_keeps_its_record(
     assert config_file_origin(config) is Origin.PREEXISTING
     assert _apm_empties(config, root=project) is False
     assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_a_record_turned_into_a_symlink_loop_never_breaks_another_lookup(
+    tmp_path, apm_home
+) -> None:
+    """Project A's recorded config becoming a link loop leaves project B's lookup alone."""
+    recorded = tmp_path / "a" / ".mcp.json"
+    _apm_writes(recorded, _WITH_ENTRY)
+    recorded.unlink()
+    try:
+        recorded.symlink_to(recorded)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    other = tmp_path / "b" / ".mcp.json"
+    other.parent.mkdir(parents=True)
+    other.write_text(_WITH_ENTRY, encoding="utf-8")
+
+    assert config_file_origin(other) is not Origin.CREATED
+    assert recorded.is_symlink() and other.read_text(encoding="utf-8") == _WITH_ENTRY

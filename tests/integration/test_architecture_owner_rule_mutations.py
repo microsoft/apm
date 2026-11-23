@@ -40,6 +40,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.architecture_linter.diagnostics import render_violations_and_failures
 from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.registry import load_registry
@@ -185,6 +186,18 @@ def test_archive_member_reads_cannot_bypass_the_limits_owner(
             "lock.dependencies[_SELF_KEY] = lock.project_self_entry()",
             'lock.dependencies[_SELF_KEY] = LockedDependency(repo_url="<self>", local_path=".")',
             id="load-inline-self-entry",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift_records.py",
+            "        served = served_outputs(\n",
+            "        served = _served_without_owner(\n",
+            id="records-serve-without-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift_records.py",
+            "        not is_external_url(match.group(2))\n",
+            '        not match.group(2).startswith("http")\n',
+            id="records-link-rule-without-owner",
         ),
     ],
 )
@@ -989,6 +1002,25 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "from apm_cli.integration.write_seam import private_scratch\n",
             id="scratch-imported-directly",
         ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                    write_seam.copy2(src, dest)\n",
+            "                    shutil.copy2(src, dest, follow_symlinks=False)\n",
+            id="bundle-raw-copy",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                    write_seam.write_text_lf(dest, normalized_text)\n",
+            "                    from apm_cli.utils.atomic_io import write_text_lf\n\n"
+            "                    write_text_lf(dest, normalized_text)\n",
+            id="bundle-raw-helper",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "(journaled_local_bundle(_install_lb))(",
+            "(_install_lb)(",
+            id="bundle-entry-unjournaled",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
@@ -1028,6 +1060,47 @@ def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
     assert report.failures == ()
     assert {violation.rule_id for violation in report.violations} == {rule_id}
     assert {violation.path for violation in report.violations} == {path}
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "        if not install_path.is_dir() or local_source_matches_copy(\n",
+            "        if not install_path.is_dir() or current == compute_local_package_hash(\n",
+            id="survivor-refresh-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/local_reanchor.py",
+            "            and local_source_matches_copy(row, source, copy)\n",
+            "            and compute_local_package_hash(source, framed=True)\n",
+            id="reanchor-fresh-copy-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/local_reanchor.py",
+            "            if copy.is_dir() and not local_source_matches_copy(row, source, copy):\n",
+            "            if copy.is_dir() and not compute_local_package_hash(source, framed=True):\n",
+            id="reanchor-refresh-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/local_content.py",
+            "            _normalize_legacy_local_plugin_for_replay(lock_dep, image)\n",
+            "            pass\n",
+            id="source-compare-skips-normalization",
+        ),
+    ],
+)
+def test_local_source_compare_cannot_bypass_the_normalizing_owner(
+    path: str, old: str, new: str
+) -> None:
+    """#5049: uninstall judges a local source against its copy through one normalizing owner."""
+    rule_id = "install-deployment-single-file-materialization"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 @pytest.mark.parametrize(
@@ -1314,8 +1387,8 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hook_trust.py",
-            '    _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))\n',
-            "",
+            "    kept, unwritten = _retire_per_file(project_root, targets, item)\n",
+            "    kept, unwritten = set(), set()\n",
         ),
         (
             "install-deployment-local-bundle-hook-trust",
@@ -1328,6 +1401,18 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "src/apm_cli/install/local_bundle_hook_trust.py",
             "        elif not all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys):\n",
             "        elif False:\n",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "        Path(hook_scripts_parent(target.name, target.root_dir)).as_posix()",
+            '        Path(target.root_dir, "hooks").as_posix()',
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/integration/hook_integrator.py",
+            "        scripts_base = hook_scripts_parent(target, root_dir or default_root) + package_name\n",
+            '        scripts_base = f"{root_dir or default_root}/hooks/{package_name}"\n',
         ),
         (
             "install-deployment-local-bundle-hook-trust",
@@ -3189,6 +3274,66 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A trust reader drops the policy discovery outcome and keeps only .policy.",
     ),
     MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="if not absence_proven(Path(deploy_root), path, pinned=root_pin)",
+        new="if Path(deploy_root, path).exists()",
+        intent="An aborted uninstall sync probes the file itself, following a swapped link.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-access",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="if not absence_proven(Path(deploy_root), path, pinned=root_pin)",
+        new=(
+            "if os.access(Path(deploy_root, path), os.F_OK)"
+            " or not absence_proven(Path(deploy_root), path, pinned=root_pin)"
+        ),
+        intent="The absence decision consults os.access beside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-binding",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="from .hook_absence import absence_proven, root_identity\n",
+        new=(
+            "from os.path import exists as absence_proven\n"
+            "\n"
+            "from .hook_absence import root_identity\n"
+        ),
+        intent="absence_proven is rebound to a plain path probe under the same spelling.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-child-no-follow",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/hook_absence.py",
+        old="os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)",
+        new="os.open(part, os.O_RDONLY | os.O_DIRECTORY, dir_fd=handle)",
+        intent="The walk below the root follows a parent swapped for a link.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-helper",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="    failed = list(integration_cleanup.failed_paths)\n",
+        new=(
+            "    def _gone(target):\n"
+            "        return not Path(target).exists()\n"
+            "\n"
+            "    failed = [p for p in integration_cleanup.failed_paths if not _gone(p)]\n"
+        ),
+        intent="A local helper wrapping Path.exists decides absence beside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-moved-pin",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="(deploy_root, manifest_path.parent, root_pin)",
+        new="(deploy_root, manifest_path.parent, root_identity(deploy_root))",
+        intent="The root is pinned again after the sync, so a replaced root is trusted.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-preflight",
         rule_id="install-deployment-uninstall-preflight",
         path="src/apm_cli/commands/uninstall/cli.py",
@@ -4245,6 +4390,43 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Update discards resolver-provided retained revision pins.",
     ),
     MutationCase(
+        guard_id="transport-platform-rmtree-callback-fallback-attempt",
+        rule_id="transport-platform-rmtree-callback-no-follow-chmod",
+        path="src/apm_cli/utils/file_ops.py",
+        old="os.chmod(path, stat.S_IWRITE, follow_symlinks=False)",
+        new="os.lstat(path)",
+        intent="A plain chmod sits in a NotImplementedError handler with no no-follow attempt.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-rmtree-callback-fallback-follow",
+        rule_id="transport-platform-rmtree-callback-no-follow-chmod",
+        path="src/apm_cli/utils/file_ops.py",
+        old="os.chmod(path, stat.S_IWRITE)\n",
+        new="os.chmod(path, stat.S_IWRITE, follow_symlinks=True)\n",
+        intent="The no-follow fallback asks chmod to follow a link.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-rmtree-callback-fallback-nested",
+        rule_id="transport-platform-rmtree-callback-no-follow-chmod",
+        path="src/apm_cli/utils/file_ops.py",
+        old="            os.chmod(path, stat.S_IWRITE, follow_symlinks=False)\n",
+        new=(
+            "            try:\n"
+            "                os.chmod(path, stat.S_IWRITE, follow_symlinks=False)\n"
+            "            except NotImplementedError:\n"
+            "                pass\n"
+        ),
+        intent="An inner handler consumes the no-follow attempt, so the outer fallback follows.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-rmtree-callback-no-follow-chmod",
+        rule_id="transport-platform-rmtree-callback-no-follow-chmod",
+        path="src/apm_cli/utils/file_ops.py",
+        old="os.chmod(path, stat.S_IWRITE, follow_symlinks=False)",
+        new="os.chmod(path, stat.S_IWRITE)",
+        intent="The rmtree read-only callback changes a mode through a link again.",
+    ),
+    MutationCase(
         guard_id="transport-platform-self-update-resolution",
         rule_id="transport-platform-self-update-resolution",
         path="src/apm_cli/commands/self_update.py",
@@ -4594,6 +4776,377 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
         new='        argv: list[str] = ["git", *inert_git_args(), *args]\n        return subprocess.run(\n            argv,',
         intent="The lock evidence probe holds a bare git name in an annotated local argv.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import functools\n\n        return functools.partial(subprocess.run, executable="git")(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches through functools.partial with a literal executable.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        from asyncio import create_subprocess_exec as spawn\n\n        spawn("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through a from-imported asyncio alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import asyncio as aio\n\n        aio.create_subprocess_exec("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through an aliased asyncio module.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import functools\n\n        return functools.partial(subprocess.run, ["git", *inert_git_args()])(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe binds a bare git argv into functools.partial.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import functools\n\n        return functools.partial(subprocess.run, args=["git", *inert_git_args()])(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe binds a bare git argv as the args keyword of functools.partial.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        launcher = subprocess.run\n        return launcher(\n            ["git", *inert_git_args(), *args],',
+        intent="The lock evidence probe launches a bare git name through a local launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import functools\n\n        functools.partialmethod(subprocess.run, ["git"])\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe binds a bare git argv into functools.partialmethod.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import asyncio\n\n        asyncio.create_subprocess_shell("git status")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through asyncio.create_subprocess_shell.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        from asyncio import subprocess as aio_sp\n\n        aio_sp.create_subprocess_exec("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through a from-imported asyncio.subprocess alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import asyncio.subprocess as aio_sp\n\n        aio_sp.create_subprocess_exec("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through an aliased asyncio.subprocess module.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import asyncio.subprocess\n\n        asyncio.subprocess.create_subprocess_exec("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through the asyncio.subprocess attribute chain.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        launcher: object = subprocess.run\n        return launcher(\n            ["git", *inert_git_args(), *args],',
+        intent="The lock evidence probe launches a bare git name through an annotated launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        git.run = subprocess.run\n        return git.run(\n            ["git", *inert_git_args(), *args],',
+        intent="The lock evidence probe launches a bare git name through an attribute launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        second = first\n        first = subprocess.run\n        return second(\n            ["git", *inert_git_args(), *args],',
+        intent="The lock evidence probe launches a bare git name through a chained launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import asyncio as aio\n\n        aio.subprocess.create_subprocess_exec("git")\n'
+        "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        intent="The lock evidence probe launches git through the subprocess chain of an aliased asyncio.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        from functools import partial as bind\n\n        bind(subprocess.run, ["git"])\n'
+        "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        intent="The lock evidence probe binds a bare git argv through an aliased functools.partial.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        from functools import partialmethod as bind_method\n\n        bind_method(subprocess.run, ["git"])\n'
+        "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        intent="The lock evidence probe binds a bare git argv through an aliased functools.partialmethod.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        launch = os.spawnv\n        launch(os.P_WAIT, "git", ["git"])\n'
+        "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        intent="The lock evidence probe spawns a bare git name through an os.spawnv alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        probe.spawn = subprocess.run\n        probe.spawn(["git"])\n'
+        "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        intent="The lock evidence probe launches a bare git name through a run alias spelled spawn.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/cache/paths.py",
+        old="    return cache_root / GIT_DB_BUCKET",
+        new='    launch = os.execv\n    launch("git", ["git"])\n    return cache_root / GIT_DB_BUCKET',
+        intent="The cache path helper execs a bare git name through an os.execv alias in an os-only file.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        def _forward(argv, executable=None):\n"
+            "            return subprocess.run(argv, executable=executable)\n\n"
+            '        _forward([get_git_executable()], executable="git")\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe passes a literal executable through a same-module wrapper.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        def _forward(argv, **options):\n"
+            "            return subprocess.run(argv, **options)\n\n"
+            '        _forward([get_git_executable()], executable="git")\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe passes a literal executable through a wrapper's keyword arguments.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from apm_cli.utils.tools import run_tool\n\n"
+            '        run_tool([get_git_executable()], executable="git")\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe passes a literal executable to a wrapper from another module.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        launcher = subprocess.run\n\n"
+            "        def _call():\n"
+            "            [launcher for launcher in ()]\n"
+            '            return launcher(["git"])\n\n'
+            "        _call()\n"
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git through an alias a comprehension variable does not shadow.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        def _init():\n"
+            "            global launch\n"
+            "            launch = subprocess.run\n\n"
+            '        launch(["git"])\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git through a launcher alias assigned under a global declaration.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        launch = None\n\n"
+            "        def _init():\n"
+            "            nonlocal launch\n"
+            "            launch = subprocess.run\n\n"
+            '        launch(["git"])\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git through a launcher alias assigned under a nonlocal declaration.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        launch = os.spawnv\n"
+            "        launch = subprocess.run\n"
+            '        launch(["git"])\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git through an alias reassigned to a different launcher.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="from apm_cli.core.deployment_state import LocatorKind\n",
+        new=(
+            "from apm_cli.core.deployment_state import LocatorKind\n\n"
+            "import subprocess\n\n"
+            "run = subprocess.run\n\n\n"
+            "def _outer():\n"
+            "    run = str\n\n"
+            "    def _inner():\n"
+            "        global run\n"
+            '        return run(["git"])\n\n'
+            "    return _inner\n"
+        ),
+        intent="The lock evidence module launches git through a global declaration past an enclosing rebinding.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        launch = subprocess.run\n\n"
+            "        def _middle():\n"
+            "            def _inner():\n"
+            "                nonlocal launch\n"
+            '                return launch(["git"])\n\n'
+            "            return _inner\n\n"
+            "        _middle()\n"
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git through a nonlocal declaration two functions deep.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from subprocess import run as launcher\n\n"
+            '        def _probe(launcher=launcher(["git"])):\n'
+            "            return launcher\n\n"
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git in a parameter default named like the launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from subprocess import run as launcher\n\n"
+            "        def _probe():\n"
+            "            identity = lambda launcher: launcher\n"
+            '            return launcher(["git"]), identity\n\n'
+            "        _probe()\n"
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git past a lambda parameter named like the launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        class _Base:\n"
+            "            def __init__(self):\n"
+            "                self.run = subprocess.run\n\n"
+            "        class _Child(_Base):\n"
+            "            def probe(self):\n"
+            '                return self.run(["git"])\n\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git through an attribute alias a subclass inherits.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from subprocess import run as launcher\n\n"
+            '        def _probe(launcher=launcher(["git"])):\n'
+            "            launcher = None\n"
+            "            return launcher\n\n"
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git in a definition header its body rebinds.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        class _Runner:\n"
+            "            def __init__(self):\n"
+            "                self.run = subprocess.run\n\n"
+            "        class _Labels:\n"
+            "            def __init__(self):\n"
+            "                self.run = lambda labels: labels\n\n"
+            "            def names(self):\n"
+            '                return self.run(["git"])\n\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe calls an attribute spelled like a launcher alias in another class.",
     ),
     MutationCase(
         guard_id="install-deployment-gate-retirement",
@@ -7501,3 +8054,37 @@ def test_bundle_policy_and_canvas_gate_routes_are_guarded(
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+def _assert_no_diagnostics(report: object) -> None:
+    """The linter prints no diagnostic line for the run."""
+    rendered = render_violations_and_failures(report.violations, report.failures)
+    assert rendered == "", rendered
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        pytest.param(
+            '        registry.partial(subprocess.run, ["git"])\n',
+            id="unrelated-partial-method",
+        ),
+        pytest.param(
+            "        import asyncio\n\n"
+            "        probe.spawn = asyncio.create_subprocess_exec\n"
+            '        probe.spawn(get_git_executable(), "--version")\n',
+            id="exec-alias-spelled-spawn",
+        ),
+    ],
+)
+def test_helper_guard_ignores_calls_that_launch_nothing(new: str) -> None:
+    """Calls that are not launches, or that launch a resolved path, are never reported."""
+    rule_id = "transport-platform-external-executable-owner"
+    path = "src/apm_cli/core/legacy_lock_evidence.py"
+    old = "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new + old, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    _assert_no_diagnostics(report)
