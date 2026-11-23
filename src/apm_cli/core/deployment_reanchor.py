@@ -23,9 +23,9 @@ from .deployment_ledger import DeploymentLedgerCodec, DeploymentMaterializationS
 
 
 def _renamed_claims(lockfile: Any, renames: Mapping[str, str]):
-    """The lock's content-bearing records whose active owner is renamed."""
+    """The lock's content-bearing records any renamed owner claims, shared ones included."""
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
-        if record.active_owner in renames and record.content_hash is not None:
+        if record.content_hash is not None and any(owner in renames for owner in record.owners):
             yield record
 
 
@@ -33,28 +33,42 @@ class _ReanchorSession(DeploymentMaterializationSession):
     """The materialization session, extended with an owner rename only."""
 
     def problems(self, lockfile: Any, renames: Mapping[str, str]) -> list[str]:
+        """Claims whose receipt the rename would carry but cannot prove.
+
+        A receipt records its actual writer, so it is authenticated by that
+        writer and the claim's canonical signature, never by the claim's full
+        owner set. A renamed writer's claim must hold its receipt.
+        """
         problems = []
         for claim in _renamed_claims(lockfile, renames):
             value = DeploymentLedgerCodec.legacy_value(claim.locator)
             receipt = self._records.get(claim.locator.key)
-            expected = [claim.active_owner, self._claim_signature(value)]
+            if receipt is None:
+                if claim.active_owner in renames:
+                    problems.append(value)
+                continue
+            expected = [receipt.active_owner, self._claim_signature(value)]
             if (
-                receipt is None
-                or receipt.owners != claim.owners
-                or receipt.active_owner != claim.active_owner
-                or self._bindings.get(claim.locator.key) != expected
-            ):
+                claim.active_owner in renames and receipt.active_owner != claim.active_owner
+            ) or self._bindings.get(claim.locator.key) != expected:
                 problems.append(value)
         return sorted(problems)
 
     def rename_owners(self, renames: Mapping[str, str]) -> None:
-        """Move the renamed owners' receipts to the committed claims this session reads."""
+        """Move receipts to the committed claims this session reads, writer and history kept."""
+        new_owners = set(renames.values())
         for key, record in list(self._records.items()):
-            if record.active_owner not in renames:
+            value = DeploymentLedgerCodec.legacy_value(record.locator)
+            shared = any(
+                owner in new_owners
+                for claim in self._claims.get(value, ())
+                for owner in claim.owners
+            )
+            if record.active_owner not in renames and not shared:
                 continue
             owners = tuple(renames.get(owner, owner) for owner in record.owners)
-            renamed = replace(record, owners=owners, active_owner=renames[record.active_owner])
-            value = DeploymentLedgerCodec.legacy_value(record.locator)
+            active = renames.get(record.active_owner, record.active_owner)
+            renamed = replace(record, owners=owners, active_owner=active)
             self._records[key] = renamed
             # Same physical bytes, same writer: the hash history stays (#4889).
             self._bindings[key] = [renamed.active_owner, self._claim_signature(value)]

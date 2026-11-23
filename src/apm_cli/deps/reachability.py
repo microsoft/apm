@@ -111,6 +111,11 @@ class ReachabilityResult:
         local_dirs: The anchored directory of every local node the walk
             reached, by its lock key, so a re-anchored local row takes the
             identity install records for it (#4889).
+        declaring_edges: Every parent key that declares a node, in the order
+            the walk saw the edges, with that edge's ``(parent identity,
+            local_path)`` (#4889).
+        local_edge_repos: The ``repo_url`` each local edge resolves to, by
+            ``(child key, parent key)``; an alias spelling names another one.
     """
 
     reachable: frozenset[str]
@@ -123,6 +128,10 @@ class ReachabilityResult:
     depths: dict[str, int] = field(default_factory=dict)
     graph_children: dict[str, frozenset[str]] = field(default_factory=dict)
     local_dirs: dict[str, Path] = field(default_factory=dict)
+    declaring_edges: dict[str, dict[str, tuple[str | None, str | None]]] = field(
+        default_factory=dict
+    )
+    local_edge_repos: dict[tuple[str, str | None], str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -160,6 +169,10 @@ class _ParentGraph:
             return
         self._parents.setdefault(key, {}).setdefault(parent_key, via)
         self._children.setdefault(parent_key, set()).add(key)
+
+    def edges(self) -> dict[str, dict[str, tuple[str | None, str | None]]]:
+        """Every non-root node's declaring parents, in the order the walk saw them."""
+        return {key: dict(parents) for key, parents in self._parents.items()}
 
     def solve(self, lock_keys, reachable_via: dict) -> tuple[dict, dict, dict]:
         """Return ``(depths, parent_keys, children)`` and fill *reachable_via*."""
@@ -378,6 +391,7 @@ def compute_forward_reachable_keys(
     )
     edge_selections: dict[str, list[EdgeSelection]] = {}
     local_dirs: dict[str, Path] = {}
+    local_edge_repos: dict[tuple[str, str | None], str] = {}
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
     marketplace_index = lockfile.marketplace_index()
@@ -434,6 +448,9 @@ def compute_forward_reachable_keys(
                 matched_key or ref.get_unique_key(),
                 parent_key,
                 (parent_repo_url, None if ref.replacement is not None else ref.local_path),
+            )
+            local_edge_repos.setdefault(
+                (matched_key or ref.get_unique_key(), parent_key), ref.repo_url
             )
             if visit_key in visited:
                 continue
@@ -539,6 +556,8 @@ def compute_forward_reachable_keys(
         depths=depths,
         graph_children=graph_children,
         local_dirs=local_dirs,
+        declaring_edges=parent_graph.edges(),
+        local_edge_repos=local_edge_repos,
     )
 
 

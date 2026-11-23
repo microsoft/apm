@@ -40,12 +40,50 @@ class LocalReanchorPlan:
 
     renames: dict[str, str] = field(default_factory=dict)
     identities: dict[str, tuple[str, str, str]] = field(default_factory=dict)
-    declaring_parents: dict[str, str] = field(default_factory=dict)
+    # Descendant local rows: (declaring parent key, local_path) of the first edge.
+    declaring_parents: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+    # Nearest parent identity of every re-parented row, ranked by the new keys.
+    resolved_by: dict[str, str | None] = field(default_factory=dict)
     # apm.yml and apm.lock.yaml as the command found them, for rollback.
     snapshot: tuple[tuple[Path, str], ...] = ()
 
     def __bool__(self) -> bool:
         return bool(self.renames or self.declaring_parents)
+
+
+def _nearest_parents(walk, key: str) -> list[str]:
+    """The node's shallowest declaring parents, in the order the walk saw their edges."""
+    depth = walk.depths.get(key)
+    edges = walk.declaring_edges.get(key, {})
+    return [
+        parent for parent in edges if depth is not None and walk.depths.get(parent) == depth - 1
+    ]
+
+
+def _root_identities(lockfile, walk, local_roots, label) -> dict[str, tuple[str, str, Any]]:
+    """``(local_path, declaring parent key, anchored dir)`` of each re-anchored root.
+
+    Install keeps the first shallowest declaring edge on the node it creates,
+    so that edge, not the nearest-parent tie rule, names the local identity.
+    """
+    identities: dict[str, tuple[str, str, Any]] = {}
+    for key in local_roots:
+        nearest = _nearest_parents(walk, key)
+        real_dir = walk.local_dirs.get(key)
+        via = walk.declaring_edges.get(key, {}).get(nearest[0]) if nearest else None
+        if via is None or via[1] is None or real_dir is None:
+            raise LocalReanchorRefused(
+                f"{label(key)} stays, but its new declaring parent could not be determined"
+            )
+        declared = walk.local_edge_repos.get((key, nearest[0]))
+        if declared != lockfile.get_dependency(key).repo_url:
+            # An alias spelling (a symlink) installs as another package directory.
+            raise LocalReanchorRefused(
+                f"{label(key)} stays, but the package that still needs it declares it as "
+                f"{declared or 'another package'}, which installs elsewhere"
+            )
+        identities[key] = (via[1], nearest[0], real_dir)
+    return identities
 
 
 def plan_local_reanchor(
@@ -54,8 +92,8 @@ def plan_local_reanchor(
     """Return the re-anchor plan for the still-needed local roots, or refuse.
 
     *rescued_roots* are the lock keys of still-needed packages whose own
-    declaration goes; *label* names one for messages. Every local row the
-    walk re-parents also gets the ``declaring_parent`` install records.
+    declaration goes; *label* names one for messages. Every row the walk
+    re-parents also gets the parent install records, ranked by its new keys.
     """
     from ...deps.local_identity import transitive_local_identity
 
@@ -74,18 +112,7 @@ def plan_local_reanchor(
             f"{label(local_roots[0])} stays, but the packages that still need it could not "
             f"all be read offline{detail}; re-anchoring it never fetches"
         )
-    identities: dict[str, tuple[str, str, Any]] = {}
-    for key in local_roots:
-        parent_key = walk.parent_keys.get(key)
-        via = walk.reachable_via.get(key)
-        real_dir = walk.local_dirs.get(key)
-        if parent_key is None or via is None or via[1] is None or real_dir is None:
-            raise LocalReanchorRefused(
-                f"{label(key)} stays, but its new declaring parent could not be determined"
-            )
-        identities[key] = (via[1], parent_key, real_dir)
     # The identity install records, from the one owner of local node identity.
-    # A re-anchored parent of another re-anchored root is named by its new key.
     nodes = {
         key: transitive_local_identity(
             replace(lockfile.get_dependency(key).to_dependency_ref(), local_path=local_path),
@@ -94,17 +121,11 @@ def plan_local_reanchor(
             root=project_root,
             root_local_dirs={},
         )
-        for key, (local_path, parent_key, real_dir) in identities.items()
+        for key, (local_path, parent_key, real_dir) in _root_identities(
+            lockfile, walk, local_roots, label
+        ).items()
     }
     renames = {key: node.get_unique_key() for key, node in nodes.items()}
-    identities = {
-        key: (
-            node.local_path,
-            renames.get(node.declaring_parent, node.declaring_parent),
-            node.anchored_local_path,
-        )
-        for key, node in nodes.items()
-    }
     collisions = sorted(
         new for old, new in renames.items() if new != old and new in lockfile.dependencies
     )
@@ -113,16 +134,29 @@ def plan_local_reanchor(
             f"{label(local_roots[0])} stays, but its new lock identity {collisions[0]} "
             "already belongs to another entry"
         )
-    declaring_parents = {}
+    # A re-anchored parent of another re-anchored root is named by its new key.
+    identities = {
+        key: (
+            node.local_path,
+            renames.get(node.declaring_parent, node.declaring_parent),
+            node.anchored_local_path,
+        )
+        for key, node in nodes.items()
+    }
+    declaring_parents: dict[str, tuple[str, str | None]] = {}
+    resolved_by: dict[str, str | None] = {}
     for key in decision.rescued_parents:
-        parent_key = walk.parent_keys.get(key)
+        nearest = _nearest_parents(walk, key)
+        if not nearest:
+            continue
+        edges = walk.declaring_edges[key]
+        # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
+        resolved_by[key] = edges[min(nearest, key=lambda parent: renames.get(parent, parent))][0]
         row = lockfile.get_dependency(key)
-        if parent_key is None:
-            continue
-        if row is None or row.source != "local" or key in identities or not row.declaring_parent:
-            continue
-        declaring_parents[key] = renames.get(parent_key, parent_key)
-    return LocalReanchorPlan(renames, identities, declaring_parents)
+        if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
+            first = nearest[0]
+            declaring_parents[key] = (renames.get(first, first), edges[first][1])
+    return LocalReanchorPlan(renames, identities, declaring_parents, resolved_by)
 
 
 def _rekey_requests(binding: Any, renames: dict[str, str], dev: dict[str, bool]) -> bool:
@@ -176,8 +210,14 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
             parent_key,
             anchored,
         )
-    for key, parent_key in plan.declaring_parents.items():
-        lockfile.dependencies[key].declaring_parent = parent_key
+    for key, (parent_key, local_path) in plan.declaring_parents.items():
+        row = lockfile.dependencies[key]
+        row.declaring_parent = parent_key
+        if local_path is not None:
+            row.local_path = local_path
+    for key, parent in plan.resolved_by.items():
+        if key in lockfile.dependencies and parent is not None:
+            lockfile.dependencies[key].resolved_by = parent
     if renames:
         _rename_ledger_owners(lockfile, renames)
         rows = list(lockfile.dependencies.items())

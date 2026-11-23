@@ -408,3 +408,60 @@ def test_a_failed_receipt_rename_rolls_the_uninstall_back(
     assert lock_bytes(world.project) == lock
     assert _receipts(world) == receipts
     world.apm("install", "--frozen")
+
+
+def _graph(tmp_path: Path, apm_binary_path: Path, packages, dev: list[str]) -> ReplayWorld:
+    """Local ``(name, deps)`` packages under vendor/, e direct, *dev* as devDependencies."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    for name, deps in packages:
+        _skill_package(world.project / "vendor" / name, name, deps)
+    _manifest(world, ["./vendor/e"], dev)
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    return world
+
+
+def test_reanchor_keeps_the_first_declaring_edge(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4889: z then a both declare ../e; install keeps z's edge, ties resolved_by to a."""
+    world = _graph(
+        tmp_path,
+        apm_binary_path,
+        (("e", ()), ("z", ("../e",)), ("a", ("../e",))),
+        ["./vendor/z", "./vendor/a"],
+    )
+    world.apm("uninstall", "./vendor/e")
+    row = _rows(world)["_local/e"]
+    assert (row["declaring_parent"], row["resolved_by"]) == ("./vendor/z", "_local/a")
+    _assert_reanchored_like_a_full_install(world)
+
+
+def test_reanchor_ranks_an_equal_depth_diamond_by_the_new_keys(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: d -> e -> f and b -> a -> f; once e is transitive, a's key ranks first."""
+    world = _graph(
+        tmp_path,
+        apm_binary_path,
+        (("f", ()), ("e", ("../f",)), ("a", ("../f",)), ("d", ("../e",)), ("b", ("../a",))),
+        ["./vendor/d", "./vendor/b"],
+    )
+    world.apm("uninstall", "./vendor/e")
+    assert _rows(world)["_local/f"]["resolved_by"] == "_local/a"
+    _assert_reanchored_like_a_full_install(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_reanchor_refuses_an_alias_spelling_that_installs_elsewhere(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: d declares ../e-link (a symlink to e); install would record _local/e-link."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    os.symlink("e", vendor / "e-link", target_is_directory=True)
+    _skill_package(vendor / "d", "d", ("../e-link",))
+    _manifest(world, ["./vendor/e"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    _assert_refused_before_any_write(world, "declares it as _local/e-link")
