@@ -53,7 +53,7 @@ from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.oracles import ExpectedCell, check_cross_cutting, operation_for
 from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _RECONCILING, Row, RowReplay, _RowModel
 from tests.lifecycle.world import World
-from tests.lifecycle.world.builder import TAG
+from tests.lifecycle.world.builder import TAG, marketplace_document
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
@@ -1256,8 +1256,16 @@ def _rebound_to_catalog(world: World) -> None:
     assert repos == ["lifecycle/p-exec"], repos
 
 
-# The digest a fresh install of p-skill@lifecycle-market records (hand-pinned).
-_FRESH_DIGEST = "sha256:2d425bfc40e6821a688090f019c149cede6e0e7294224643d22d53d2f93933a8"
+def _fresh_digest() -> str:
+    """The digest a fresh install of p-skill@lifecycle-market records: sha256 of the
+    served catalog's canonical JSON (sorted keys, no whitespace), derived from the
+    world's catalog document so a catalog change never leaves it stale (#5159)."""
+    canonical = json.dumps(
+        marketplace_document(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 _RESTORED = (
     r"Restored marketplace provenance for lifecycle/p-skill "
     r"\(p-skill@lifecycle-market\) from its catalog\."
@@ -1273,7 +1281,7 @@ def _modern_stamp(world: World) -> None:
 def _digest_restored_and_stable(world: World) -> None:
     """The restored digest is the fresh-install value; replays agree; update is stable."""
     _modern_stamp(world)
-    assert _marketplace_row(world)["source_digest"] == _FRESH_DIGEST
+    assert _marketplace_row(world)["source_digest"] == _fresh_digest()
     restored = (world.project / LOCK).read_bytes()
     for argv in ("apm install --frozen", "apm audit --ci", "apm update --yes"):
         result = driver.run(world, argv)
@@ -1523,7 +1531,7 @@ def _converges_after(world: World, remedy: str) -> None:
     updated = driver.run(world, "apm update --yes")
     assert updated.returncode == 0, updated.stdout + updated.stderr
     assert re.search(_RESTORED, updated.stdout), updated.stdout
-    assert _marketplace_row(world)["source_digest"] == _FRESH_DIGEST
+    assert _marketplace_row(world)["source_digest"] == _fresh_digest()
 
 
 def test_missing_digest_with_no_registration_refuses_and_the_remedy_converges(

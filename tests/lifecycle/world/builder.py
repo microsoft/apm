@@ -74,6 +74,19 @@ def _write_manifest(path: Path, name: str) -> None:
     path.write_text(yaml.safe_dump(_manifest(name)), encoding="utf-8")
 
 
+def marketplace_document() -> dict[str, object]:
+    """The world marketplace catalog (``.claude-plugin/marketplace.json``) as served."""
+    plugins = [
+        {
+            "name": name,
+            "description": f"Lifecycle world package {name}",
+            "source": {"source": "github", "repo": f"{ORG}/{name}", "ref": TAG},
+        }
+        for name in (*GIT_PUBLISHED, *GIT_PACK_ONLY)
+    ]
+    return {"name": MARKETPLACE_NAME, "owner": {"name": "APM Lifecycle"}, "plugins": plugins}
+
+
 def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
     """Commit each served repository; return ``owner/repo`` -> bare repository."""
     factory = LocalGitRepositoryFactory(shared / "repositories", env=env)
@@ -96,17 +109,8 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
         publish(policy_org(variant), POLICY_REPO, tree)
     catalog = trees / MARKETPLACE_REPO
     (catalog / ".claude-plugin").mkdir(parents=True)
-    plugins = [
-        {
-            "name": name,
-            "description": f"Lifecycle world package {name}",
-            "source": {"source": "github", "repo": f"{ORG}/{name}", "ref": TAG},
-        }
-        for name in (*GIT_PUBLISHED, *GIT_PACK_ONLY)
-    ]
-    document = {"name": MARKETPLACE_NAME, "owner": {"name": "APM Lifecycle"}, "plugins": plugins}
     (catalog / ".claude-plugin" / "marketplace.json").write_text(
-        json.dumps(document, indent=2) + "\n", encoding="ascii"
+        json.dumps(marketplace_document(), indent=2) + "\n", encoding="ascii"
     )
     publish(ORG, MARKETPLACE_REPO, catalog)
     return served
