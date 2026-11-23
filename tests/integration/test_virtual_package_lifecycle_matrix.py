@@ -231,6 +231,19 @@ def _invoke(
         )
         repo.close()
 
+    def route_transport_plan(
+        engine,
+        _repo_url_base: str,
+        target_path: Path,
+        *,
+        clone_action,
+        **_kwargs: object,
+    ) -> None:
+        # A real origin answers the pinned-commit admission (ls-remote and a
+        # heads/tags fetch) over the same channel its clone uses; here that
+        # channel is the scenario's local origin, like clone_local_bare.
+        clone_action(scenario.repository.origin.as_uri(), dict(engine._host.git_env), target_path)
+
     def resolve_virtual_commit(
         _self: GitHubPackageDownloader,
         _dep_ref: DependencyReference,
@@ -314,6 +327,10 @@ def _invoke(
             GitHubPackageDownloader,
             "_bare_clone_with_fallback",
             clone_local_bare,
+        )
+        patch.setattr(
+            "apm_cli.deps.clone_engine.CloneEngine.execute",
+            route_transport_plan,
         )
         patch.setattr(
             GitHubPackageDownloader,
