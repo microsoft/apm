@@ -88,6 +88,105 @@ def reconcile_uninstall_deployment_state(
     return changed
 
 
+def retain_failed_claims(
+    lockfile,
+    removed_rows: dict,
+    failed_paths,
+    removed_hashes: dict[str, str],
+    project_root: Path | None = None,
+) -> bool:
+    """Keep each removed row's claim on the files sync could not remove (#4851).
+
+    Runs after MCP, LSP and native survivor derivation, so a claim-only row
+    never keeps a service alive. The row returns narrowed to those files, with
+    *removed_hashes* (the pre-removal cleanup snapshot, canonical ledger first)
+    as the integrity baseline, through the ledger owner, so the lock keeps
+    tracking what is still on disk and the next run can retry. Returns whether
+    the lock changed.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    failed = {str(path).replace("\\", "/") for path in failed_paths}
+    claims: dict[str, list[str]] = {}
+    for key, row in removed_rows.items():
+        kept = [path for path in row.deployed_files if path.replace("\\", "/") in failed]
+        if kept and key not in lockfile.dependencies:
+            claims[key] = kept
+    present = set(lockfile.dependencies) | set(claims)
+    # Each claim's local source is read while every removed parent is still visible.
+    sources = _claim_local_sources(lockfile, removed_rows, claims, present, project_root)
+    renamed = {}
+    for key in claims:
+        _anchor_claim_row(removed_rows[key], present, sources.get(key))
+        # A legacy local row keyed by its local_path takes its re-spelled key.
+        renamed[key] = removed_rows[key].get_unique_key()
+    final = set(lockfile.dependencies) | set(renamed.values())
+    for key in claims:
+        row = removed_rows[key]
+        row.resolved_by = renamed.get(row.resolved_by, row.resolved_by)
+        row.declaring_parent = renamed.get(row.declaring_parent, row.declaring_parent)
+        _anchor_claim_row(row, final)
+    updates: dict[str, tuple[list[str], dict[str, str]]] = {}
+    for key, kept in claims.items():
+        row, owner = removed_rows[key], renamed[key]
+        hashes = {}
+        for path in kept:
+            content_hash = removed_hashes.get(path) or row.deployed_file_hashes.get(path)
+            if content_hash:
+                hashes[path] = content_hash
+        if owner in updates or owner in lockfile.dependencies:
+            # Same identity as a row the lock keeps: its files join that row.
+            files, known = updates.get(owner) or (
+                lockfile.dependencies[owner].deployed_files,
+                lockfile.dependencies[owner].deployed_file_hashes,
+            )
+            updates[owner] = ([*dict.fromkeys([*files, *kept])], {**hashes, **known})
+            continue
+        row.native_plugin = None
+        lockfile.dependencies[owner] = row
+        updates[owner] = (kept, hashes)
+    DeploymentLedgerCodec.replace_legacy_owners(lockfile, updates)
+    return bool(updates)
+
+
+def _claim_local_sources(lockfile, removed_rows, claims, present, project_root) -> dict[str, str]:
+    """Root-relative ``local_path`` of each claim whose declaring parent goes."""
+    import copy
+
+    from apm_cli.deps.path_anchoring import root_anchored_local_path
+
+    if project_root is None:
+        return {}
+    view = copy.copy(lockfile)
+    view.dependencies = {**removed_rows, **lockfile.dependencies}
+    return {
+        key: root_anchored_local_path(removed_rows[key], view, project_root)
+        for key in claims
+        if removed_rows[key].resolved_by not in (None, *present)
+        and removed_rows[key].replacement is None
+        and removed_rows[key].is_local_source
+    }
+
+
+def _anchor_claim_row(row, present: set[str], root_local_path: str | None = None) -> None:
+    """Point a restored claim row's graph edges only at rows the lock keeps.
+
+    A parent removed in the same uninstall is gone; the claim anchors at the
+    root instead, so the replacement graph stays valid and the lock persists.
+    A local claim takes *root_local_path*, its source re-spelled against the
+    project root, so it still names the same directory.
+    """
+    if row.resolved_by is not None and row.resolved_by not in present:
+        row.resolved_by = None
+        if root_local_path is not None:
+            row.local_path = root_local_path
+    if row.declaring_parent is not None and row.declaring_parent not in present:
+        row.declaring_parent = None
+    binding = row.replacement
+    if binding is not None:
+        binding.retain_parents_or_root(present)
+
+
 def lockfile_has_persisted_state(lockfile) -> bool:
     """Return whether uninstall should keep rather than remove the lockfile."""
     return bool(
