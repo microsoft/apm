@@ -169,7 +169,8 @@ class _PreparedTargetConfig:
     """Validated target config ready for one atomic file write."""
 
     path: Path
-    content: str
+    # None leaves the file as it is: a target that only joined a hold (#4871).
+    content: str | None
     changed: builtins.set
     created_servers_key: bool = False
     owner_only: bool = False
@@ -987,7 +988,10 @@ class LSPIntegrator:
                     raise
                 # The held render is the locked one: keep the original kinds.
                 prepared = replace(
-                    rebuilt, kept={**rebuilt.kept, **own_kept}, joined=tuple(sorted(joined))
+                    rebuilt,
+                    kept={**rebuilt.kept, **own_kept},
+                    joined=tuple(sorted(joined)),
+                    content=rebuilt.content if prepared is not None or rebuilt.changed else None,
                 )
             if prepared is not None:
                 held.append((runtime, spec, prepared))
@@ -1052,6 +1056,8 @@ class LSPIntegrator:
     @staticmethod
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
         """Write one config after every target in the install has validated."""
+        if prepared.content is None:
+            return prepared.changed
         write_seam.mkdir(prepared.path.parent, parents=True, exist_ok=True)
         LSPIntegrator._atomic_write_config(
             prepared.path, prepared.content, owner_only=prepared.owner_only

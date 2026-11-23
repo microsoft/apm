@@ -681,7 +681,8 @@ class TestKeptEntryReviewThree:
         if edit_opencode:
             data = json.loads(opencode.read_text())
             data["lsp"]["pyright"]["command"] = ["mine"]
-            opencode.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            # Compact JSON: a hold must not even reformat the file.
+            opencode.write_text(json.dumps(data), encoding="utf-8")
         before = opencode.read_bytes()
         record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(stdio))
         LSPIntegrator.install(
