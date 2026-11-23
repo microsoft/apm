@@ -518,3 +518,51 @@ def test_tampered_bundle_refusal_names_the_reason_and_remedy(
         assert part not in result.stdout, result.stdout
     assert "Error installing dependencies" not in result.stdout + result.stderr
     assert tree_bytes(consumer) == before
+
+
+# -- the bundle's hook sidecar is in the config file records (#5039) -------------------
+
+_SIDECAR = ".github/apm-hooks.json"
+
+
+def _named_bundle(world: MarketplacePackWorld, tmp_path: Path, name: str) -> tuple[Path, str]:
+    producer = _hooked_package(world.isolated.work_root / name, name, "Bash", f"{name}-skill")
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / f"out-{name}"))
+    bundle = tmp_path / f"out-{name}" / f"{name}-1.0.0"
+    info = detect_local_bundle(bundle)
+    return bundle, local_bundle_approval_key(
+        info.package_id, str(info.plugin_json.get("version") or ""), info.source_dir, info.lockfile
+    )
+
+
+def _recorded(world: MarketplacePackWorld, path: Path) -> dict | None:
+    """This machine's config file record of *path* (what crash recovery verifies)."""
+    records = Path(world.env["APM_HOME"]) / "deployment-receipts" / "config-files"
+    store = records / "records.json"
+    if not store.is_file():
+        return None
+    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    return next((row for row in rows if row["path"] == path.resolve().as_posix()), None)
+
+
+def test_bundle_sidecar_writes_keep_the_config_file_records_current(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Every write of the bundle hook sidecar is recorded with the bytes it left, so
+    crash recovery can verify the sidecar when a journaled install later changes it."""
+    import hashlib
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle_a, key_a = _named_bundle(world, tmp_path, "pkga")
+    bundle_b, key_b = _named_bundle(world, tmp_path, "pkgb")
+    consumer = world.consumer("bundle-consumer", targets=("copilot",))
+    _allow(consumer, key_a, key_b)
+    sidecar = consumer / _SIDECAR
+
+    for bundle in (bundle_a, bundle_b):
+        world.apm(consumer, "install", str(bundle), "--no-policy")
+        row = _recorded(world, sidecar)
+        assert row is not None, f"no record of {_SIDECAR} after installing {bundle.name}"
+        digest = "sha256:" + hashlib.sha256(sidecar.read_bytes()).hexdigest()
+        assert row["hash"] == digest, (row, sidecar.read_text(encoding="utf-8"))
