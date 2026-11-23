@@ -792,8 +792,6 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
             side_effect=AssertionError("credential-aware cache retry was bypassed"),
         ),
         patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
-        patch("apm_cli.utils.file_ops.robust_copy2"),
-        patch("apm_cli.utils.file_ops.robust_copytree"),
         patch("apm_cli.deps.package_validator.stamp_plugin_version"),
         patch("apm_cli.deps.github_downloader._rmtree"),
     ):

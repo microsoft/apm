@@ -5,13 +5,16 @@ on the same state; I7 -- a refused command preserves durable state and says
 why (source: .agents/skills/apm-lifecycle-tests/SKILL.md; owner
 ``package-content-hash`` in .apm/architecture/owners/install-deployment.json).
 CELL: OP=audit-ci|install-frozen|install|update SRC=git PRIM=apm-package
-SCOPE=project LOCK=unchanged DEPLOYED=warm CACHE=every-copy-differs FROZEN
+SCOPE=project LOCK=unchanged DEPLOYED=warm CACHE=every-copy-differs|commit-unavailable FROZEN
 
 When the project copy under ``apm_modules`` and the persistent git checkout
-both differ from the locked ``content_hash``, every command reads the locked
-source through the same cache and refuses with the shared
-entry/expected/observed line. A refusal leaves the project, the lockfile and
-``apm_modules`` byte for byte as they were.
+both differ from the locked commit, every command still reads the locked
+source through the same cache. A writing command rebuilds the cache copy from
+the commit and says so with a warning; the ``apm_modules`` copy is then
+detected and restored as when it alone differs, and ``audit --ci`` and
+``install --frozen`` agree. When the commit can no longer be fetched, the
+cache copy cannot be rebuilt: every command refuses, names the package, and
+leaves the project, the lockfile and ``apm_modules`` byte for byte as they were.
 """
 
 from __future__ import annotations
@@ -61,24 +64,73 @@ def _durable(world: ReplayWorld) -> tuple[dict[str, bytes], dict[str, bytes]]:
     return tree_digest(world.project), _all_files(world.project / "apm_modules")
 
 
-def _edit_every_copy(world: ReplayWorld) -> list[Path]:
-    checkouts = world.isolated.cache_root / "git" / "checkouts_v1"
-    copies = [
+def _checkouts(world: ReplayWorld) -> Path:
+    return world.isolated.cache_root / "git" / "checkouts_v1"
+
+
+def _copies(root: Path) -> list[Path]:
+    return [
         path
-        for root in (world.project / "apm_modules", checkouts)
         for path in root.rglob(_SKILL.name)
-        if ".git" not in path.parts and path.is_file()
+        if ".git" not in path.parts and path.is_file() and path.parent.name == "helper"
     ]
-    assert len(copies) >= 2, copies
-    for path in copies:
+
+
+def _edit_every_copy(world: ReplayWorld) -> bytes:
+    """Edit the apm_modules copy and the cache copy; return the committed bytes."""
+    modules, cached = _copies(world.project / "apm_modules"), _copies(_checkouts(world))
+    assert modules and cached, (modules, cached)
+    committed = modules[0].read_bytes()
+    for path in (*modules, *cached):
         path.chmod(0o644)
         path.write_bytes(path.read_bytes() + b"\nCopy edit.\n")
-    return copies
+    return committed
+
+
+def _assert_holds_commit(world: ReplayWorld, committed: bytes) -> None:
+    """The cache copy was rebuilt and the apm_modules copy restored to the commit's bytes."""
+    modules, cached = _copies(world.project / "apm_modules"), _copies(_checkouts(world))
+    assert modules and cached, (modules, cached)
+    for path in (*modules, *cached):
+        assert path.read_bytes() == committed, path
+
+
+def _drop_commit_content(world: ReplayWorld) -> None:
+    """Remove one blob of the locked commit from the served repository."""
+    origin = world.repos["pkg"].origin
+    blob = world.git(origin, "rev-parse", f"HEAD:{_SKILL.as_posix()}").strip()
+    loose = origin / "objects" / blob[:2] / blob[2:]
+    assert loose.is_file(), loose
+    loose.chmod(0o644)
+    loose.unlink()
+
+
+def _text(result: CommandResult) -> str:
+    return re.sub(r"\s+", " ", result.stdout + result.stderr)
 
 
 def _names_mismatch(result: CommandResult, expected: str) -> bool:
-    text = re.sub(r"\s+", " ", result.stdout + result.stderr)
-    return f"Content hash mismatch for test/pkg: expected {expected}, got sha256:" in text
+    return f"Content hash mismatch for test/pkg: expected {expected}, got sha256:" in _text(result)
+
+
+def _mismatch_count(result: CommandResult) -> int:
+    return _text(result).count("Content hash mismatch for test/pkg:")
+
+
+def _rebuilt(result: CommandResult) -> bool:
+    """The warning that names the cache copy rebuilt from its commit."""
+    return (
+        re.search(
+            r"Cached copy of \S*test/pkg\S* @ [0-9a-f]{12} failed verification against its commit",
+            _text(result),
+        )
+        is not None
+    )
+
+
+def _names_failure(result: CommandResult) -> bool:
+    """An error line that names the package."""
+    return re.search(r"\[x\][^\[]*test/pkg", _text(result)) is not None
 
 
 def _installed(tmp_path: Path, apm_binary_path: Path) -> ReplayWorld:
@@ -96,12 +148,40 @@ def _locked_content_hash(world: ReplayWorld) -> str:
     return next(row["content_hash"] for row in rows if row["repo_url"] == "test/pkg")
 
 
-def test_audit_ci_and_frozen_refuse_alike_when_every_copy_differs(
+def test_audit_ci_and_frozen_agree_when_every_copy_differs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _installed(tmp_path, apm_binary_path)
+    expected = _locked_content_hash(world)
+    committed = _edit_every_copy(world)
+    before = _durable(world)
+    project_before = before[0]
+
+    # I3 paired probe on one state. audit --ci never writes, not even the cache.
+    audit = world.apm("audit", "--ci", expect=None)
+    assert _durable(world) == before, "I5: audit --ci changed durable state"
+    frozen = world.apm("install", "--frozen", expect=None)
+    assert audit.returncode == frozen.returncode, (_evidence(audit), _evidence(frozen))
+    for result in (audit, frozen):
+        assert result.returncode == 0, _evidence(result)
+        # The apm_modules copy is named as when it alone differs.
+        assert _names_mismatch(result, expected), _evidence(result)
+
+    # The rebuild is announced, and both copies hold the commit's bytes again.
+    assert _rebuilt(frozen), _evidence(frozen)
+    _assert_holds_commit(world, committed)
+    assert tree_digest(world.project) == project_before, "project or lockfile changed"
+
+    world.apm("audit", "--ci")
+
+
+def test_audit_ci_and_frozen_refuse_alike_when_the_commit_cannot_be_fetched(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = _installed(tmp_path, apm_binary_path)
     expected = _locked_content_hash(world)
     _edit_every_copy(world)
+    _drop_commit_content(world)
     before = _durable(world)
 
     # I3 paired probe on one state.
@@ -112,35 +192,28 @@ def test_audit_ci_and_frozen_refuse_alike_when_every_copy_differs(
     plain = world.apm("install", expect=None)
     assert _durable(world) == before, "I7: refused install changed durable state"
 
-    for refused in (audit, frozen, plain):
-        assert refused.returncode == 1, _evidence(refused)
-        assert _names_mismatch(refused, expected), _evidence(refused)
+    assert audit.returncode != 0, _evidence(audit)
+    assert _names_mismatch(audit, expected), _evidence(audit)
+    # The first writer tries the rebuild, says so, then refuses.
+    assert _rebuilt(frozen), _evidence(frozen)
+    for refused in (frozen, plain):
+        assert refused.returncode != 0, _evidence(refused)
+        assert _names_failure(refused), _evidence(refused)
 
 
-def test_update_refusal_names_the_mismatch_as_an_error(
+def test_update_rebuilds_a_modified_cache_copy_with_a_warning(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = _installed(tmp_path, apm_binary_path)
-    expected = _locked_content_hash(world)
-    _edit_every_copy(world)
-    before = _durable(world)
+    committed = _edit_every_copy(world)
+    project_before = tree_digest(world.project)
 
     update = world.apm("update", "--yes", expect=None)
 
-    assert update.returncode == 1, _evidence(update)
-    errors = [
-        line
-        for line in (update.stdout + update.stderr).splitlines()
-        if line.lstrip().startswith("[x]")
-    ]
-    assert any("test/pkg" in line for line in errors), _evidence(update)
-    assert _names_mismatch(update, expected), _evidence(update)
-    assert _durable(world) == before, "I7: refused update changed durable state"
-
-
-def _mismatch_count(result: CommandResult) -> int:
-    text = re.sub(r"\s+", " ", result.stdout + result.stderr)
-    return text.count("Content hash mismatch for test/pkg:")
+    assert update.returncode == 0, _evidence(update)
+    assert _rebuilt(update), _evidence(update)
+    _assert_holds_commit(world, committed)
+    assert tree_digest(world.project) == project_before, "project or lockfile changed"
 
 
 def _assert_restore_only(result: CommandResult) -> None:
@@ -152,24 +225,25 @@ def _assert_restore_only(result: CommandResult) -> None:
         assert forbidden not in text, (forbidden, text)
 
 
-def test_content_hash_refusal_remedy_converges_non_interactively(
+def test_every_copy_differs_converges_without_a_remedy(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """RA-004/RA-005: one mismatch report; the printed cache restore converges."""
+    """RA-005: one mismatch report; the rebuilt cache converges with no printed remedy."""
     world = _installed(tmp_path, apm_binary_path)
     _edit_every_copy(world)
 
-    audit = world.apm("audit", "--ci", expect=1)
-    # RA-005: one finding prints once, under its owning check.
+    audit = world.apm("audit", "--ci")
+    # RA-005: one finding prints once.
     assert _mismatch_count(audit) == 1, _evidence(audit)
-    assert "drift details:" in audit.stdout + audit.stderr, _evidence(audit)
-    refused = world.apm("install", expect=1)
-    _assert_restore_only(refused)
+    rebuilt = world.apm("install")
+    assert _rebuilt(rebuilt), _evidence(rebuilt)
 
-    # The printed remedy, as printed: no TTY (stdin is /dev/null), then retry.
-    world.apm("cache", "clean", "--yes")
-    world.apm("install")
-    world.apm("audit", "--ci")
+    # Converged: nothing left to rebuild, restore or report.
+    again = world.apm("install")
+    assert not _rebuilt(again), _evidence(again)
+    assert _mismatch_count(again) == 0, _evidence(again)
+    clean = world.apm("audit", "--ci")
+    assert _mismatch_count(clean) == 0, _evidence(clean)
 
 
 def test_content_hash_refusal_lock_restore_converges(tmp_path: Path, apm_binary_path: Path) -> None:
