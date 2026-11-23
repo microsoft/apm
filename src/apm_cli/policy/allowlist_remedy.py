@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
     from ..models.apm_package import APMPackage, DependencyReference
     from ..models.dependency.selection import ManifestSelectionIndex
+    from .models import CheckResult
     from .schema import ApmPolicy, DependencyPolicy
 
 # One shell word every supported shell passes through unchanged.
@@ -103,6 +104,46 @@ def allowlist_project(
         required_fields=frozenset(policy.manifest.required_fields),
         dev_section_keys=frozenset(dev_block) if isinstance(dev_block, dict) else frozenset(),
     )
+
+
+def with_allowlist_next_step(
+    checks: list[CheckResult],
+    source_deps: Sequence[DependencyReference],
+    policy: ApmPolicy,
+    policy_source: str | None,
+    project_inputs: tuple,
+) -> list[CheckResult]:
+    """Attach the catalog next step to a failed ``dependency-allowlist`` check (#4570).
+
+    Only under ``enforcement: block``; under warn the audit reports the
+    violation without a next step. The ``apm uninstall`` option is offered
+    only when :func:`uninstall_selectors` proves it clears every denied
+    dependency; otherwise the advice is admin-only. *project_inputs* is
+    ``(project_root, manifest, apm_deps, lock, raw_yml)``; *policy_source*
+    (the discovered source, e.g. ``org:contoso/.github``) is named in it.
+    """
+    from dataclasses import replace
+
+    from ..core.remediation import dependency_not_allowed_advice
+    from .discovery import _redact_policy_ref
+    from .matcher import dependency_policy_subject
+
+    failed = next(
+        (c for c in checks if c.name == "dependency-allowlist" and not c.passed and c.subjects),
+        None,
+    )
+    if policy.enforcement != "block" or failed is None:
+        return checks
+    project = allowlist_project(*project_inputs, policy)
+    refs = {subject.ref for subject in failed.subjects}
+    denied = [dep for dep in source_deps if dependency_policy_subject(dep) in refs]
+    remedy, sentence = dependency_not_allowed_advice(
+        uninstall_selectors(denied, project),
+        len(failed.subjects),
+        _redact_policy_ref(policy_source) if policy_source else None,
+    )
+    advised = replace(failed, next_step=sentence, remediations=(remedy,) if remedy else ())
+    return [advised if check is failed else check for check in checks]
 
 
 def uninstall_selectors(

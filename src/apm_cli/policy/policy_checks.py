@@ -22,6 +22,7 @@ from ..core.remediation import (
     REQUIRED_PACKAGE_UNLOCKED,
     UNMANAGED_FILE_TRACK,
 )
+from .allowlist_remedy import with_allowlist_next_step as _advise
 from .models import (
     CheckResult,
     CIAuditResult,
@@ -143,40 +144,6 @@ def _with_mcp_declarers(
         replace(check, subjects=tuple(_hint(subject) for subject in check.subjects))
         for check in checks
     ]
-
-
-def _with_allowlist_next_step(
-    checks: list[CheckResult],
-    source_deps: Sequence[DependencyReference],
-    project: AllowlistProject,
-    policy_source: str | None,
-) -> list[CheckResult]:
-    """Attach the catalog next step to a failed ``dependency-allowlist`` check (#4570).
-
-    The ``apm uninstall`` option is offered only when
-    :func:`~apm_cli.policy.allowlist_remedy.uninstall_selectors` proves it
-    clears every denied dependency; otherwise the advice is admin-only.
-    """
-    from ..core.remediation import dependency_not_allowed_advice
-    from .allowlist_remedy import uninstall_selectors
-    from .discovery import _redact_policy_ref
-    from .matcher import dependency_policy_subject
-
-    failed = next(
-        (c for c in checks if c.name == "dependency-allowlist" and not c.passed and c.subjects),
-        None,
-    )
-    if failed is None:
-        return checks
-    refs = {subject.ref for subject in failed.subjects}
-    denied = [dep for dep in source_deps if dependency_policy_subject(dep) in refs]
-    remedy, sentence = dependency_not_allowed_advice(
-        uninstall_selectors(denied, project),
-        len(failed.subjects),
-        _redact_policy_ref(policy_source) if policy_source else None,
-    )
-    advised = replace(failed, next_step=sentence, remediations=(remedy,) if remedy else ())
-    return [advised if check is failed else check for check in checks]
 
 
 def _required_policy_index(
@@ -1975,8 +1942,6 @@ def run_policy_checks(
 
     *modules_root* and *no_policy* select the same MCP view the baseline
     config-consistency check reads (the CI scratch replay, when prepared).
-    *policy_source* (the discovered source, e.g. ``org:contoso/.github``) is
-    named in the next step of a failed ``dependency-allowlist`` check.
 
     These checks are ADDED to baseline checks -- caller runs both.
     When *fail_fast* is ``True`` (default), stops after the first
@@ -2065,18 +2030,8 @@ def run_policy_checks(
             manifest.marketplaces, marketplace_resolution_origins(lock)
         ),
     )
-    checks = dep_result.checks
-    if policy.enforcement == "block":
-        from .allowlist_remedy import allowlist_project
-
-        # Under warn the audit reports the violation without a next step.
-        checks = _with_allowlist_next_step(
-            checks,
-            source_deps,
-            allowlist_project(project_root, manifest, apm_deps, lock, raw_yml, policy),
-            policy_source,
-        )
-    result.checks.extend(checks)
+    inputs = (project_root, manifest, apm_deps, lock, raw_yml)
+    result.checks.extend(_advise(dep_result.checks, source_deps, policy, policy_source, inputs))
 
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:
