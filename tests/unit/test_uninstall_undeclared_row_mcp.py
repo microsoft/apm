@@ -55,7 +55,9 @@ def _install_two_sharing_one_server(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 def _servers(project: Path) -> set[str]:
     lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8")) or {}
-    config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    # The emptied config APM created is deleted outright (#4862).
+    path = project / ".mcp.json"
+    config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     return set(lock.get("mcp_servers") or []) | set(config.get("mcpServers") or {})
 
 
