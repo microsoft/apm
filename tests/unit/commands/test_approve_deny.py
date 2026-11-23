@@ -1022,8 +1022,7 @@ _ORG_DENY = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
 
 def _org_denies():
     """Serve the org deny at the policy discovery boundary."""
-    found = PolicyFetchResult(policy=_ORG_DENY, source="org:contoso/.github", outcome="found")
-    return patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=found)
+    return _serve_policy(_ORG_DENY)
 
 
 def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
