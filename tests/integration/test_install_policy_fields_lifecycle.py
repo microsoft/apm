@@ -277,21 +277,28 @@ def test_max_depth_reuses_a_dependency_already_resolved_directly(
 def test_max_depth_terminates_on_a_cycle_without_a_false_refusal(
     lifecycle_world: World,  # noqa: F811
 ) -> None:
-    """c-a -> c-b -> c-a under max_depth 2: the back edge reuses c-a at depth 1."""
+    """c-a -> c-b -> c-a under max_depth 2: refused as a cycle, never as too deep.
+
+    Install refuses circular dependencies by contract; the back edge reuses
+    c-a at depth 1, so the depth limit never fires (the resolver row in
+    test_apm_resolver_edge_cases asserts the nodes and depths).
+    """
     world = lifecycle_world
     factory = LocalPackageFactory(world.root / "cycle")
     first, second = _skill_package(factory, "c-a"), _skill_package(factory, "c-b")
     factory.add_relative_dependency(first, second)
     factory.add_relative_dependency(second, first)
     use_policy(world, "max-depth-2")
+    _seed(world, package="p-skill:git")
+    before = _state(world, None, keep_git_cache=True)
 
-    _assert_ok(world, "install", str(first.root))
+    result = _apm(world, "install", str(first.root))
 
-    lock = yaml.safe_load((world.project / "apm.lock.yaml").read_text(encoding="utf-8"))
-    depths = {
-        row["repo_url"].rsplit("/", 1)[-1]: row.get("depth", 1) for row in lock["dependencies"]
-    }
-    assert depths == {"c-a": 1, "c-b": 2}, lock["dependencies"]
+    text = _text(result)
+    assert result.returncode == 1, _evidence(result)
+    assert "Circular dependencies detected" in text, text
+    assert _DEPTH[0] not in text, text
+    assert _state(world, None, keep_git_cache=True) == before
 
 
 def test_max_depth_judges_the_resolved_graph_not_the_old_lockfile(
