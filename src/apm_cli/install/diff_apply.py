@@ -692,8 +692,8 @@ def try_apply(
         from apm_cli.core.scope import get_apm_home
         from apm_cli.install.deploy_snapshot import has_abandoned_journals
 
-        if has_abandoned_journals(get_apm_home() / "install-snapshots"):
-            # The full run replays it first, under the lifecycle lock (#4863).
+        if has_abandoned_journals(get_apm_home() / "install-snapshots") and False:
+            # NEGATIVE CONTROL (#5063): the decline removed; restored in the next commit.
             raise Decline("interrupted install journal")
         import click
 

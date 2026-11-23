@@ -631,3 +631,72 @@ def test_a_pending_legacy_skill_migration_takes_the_full_pipeline(
     monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
     before = _locked_project(tmp_path, "  deployed_files:\n  - .github/skills/s/SKILL.md\n")
     _assert_declines_with(tmp_path, monkeypatch, capsys, before, "legacy skill migration pending")
+
+
+def test_an_abandoned_journal_declines_and_the_full_run_recovers_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A killed install's journal sends the fast path to the full run, which replays it."""
+    from apm_cli.constants import APM_MODULES_DIR
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.install.transaction import replay_abandoned_deploys
+
+    for name in ("PROXY_REGISTRY_URL", "PROXY_REGISTRY_ONLY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    _locked_project(project)
+    killed = project / ".github" / "prompts" / "killed.prompt.md"
+    journal = DeployJournal(tmp_path / "home" / "install-snapshots", root=project)
+    journal.record(killed)
+    killed.parent.mkdir(parents=True)
+    killed.write_bytes(b"half\n")
+    journal.after_write(killed)
+    store = journal.store
+    assert store is not None
+    before = sorted(str(p.relative_to(project)) for p in project.rglob("*"))
+
+    _assert_declines_with(project, monkeypatch, capsys, before, "interrupted install journal")
+    assert store.is_dir(), "the fast path never touches the journal"
+
+    replay_abandoned_deploys(project / APM_MODULES_DIR, None)
+
+    assert not killed.exists()
+    assert not store.exists()
+
+
+def test_a_fast_apply_config_write_is_sealed_with_its_expected_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fast apply's journal sees each seam write's exact bytes, then its post-write seal."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.install.transaction import journaled_apply
+    from apm_cli.integration import write_seam
+    from apm_cli.utils.content_hash import exact_hash_of_bytes
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    events: list[tuple[str, Path, str | None]] = []
+    record, seal = DeployJournal.record, DeployJournal.after_write
+
+    def observed_record(self, path, *, contents=True, expected=None):
+        events.append(("record", Path(path), expected))
+        return record(self, path, contents=contents, expected=expected)
+
+    def observed_seal(self, path):
+        events.append(("sealed", Path(path), None))
+        return seal(self, path)
+
+    monkeypatch.setattr(DeployJournal, "record", observed_record)
+    monkeypatch.setattr(DeployJournal, "after_write", observed_seal)
+    config = tmp_path / "project" / ".gitignore"
+    config.parent.mkdir()
+
+    with journaled_apply():
+        write_seam.write_text(config, "apm_modules/\n")
+
+    written = exact_hash_of_bytes(config.read_bytes())
+    assert [e for e in events if e[1] == config] == [
+        ("record", config, written),
+        ("sealed", config, None),
+    ]
