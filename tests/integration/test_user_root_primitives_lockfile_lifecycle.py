@@ -324,3 +324,15 @@ def test_install_g_then_audit_accepts_a_user_root_inline_hook(scene: HarnessScen
     audit = _install_claude_hook_then_audit(scene, "echo guard")
 
     assert audit.returncode == 0, describe(audit)
+
+    settings = scene.home / ".claude" / "settings.json"
+    settings.write_text(
+        settings.read_text(encoding="utf-8").replace("echo guard", "echo tampered"),
+        encoding="utf-8",
+    )
+    tampered = scene.runner.run(
+        ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
+    )
+
+    assert tampered.returncode == 1, describe(tampered)
+    assert "drift detected: 1 file(s): .claude/settings.json" in tampered.stdout, describe(tampered)
