@@ -83,7 +83,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_CACHE_DIR` | Override the APM cache root. | platform default (XDG / `LOCALAPPDATA`) | Must be writable. See [`apm cache`](../cli/cache/). |
+| `APM_CACHE_DIR` | Override the APM cache root. | platform default (XDG / `LOCALAPPDATA`) | Must be writable. Do not share or restore the cache across trust boundaries. See [`apm cache`](../cli/cache/). |
 | `APM_NO_CACHE` | `1`/`true`/`yes` disables read and write of the cache for the current invocation. | unset | Equivalent to `--no-cache` on commands that support it. |
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
 | `APM_HOME` | Override the root for APM-owned user metadata and configuration. | `~/.apm` | Must be writable. Does not redirect files deployed to agent targets. |
