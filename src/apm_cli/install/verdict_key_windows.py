@@ -131,13 +131,33 @@ def private_to_current_user(path: Path) -> bool:  # pragma: no cover - Windows o
         kernel.LocalFree(descriptor)
 
 
+def _current_user_sid_string() -> str | None:  # pragma: no cover - Windows only
+    try:
+        ctypes, wintypes, advapi, kernel = _api()
+    except (OSError, AttributeError):
+        return None
+    user, _keepalive = _current_user_sid(ctypes, wintypes, advapi, kernel)
+    if not user:
+        return None
+    advapi.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+    text = wintypes.LPWSTR()
+    if not advapi.ConvertSidToStringSidW(ctypes.c_void_p(user), ctypes.byref(text)):
+        return None
+    try:
+        return text.value
+    finally:
+        kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
+
+
 def restrict_to_current_user(path: Path) -> None:  # pragma: no cover - Windows only
-    """Strip inherited ACEs and grant only the current user (icacls, once, at creation)."""
-    import getpass
+    """Strip inherited ACEs and grant only the current user's SID (icacls, once, at creation)."""
     import subprocess
 
+    sid = _current_user_sid_string()
+    if sid is None:
+        return  # the privacy check then refuses the key
     subprocess.run(
-        ["icacls", str(path), "/inheritance:r", "/grant:r", f"{getpass.getuser()}:F"],
+        ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:F"],
         capture_output=True,
         check=False,
     )
