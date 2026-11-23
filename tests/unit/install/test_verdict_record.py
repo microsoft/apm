@@ -427,3 +427,79 @@ def test_the_run_s_own_environment_changes_are_not_keyed(
     capsys.readouterr()
     verdict_record.replay(["install"])
     assert "up to date in " in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("variable", ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_DIR"])
+def test_a_redirected_git_config_is_keyed_by_its_bytes(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys, variable: str
+) -> None:
+    """W3d R7: git reads the file a GIT_* redirect names, so its bytes are a verdict input."""
+    target = project.parent / "redirect"
+    target.mkdir()
+    config = target / "config" if variable == "GIT_DIR" else target / "gitconfig"
+    config.write_text("[core]\n\tautocrlf = false\n", encoding="utf-8")
+    monkeypatch.setenv(variable, str(target if variable == "GIT_DIR" else config))
+    if variable == "GIT_DIR":
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")  # git var refuses a GIT_DIR that is no repo
+    _record()
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert "up to date in " in capsys.readouterr().out
+    config.write_text('[url "https://mirror.example/"]\n\tinsteadOf = https://github.com/\n')
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "include.path", "GIT_CONFIG_VALUE_0": "x"},
+        {"GIT_CONFIG_PARAMETERS": "'include.path'='x'"},
+    ],
+    ids=["key-n", "parameters"],
+)
+def test_an_environment_injected_git_include_is_never_recorded(
+    project: Path, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    _record()
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_the_system_git_config_is_the_one_git_names(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W3d R7: the system file is asked of git (`git var GIT_CONFIG_SYSTEM`), never guessed."""
+    import json
+    import subprocess
+
+    from apm_cli.utils.git_env import get_git_executable
+
+    for name in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_SYSTEM"):
+        monkeypatch.delenv(name, raising=False)
+    asked = subprocess.run(
+        [get_git_executable(), "var", "GIT_CONFIG_SYSTEM"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if asked.returncode != 0:
+        pytest.skip("git older than 2.42 cannot name its system config")
+    _record()
+    (record,) = (_home(project) / "verdicts").iterdir()
+    assert json.loads(record.read_text(encoding="utf-8"))["git_system"] == asked.stdout.strip()
+
+
+def test_a_clock_moved_back_before_the_record_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """W3d R8: a clock earlier than the record's issue time (beyond skew) never hits."""
+    import time
+
+    _record()
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() - 2 * verdict_record._CLOCK_SKEW)
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""

@@ -88,6 +88,8 @@ ENV_ALLOWLIST = (
     "GIT_SSH_COMMAND",
     "HERMES_HOME",
     "HOME",
+    "HOMEDRIVE",
+    "HOMEPATH",
     "LOCALAPPDATA",
     "MCP_REGISTRY_ALLOW_HTTP",
     "MCP_REGISTRY_URL",
@@ -387,44 +389,114 @@ def _walk_files(base: Path, skip: tuple[str, ...] = ()) -> Iterator[Path]:
             yield Path(directory) / name
 
 
-def _git_files(root: Path) -> list[Path]:
+_GIT_TRUE = frozenset({"1", "true", "yes", "on"})
+
+
+def _git_files(root: Path, system: str) -> list[Path]:
     """The config files a child ``git`` reads for this checkout, at every scope.
 
-    The no-op runs ``git remote`` for policy discovery; a hit runs no git, so it
-    keys what git would read: the repository's own config (found upward, a
-    ``.git`` file followed to its gitdir and common dir), the global and XDG
-    files and the system file beside the ``git`` on PATH (PATH and ``GIT_*``
-    are keyed too). A config with an ``include`` is never recorded.
+    The no-op runs ``git remote`` for policy discovery and it honors
+    ``url.insteadOf``; a hit runs no git, so it keys what git would read: the
+    repository config (``GIT_DIR``/``GIT_COMMON_DIR``, else found upward with a
+    ``.git`` file followed to its gitdir and common dir), the global config
+    (``GIT_CONFIG_GLOBAL``, else ``~/.gitconfig`` and the XDG file) and *system*,
+    the path git itself reported (``git var GIT_CONFIG_SYSTEM``) for the binary
+    keyed beside it. ``GIT_*`` and PATH are keyed as values too.
     """
+    env = dict(_env_prefixed("GIT_"))
+    cwd = Path.cwd()
     files: list[Path] = []
-    for base in (root, *root.parents):
-        dot = base / ".git"
-        if dot.is_dir():
-            files += [dot / "config", dot / "config.worktree"]
-            break
-        if dot.is_file():
-            text = dot.read_text(encoding="utf-8", errors="replace").strip()
-            if not text.startswith("gitdir:"):
+    if env.get("GIT_DIR"):
+        gitdir = cwd / env["GIT_DIR"]
+        common = cwd / env["GIT_COMMON_DIR"] if env.get("GIT_COMMON_DIR") else gitdir
+        files += [gitdir / "config", gitdir / "config.worktree", common / "config"]
+    else:
+        for base in (root, *root.parents):
+            dot = base / ".git"
+            if dot.is_dir():
+                files += [dot / "config", dot / "config.worktree"]
                 break
-            gitdir = (base / text[len("gitdir:") :].strip()).resolve()
-            files += [dot, gitdir / "config", gitdir / "config.worktree"]
-            common = gitdir / "commondir"
-            if common.is_file():
-                files.append(common)
-                files.append((gitdir / common.read_text(encoding="utf-8").strip()) / "config")
-            break
-    home = Path(os.path.expanduser("~"))
-    xdg = _env("XDG_CONFIG_HOME") or str(home / ".config")
-    files += [home / ".gitconfig", Path(xdg) / "git" / "config", Path("/etc/gitconfig")]
-    import shutil
-
-    git = shutil.which("git")
-    if git:
-        exe = Path(git).resolve()
-        files += [parent / "etc" / "gitconfig" for parent in list(exe.parents)[:3]]
+            if dot.is_file():
+                text = dot.read_text(encoding="utf-8", errors="replace").strip()
+                if not text.startswith("gitdir:"):
+                    break
+                gitdir = (base / text[len("gitdir:") :].strip()).resolve()
+                files += [dot, gitdir / "config", gitdir / "config.worktree"]
+                common = gitdir / "commondir"
+                if common.is_file():
+                    files.append(common)
+                    files.append((gitdir / common.read_text(encoding="utf-8").strip()) / "config")
+                break
+    if env.get("GIT_CONFIG_GLOBAL"):
+        files.append(cwd / env["GIT_CONFIG_GLOBAL"])
+    else:
+        home = Path(os.path.expanduser("~"))
+        xdg = _env("XDG_CONFIG_HOME") or str(home / ".config")
+        files += [home / ".gitconfig", Path(xdg) / "git" / "config"]
+    if system:
+        files.append(Path(system))
     if os.name == "nt":
         files.append(Path(_env("PROGRAMDATA") or "C:/ProgramData") / "Git" / "config")
     return files
+
+
+def _git() -> str | None:
+    """The git the no-op runs: APM's trusted resolver (never the working tree)."""
+    from apm_cli.utils.git_env import get_git_executable
+
+    try:
+        return get_git_executable()
+    except FileNotFoundError:
+        return None
+
+
+def _git_identity() -> str:
+    """That git as path, size and mtime: an upgrade or a swapped binary misses."""
+    git = _git()
+    if git is None:
+        return "none"
+    exe = Path(git).resolve()
+    info = exe.stat()
+    return f"{exe}|{info.st_size}|{info.st_mtime_ns}"
+
+
+def _git_system() -> str:
+    """The system config path git reads, asked of git once per record (W3d R7)."""
+    env = dict(_env_prefixed("GIT_"))
+    if (env.get("GIT_CONFIG_NOSYSTEM") or "").strip().lower() in _GIT_TRUE:
+        return ""
+    if env.get("GIT_CONFIG_SYSTEM"):
+        return str(Path.cwd() / env["GIT_CONFIG_SYSTEM"])
+    import subprocess
+
+    git = _git()
+    if git is None:
+        return ""
+    try:
+        result = subprocess.run(
+            [git, "var", "GIT_CONFIG_SYSTEM"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("git cannot name its system config") from exc
+    path = result.stdout.strip()
+    if result.returncode != 0 or not path:
+        raise ValueError("git cannot name its system config")
+    return path
+
+
+def _git_env_include() -> bool:
+    """An include injected through the environment (``GIT_CONFIG_KEY_n``,
+    ``GIT_CONFIG_PARAMETERS``) is refused like an ``[include]`` section."""
+    for name, value in _env_prefixed("GIT_CONFIG_"):
+        if (name.startswith("GIT_CONFIG_KEY_") or name == "GIT_CONFIG_PARAMETERS") and (
+            "include" in value.lower()
+        ):
+            return True
+    return False
 
 
 _INCLUDE_RE = re.compile(rb"^\s*\[\s*include", re.IGNORECASE | re.MULTILINE)
@@ -462,6 +534,7 @@ def _inputs(
     lock_text: bytes,
     run_env: list[str],
     surfaces: list[str],
+    git_system: str,
 ) -> None:
     """Every verdict input, read live (QL D3-D6, O3); a writer reads the run's entry state."""
     digest.put("version", str(RECORD_VERSION).encode())
@@ -479,7 +552,11 @@ def _inputs(
         digest.put(f"env:{name}", b"\x00unset" if value is None else b"\x01" + value.encode())
     for name, value in _env_prefixed("GIT_"):
         digest.put(f"git-env:{name}", value.encode("utf-8", "surrogateescape"))
-    for path in _git_files(root):
+    if _git_env_include():
+        raise ValueError("git config include")
+    digest.put("git-binary", _git_identity().encode("utf-8", "surrogateescape"))
+    digest.put("git-system", git_system.encode("utf-8", "surrogateescape"))
+    for path in _git_files(root, git_system):
         # Keyed bytes only, never trusted content: a dotfile symlink is followed.
         try:
             data: bytes | None = path.read_bytes()
@@ -644,10 +721,11 @@ def replay(argv: list[str]) -> bool:
         if lock_text is None or record.get("v") != RECORD_VERSION:
             return False
         run_env, surfaces = record.get("run_env"), record.get("surfaces")
-        if not _names(run_env) or not _names(surfaces):
+        git_system = record.get("git_system")
+        if not _names(run_env) or not _names(surfaces) or not isinstance(git_system, str):
             return False
         digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text, run_env, surfaces)
+        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system)
         _body(digest, record)
         now = time.time()
         issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
@@ -894,8 +972,9 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
             name for name in _ENV_READS if name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT
         )
         surfaces = _owner_surfaces(root)
+        git_system = _git_system()
         digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text, run_env, surfaces)
+        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system)
         stderr_kept = "".join(
             line
             for line in stderr_text.splitlines(keepends=True)
@@ -911,6 +990,7 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str) -> None:
             "expires_at": _expiry(issued),
             "run_env": run_env,
             "surfaces": surfaces,
+            "git_system": git_system,
         }
         _body(digest, record)
         record["mac"] = digest.hexdigest()
