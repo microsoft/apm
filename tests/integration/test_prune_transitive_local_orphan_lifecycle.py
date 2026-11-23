@@ -225,12 +225,18 @@ def test_prune_keeps_an_orphan_file_without_deployment_evidence(
     assert "_local/e" not in _rows(world)
 
 
+@pytest.mark.parametrize("damage", ["malformed", "directory"])
 def test_prune_with_a_partial_graph_keeps_the_orphan_and_reports(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, damage: str
 ) -> None:
     """A survivor whose manifest cannot be read keeps every local transitive and says so."""
     world = _world(tmp_path, apm_binary_path)
-    (world.project / "vendor" / "a" / "apm.yml").write_text("name: [\n", encoding="utf-8")
+    manifest = world.project / "vendor" / "a" / "apm.yml"
+    if damage == "malformed":
+        manifest.write_text("name: [\n", encoding="utf-8")
+    else:
+        manifest.unlink()
+        manifest.mkdir()
 
     pruned = _output(world.apm("prune"))
 
@@ -521,3 +527,28 @@ def test_prune_keeps_a_local_child_of_a_retained_replaced_package(
     assert "_local/d (would be removed)" in preview, preview
     assert lock_bytes(world.project) == lock
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
+
+
+def test_prune_treats_a_surviving_single_file_dependency_as_a_leaf(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A declared primitive file cannot declare children, so the walk stays complete."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    _skill_package(vendor / "a", "a", ("../f",))
+    _write(
+        world.project / "ai" / "xyz.agent.md",
+        "---\nname: xyz\ndescription: An agent\n---\n# xyz\n",
+    )
+    _manifest(world, ["./vendor/d", "./vendor/a", "./ai/xyz.agent.md"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a", "./ai/xyz.agent.md"])
+
+    pruned = _output(world.apm("prune"))
+
+    assert "could not be read" not in pruned, pruned
+    _assert_orphan_pruned(world)
