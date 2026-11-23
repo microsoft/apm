@@ -1884,10 +1884,9 @@ class GitHubPackageDownloader:
 
         # Regular package download (existing logic)
         resolved_ref = self.resolve_git_reference(dep_ref)
-        if resolved_ref.ref_type == GitReferenceType.COMMIT:
-            from ..cache.commit_reachability import admit_pinned_commit
+        from ..cache.commit_reachability import admit_pinned_commit
 
-            admit_pinned_commit(self, dep_ref, resolved_ref.resolved_commit or dep_ref.reference)
+        admit_pinned_commit(self, dep_ref, dep_ref.reference, resolved=resolved_ref)
 
         # Create target directory if it doesn't exist
         target_path.mkdir(parents=True, exist_ok=True)

@@ -81,25 +81,73 @@ class _Admission:
         return None
 
 
-def admit_pinned_commit(downloader, dep_ref, sha: str | None) -> None:
-    """Admit a commit-pinned dependency before any cache, bare or clone fetch.
+def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> None:
+    """Admit a dependency's commit before any cache, bare or clone fetch.
 
-    Runs under the downloader's own persistent-cache credential fallback,
-    so the verdict uses the credentials the fetch would. A non-commit ref
-    (branch or tag) is not checked here.
+    *sha* is the dependency's own ref. When it is not a commit, the commit
+    *resolved* (or ``downloader.resolve_git_reference``) names is used: a
+    commit this run read from the origin's current branch or tag is a tip, so
+    it is recorded as reachable without a check; a commit replayed from the
+    lockfile is checked like any pin. Runs under the downloader's
+    persistent-cache credential fallback, so the verdict uses the
+    credentials the fetch would.
 
     Raises:
         CommitNotReachableError: The commit is not admitted.
     """
-    if not sha or not _COMMIT_RE.match(sha):
-        return
     from .paths import get_cache_root
+    from .url_normalize import cache_shard_key, normalize_repo_url
 
     cache = getattr(downloader, "persistent_git_cache", None)
     root = Path(getattr(cache, "_cache_root", None) or get_cache_root())
+    from ..deps.transport_selection import initial_transport_scheme
+
+    ssh = not dep_ref.artifactory_prefix and initial_transport_scheme(dep_ref) == "ssh"
+    url = (
+        downloader._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref)
+        if ssh
+        else downloader._persistent_cache_remote(dep_ref, dep_ref.to_github_url())
+    )
+    if not sha or not _COMMIT_RE.match(sha):
+        sha, fresh_tip = _resolved_commit(downloader, dep_ref, resolved)
+        if sha is None:
+            return
+        if fresh_tip:
+            _record(_marker(root, cache_shard_key(url), sha.lower()), normalize_repo_url(url))
+            return
+    if ssh:
+        # The clone keeps the declared SSH transport; so does its admission.
+        env = downloader._cache_git_env(dep_ref, remote_url=url)
+        require_reachable_commit(root, url, cache_shard_key(url), sha, env=env)
+        return
     downloader._persistent_cache_checkout(
         _Admission(root), dep_ref, dep_ref.to_github_url(), sha, locked_sha=None
     )
+
+
+def _resolved_commit(downloader, dep_ref, resolved) -> tuple[str | None, bool]:
+    """Return ``(commit, fresh_tip)`` for a branch or tag ref.
+
+    ``fresh_tip`` is true when this run read the commit from the origin's
+    current refs (not from the lockfile).
+    """
+    from ..models.dependency.types import GitReferenceType
+
+    tiered = getattr(downloader, "_tiered_resolver", None)
+    if resolved is None:
+        if tiered is None:
+            # No lockfile seed without the tiered resolver: a fresh resolution.
+            return None, False
+        try:
+            resolved = downloader.resolve_git_reference(dep_ref)
+        except Exception:
+            return None, False
+    sha = getattr(resolved, "resolved_commit", None)
+    if not sha or not _COMMIT_RE.match(sha):
+        return None, False
+    if getattr(resolved, "ref_type", None) == GitReferenceType.COMMIT:
+        return sha, False
+    return sha, tiered is None or tiered.remotely_resolved(dep_ref, sha) is True
 
 
 def require_reachable_commit(

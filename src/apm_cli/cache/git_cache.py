@@ -370,9 +370,9 @@ class GitCache:
         if self._read_only:
             return self._read_only_checkout(shard_key, ref, locked_sha, sparse_paths, env)
         sha = self._resolve_sha(url, ref, locked_sha=locked_sha, env=env)
-        # A caller passing the resolved commit as both ref and locked_sha
-        # (the downloader) admitted it already (admit_pinned_commit).
-        pinned = locked_sha if not ref else ref if not locked_sha else None
+        # Every commit pin is checked; only an origin-and-commit record (the
+        # downloader writes one on admission) lets the check skip the network.
+        pinned = locked_sha or ref
         if pinned and _SHA_RE.match(pinned):
             from .commit_reachability import require_reachable_commit
 

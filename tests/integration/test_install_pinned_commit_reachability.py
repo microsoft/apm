@@ -19,11 +19,12 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-ref-freshness")]
 
 _REMOTE = "https://gitlab.com/acme/platform/pkg"
+# Only the transport credentials are replaced; the downloader runs as shipped.
+_DOWNLOADER = "apm_cli.deps.github_downloader.GitHubPackageDownloader"
 _UNREACHABLE = "not reachable from any branch or tag"
 
 
@@ -106,18 +107,17 @@ def _project(root: Path, ref: str, path: str | None = None) -> Path:
 
 
 def _install(project: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, **env: str):
-    def _fixture_git_env(downloader: GitHubPackageDownloader, **_kwargs) -> dict[str, str]:
+    def _fixture_git_env(downloader, **_kwargs) -> dict[str, str]:
         return dict(downloader.git_env)
 
     monkeypatch.chdir(project)
     with (
         patch.dict(os.environ, {**origin.env(), **env}, clear=False),
         patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
-        patch.object(GitHubPackageDownloader, "_resolve_dep_token", return_value=None),
-        patch.object(GitHubPackageDownloader, "_resolve_dep_auth_ctx", return_value=None),
-        patch.object(
-            GitHubPackageDownloader,
-            "_build_noninteractive_git_env",
+        patch(f"{_DOWNLOADER}._resolve_dep_token", return_value=None),
+        patch(f"{_DOWNLOADER}._resolve_dep_auth_ctx", return_value=None),
+        patch(
+            f"{_DOWNLOADER}._build_noninteractive_git_env",
             autospec=True,
             side_effect=_fixture_git_env,
         ),
@@ -173,10 +173,15 @@ def test_install_admits_a_non_tip_commit_on_main(
     assert _installed(project) != []
 
 
+@pytest.mark.parametrize(
+    ("path", "no_cache"),
+    [(None, False), (None, True), ("skills/tool", False), ("skills/tool", True)],
+    ids=["repo-cached", "repo-no-cache", "subdir-cached", "subdir-no-cache"],
+)
 def test_a_locked_commit_only_a_pull_ref_reaches_is_refused_on_replay(
-    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, path, no_cache
 ) -> None:
-    project = _project(tmp_path, "main")
+    project = _project(tmp_path, "main", path)
     first = _install(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "cache"))
     assert first.exit_code == 0, first.output
     lock_path = project / "apm.lock.yaml"
@@ -185,7 +190,8 @@ def test_a_locked_commit_only_a_pull_ref_reaches_is_refused_on_replay(
     lock_path.write_text(lock, encoding="utf-8")
     shutil.rmtree(project / "apm_modules")
 
-    result = _install(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "cache2"))
+    replay_env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache2")}
+    result = _install(project, origin, monkeypatch, **replay_env)
 
     assert result.exit_code == 1, result.output
     assert _UNREACHABLE in " ".join(result.output.split())
