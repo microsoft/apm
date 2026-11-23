@@ -478,3 +478,77 @@ def test_emptying_a_required_dev_dependencies_field_falls_back_to_the_admin(
 
     assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'") is advised
     assert bool(check.remediations) is advised
+
+
+def test_the_selector_follows_the_manifest_default_host(tmp_path: Path, capsys) -> None:
+    """#5007: under default_host gitlab.com a bare acme/evil-pkg is not the GitHub entry."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    declared = "https://github.com/acme/evil-pkg"
+    root = _project(
+        tmp_path,
+        [declared],
+        [LockedDependency(repo_url="acme/evil-pkg", host="github.com", depth=1)],
+        default_host="gitlab.com",
+    )
+
+    check = _allowlist(root)
+
+    assert [r.to_json()["command"] for r in check.remediations] == [f"apm uninstall {declared}"]
+    removed = CliRunner().invoke(cli, ["uninstall", declared], catch_exceptions=False, env={})
+    assert removed.exit_code == 0, removed.output
+    assert yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))["dependencies"] == {
+        "apm": []
+    }
+
+
+@pytest.mark.parametrize("linked", [True, False], ids=["final-symlink", "regular-file"])
+def test_a_final_symlink_uninstall_would_keep_withholds_the_advice_and_names_it(
+    tmp_path: Path, capsys, linked: bool
+) -> None:
+    """#5008: target cleanup refuses a final symlink, so uninstall is not suggested."""
+    import hashlib
+
+    deployed = ".github/instructions/evil.instructions.md"
+    content = b"---\napplyTo: '**'\n---\n# evil rules\n"
+    project = tmp_path / "proj"
+    project.mkdir()
+    target = project / deployed
+    target.parent.mkdir(parents=True)
+    if linked:
+        outside = tmp_path / "outside.md"
+        outside.write_bytes(content)
+        target.symlink_to(outside)
+    else:
+        target.write_bytes(content)
+    root = _project(
+        project,
+        ["acme/evil-pkg"],
+        [
+            LockedDependency(
+                repo_url="acme/evil-pkg",
+                depth=1,
+                deployed_files=[deployed],
+                deployed_file_hashes={deployed: "sha256:" + hashlib.sha256(content).hexdigest()},
+            )
+        ],
+    )
+    if not linked:
+        from tests.utils.deployment_evidence import seed_receipts
+
+        # The receipt install would have written: the regular file is provably APM's.
+        seed_receipts(root, [target], target="copilot", owner="acme/evil-pkg")
+
+    check = _allowlist(root)
+
+    line = _stderr(capsys, check)[2]
+    if linked:
+        assert check.remediations == ()
+        assert line.startswith("    Ask your org admin to allow it"), line
+        assert f"{deployed} is a symbolic link" in line, line
+    else:
+        assert [r.to_json()["command"] for r in check.remediations] == [
+            "apm uninstall acme/evil-pkg"
+        ], line
