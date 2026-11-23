@@ -200,6 +200,29 @@ def _check_alternates(git_dir: Path, alternates_root: Path | None) -> None:
                 raise UntrustedCachedRepoError("object alternates are chained")
 
 
+_OBJECT_PAYLOAD = re.compile(r"[0-9a-f]{2}|pack")
+
+
+def _raise(error: OSError) -> None:
+    raise error
+
+
+def _check_plain_tree(git_dir: Path) -> None:
+    """Refuse any link or special file anywhere in the Git directory.
+
+    Only the contents of the object fan-out and pack directories are skipped
+    (they are read through Git's own object checks); the directories are not.
+    """
+    objects = os.path.join(git_dir, "objects")
+    for directory, subdirs, names in os.walk(git_dir, onerror=_raise):
+        for name in (*subdirs, *names):
+            mode = os.lstat(os.path.join(directory, name)).st_mode
+            if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                raise UntrustedCachedRepoError(f"{name} is not a plain file or directory")
+        if directory == objects:
+            subdirs[:] = [d for d in subdirs if not _OBJECT_PAYLOAD.fullmatch(d)]
+
+
 def _check_hooks(git_dir: Path) -> None:
     hooks = git_dir / "hooks"
     if not hooks.exists():
@@ -230,9 +253,7 @@ def require_trusted_cached_repo(
         info = os.lstat(git_dir)
         if not stat.S_ISDIR(info.st_mode) or (not bare and os.path.islink(repo)):
             raise UntrustedCachedRepoError("git directory is not a plain directory")
-        for name in ("objects", "refs"):
-            if not stat.S_ISDIR(os.lstat(git_dir / name).st_mode):
-                raise UntrustedCachedRepoError(f"{name} is not a plain directory")
+        _check_plain_tree(git_dir)
         for name in ("commondir", "info/attributes"):
             if (git_dir / name).exists():
                 raise UntrustedCachedRepoError(f"{name} present")

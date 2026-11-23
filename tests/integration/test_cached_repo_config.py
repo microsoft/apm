@@ -457,24 +457,30 @@ def test_an_alternate_is_checked_exactly_as_git_reads_it(tmp_path: Path) -> None
 
 
 @_POSIX_ONLY
-@pytest.mark.parametrize("name", ["objects", "refs"])
+@pytest.mark.parametrize("name", ["objects", "refs/heads", "info/sparse-checkout"])
 def test_git_state_linked_out_of_the_repository_is_refused(tmp_path: Path, name: str) -> None:
     from apm_cli.cache.cached_repo import UntrustedCachedRepoError, require_trusted_cached_repo
 
     origin, first, _second = _origin(tmp_path)
     checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
-    elsewhere = tmp_path / f"external-{name}"
-    (checkout / ".git" / name).rename(elsewhere)
-    (checkout / ".git" / name).symlink_to(elsewhere, target_is_directory=True)
+    planted = checkout / ".git" / name
+    elsewhere = tmp_path / "external" / name
+    elsewhere.parent.mkdir(parents=True)
+    if planted.exists():
+        planted.rename(elsewhere)
+    else:
+        elsewhere.write_text("/*\n", encoding="ascii")
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.symlink_to(elsewhere, target_is_directory=elsewhere.is_dir())
 
-    with pytest.raises(UntrustedCachedRepoError, match="not a plain directory"):
+    with pytest.raises(UntrustedCachedRepoError, match="not a plain file or directory"):
         require_trusted_cached_repo(
             checkout,
             bare=False,
             origin_ok=lambda _url: True,
             alternates_root=tmp_path / "cache" / "git" / "db_v1",
         )
-    assert (checkout / ".git" / name).is_symlink()
+    assert planted.is_symlink()
 
 
 @_POSIX_ONLY
