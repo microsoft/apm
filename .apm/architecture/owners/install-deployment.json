@@ -153,6 +153,7 @@
         "src/apm_cli/install/commit_gate.py",
         "src/apm_cli/install/deploy_snapshot.py",
         "src/apm_cli/install/deploy_state.py",
+        "src/apm_cli/install/journal_modes.py",
         "src/apm_cli/adapters/client/config_journal.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",

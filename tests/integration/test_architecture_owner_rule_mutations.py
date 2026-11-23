@@ -5249,6 +5249,22 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         new="    return tuple(sorted(retired))\n",
         intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/utils/git_env.py",
+        old="    return filesystem_containment(path, root) is not False",
+        new="    return os.path.samefile(path, root) or filesystem_containment(path, root) is not False",
+        intent="Helper exclusion computes containment itself beside the path_security owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/utils/path_security.py",
+        old="def filesystem_containment(path: Path, root: Path) -> bool | None:",
+        new="def _filesystem_containment(path: Path, root: Path) -> bool | None:",
+        intent="The path_security owner stops defining filesystem-aware containment.",
+    ),
 )
 
 EXECUTABLE_MUTATIONS = MUTATIONS + USER_ROOT_ROUTING_MUTATIONS

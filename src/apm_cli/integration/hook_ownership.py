@@ -28,10 +28,48 @@ def read_hook_object(path: Path) -> dict[str, Any]:
     return data
 
 
+def require_hook_event_lists(
+    hooks: dict, events, path: Path, project_root: Path, user_scope: bool = False
+) -> None:
+    """Ensure the merge target event, and every alias it clears, is a list (#5137).
+
+    The first of *events* is created when missing; a present event (or alias
+    spelling) that is not a list raises a ``ValueError`` naming the file and
+    that event, with the scope's remedy.
+    """
+    hooks.setdefault(events[0], [])
+    for event in events:
+        if event in hooks and not isinstance(hooks[event], list):
+            raise ValueError(malformed_hook_event(path, project_root, event, user_scope))
+
+
+def malformed_hook_event(
+    path: Path, project_root: Path, event: str, user_scope: bool = False
+) -> str:
+    """Name a hook event in a deployed config that is not a list of entries (#5137)."""
+    from apm_cli.core.remediation import HOOK_EVENT_MALFORMED
+    from apm_cli.utils.diagnostics import printable_ascii_text
+    from apm_cli.utils.paths import portable_relpath
+
+    try:
+        shown = portable_relpath(path, project_root)
+    except ValueError:
+        shown = path.as_posix()
+    remedy = (
+        HOOK_EVENT_MALFORMED.with_command("apm install -g") if user_scope else HOOK_EVENT_MALFORMED
+    )
+    # The event name comes from package and user files: never print control bytes.
+    return (
+        f"{printable_ascii_text(shown)}: hook event '{printable_ascii_text(event)}' is not a "
+        f"list of hook entries. {remedy.sentence()}"
+    )
+
+
 def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
     """Restore sidecar ownership markers onto matching in-memory entries."""
     for event_name, sidecar_entries in sidecar_data.items():
-        if event_name not in hooks or not isinstance(sidecar_entries, list):
+        if not isinstance(sidecar_entries, list) or not isinstance(hooks.get(event_name), list):
+            # A missing or malformed event on disk holds no entry to mark (#5137).
             continue
         pool: dict[str, deque[str]] = {}
         for sidecar_entry in sidecar_entries:
