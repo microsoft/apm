@@ -428,6 +428,28 @@ def test_eviction_touches_only_key_named_entries_in_their_shard(tmp_path: Path) 
     assert all(stray.read_bytes() == b"x" * 4096 for stray in strays)
 
 
+def test_package_records_count_toward_the_cap_and_are_evicted_over_it(tmp_path: Path) -> None:
+    from apm_cli.cache.deploy_store import RECORDS_DIR, package_record_key
+
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    store.put(key, _TEXT)
+    ident = ("https://github.com/o/r", "a" * 40, "sha256:" + "b" * 64, ["copilot"], "9.9", "x")
+    raw = hashlib.sha256(_TEXT).hexdigest()
+    record = {"v": 1, "files": {"a.md": [key, raw]}, "ascii_only": True, "body": None}
+    record_key = package_record_key(*ident)
+    assert store.put_record(record_key, record)
+    record_path = root / RECORDS_DIR / record_key[:2] / f"{record_key}.json"
+    os.utime(record_path, (1000, 1000))
+    total = len(_TEXT) + record_path.stat().st_size
+
+    assert store.get_stats()["total_size_bytes"] == total
+    assert store.enforce_size_cap(limit=total - 1) == 1, "the older record goes first"
+    assert not record_path.exists()
+    assert store.package_record(*ident) is None, "an evicted record is a miss"
+    assert store.get(key) == _TEXT
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 def test_eviction_never_follows_a_linked_shard(tmp_path: Path) -> None:
     store, root = _store(tmp_path)

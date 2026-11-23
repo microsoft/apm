@@ -22,7 +22,9 @@ digest is line-ending-normalized, apm#1952); either may be the one kept.
 Size bound: an entry larger than :data:`MAX_DEPLOY_ENTRY_BYTES` is never
 stored, and after a command adds entries the store evicts least recently
 used entries (a verified read refreshes recency) once it exceeds
-:data:`MAX_DEPLOY_STORE_BYTES`, down to 80% of it. ``apm cache clean``
+:data:`MAX_DEPLOY_STORE_BYTES`, down to 80% of it. Package records under
+``records/`` count toward that bound and are evicted the same way; evicting
+a record or a blob it names only turns the next replay into a miss. ``apm cache clean``
 empties it; an empty store only means the next command does the full work.
 """
 
@@ -48,6 +50,7 @@ RECORDS_DIR = "records"
 _RECORD_VERSION = 1
 
 _KEY_RE = re.compile(r"[0-9a-f]{64}")
+_RECORD_NAME_RE = re.compile(r"[0-9a-f]{64}\.json")
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
 # A FIFO planted at an entry path must be a miss, not a blocked open.
@@ -235,6 +238,11 @@ class DeployStore:
                     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if not self._real_dir(directory):
                     return False
+            if _read_bounded(path) == data:
+                # Unchanged: refresh recency without a write that would trigger a cap scan.
+                with contextlib.suppress(OSError):
+                    os.utime(path, None)
+                return True
             fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".part")
         except OSError:
             return False
@@ -246,6 +254,7 @@ class DeployStore:
             with contextlib.suppress(OSError):
                 os.unlink(temp)
             return False
+        self.written += 1
         return True
 
     def package_record(
@@ -275,43 +284,64 @@ class DeployStore:
         if raw is None:
             return None
         try:
-            return _valid_record(json.loads(raw.decode("ascii")))
+            record = _valid_record(json.loads(raw.decode("ascii")))
         except (UnicodeDecodeError, ValueError):
             return None
+        if record is not None:
+            with contextlib.suppress(OSError):
+                os.utime(path, None)
+        return record
 
-    def _scan(self) -> list[tuple[float, int, str]]:
-        """``(mtime, size, path)`` of every key-named entry in its own real shard."""
+    def _scan_shards(self, base: Path, name_re: re.Pattern[str]) -> list[tuple[float, int, str]]:
+        """``(mtime, size, path)`` of every key-named regular file in its own real shard."""
         found: list[tuple[float, int, str]] = []
-        if not self._real_dir(self._root):
-            return found
-        try:
-            with os.scandir(self._root) as shards:
-                for shard in shards:
-                    # Windows junctions pass is_dir(follow_symlinks=False); refuse them.
-                    if len(shard.name) != 2 or not self._real_dir(Path(shard.path)):
-                        continue
-                    with os.scandir(shard.path) as files:
-                        for item in files:
-                            if not (
-                                _KEY_RE.fullmatch(item.name)
-                                and item.name.startswith(shard.name)
-                                and item.is_file(follow_symlinks=False)
-                            ):
-                                continue
-                            info = item.stat(follow_symlinks=False)
-                            found.append((info.st_mtime, info.st_size, item.path))
-        except OSError:
-            return []
+        with os.scandir(base) as shards:
+            for shard in shards:
+                # Windows junctions pass is_dir(follow_symlinks=False); refuse them.
+                if len(shard.name) != 2 or not self._real_dir(Path(shard.path)):
+                    continue
+                with os.scandir(shard.path) as files:
+                    for item in files:
+                        if not (
+                            name_re.fullmatch(item.name)
+                            and item.name.startswith(shard.name)
+                            and item.is_file(follow_symlinks=False)
+                        ):
+                            continue
+                        info = item.stat(follow_symlinks=False)
+                        found.append((info.st_mtime, info.st_size, item.path))
         return found
 
+    def _scan(self) -> tuple[list[tuple[float, int, str]], list[tuple[float, int, str]]]:
+        """``(blobs, records)``: every key-named blob and package record in its own real shard."""
+        if not self._real_dir(self._root):
+            return [], []
+        records_root = self._root / RECORDS_DIR
+        try:
+            blobs = self._scan_shards(self._root, _KEY_RE)
+            records = (
+                self._scan_shards(records_root, _RECORD_NAME_RE)
+                if self._real_dir(records_root)
+                else []
+            )
+        except OSError:
+            return [], []
+        return blobs, records
+
     def get_stats(self) -> dict[str, int]:
-        """Entry count and total size of the stored deployed bytes."""
-        entries = self._scan()
-        return {"entry_count": len(entries), "total_size_bytes": sum(e[1] for e in entries)}
+        """Deployed-file entry count and total size of the store (blobs and records)."""
+        blobs, records = self._scan()
+        total = sum(e[1] for e in blobs) + sum(e[1] for e in records)
+        return {"entry_count": len(blobs), "total_size_bytes": total}
 
     def enforce_size_cap(self, limit: int = MAX_DEPLOY_STORE_BYTES) -> int:
-        """Evict least recently used entries above *limit*, down to 80% of it; return count."""
-        entries = self._scan()
+        """Evict least recently used blobs and records above *limit*, down to 80% of it.
+
+        Returns the eviction count. A record names blobs by digest and every
+        reader verifies on read, so evicting either one is only a later miss.
+        """
+        blobs, records = self._scan()
+        entries = blobs + records
         total = sum(size for _mtime, size, _path in entries)
         if total <= limit:
             return 0
