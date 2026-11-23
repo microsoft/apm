@@ -115,11 +115,27 @@ def run(ctx: InstallContext) -> None:
         raise
     from apm_cli.install.service import InstallService
 
-    if ctx.dry_run or InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
+    if ctx.dry_run:
+        return
+    _note_native_route(ctx)
+    if InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
         return
     stamped = _record_declared(LockFile.read(lock_path), declared)
     if stamped is not None:
         stamped.write(lock_path)
+
+
+def _note_native_route(ctx: InstallContext) -> None:
+    """Name each dependency this install deployed through the native plugin route."""
+    if ctx.diagnostics is None:
+        return
+    from apm_cli.claude_plugins.admission import has_loose_route, native_route_notice
+    from apm_cli.core.scope import is_user_scope
+
+    user_scope = is_user_scope(ctx.scope)
+    for package_name, plugin in ctx.claude_native_plugins.items():
+        loose_route = has_loose_route(plugin, user_scope=user_scope)
+        ctx.diagnostics.warn(native_route_notice(loose_route=loose_route), package=package_name)
 
 
 def _retired_harnesses(ctx: InstallContext) -> frozenset[str]:

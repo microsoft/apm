@@ -47,6 +47,11 @@ class ClientFactory:
     """Factory for creating MCP client adapters."""
 
     @staticmethod
+    def adapter_class(client_type: str) -> type | None:
+        """Return the adapter class registered for *client_type*, or None if unsupported."""
+        return _MCP_CLIENT_REGISTRY.get(client_type.lower())
+
+    @staticmethod
     def create_client(
         client_type,
         project_root: Path | str | None = None,

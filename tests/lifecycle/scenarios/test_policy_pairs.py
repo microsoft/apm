@@ -20,6 +20,7 @@ import re
 
 import pytest
 
+from tests.lifecycle import driver
 from tests.lifecycle.scenarios._kit import (
     Known,
     Scenario,
@@ -36,6 +37,7 @@ from tests.lifecycle.scenarios._sources import (
 from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.packages import INERT_COMMAND
 from tests.lifecycle.world.services import REGISTRY_SERVER
+from tests.utils.artifact_snapshot import ArtifactSnapshotSet, assert_snapshot_set_unchanged
 
 pytestmark = [
     pytest.mark.e2e,
@@ -334,6 +336,36 @@ def test_no_policy_installs_a_local_bundle(lifecycle_world) -> None:
     scenario.finish()
 
 
+def test_a_denied_local_bundle_is_refused_before_any_write(lifecycle_world) -> None:
+    """A local bundle meets dependencies.deny by its name and its recorded packages (#4646)."""
+    world = lifecycle_world
+    use_policy(world, "allow")
+    specs = {"p-exec-bundle": world.packages["p-exec:bundle"].spec}
+    kinds = {"p-exec-bundle": ("hook", "mcp", "bin")}
+    scenario = Scenario(world, specs, policy="allow", kinds=kinds)
+    _deny(scenario, "p-exec-bundle")
+    # Warm the policy cache first, so the refusal itself may change no cache byte.
+    warmed = driver.run(world, ["policy", "status"])
+    assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+    roots = dict(scenario.snapshot_roots())
+    cache = world.cache_root
+    if cache is not None and not any(cache.is_relative_to(r) for r in roots.values()):
+        roots["cache"] = cache
+    before = ArtifactSnapshotSet.capture(roots)
+    step = scenario.run(
+        "install p-exec-bundle",
+        credit=[
+            _pair(OP="bundle-install", GATE=_DD),
+            _pair(SRC="local-bundle", GATE=_DD),
+        ],
+        refusal=True,
+    )
+    # Project, lock, ledger, APM_HOME and cache are byte-identical after the refusal.
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(roots))
+    assert "denied by pattern" in " ".join(step.output.split()), step.output
+    scenario.finish()
+
+
 # -- MCP server sources --------------------------------------------------------------
 
 _MCP_LINES = {
@@ -434,6 +466,10 @@ CREDITS = credits(
         "test_a_denied_package_is_refused_offline": [_pair(GATE=_DD, NET="offline")],
         "test_no_policy_installs_offline": [_pair(NET="offline", NOPOLICY="on")],
         "test_marketplace_add_beside_a_denied_dependency": [_pair(OP="marketplace", GATE=_DD)],
+        "test_a_denied_local_bundle_is_refused_before_any_write": [
+            _pair(OP="bundle-install", GATE=_DD),
+            _pair(SRC="local-bundle", GATE=_DD),
+        ],
         "test_no_policy_installs_a_local_bundle": [
             _pair(OP="bundle-install", SRC="local-bundle", NOPOLICY="on")
         ],

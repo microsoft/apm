@@ -90,6 +90,8 @@ class _WriteScope:
     writer: LockfileWriter
     pending: dict[Path, str | _Removed] = field(default_factory=dict)
     after_commit: list[Callable[[], None]] = field(default_factory=list)
+    # Run just before the staged documents are written (#4863).
+    before_commit: list[Callable[[], None]] = field(default_factory=list)
     # Run when the staged documents never reach disk: a failed commit or an
     # abandoned command (#4664).
     if_uncommitted: list[Callable[[], None]] = field(default_factory=list)
@@ -404,6 +406,18 @@ def after_lockfile_commit(action: Callable[[], None], *, first: bool = False) ->
         scope.after_commit.append(action)
 
 
+def before_lockfile_commit(action: Callable[[], None]) -> None:
+    """Run *action* just before what this command staged is written (#4863).
+
+    The deploy journal records there which lockfile it is about to commit,
+    so a process killed after the write is not mistaken for an uncommitted
+    install. With nothing staged, nothing is about to be written.
+    """
+    scope = _scope()
+    if scope is not None and scope.pending:
+        scope.before_commit.append(action)
+
+
 def unless_lockfile_commits(action: Callable[[], None]) -> bool:
     """Run *action* if what this command staged never reaches disk (#4664).
 
@@ -448,6 +462,7 @@ def discard_staged_lockfile_writes() -> None:
         return
     scope.pending.clear()
     scope.after_commit.clear()
+    scope.before_commit.clear()
     scope.if_uncommitted.clear()
     scope.changed_state = False
 
@@ -468,6 +483,10 @@ def _commit(scope: _WriteScope) -> None:
     from .lockfile import ensure_lockfile_writable
     from .lockfile_document import same_document
 
+    marks, scope.before_commit = scope.before_commit, []
+    if scope.pending:
+        for mark in marks:
+            mark()
     while scope.pending:
         key = next(iter(scope.pending))
         document = scope.pending[key]
