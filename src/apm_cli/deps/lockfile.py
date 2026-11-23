@@ -209,16 +209,6 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
     return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
 
 
-def _same_document(current: str | None, serialized: str) -> bool:
-    """Whether *current* holds the data *serialized* would write; only formatting may differ."""
-    from ..utils.yaml_io import load_yaml_str
-
-    try:
-        return current is not None and load_yaml_str(current) == load_yaml_str(serialized)
-    except (UnicodeError, yaml.YAMLError, ValueError):
-        return False
-
-
 def recorded_generator(data: Mapping[str, Any]) -> object:
     """The ``apm_version`` a parsed lockfile records for the generator gate.
 
@@ -1763,9 +1753,11 @@ class LockFile:
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
+        from .lockfile_document import document_snapshot, same_document
         from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
 
         existing: LockFile | None
+        existing_document: dict[str, Any] | None = None
         legacy_timestamp_present = False
         existing_text = staged_lockfile_text(path)
         if isinstance(existing_lockfile, _ExistingLockfileUnset) and existing_text is not None:
@@ -1776,6 +1768,8 @@ class LockFile:
             existing = None
             if isinstance(existing_data, dict):
                 legacy_timestamp_present = existing_data.get("generated_at") is not None
+                # Construction shares nested objects; snapshot for the no-op check.
+                existing_document = document_snapshot(existing_data)
                 try:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
@@ -1824,7 +1818,7 @@ class LockFile:
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml(user_scope=user_scope)
         assert_no_staging_paths(serialized, path.name)
-        if unchanged and _same_document(existing_text, serialized):
+        if unchanged and same_document(existing_text, serialized, existing_document):
             # A proven no-op keeps the file's own bytes (comments, key style).
             return True
         if not stage_lockfile(path, serialized):

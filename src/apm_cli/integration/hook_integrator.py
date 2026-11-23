@@ -406,6 +406,7 @@ class HookIntegrator(BaseIntegrator):
     #   VS Code:          https://code.visualstudio.com/docs/copilot/customization/hooks
     #   Claude Code:      https://code.claude.com/docs/en/hooks
     HOOK_COMMAND_KEYS: tuple[str, ...] = _HOOK_COMMAND_KEYS
+    replay_command_root: Path | None = None  # live user root, set only by audit replay
 
     @staticmethod
     def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
@@ -962,10 +963,9 @@ class HookIntegrator(BaseIntegrator):
             return False
         return HookIntegrator._hook_entry_content_key(entry) in fresh_content_keys
 
-    @staticmethod
-    def _deploy_root_for_hook_rewrite(project_root: Path, user_scope: bool) -> Path | None:
-        # User scope needs cwd-independent paths; project scope stays portable.
-        return project_root if user_scope else None
+    def _deploy_root_for_hook_rewrite(self, project_root: Path, user_scope: bool) -> Path | None:
+        # User scope needs cwd-independent paths; audit replay renders the live root's.
+        return (self.replay_command_root or project_root) if user_scope else None
 
     @staticmethod
     def _home_reference_for_hook_rewrite(target, user_scope: bool):
