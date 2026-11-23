@@ -203,6 +203,29 @@ class AgentIntegrator(BaseIntegrator):
     # Target-driven API (data-driven dispatch)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _agents_dir(target: TargetProfile, mapping, project_root: Path) -> Path:
+        return project_root / (mapping.deploy_root or target.root_dir) / mapping.subdir
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, target: TargetProfile, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """``{target_path: source}`` this integrator may copy for *target*, else ``None``.
+
+        The same directory and ``get_target_filename_for_target`` the agent
+        path uses; Kiro agents are rendered, so they are ``None``. Whether a
+        given agent is a byte copy is proven by its bytes, not assumed here.
+        """
+        mapping = target.primitives.get("agents")
+        if not mapping:
+            return {}
+        if mapping.format_id == "kiro_agent":
+            return None
+        agents_dir = self._agents_dir(target, mapping, project_root)
+        name = getattr(getattr(package_info, "package", None), "name", "")
+        files = self.find_agent_files(package_info.install_path, source_plan, None, name)
+        return {agents_dir / self.get_target_filename_for_target(f, name, target): f for f in files}
+
     def get_target_filename_for_target(
         self,
         source_file: Path,
@@ -237,8 +260,6 @@ class AgentIntegrator(BaseIntegrator):
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
 
-        effective_root = mapping.deploy_root or target.root_dir
-        target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
@@ -252,7 +273,7 @@ class AgentIntegrator(BaseIntegrator):
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 
-        agents_dir = target_root / mapping.subdir
+        agents_dir = self._agents_dir(target, mapping, project_root)
         # Lazy mkdir: only create the dir when we actually need to write.
         # This avoids creating .kiro/agents/ when every agent is invalid-tools.
         agents_dir_created = False

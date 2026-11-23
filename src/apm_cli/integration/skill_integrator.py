@@ -202,6 +202,12 @@ def normalize_skill_name(name: str) -> str:
     return to_hyphen_case(name)
 
 
+def promoted_skill_name(raw_name: str) -> str:
+    """The directory name a promoted sub-skill deploys under."""
+    is_valid, _ = validate_skill_name(raw_name)
+    return raw_name if is_valid else normalize_skill_name(raw_name)
+
+
 def copy_skill_to_target(
     package_info,
     source_path: Path,
@@ -562,6 +568,45 @@ class SkillIntegrator(BaseIntegrator):
                 for path in copied
             )
         return copied
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, targets, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """``{target_path: source}`` the sub-skill copy may write for *targets*, else ``None``.
+
+        The same route, skill-root dedup, promoted name and admitted member
+        walk the sub-skill promotion uses. Native and bundle routes are not
+        mapped (``None``). Whether a member is a byte copy is proven by its bytes.
+        """
+        from copy import copy
+
+        from apm_cli.integration.skill_support import _build_deployable_copy_ignore
+
+        info = copy(package_info)
+        info.install_path = Path(package_info.install_path).resolve()
+        selection = self.selected_skill_sources(info)
+        if selection.route == "none":
+            return {}
+        if selection.route != "subskills":
+            return None
+        ignore = _build_deployable_copy_ignore(source_plan=source_plan)
+        planned: dict[Path, Path] = {}
+        seen_roots: set[Path] = set()
+        for target in targets:
+            if not target.supports("skills"):
+                continue
+            skills_root = project_root / target.skills_rel_root
+            if skills_root.resolve() in seen_roots:
+                continue
+            seen_roots.add(skills_root.resolve())
+            for name in sorted(selection.children):
+                child = selection.children[name]
+                if not child.is_dir() or not (child / "SKILL.md").exists():
+                    continue
+                destination = skills_root / promoted_skill_name(child.name)
+                for member in self.admitted_source_members(child, ignore):
+                    planned[destination / member.relative_to(child)] = member
+        return planned
 
     def _ownership_maps(self, lockfile_root: Path) -> tuple[Mapping[str, str], Mapping[str, str]]:
         """Read durable ownership once per used root in the current integration phase."""
@@ -940,8 +985,7 @@ class SkillIntegrator(BaseIntegrator):
             # --skill filter: skip skills not in the requested subset
             if name_filter is not None and raw_sub_name not in name_filter:
                 continue
-            is_valid, _ = validate_skill_name(raw_sub_name)
-            sub_name = raw_sub_name if is_valid else normalize_skill_name(raw_sub_name)
+            sub_name = promoted_skill_name(raw_sub_name)
             target = target_skills_root / sub_name
             rewriter = link_rewriter or SkillIntegrator()
             rel_path = rewriter._skill_path_entry(target, materialization_root)

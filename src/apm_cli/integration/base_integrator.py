@@ -505,6 +505,17 @@ class BaseIntegrator:
             return None
         return edit_kind(expected, incoming)
 
+    def admitted_source_members(
+        self, source: Path, ignore: Callable[[str, list[str]], list[str]]
+    ) -> Iterator[Path]:
+        """Every member of *source* a directory copy admits, in copy order."""
+        for directory, directories, filenames in self.walk_source_tree(source):
+            ignored = set(ignore(directory, [*directories, *filenames]))
+            directories[:] = sorted(name for name in directories if name not in ignored)
+            for name in sorted(filenames):
+                if name not in ignored:
+                    yield Path(directory) / name
+
     def copy_directory_files(
         self,
         source: Path,
@@ -533,89 +544,81 @@ class BaseIntegrator:
 
         copied: list[Path] = []
         destination_existed = destination.exists()
-        for directory, directories, filenames in self.walk_source_tree(source):
-            ignored = set(ignore(directory, [*directories, *filenames]))
-            directories[:] = sorted(name for name in directories if name not in ignored)
-            for name in sorted(filenames):
-                if name in ignored:
-                    continue
-                source_file = Path(directory) / name
-                target_file = destination / source_file.relative_to(source)
-                if has_symlink_component(destination.parent, target_file, raise_on_error=True):
-                    raise PathTraversalError(
-                        f"Skill destination {target_file} contains a symlink -- refusing to deploy"
-                    )
-                ensure_path_within(target_file, destination)
-                entry = path_entry(target_file)
-                if write_allowed is not None and not write_allowed(entry):
-                    if on_member_skipped is not None:
-                        on_member_skipped(target_file)
-                    continue
-                if target_file.exists() and not target_file.is_file():
-                    raise IsADirectoryError(
-                        errno.EISDIR, os.strerror(errno.EISDIR), str(target_file)
-                    )
-                if (
-                    unchanged
-                    and self.is_content_identical_to_source(target_file, source_file)
-                    and not (requires_write is not None and requires_write(target_file))
-                ):
-                    copied.append(target_file)
-                    continue
-                if self.check_collision(
-                    target_file,
-                    entry,
-                    {entry} if is_managed(entry) else set(),
-                    force,
-                    diagnostics=diagnostics,
-                ):
-                    if on_member_skipped is not None:
-                        on_member_skipped(target_file)
-                    continue
-                expected = (
-                    baseline_hash(target_file)
-                    if baseline_hash is not None
-                    else recorded_hashes.get(entry)
+        for source_file in self.admitted_source_members(source, ignore):
+            target_file = destination / source_file.relative_to(source)
+            if has_symlink_component(destination.parent, target_file, raise_on_error=True):
+                raise PathTraversalError(
+                    f"Skill destination {target_file} contains a symlink -- refusing to deploy"
                 )
-                state = (
-                    None
-                    if force
-                    else self._member_edit(
-                        target_file,
-                        source_file,
-                        expected,
-                        untrusted=(baseline_hash is not None and expected is None),
-                    )
-                )
-                if state is not None:
-                    if state == "untrusted":
-                        message = self.untrusted_member_message(
-                            entry, path_entry(destination), destination
-                        )
-                    else:
-                        message = kept_edit_message(
-                            entry, user_scope=self.install_user_scope(), proven_edit=True
-                        )
-                    if diagnostics is not None:
-                        if state == "drift":
-                            diagnostics.warn(message)
-                        else:
-                            diagnostics.error(message, package=package)
-                    else:
-                        _rich_warning(message)
-                    if on_member_skipped is not None:
-                        on_member_skipped(target_file)
-                    continue
-                write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
-                try:
-                    write_seam.copy2(source_file, target_file)
-                except OSError:
-                    if not destination_existed:
-                        self.cleanup_empty_parents([target_file], destination.parent)
-                    raise
+            ensure_path_within(target_file, destination)
+            entry = path_entry(target_file)
+            if write_allowed is not None and not write_allowed(entry):
+                if on_member_skipped is not None:
+                    on_member_skipped(target_file)
+                continue
+            if target_file.exists() and not target_file.is_file():
+                raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(target_file))
+            if (
+                unchanged
+                and self.is_content_identical_to_source(target_file, source_file)
+                and not (requires_write is not None and requires_write(target_file))
+            ):
                 copied.append(target_file)
-                if on_member_written is not None:
-                    on_member_written(target_file)
+                continue
+            if self.check_collision(
+                target_file,
+                entry,
+                {entry} if is_managed(entry) else set(),
+                force,
+                diagnostics=diagnostics,
+            ):
+                if on_member_skipped is not None:
+                    on_member_skipped(target_file)
+                continue
+            expected = (
+                baseline_hash(target_file)
+                if baseline_hash is not None
+                else recorded_hashes.get(entry)
+            )
+            state = (
+                None
+                if force
+                else self._member_edit(
+                    target_file,
+                    source_file,
+                    expected,
+                    untrusted=(baseline_hash is not None and expected is None),
+                )
+            )
+            if state is not None:
+                if state == "untrusted":
+                    message = self.untrusted_member_message(
+                        entry, path_entry(destination), destination
+                    )
+                else:
+                    message = kept_edit_message(
+                        entry, user_scope=self.install_user_scope(), proven_edit=True
+                    )
+                if diagnostics is not None:
+                    if state == "drift":
+                        diagnostics.warn(message)
+                    else:
+                        diagnostics.error(message, package=package)
+                else:
+                    _rich_warning(message)
+                if on_member_skipped is not None:
+                    on_member_skipped(target_file)
+                continue
+            write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
+            try:
+                write_seam.copy2(source_file, target_file)
+            except OSError:
+                if not destination_existed:
+                    self.cleanup_empty_parents([target_file], destination.parent)
+                raise
+            copied.append(target_file)
+            if on_member_written is not None:
+                on_member_written(target_file)
         return copied
 
     @staticmethod

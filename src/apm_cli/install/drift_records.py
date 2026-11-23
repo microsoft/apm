@@ -23,7 +23,11 @@ from typing import Any
 # ``APM_AUDIT_RECORDS=0`` replays every package live.
 RECORDS_SWITCH = "APM_AUDIT_RECORDS"
 # Source directories whose content is executable or gate-decided: always live.
-_LIVE_DIRS = frozenset({"hooks", "bin", "scripts"})
+_LIVE_DIRS = frozenset({"hooks", "bin", "scripts", "extensions"})
+# Target primitive kinds this decision can map; hooks and canvas extensions are
+# live by _LIVE_DIRS, and any other kind (e.g. rendered commands) is never mapped.
+_MAPPED_KINDS = frozenset({"instructions", "prompts", "agents", "skills"})
+_LIVE_KINDS = frozenset({"hooks", "canvas"})
 _EXEC_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
 # ``(install_path, context) -> {dest_rel: source_path}`` built by the integrators'
@@ -36,9 +40,34 @@ def records_enabled() -> bool:
     return os.environ.get(RECORDS_SWITCH, "").strip() != "0"
 
 
-def _integrator_mapping(_install_path: Path, _context: Any) -> Mapping[str, Path] | None:
-    """The integrators' verbatim destinations (not wired yet: every package replays live)."""
-    return None
+def _integrator_mapping(_install_path: Path, context: Any) -> Mapping[str, Path] | None:
+    """The union of the integrators' own verbatim destinations, relative to the deploy root.
+
+    *context* carries ``package_info``, ``targets``, ``integrators`` and
+    ``project_root`` (the root the replay writes under). ``None`` when any
+    target deploys a kind no integrator maps, any integrator renders, or two
+    sources would land on one destination.
+    """
+    targets = list(context.targets)
+    if any(set(t.primitives) - _MAPPED_KINDS - _LIVE_KINDS for t in targets):
+        return None
+    integrators = context.integrators
+    root = Path(context.project_root)
+    parts = [
+        integrators[name].verbatim_destinations(context.package_info, root, target)
+        for name in ("instruction", "prompt", "agent")
+        for target in targets
+    ]
+    parts.append(integrators["skill"].verbatim_destinations(context.package_info, root, targets))
+    planned: dict[str, Path] = {}
+    for part in parts:
+        if part is None:
+            return None
+        for destination, source in part.items():
+            rel = destination.relative_to(root).as_posix()
+            if planned.setdefault(rel, source) != source:
+                return None
+    return planned
 
 
 def served_outputs(
@@ -106,13 +135,18 @@ def _bound_record(
 
     deployed = set(getattr(lock_dep, "deployed_files", None) or ())
     hashes = dict(getattr(lock_dep, "deployed_file_hashes", None) or {})
-    if not deployed or deployed != set(hashes) or _names_live_kind(deployed):
+    if not hashes or not set(hashes) <= deployed or _names_live_kind(deployed):
         return None
     record = _record(lock_dep, targets, store)
     if record is None or record.get("policy") != policy_fingerprint:
         return None
-    if set(record["files"]) != deployed or not record_matches(record, hashes):
+    if set(record["files"]) != set(hashes) or not record_matches(record, hashes):
         return None
+    # Entries without a hash are directories the package owns (a skill dir):
+    # each must hold at least one recorded file.
+    for directory in deployed - set(hashes):
+        if not any(rel.startswith(directory.rstrip("/") + "/") for rel in hashes):
+            return None
     return record
 
 
@@ -215,3 +249,167 @@ def _plain_bytes(source: Path, root: Path) -> bytes | None:
     if not stat.S_ISREG(info.st_mode) or info.st_mode & _EXEC_BITS:
         return None
     return source.read_bytes()
+
+
+class ReplayRecords:
+    """The record-served side of one drift replay run (``install/drift.py::run_replay``).
+
+    Serves a package only at its own position in the replay loop, so the scratch
+    tree is written in the live order. ``intact()`` reports whether every served
+    file still holds its served bytes once the loop ends: a live package that
+    rendered onto a served destination makes the caller replay everything live.
+    """
+
+    @classmethod
+    def for_replay(
+        cls,
+        config: Any,
+        project_root: Path,
+        lock: Any,
+        targets: Any,
+        integrators: Any,
+        scratch_root: Path,
+        *,
+        enabled: bool,
+    ) -> ReplayRecords:
+        """The record side of one replay; ``exec_policy`` is what the executables gate uses."""
+        policy_fetch, exec_policy = record_policy(config, project_root, enabled=enabled)
+        records = cls(
+            enabled=enabled and not config.user_scope,
+            lock=lock,
+            targets=targets,
+            integrators=integrators,
+            scratch_root=scratch_root,
+            policy_fetch=policy_fetch,
+        )
+        records.exec_policy = exec_policy
+        return records
+
+    def __init__(
+        self,
+        *,
+        enabled: bool,
+        lock: Any,
+        targets: Any,
+        integrators: Any,
+        scratch_root: Path,
+        policy_fetch: Callable[[], Any] | None,
+    ) -> None:
+        self.exec_policy: Callable[[], Any] | None = None
+        global _LAST_SUMMARY
+        _LAST_SUMMARY = None
+        self._enabled = enabled and records_enabled()
+        self._targets = targets
+        self._integrators = integrators
+        self._scratch_root = Path(scratch_root)
+        self._policy_fetch = policy_fetch
+        self._fingerprint: str | None = None
+        self._fingerprinted = False
+        self._served: dict[str, bytes] = {}
+        self.served_packages = 0
+        self._claims: dict[str, int] = {}
+        for dep in lock.get_all_dependencies() if self._enabled else ():
+            for key in {_dest_key(rel) for rel in getattr(dep, "deployed_files", None) or ()}:
+                self._claims[key] = self._claims.get(key, 0) + 1
+
+    def _policy_fingerprint(self) -> str | None:
+        if not self._fingerprinted:
+            self._fingerprinted = True
+            from apm_cli.policy.effective_fingerprint import effective_policy_fingerprint
+
+            try:
+                fetch = self._policy_fetch() if self._policy_fetch is not None else None
+                self._fingerprint = effective_policy_fingerprint(fetch)
+            except Exception:
+                self._fingerprint = None
+        return self._fingerprint
+
+    def serve(self, lock_dep: Any, install_path: Path, package_info: Any, selection: Any) -> bool:
+        """Write *lock_dep*'s proven output into scratch; ``False`` means replay it live."""
+        from apm_cli.deps.lockfile import _SELF_KEY
+
+        if not self._enabled or getattr(lock_dep, "local_path", None) == _SELF_KEY:
+            return False
+        fingerprint = self._policy_fingerprint()
+        if fingerprint is None:
+            return False
+        own = getattr(lock_dep, "deployed_files", None) or ()
+        context = _MappingContext(
+            package_info, self._targets, self._integrators, self._scratch_root
+        )
+        served = served_outputs(
+            lock_dep,
+            install_path,
+            context=context,
+            selection=selection,
+            policy_fingerprint=fingerprint,
+            other_dests=[rel for rel in own if self._claims.get(_dest_key(rel), 0) > 1],
+        )
+        if served is None:
+            return False
+        for rel, data in served.items():
+            path = self._scratch_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        self._served.update(served)
+        self.served_packages += 1
+        return True
+
+    def finish(self, logger: Any, live: int) -> bool:
+        """Report the replay when every served file is intact; ``False`` means replay live."""
+        global _LAST_SUMMARY
+        if not self.intact():
+            return False
+        _LAST_SUMMARY = (self.served_packages, live)
+        logger.replay_complete(live + self.served_packages)
+        return True
+
+    def intact(self) -> bool:
+        """Every served destination still holds exactly the bytes served to it."""
+        for rel, data in self._served.items():
+            try:
+                if (self._scratch_root / rel).read_bytes() != data:
+                    return False
+            except OSError:
+                return False
+        return True
+
+
+_LAST_SUMMARY: tuple[int, int] | None = None
+
+
+def last_replay_summary() -> tuple[int, int] | None:
+    """``(served, live)`` package counts of the last drift replay in this process."""
+    return _LAST_SUMMARY
+
+
+def record_policy(
+    config: Any, project_root: Path, *, enabled: bool
+) -> tuple[Callable[[], Any] | None, Callable[[], Any] | None]:
+    """``(discovery, policy provider)`` for one replay, sharing ONE discovery.
+
+    With records off, or when the caller supplies the provider (and maybe the
+    discovery it routes), nothing changes. Otherwise the replay discovers once
+    and the executables gate resolves its policy from that same discovery,
+    exactly as it would have resolved it on its own.
+    """
+    if not enabled or config.policy_provider is not None:
+        return config.policy_fetch, config.policy_provider
+    import functools
+
+    from apm_cli.core.scope import manifest_root
+    from apm_cli.policy.outcome_routing import discover_trust_policy, resolve_trust_policy
+
+    root = manifest_root(project_root, user_scope=config.user_scope)
+    fetch = functools.cache(lambda: discover_trust_policy(root))
+    return fetch, lambda: resolve_trust_policy(root, announce=False, fetch_result=fetch())
+
+
+class _MappingContext:
+    """The integrators' deploy context for one package (targets, root, integrators)."""
+
+    def __init__(self, package_info: Any, targets: Any, integrators: Any, root: Path) -> None:
+        self.package_info = package_info
+        self.targets = targets
+        self.integrators = integrators
+        self.project_root = root

@@ -287,3 +287,12 @@ def test_case_equal_dests_in_one_record_replay_live(tmp_path: Path) -> None:
     _rewrite_record(world, files=files)
 
     assert _serve(world) is None
+
+
+def test_a_locked_directory_holding_recorded_files_still_binds(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    world["dep"].deployed_files = [*world["dep"].deployed_files, ".github/skills/guide"]
+
+    assert _serve(world) is not None
+    world["dep"].deployed_files = [*world["dep"].deployed_files, ".github/skills/empty"]
+    assert _serve(world) is None
