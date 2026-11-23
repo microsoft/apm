@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import RuntimeAdapter, _stream_subprocess_output
-from .utils import find_runtime_binary
+from .utils import find_runtime_binary, require_runtime_binary
 
 
 class CopilotRuntime(RuntimeAdapter):
@@ -40,7 +40,7 @@ class CopilotRuntime(RuntimeAdapter):
         """
         try:
             # Build Copilot CLI command
-            cmd = ["copilot", "-p", prompt_content]
+            cmd = [require_runtime_binary("copilot"), "-p", prompt_content]
 
             # Add optional arguments from kwargs
             if kwargs.get("full_auto", False):
@@ -108,7 +108,7 @@ class CopilotRuntime(RuntimeAdapter):
         try:
             # Try to get Copilot CLI version
             version_result = subprocess.run(
-                ["copilot", "--version"],
+                [require_runtime_binary("copilot"), "--version"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

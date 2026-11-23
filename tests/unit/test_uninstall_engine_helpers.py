@@ -985,3 +985,18 @@ class TestShrinkRetiredPaths:
 
         assert ".agents/skills" in sharers
         assert not dynamic & set().union(*sharers.values())
+
+
+class TestUninstallDeletionCandidates:
+    """The evidence preflight's candidates (#3701, #4313)."""
+
+    def test_a_declaration_only_shrink_still_names_its_retired_files(self):
+        from apm_cli.commands.uninstall.selection_shrink import uninstall_deletion_candidates
+
+        lockfile = TestShrinkRetiredPaths()._lockfile()
+
+        candidates = uninstall_deletion_candidates(
+            lockfile, set(), shrunk={"org/bundle": _ShrunkNode(["alpha"], ["copilot"])}
+        )
+
+        assert ".agents/skills/beta/SKILL.md" in candidates
