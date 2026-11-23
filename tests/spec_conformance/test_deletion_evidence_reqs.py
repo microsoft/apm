@@ -641,6 +641,40 @@ def test_an_enclosing_owner_render_never_overrides_the_files_own_offline_owner(
 
 
 @pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_user_file_created_after_the_final_directory_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Consent removes only an emptied skill directory: a late user file survives."""
+    skill = ".agents/skills/alpha"
+    first = f"{skill}/SKILL.md"
+    late = tmp_path / skill / "mine.md"
+    hashes, evidence = _skill_world(tmp_path, {first: "skill\n"})
+    real_rglob = Path.rglob
+
+    def scan_then_user_writes(self: Path, pattern: str, *args, **kwargs):
+        yield from real_rglob(self, pattern, *args, **kwargs)
+        if self == tmp_path / skill and not (tmp_path / first).exists() and not late.exists():
+            late.write_text("user\n", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "rglob", scan_then_user_writes)
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert late.read_text(encoding="utf-8") == "user\n"
+    assert not (tmp_path / first).exists()
+    assert skill not in result.deleted
+
+
+@pytest.mark.req("req-lk-024")
 def test_consent_reads_an_absolute_spelling_under_the_root_as_one_file(tmp_path: Path) -> None:
     """A conflicting hash recorded under the absolute user-scope spelling blocks consent."""
     root = tmp_path / "home"
@@ -684,6 +718,57 @@ def test_consent_finds_an_owner_recorded_under_an_absolute_spelling(tmp_path: Pa
 
     assert path.exists() and result.deleted == []
     assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_a_cowork_spelling_of_a_root_file_as_one_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Cowork root inside the deploy root: a conflicting hash under the URI blocks consent."""
+    root = tmp_path / "project"
+    claim = ".agents/skills/alpha/notes.md"
+    path = root / claim
+    path.parent.mkdir(parents=True)
+    path.write_text("# Notes\n", encoding="utf-8")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(root / ".agents/skills"))
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={
+            claim: frozenset({compute_file_hash(path)}),
+            "cowork://skills/alpha/notes.md": frozenset({_OTHER}),
+        },
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    assert evidence.lockfile_consentable(claim, path) is False
+    assert path.exists()
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_honours_a_receipt_recorded_under_another_spelling_of_the_file(
+    tmp_path: Path,
+) -> None:
+    """A differing receipt under a case-variant spelling of the same file blocks consent."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    variant = root / _PATH.replace("notes.", "NOTES.")
+    if not variant.exists():
+        # A case-sensitive filesystem models the alias with a hard link.
+        os.link(path, variant)
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={variant.resolve().as_posix(): _OTHER},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    assert evidence.lockfile_consentable(_PATH, path) is False
+    assert path.exists()
 
 
 @pytest.mark.req("req-lk-024")
