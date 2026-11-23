@@ -3622,5 +3622,13 @@
 "tests/lifecycle/scenarios/test_deployed_absent.py::test_an_approved_local_bundle_deploys_from_nothing[project]": 15.0,
 "tests/lifecycle/scenarios/test_deployed_absent.py::test_an_approved_local_bundle_deploys_from_nothing[user]": 15.0,
 "tests/lifecycle/scenarios/test_pack_lock_states.py::test_pack_builds_from_a_stale_lock": 15.0,
-"tests/lifecycle/scenarios/test_pack_lock_states.py::test_pack_refuses_a_lock_a_newer_apm_wrote": 15.0
+"tests/lifecycle/scenarios/test_pack_lock_states.py::test_pack_refuses_a_lock_a_newer_apm_wrote": 15.0,
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_decide_mode_hit_leaves_caches_untouched[noop]": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_decide_mode_hit_leaves_caches_untouched[warm-locked]": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_kill_mid_commit_then_install_equals_the_full_world[after-first-file-linked]": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_kill_mid_commit_then_install_equals_the_full_world[after-first-package-published]": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_kill_mid_commit_then_install_equals_the_full_world[after-first-service-write]": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_kill_mid_commit_then_install_equals_the_full_world[before-services-render]": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_output_failure_after_commit_never_runs_the_full_pipeline": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity.py::test_one_missing_deployed_file_after_a_noop_hit_is_restored": 17.5
 }

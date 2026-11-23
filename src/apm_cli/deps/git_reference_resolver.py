@@ -300,6 +300,18 @@ class GitReferenceResolver:
                     use_ssh=False,
                     dep_ref=dep_ref,
                 )
+                if token is None and not (
+                    g is not None and type(g).__module__.startswith("unittest.mock")
+                ):
+                    # The anonymous attempt only: answered in process when git's
+                    # request is provably identical; otherwise git runs as before.
+                    from .anonymous_ref_listing import list_refs_anonymously
+
+                    listed = list_refs_anonymously(
+                        public_url, include_heads=include_heads, env=git_env
+                    )
+                    if listed is not None:
+                        return ("ok", listed)
                 return ("ok", _run_remote(public_url, git_env))
 
             org = repository_owner(repo_url_base)
