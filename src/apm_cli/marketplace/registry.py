@@ -127,32 +127,29 @@ def get_marketplace_by_name(name: str) -> MarketplaceSource:
     raise MarketplaceNotFoundError(name, host=default_host())
 
 
-def _catalog(source: MarketplaceSource) -> tuple[str, str]:
-    return source.url, source.path
+def _adopt_ref_pins(leaving: Sequence[MarketplaceSource]) -> None:
+    """Move legacy alias pins to the catalog each leaving registration names (#4966)."""
+    if not leaving:
+        return
+    from .source_identity import catalog_pin_identity
+    from .version_pins import adopt_alias_ref_pins
 
-
-def _forget_ref_pins(names: Sequence[str]) -> None:
-    """Withdraw the ref pins of aliases that left or now name another catalog (#4966)."""
-    if names:
-        from .version_pins import forget_marketplace_ref_pins
-
-        forget_marketplace_ref_pins(names)
+    for source in leaving:
+        try:
+            catalog = catalog_pin_identity(source)
+        except ValueError:
+            continue
+        adopt_alias_ref_pins(source.name, catalog)
 
 
 def add_marketplace(source: MarketplaceSource) -> None:
     """Register a marketplace (replaces if same name exists)."""
     with _marketplace_mutation():
         before = _load()
+        _adopt_ref_pins([s for s in before if s.name.lower() == source.name.lower()])
         sources = [s for s in before if s.name.lower() != source.name.lower()]
         sources.append(source)
         _save(sources)
-        _forget_ref_pins(
-            [
-                s.name
-                for s in before
-                if s.name.lower() == source.name.lower() and _catalog(s) != _catalog(source)
-            ]
-        )
     logger.debug("Registered marketplace '%s'", source.name)
 
 
@@ -169,8 +166,8 @@ def remove_marketplace(name: str) -> None:
             from ..utils.github_host import default_host
 
             raise MarketplaceNotFoundError(name, host=default_host())
+        _adopt_ref_pins([s for s in before if s.name.lower() == name.lower()])
         _save(after)
-        _forget_ref_pins([name])
     logger.debug("Removed marketplace '%s'", name)
 
 
@@ -192,7 +189,6 @@ def apply_manifest_marketplaces(
     applied: list[str] = []
     conflicts: list[str] = []
     removed: list[str] = []
-    rebound: list[str] = []
     with _marketplace_mutation():
         sources = _load()
         for source in upserts:
@@ -201,8 +197,7 @@ def apply_manifest_marketplaces(
             if owner is not None and owner.origin != ORIGIN_MANIFEST:
                 conflicts.append(owner.name)
                 continue
-            if owner is not None and _catalog(owner) != _catalog(source):
-                rebound.append(owner.name)
+            _adopt_ref_pins([owner] if owner is not None else [])
             sources = [s for s in sources if s.name.lower() != lower]
             sources.append(source)
             applied.append(source.name)
@@ -211,12 +206,12 @@ def apply_manifest_marketplaces(
             kept = [
                 s for s in sources if not (s.name.lower() == lower and s.origin == ORIGIN_MANIFEST)
             ]
+            _adopt_ref_pins([s for s in sources if s not in kept])
             if len(kept) != len(sources):
                 removed.append(name)
                 sources = kept
         if applied or removed:
             _save(sources)
-            _forget_ref_pins([*rebound, *removed])
     logger.debug("Manifest marketplaces: applied=%s removed=%s", applied, removed)
     return applied, conflicts, removed
 

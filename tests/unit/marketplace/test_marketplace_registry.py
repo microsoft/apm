@@ -205,50 +205,89 @@ class TestRegistryUtf8RoundTrip:
         assert fetched.repo == "repo-\u4e2d\u6587"
 
 
-class TestAliasRefPins:
-    """#4966: an alias's ref pins leave with the catalog they were recorded for."""
+class TestCatalogScopedRefPins:
+    """#4966: ref pins belong to the catalog, not to the alias that named it."""
 
     @pytest.fixture(autouse=True)
     def _pins_home(self, tmp_path, monkeypatch):
         monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
         self.pins = tmp_path / "apm-home" / "cache" / "marketplace" / "version-pins.json"
         self.pins.parent.mkdir(parents=True)
-        self.pins.write_text(
-            json.dumps({"team/tool/1.0.0": "v1", "team/other": "main", "teams/tool": "v9"})
-        )
 
-    def _pins(self) -> dict:
-        return json.loads(self.pins.read_text())
+    def _write(self, pins: dict) -> None:
+        self.pins.write_text(json.dumps(pins))
 
-    def test_remove_withdraws_only_that_alias_pins(self):
-        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+    @staticmethod
+    def _check(alias: str, ref: str, source: MarketplaceSource):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import check_ref_pin
+
+        return check_ref_pin(alias, "tool", ref, "1.0.0", catalog=catalog_pin_identity(source))
+
+    def test_a_legacy_alias_pin_still_guards_the_catalog_the_alias_names(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        source = MarketplaceSource(name="team", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source)
+
+        assert self._check("team", "v2", source) == "v1"
+
+    def test_removing_an_alias_keeps_its_catalog_pinned(self):
+        self._write({"team/tool/1.0.0": "v1", "teams/tool/1.0.0": "v9"})
+        source = MarketplaceSource(name="team", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source)
 
         registry_mod.remove_marketplace("TEAM")
+        registry_mod.add_marketplace(MarketplaceSource(name="other", owner="a", repo="catalog"))
 
-        assert self._pins() == {"teams/tool": "v9"}
+        assert self._check("other", "v2", source) == "v1"
+        assert json.loads(self.pins.read_text())["teams/tool/1.0.0"] == "v9"
 
-    def test_rebinding_an_alias_to_another_catalog_withdraws_its_pins(self):
+    def test_an_alias_re_added_for_another_catalog_starts_without_its_pins(self):
+        self._write({"team/tool/1.0.0": "v1"})
         registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
 
-        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="b", repo="catalog"))
+        registry_mod.remove_marketplace("team")
+        other = MarketplaceSource(name="team", owner="b", repo="catalog")
+        registry_mod.add_marketplace(other)
 
-        assert self._pins() == {"teams/tool": "v9"}
+        assert self._check("team", "v2", other) is None
 
-    def test_re_adding_the_same_catalog_keeps_its_pins(self):
-        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
-        before = self._pins()
+    def test_rebinding_an_alias_in_place_keeps_the_old_catalog_pinned(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        old = MarketplaceSource(name="team", owner="a", repo="catalog")
+        registry_mod.add_marketplace(old)
 
+        new = MarketplaceSource(name="team", owner="b", repo="catalog")
+        registry_mod.add_marketplace(new)
+
+        assert self._check("team", "v2", new) is None
+        assert self._check("team", "v2", old) == "v1"
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "https://github.com/a/catalog.git",
+            "git@github.com:a/catalog.git",
+            "https://GitHub.com/a/catalog.git",
+        ],
+    )
+    def test_an_equivalent_catalog_spelling_keeps_its_pins(self, spelling: str):
+        self._write({"team/tool/1.0.0": "v1"})
         registry_mod.add_marketplace(
-            MarketplaceSource(name="team", owner="a", repo="catalog", ref="release")
+            MarketplaceSource(name="team", url="https://github.com/a/catalog")
         )
 
-        assert self._pins() == before
+        respelled = MarketplaceSource(name="team", url=spelling)
+        registry_mod.add_marketplace(respelled)
 
-    def test_manifest_removal_withdraws_the_alias_pins(self):
-        registry_mod.register_manifest_marketplace(
-            MarketplaceSource(name="team", owner="a", repo="catalog", origin="manifest")
-        )
+        assert self._check("team", "v2", respelled) == "v1"
+
+    def test_a_manifest_removal_keeps_its_catalog_pinned(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        source = MarketplaceSource(name="team", owner="a", repo="catalog", origin="manifest")
+        registry_mod.register_manifest_marketplace(source)
 
         assert registry_mod.unregister_manifest_marketplace("team")
 
-        assert self._pins() == {"teams/tool": "v9"}
+        assert self._check("team", "v2", source) == "v1"
+        assert "team/tool/1.0.0" not in json.loads(self.pins.read_text())
