@@ -10,6 +10,7 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
+    has_symlink_component,
     resolve_for_containment,
     resolved_relative_within,
     safe_rmtree,
@@ -238,3 +239,46 @@ class TestResolvedContainment:
         assert resolved_relative_within(escaped, base) is None
         with pytest.raises(PathTraversalError):
             ensure_path_within(tmp_path / "base" / "link" / "f.md", tmp_path / "base")
+
+
+# ---------------------------------------------------------------------------
+# has_symlink_component
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+class TestHasSymlinkComponent:
+    """``..`` is collapsed below the base before linked components are checked."""
+
+    @pytest.fixture
+    def base(self, tmp_path):
+        base = tmp_path / "base"
+        (base / "real").mkdir(parents=True)
+        (tmp_path / "outside").mkdir()
+        (base / "link").symlink_to(tmp_path / "outside", target_is_directory=True)
+        return base
+
+    def test_dotdot_escaping_the_base_is_refused(self, base):
+        assert has_symlink_component(base, base / ".." / "outside" / "f.md") is True
+
+    def test_missing_directory_then_dotdot_still_sees_the_link(self, base):
+        assert has_symlink_component(base, base / "missing" / ".." / "link" / "f.md") is True
+
+    def test_missing_directory_then_dotdot_to_regular_directory_passes(self, base):
+        assert has_symlink_component(base, base / "missing" / ".." / "real" / "f.md") is False
+
+    def test_dotdot_stepping_back_over_a_link_is_refused(self, base):
+        assert has_symlink_component(base, base / "link" / ".." / "real" / "f.md") is True
+
+    @pytest.mark.parametrize(
+        ("relative", "expected"),
+        [
+            ("real/f.md", False),
+            ("real/missing/f.md", False),
+            ("missing/deeper/f.md", False),
+            ("link/f.md", True),
+            ("link", True),
+        ],
+    )
+    def test_paths_without_dotdot_are_unchanged(self, base, relative, expected):
+        assert has_symlink_component(base, base / relative) is expected
