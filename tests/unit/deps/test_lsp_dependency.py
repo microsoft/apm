@@ -49,6 +49,11 @@ class TestFromString:
     def test_name_containing_reserved_word_accepted(self, name):
         assert LSPDependency.from_string(name).name == name
 
+    @pytest.mark.parametrize("name", ["__proto__\n", "ok-name\n"])
+    def test_trailing_newline_name_raises(self, name):
+        with pytest.raises(ValueError, match="Invalid LSP dependency name"):
+            LSPDependency.from_string(name)
+
 
 # ===========================================================================
 # LSPDependency.from_dict
