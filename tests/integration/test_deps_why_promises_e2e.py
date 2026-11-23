@@ -26,6 +26,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LOCKFILE_NAME, LockedDependency, LockFile
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared helpers / fixtures
 # ---------------------------------------------------------------------------

@@ -292,7 +292,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   through a guarded copy, even when the source bytes are unchanged.
   A receipt vouches only for bytes APM wrote under the current lock, or for
   bytes still on disk. A new worktree has no receipts, and a receipt written
-  under another branch's lock does not count. Missing evidence, including
+  under another branch's lock does not count. A receipt also remembers the
+  last few versions APM wrote to each file on this checkout, so after switching
+  branches and back without reinstalling, a source edit installs directly; this
+  history never authorizes deleting a file. Missing evidence, including
   installations predating these receipts, does not authorize overwriting
   existing files. The one exception: a skill directory recorded in the
   lockfile whose files each match either what this install would write
@@ -326,7 +329,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   After hash drift, the deployed files are already on disk; only the lockfile write is withheld. To recover, run `apm install` without `--frozen`, then commit the deployed files and the updated `apm.lock.yaml`. Export local edits you want to keep with `apm export-patch` first. The unrecorded-files check is one-directional and matches the tolerance above: claims the install would *drop* (a `--target` filter, `--only`) do not fail, and a removed dependency's claims are kept rather than dropped (see **Frozen mode**). `generated_at` and `apm_version` are excluded, so a newer CLI reading an older lockfile is not a rewrite.
 - **Frozen native-service targets.** The no-write boundary includes late MCP/LSP integration and MCP-only installs: `apm.yml` and `apm.lock.yaml` keep their exact bytes, including legacy timestamps. Frozen mode replays recorded target/server ownership, not an unrecorded personal deployment. If Copilot and Claude own a server but IntelliJ does not, `apm install --frozen --target copilot,claude,intellij` exits `1`, names the missing target/server claim, and leaves native MCP/LSP configs and user entries unchanged. A registry server the lock records but never claimed for Codex or Antigravity (because that harness refuses its transport, for example SSE) is looked up in its declared registry before any write and skipped with a warning; if the harness can load it after all, the install fails the same way. Run the same command without `--frozen`, keeping the intended `--target`, `--only`, `--root DIR` or `--global` options, to record that ownership; commit the lockfile, then replay frozen. `--only mcp` does not hydrate package sources, even without `--frozen`. Restore the package sources and declarations matching the lock using `apm install` without `--only mcp` in the same deployment store (retain `--root DIR` or `--global`, if used) before retrying. Reordered, repeated and narrower selections remain valid. Source acquisition may precede this check; this is not a general rollback guarantee for package deployment or lifecycle scripts.
   Late MCP checks use the complete resolved package graph, not just the packages selected for installation.
-- **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped with `--only mcp`. At `--global` the source root is `$HOME`, so `~/.apm/` primitives deploy to user-scope targets.
+- **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped with `--only mcp`. At `--global` the source root is `$HOME`, so `~/.apm/` primitives deploy to user-scope targets and are recorded in `$APM_HOME/apm.lock.yaml`: a later `apm install -g` updates them when you edit the source, and still skips a file APM did not deploy.
 - **User-scope skill paths.** Global skill installation reads the lockfile from the APM user home (`$APM_HOME`, default `~/.apm/`), separate from the skill deployment root. `HOME` or `APM_HOME` directory symlink aliases work without extra flags; package-descendant symlinks and symlinked skill destinations remain rejected. Explicit dependency `alias:` placement is separate; unrelated user files remain protected.
 - **Shared skill assets.** When dependencies deploy the same skill directory,
   matching managed files still use last-writer behavior, but reinstalling one
@@ -470,7 +473,11 @@ extensions never removes another bundle's or anything outside the target's
 extensions directory, and an extension you edited is kept.
 Org policy `dependencies.deny` applies to the bundle's package
 name (as `_local/<name>`) and to every package its `apm.lock.yaml` records: a
-denied bundle is refused before any file is written. A bundle whose
+denied bundle is refused before any file is written. `dependencies.allow`
+judges the bundle only by the packages its `apm.lock.yaml` records, never by its
+name; under an allow list, a bundle that records no packages is a violation.
+With `enforcement: block` a violating bundle is refused before any file is
+written; `warn` reports it and installs. A bundle whose
 `apm.lock.yaml` cannot be read is refused; repack it with `apm pack`. `apm uninstall` does not
 remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:

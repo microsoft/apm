@@ -20,7 +20,7 @@ import subprocess
 import pytest
 import yaml
 
-pytestmark = pytest.mark.requires_github_token
+pytestmark = [pytest.mark.requires_github_token, pytest.mark.e2e]
 
 
 SAMPLE_REPO_URL = "microsoft/apm-sample-package"

@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
 
 def test_install_global_hints_compile_and_writes_no_root_file(tmp_path, monkeypatch):
     """`apm install -g` prints the compile hint but writes NO root context file.
