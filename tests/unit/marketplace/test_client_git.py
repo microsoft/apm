@@ -27,6 +27,15 @@ from apm_cli.marketplace.client import (
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.utils.git_env import GitUrlRewriteError
+from tests.utils.checkout_trust import trust_checkout_contents
+
+
+@pytest.fixture(autouse=True)
+def _fake_checkouts_are_trusted():
+    """These tests mock GitCache with plain directories; see checkout_trust."""
+    with trust_checkout_contents():
+        yield
+
 
 pytestmark = pytest.mark.component
 

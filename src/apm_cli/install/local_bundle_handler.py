@@ -20,6 +20,7 @@ never deployed.
 
 from __future__ import annotations
 
+import functools
 import json
 import shutil
 from pathlib import Path
@@ -151,7 +152,12 @@ def install_local_bundle(
 
             targets = resolve_skill_layout(targets, legacy_skill_paths=True)
 
-        from .bundle_admission import admit_bundle, bundle_policy_subjects, plugin_bundle_integrity
+        from .bundle_admission import (
+            admit_bundle,
+            bundle_policy_subjects,
+            plugin_bundle_integrity,
+            refuse_unmanaged_bundle_files,
+        )
 
         verify_integrity = plugin_bundle_integrity(bundle_info, logger)
         integrity_verified = False
@@ -168,26 +174,14 @@ def install_local_bundle(
             # approve its content (RA-035). admit_bundle reuses this verdict.
             integrity_check(False)
 
-        bundle_mcp_deps: list[MCPDependency] = []
-        bundle_mcp_declared = False
-        if bundle_info.lockfile is not None:
-            pack = bundle_info.lockfile.get("pack") or {}
-            bundle_files = pack.get("bundle_files") or {}
-            if isinstance(bundle_files, dict):
-                bundle_mcp_declared = any(
-                    str(path).lower() in {".mcp.json", "mcp.json"} for path in bundle_files
-                )
-        elif bundle_info.source_dir is not None:
-            bundle_mcp_declared = any(
-                path.is_file() and path.name.lower() in {".mcp.json", "mcp.json"}
-                for path in bundle_info.source_dir.iterdir()
-            )
-        bundle_mcp_deps = (
+        from ..bundle.local_bundle import bundle_declares_mcp
+
+        bundle_mcp_deps: list[MCPDependency] = (
             _parse_legacy_bundle_mcp_servers(
                 bundle_info.source_dir,
                 bundle_format=bundle_info.format,
             )
-            if bundle_mcp_declared and bundle_info.source_dir is not None
+            if bundle_declares_mcp(bundle_info) and bundle_info.source_dir is not None
             else []
         )
         bundle_lsp_deps = (
@@ -225,7 +219,7 @@ def install_local_bundle(
         deployment_decision = EffectiveTargetDecision(
             [resolved.name for resolved in targets], "bundle deployment targets"
         )
-        admit_bundle(
+        bundle_policy = admit_bundle(
             policy_root=manifest_root(source_root, user_scope=global_),
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
@@ -255,20 +249,22 @@ def install_local_bundle(
                 LSPIntegrator.supported_target_runtimes(target_names), bundle=True
             )
 
-        result = integrate_local_bundle(
+        deploy = functools.partial(
+            integrate_local_bundle,
             bundle_info,
             project_root,
             targets=targets,
             force=force,
-            dry_run=dry_run,
             diagnostics=None,
-            logger=logger,
             scope=scope,
             alias=alias,
             allow_executables=allow_executables,
             approval_key=bundle_approval_key,
-            create_config=create_config,
         )
+        refuse_unmanaged_bundle_files(
+            bundle_policy, deploy, user_scope=global_, logger=logger, dry_run=dry_run
+        )
+        result = deploy(dry_run=dry_run, logger=logger, create_config=create_config)
 
         deployed = result.get("deployed_files", [])
         deployed_hashes = result.get("deployed_file_hashes", {})

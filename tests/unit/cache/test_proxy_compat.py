@@ -14,6 +14,7 @@ import pytest
 
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.utils.git_env import git_subprocess_env
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = pytest.mark.component
 
@@ -35,6 +36,7 @@ class TestProxyEnvPreserved:
             assert env[var] == value
 
 
+@trust_checkout_contents()
 class TestInsteadOfRewrite:
     """Verify cache key stability across insteadOf rewrites.
 

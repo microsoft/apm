@@ -18,9 +18,10 @@ the claude target of the user scope through five gate levels: gate off
 ``APM_HOME/config.json``). Every resolving install passes ``--trust-bin`` so
 the gate decision alone decides bin/. Every step runs I1-I9; installs and
 updates must leave exactly the model's deployed set, and ``install --mcp``
-leaves bin/ byte-identical (U7). The dependency-deny level has no user-scope
-command: org policy does not govern user scope (#3703). ``bin_cells`` labels
-the same script statically.
+leaves bin/ byte-identical (U7). A last segment runs under an org policy that
+denies the plugin: a user-scope command discovers no org policy (#3703), so the
+steps that should retire or refuse bin/ are strict known cells (``KNOWN_DD``).
+``bin_cells`` labels the same script statically.
 """
 
 from __future__ import annotations
@@ -29,10 +30,11 @@ import json
 from dataclasses import dataclass
 
 from tests.lifecycle import driver
-from tests.lifecycle.machines._kit import Bench, Step, StepRunner
+from tests.lifecycle.machines._kit import Bench, KnownCell, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.services import REGISTRY_SERVER
 
 PLUGIN = "p-native-claude-bin"
@@ -41,6 +43,16 @@ KINDS = {PLUGIN: frozenset({"bin"})}
 TARGETS = frozenset({"claude"})
 BIN_PATH = f".agents/plugins/{PLUGIN}/bin/{PLUGIN}"
 _PLUGINS = ".agents/plugins"
+_POLICY = "deny-native"
+# Steps under the org deny that keep bin/ although the deny should retire it:
+# a user-scope command discovers no org policy (#3703). install --mcp (U7) and lock
+# (reference/cli/lock.md) are not: both keep bin/ byte-identical at every gate level,
+# so they are checked as usual.
+_USER_SCOPE_DENY = "#3703"
+KNOWN_DD: dict[str, str] = {
+    f"G1|{op}|bin|denied-dependency|user": _USER_SCOPE_DENY
+    for op in ("install", "install-frozen", "update")
+}
 
 
 @dataclass
@@ -52,8 +64,11 @@ class BinState:
     decision: str | None = None
     revoked: bool = False
     deployed: bool = False
+    denied_by_policy: bool = False
 
     def gate(self) -> str:
+        if self.denied_by_policy:
+            return "denied-dependency"
         if not self.gate_on:
             return "none"
         if self.revoked:
@@ -74,6 +89,8 @@ class BinState:
             targets=TARGETS,
             scope="user",
             exec_gate=self.gate_on,
+            policy=_POLICY if self.denied_by_policy else "none",
+            policy_denied=frozenset({PLUGIN}) if self.denied_by_policy else frozenset(),
         )
 
 
@@ -85,6 +102,16 @@ class GateBin(StepRunner):
         self.dry = bench is None
         self.state = BinState()
         self.credited: set[str] = set()
+        self.known = tuple(
+            KnownCell(
+                cell, "I4", _USER_SCOPE_DENY, "still deployed but not allowed", self._applies(cell)
+            )
+            for cell in KNOWN_DD
+        )
+        self._cell = ""
+
+    def _applies(self, cell: str):
+        return lambda *_args: self._cell == cell
 
     def run(self, op: str, *words: str, exits=(0,)) -> None:
         """Run one command, check I1-I9 and its outcome, credit its id, then advance."""
@@ -92,16 +119,19 @@ class GateBin(StepRunner):
         self.credited.add(cell)
         requested = self._requested(op)
         if not self.dry:
+            self._cell = cell
             step = self.step(
                 words,
                 exits=frozenset(exits),
                 cells=(cell,),
                 model=requested.model(),
                 converged=False,
-                mutating=op in ("install", "update", "uninstall"),
+                mutating=op in ("install", "update", "uninstall") or cell in KNOWN_DD,
             )
-            self._check_outcome(op, requested, step)
-            self._credit(op, cell, step)
+            self._cell = ""
+            if cell not in KNOWN_DD:
+                self._check_outcome(op, requested, step)
+                self._credit(op, cell, step)
         self.state = requested
 
     def _requested(self, op: str) -> BinState:
@@ -198,6 +228,12 @@ class GateBin(StepRunner):
         self.state.decision = None
         self.state.revoked = self.state.deployed
 
+    def deny_by_policy(self) -> None:
+        """The org policy starts denying the plugin (an input outside the CLI)."""
+        if not self.dry:
+            self.edit("policy-" + _POLICY, lambda: use_policy(self.bench.world, _POLICY))
+        self.state.denied_by_policy = True
+
 
 def replay_bin(machine: GateBin) -> None:
     """Walk the five user-scope gate levels over the plugin."""
@@ -228,6 +264,20 @@ def replay_bin(machine: GateBin) -> None:
     machine.revoke()
     machine.run("mcp-install", *mcp)
     machine.run("install", *install)
+    machine.run("uninstall", "uninstall", SPEC)
+    # denied-dependency: the org denies the plugin; user scope never sees it (#3703).
+    # The user installs and approves the plugin; then the org starts denying it,
+    # so only the org deny could keep bin/ out.
+    machine.run("install", *install, SPEC)
+    machine.run("approve", "approve", SPEC)
+    machine.deny_by_policy()
+    machine.run("approve", "approve", SPEC)
+    machine.run("install", *install)
+    machine.run("mcp-install", *mcp)
+    machine.run("lock", "lock")
+    machine.run("compile", "compile")
+    machine.run("update", "update", "--yes")
+    machine.run("install-frozen", *install, "--frozen")
     machine.run("uninstall", "uninstall", SPEC)
 
 

@@ -334,6 +334,17 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=(
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
+def _judge_resolution(ctx: InstallContext, graph, failures, depth_policy, resolver) -> None:
+    """Refuse the resolved graph: policy refusals first, then any other resolution error."""
+    from apm_cli.install.commit_gate import refuse_policy_depth_limit
+    from apm_cli.install.phases.policy_gate import _drop_policy_refused_replacement_errors
+
+    _drop_policy_refused_replacement_errors(ctx, graph)
+    if depth_policy is not None:
+        refuse_policy_depth_limit(ctx, depth_policy, resolver.depth_limit_chains)
+    _fail_on_resolution_errors(ctx, graph, failures)
+
+
 def _attach_resolver_marketplace_provenance(ctx: InstallContext, resolver) -> None:
     """Carry manifest-resolved marketplace identity into selection and lockfile assembly."""
     if ctx.only_packages and resolver.selected_marketplace_keys:
@@ -737,10 +748,13 @@ def _resolve_dependencies(
     # ------------------------------------------------------------------
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
+    from apm_cli.install.commit_gate import policy_depth_limit
     from apm_cli.install.legacy_plugin_compat import validate_cached_legacy_plugin
     from apm_cli.install.service import InstallService
 
+    depth_policy, max_depth = policy_depth_limit(ctx)
     resolver = APMDependencyResolver(
+        max_depth=max_depth,
         apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,
         activation_callback=partial(
@@ -768,10 +782,7 @@ def _resolve_dependencies(
 
     # The graph reads source_root; apm_modules_dir remains the deployment root.
     dependency_graph = _build_dependency_graph(ctx, resolver)
-    from apm_cli.install.phases.policy_gate import _drop_policy_refused_replacement_errors
-
-    _drop_policy_refused_replacement_errors(ctx, dependency_graph)
-    _fail_on_resolution_errors(ctx, dependency_graph, transitive_failures)
+    _judge_resolution(ctx, dependency_graph, transitive_failures, depth_policy, resolver)
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so
     # the integrate phase skips them via the same gate used for download

@@ -36,6 +36,7 @@ from tests.lifecycle.generator.rules import (
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
     REFUSAL_EVIDENCE,
+    RETIRED_MCP_OWNERS,
     RULE_CELL_REFUSALS,
     RULES,
     U_BIN_PIN,
@@ -44,7 +45,7 @@ from tests.lifecycle.generator.rules import (
     classify,
     refusal_cell,
 )
-from tests.lifecycle.generator.space import build_space, raw_cells
+from tests.lifecycle.generator.space import Entry, build_space, raw_cells
 from tests.lifecycle.generator.witnesses import BIN_WITNESSES, credits, credits_bin, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
@@ -528,6 +529,11 @@ def _u3(cell) -> bool:
     )
 
 
+def _u_mcpown_user(cell) -> bool:
+    """Retired MCP owners exist only at project scope (retired_destinations.py::split_mcp_claims)."""
+    return cell.get("SCOPE") == "user" and cell.get("MCPOWN") in ("vscode", "legacy-receipt")
+
+
 @cache
 def _committed_removed() -> dict[str, tuple[str, ...]]:
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
@@ -549,6 +555,8 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U3", _u3),
         ("U6", _u6),
         ("U8", lambda cell: _u8(cell) is not None),
+        ("U-BIN-OPS", lambda cell: _u_bin_ops(cell)),
+        ("U-MCPOWN-USER", _u_mcpown_user),
     ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
@@ -591,6 +599,16 @@ def test_executable_gate_levels_of_an_mcp_source_map_to_the_first_party_rule_cel
         cell_id("pair", {"SRC": src, "GATE": gate})
         for src in ("inline-mcp", "mcp-registry")
         for gate in executable
+    } | {
+        cell_id("T1", {"OP": "mcp-install", "PRIM": "mcp", "GATE": gate}) for gate in executable
+    } | {
+        # R5: approve / deny decide only installed packages (see the live scan test).
+        cell
+        for src in ("inline-mcp", "mcp-registry")
+        for cell in (
+            cell_id("pair", {"OP": "approve-deny", "SRC": src}),
+            cell_id("T3", {"OP": "approve-deny", "SRC": src, "PRIM": "mcp"}),
+        )
     }
     assert all(data["mapped"][key]["maps_to"] == FIRST_PARTY_MCP_CELL for key in mapped)
     rule = data["obligations"][FIRST_PARTY_MCP_CELL]
@@ -651,6 +669,40 @@ def test_every_removed_and_mapped_cell_names_its_rules() -> None:
 # -- U-BIN: bin/ at project scope only inside a whole plugin (#4894) ----------
 
 
+def _u_bin_ops(cell) -> bool:
+    """A gate level of bin/ under a command bin/ never reaches; an org deny stays a cell."""
+    return (
+        set(cell) == {"OP", "PRIM", "GATE"}
+        and cell["PRIM"] == "bin"
+        and cell["OP"] in ("pack", "marketplace", "bundle-install")
+        and cell["GATE"] != "denied-dependency"
+    )
+
+
+def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
+    """Tripwire: U-BIN-OPS lapses the moment a premise changes in the source.
+
+    pack and every marketplace subcommand must keep no user-scope form (audit is
+    not exempt: its drift replay fingerprints a whole native plugin's bin/), and plugin_bin_deployable must keep requiring a marketplace plugin at
+    user scope (the U-BIN pin hashes that predicate); the closed-world pin of the
+    bin/ writer (security/u_bin.py) keeps a local bundle from ever writing bin/.
+    """
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from tests.lifecycle.security import u_bin
+
+    subcommands = ("package", "add", "list", "browse", "update", "remove", "audit", "check")
+    commands = [("pack",)]
+    commands += [("marketplace", name) for name in subcommands]
+    for words in commands:
+        result = CliRunner().invoke(cli, [*words, "--help"])
+        assert result.exit_code == 0, (words, result.output)
+        assert "--global" not in result.output and "-g," not in result.output, words
+    assert bin_pin.predicate_digest() == U_BIN_PIN
+    assert u_bin.pin_holds()
+
+
 def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
     assert bin_pin.predicate_digest() == U_BIN_PIN
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
@@ -674,6 +726,66 @@ def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
     for key in cells:
         entry = data["obligations"][key]
         assert entry["status"] == "required" and entry["witness"].endswith(spine), (key, entry)
+
+
+def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
+    """The user-scope bin spine implies this pair only through strict #3703 cells and
+    sorts first by node id; the project matrix passes it, so it stays required."""
+    key = "pair|OP=install|GATE=denied-dependency"
+    entry = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"][key]
+    assert entry["status"] == "required", entry
+    assert entry["witness"].endswith("test_gate_matrix_credits_op_prim_gate_cells[project]"), entry
+    assert "tracking" not in entry, entry
+
+
+# -- U-MCPOWN-USER: bound to the live retired-claim reader ---------------------------
+
+
+def test_u_mcpown_user_holds_only_while_the_reader_ignores_user_scope(tmp_path) -> None:
+    """The removal stands only while split_mcp_claims returns no retired claims at user scope.
+
+    A pre-0.37 lock with a vscode claim and an unsettled copilot claim yields
+    retired claims at project scope; the same lock at user scope yields none.
+    If the reader ever reports user-scope retired claims, the U-MCPOWN-USER
+    cells are reachable again and this test fails.
+    """
+    from apm_cli.install.mcp.retired_destinations import split_mcp_claims
+
+    def claims(user_scope: bool):
+        servers = {"copilot": ["srv"], "vscode": ["srv"]}
+        hashes = {"copilot": {"srv": "sha256:" + "0" * 64}, "vscode": {"srv": "sha256:" + "1" * 64}}
+        return split_mcp_claims(
+            servers, hashes, apm_version="0.36.0", project_root=tmp_path, user_scope=user_scope
+        )
+
+    project = claims(user_scope=False)
+    assert project.names["vscode"] == {"srv"}, "the fixture lock carries a retired claim"
+    user = claims(user_scope=True)
+    assert not any(user.names.values()) and not any(user.hashes.values()), user
+    removed = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["removed"]
+    recorded = {key for key, rules in removed.items() if "U-MCPOWN-USER" in rules}
+    assert recorded == {f"pair|SCOPE=user|MCPOWN={owner}" for owner in RETIRED_MCP_OWNERS}, recorded
+
+
+def test_only_a_changed_target_set_routes_an_offline_pair_to_target_history() -> None:
+    """An unchanged TGT is no target history: its offline pair belongs to T-6e."""
+    for tgt, lane in (
+        ("single-widened", "T-6a"),
+        ("multi-narrowed", "T-6a"),
+        ("changed", "T-6a"),
+        ("single-unchanged", "T-6e"),
+        ("multi-unchanged", "T-6e"),
+    ):
+        cell = {"TGT": tgt, "NET": "offline"}
+        entry = Entry(id=cell_id("pair", cell), family="pair", cell=cell, strength="e2e")
+        assert emit.lane_for(entry) == lane, (tgt, emit.lane_for(entry))
+    ledger = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    unchanged = {
+        key: entry["lane"]
+        for key, entry in ledger.items()
+        if entry["family"] == "pair" and "NET=offline" in key and "-unchanged" in key
+    }
+    assert len(unchanged) == 2 and set(unchanged.values()) == {"T-6e"}, unchanged
 
 
 # -- bin cells need a witness that deploys bin/ at the cell's scope (#4981) ------
