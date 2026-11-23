@@ -217,9 +217,6 @@ class TestCatalogScopedRefPins:
     def _write(self, pins: dict) -> None:
         self.pins.write_text(json.dumps(pins))
 
-    def _pinned(self) -> dict:
-        return json.loads(self.pins.read_text())
-
     @staticmethod
     def _key(source: MarketplaceSource) -> str:
         from apm_cli.marketplace.source_identity import catalog_pin_identity
@@ -239,7 +236,7 @@ class TestCatalogScopedRefPins:
         registry_mod.add_marketplace(source)
 
         assert self._check("team", "v2", source) == "v1"
-        assert self._pinned() == {"team/tool/1.0.0": "v1"}
+        assert json.loads(self.pins.read_text()) == {"team/tool/1.0.0": "v1"}
 
     def test_removing_an_alias_keeps_its_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1", "teams/tool/1.0.0": "v9"})
@@ -262,7 +259,7 @@ class TestCatalogScopedRefPins:
 
         assert self._check("team", "v2", other) is None
         first = MarketplaceSource(name="team", owner="a", repo="catalog")
-        assert self._pinned() == {self._key(first): "v1"}
+        assert json.loads(self.pins.read_text()) == {self._key(first): "v1"}
 
     def test_rebinding_an_alias_in_place_keeps_the_old_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1"})
@@ -274,7 +271,7 @@ class TestCatalogScopedRefPins:
 
         assert self._check("team", "v2", new) is None
         assert self._check("team", "v2", old) == "v1"
-        assert self._pinned() == {self._key(old): "v1"}
+        assert json.loads(self.pins.read_text()) == {self._key(old): "v1"}
 
     @pytest.mark.parametrize(
         "spelling",
@@ -294,7 +291,7 @@ class TestCatalogScopedRefPins:
         registry_mod.add_marketplace(respelled)
 
         assert self._check("team", "v2", respelled) == "v1"
-        assert self._pinned() == {self._key(respelled): "v1"}
+        assert json.loads(self.pins.read_text()) == {self._key(respelled): "v1"}
 
     def test_a_manifest_removal_keeps_its_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1"})
@@ -325,21 +322,20 @@ class TestCatalogPinIdentity:
     """#4966: the pin scope names exactly one catalog."""
 
     @staticmethod
-    def _record(pins_dir: Path, source: MarketplaceSource) -> dict:
+    def _record(pins_dir: Path, source: MarketplaceSource) -> None:
         from apm_cli.marketplace.source_identity import catalog_pin_identity
         from apm_cli.marketplace.version_pins import record_ref_pin
 
         record_ref_pin(
             "t", "tool", "v1", "1.0.0", str(pins_dir), catalog=catalog_pin_identity(source)
         )
-        return json.loads((pins_dir / "version-pins.json").read_text())
 
     def test_catalog_paths_that_differ_only_in_case_are_different_catalogs(self, tmp_path):
         url = "https://git.example.com/Org/catalog"
         self._record(tmp_path, MarketplaceSource(name="t", url=url, path="catalogs/A.json"))
-        pins = self._record(tmp_path, MarketplaceSource(name="t", url=url, path="catalogs/a.json"))
+        self._record(tmp_path, MarketplaceSource(name="t", url=url, path="catalogs/a.json"))
 
-        assert len(pins) == 2
+        assert len(json.loads((tmp_path / "version-pins.json").read_text())) == 2
 
     def test_a_local_catalog_is_scoped_by_its_resolved_location_and_path(self, tmp_path):
         root = tmp_path / "catalogs"
@@ -351,6 +347,6 @@ class TestCatalogPinIdentity:
         self._record(
             pins_dir, MarketplaceSource(name="t", url=str(tmp_path / "link"), path="a.json")
         )
-        pins = self._record(pins_dir, MarketplaceSource(name="t", url=str(root), path="b.json"))
+        self._record(pins_dir, MarketplaceSource(name="t", url=str(root), path="b.json"))
 
-        assert len(pins) == 2
+        assert len(json.loads((pins_dir / "version-pins.json").read_text())) == 2
