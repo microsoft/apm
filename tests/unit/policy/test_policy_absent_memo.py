@@ -244,3 +244,63 @@ def test_an_in_flight_fetch_never_serves_a_value_across_an_invalidation():
         assert first.result(5) == "before-invalidation"
         assert waiter.result(5) == "after-invalidation"
         assert fetch("key") == "after-invalidation"
+
+
+def _chain(root: Path) -> str:
+    from apm_cli.policy.discovery import discover_policy_with_chain
+
+    return discover_policy_with_chain(root, policy_override=_SOURCE, no_cache=True).outcome
+
+
+@pytest.mark.parametrize("status", [404, 200], ids=["absent", "found"])
+def test_one_command_run_discovers_the_policy_chain_once(server, tmp_path, status):
+    """Preflight, gate, exec trust and MCP each ask; the network answers once."""
+    server.status = status
+    with invocation_scope():
+        first = _chain(tmp_path)
+        fetched = len(server.urls)
+        outcomes = [first, _chain(tmp_path), _chain(tmp_path)]
+
+    assert outcomes == [first] * 3 and first in {"absent", "found"}
+    assert fetched > 0 and len(server.urls) == fetched
+    with invocation_scope():
+        _chain(tmp_path)
+    assert len(server.urls) == 2 * fetched, "the next command run discovers again"
+
+
+def test_a_transient_chain_failure_is_retried_in_the_same_run(server, tmp_path):
+    server.exc = requests.ConnectionError("network down")
+    with invocation_scope():
+        first = _chain(tmp_path)
+        fetched = len(server.urls)
+        server.exc = None
+        server.status = 200
+        second = _chain(tmp_path)
+
+    assert first == "cache_miss_fetch_fail" and second == "found"
+    assert len(server.urls) > fetched
+
+
+def test_one_command_run_reads_the_git_remote_once_for_policy(server, tmp_path, monkeypatch):
+    import subprocess
+
+    from apm_cli.policy.discovery import discover_policy_with_chain
+
+    for args in (["init", "-q"], ["remote", "add", "origin", "https://github.com/contoso/app.git"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    remote_reads: list[list[str]] = []
+    real_run = subprocess.run
+
+    def counting_run(argv, *args, **kwargs):
+        if "remote" in list(argv):
+            remote_reads.append(list(argv))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", counting_run)
+    with invocation_scope():
+        outcomes = [discover_policy_with_chain(tmp_path).outcome for _ in range(3)]
+        reads = len(remote_reads)
+        assert discover_policy_with_chain(tmp_path).outcome == outcomes[0]
+
+    assert outcomes == [outcomes[0]] * 3 and 0 < reads == len(remote_reads)
+    assert any(urlsplit(url).netloc == "api.github.com" for url in server.urls)
