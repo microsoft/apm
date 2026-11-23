@@ -249,3 +249,37 @@ def test_a_retained_descendant_with_a_stale_copy_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "differs from its apm_modules copy" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def test_a_retained_descendant_whose_excluded_files_changed_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """f's .git/HEAD changes after install: the hash ignores it, the copier does not."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    for name, deps in (("f", ()), ("e", ("../f",)), ("d", ("../e",))):
+        _skill_package(world.project / "vendor" / name, name, deps)
+    head = world.project / "vendor/f/.git/HEAD"
+    head.parent.mkdir(parents=True)
+    head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    head.write_text("ref: refs/heads/other\n", encoding="utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "differs from its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before

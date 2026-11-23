@@ -260,9 +260,12 @@ def _require_fresh_copy(row, source: Path | None, copy: Path, key: str, label) -
 
     framed = row.content_hash_framed
     try:
-        fresh = source is not None and compute_local_package_hash(
-            source, framed=framed
-        ) == compute_local_package_hash(copy, framed=framed)
+        fresh = (
+            source is not None
+            and compute_local_package_hash(source, framed=framed)
+            == compute_local_package_hash(copy, framed=framed)
+            and _unhashed_files_match(source, copy)
+        )
     except (OSError, ValueError, TypeError):
         fresh = False
     if not fresh:
@@ -270,6 +273,33 @@ def _require_fresh_copy(row, source: Path | None, copy: Path, key: str, label) -
             f"{label(key)} stays, but its local source differs from its apm_modules copy, "
             "so the re-anchor cannot keep it as a fresh install would"
         )
+
+
+def _unhashed_files_match(source: Path, copy: Path) -> bool:
+    """Whether the files the package hash skips (.git/, __pycache__/) match the copy.
+
+    Install copies them through the local copier, so a change there alone still
+    makes a fresh install rewrite apm_modules (#4999).
+    """
+    import tempfile
+
+    from ...config import get_apm_temp_dir
+    from ...install.phases.local_content import _copy_tree_dereferencing_validated
+
+    if not source.is_dir():
+        return True
+
+    def unhashed(root: Path) -> dict[str, bytes]:
+        return {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and {".git", "__pycache__"} & set(path.relative_to(root).parts)
+        }
+
+    with tempfile.TemporaryDirectory(prefix="apm-reanchor-", dir=get_apm_temp_dir()) as stage:
+        image = Path(stage) / "package"
+        _copy_tree_dereferencing_validated(source, image, source)
+        return unhashed(image) == unhashed(copy)
 
 
 def move_materializations(
