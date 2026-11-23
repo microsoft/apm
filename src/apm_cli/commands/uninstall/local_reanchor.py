@@ -25,6 +25,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import sys
@@ -63,6 +64,8 @@ class LocalReanchorPlan:
     moves: tuple[tuple[Path, Path], ...] = ()
     # Lock key -> install's breadth-first visit rank, for request order (#4999).
     visit_order: dict[str, int] = field(default_factory=dict)
+    # Re-identified key -> the child keys the walk saw it declare (#5091).
+    children: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.renames or self.declaring_parents)
@@ -102,7 +105,7 @@ def _root_identities(
 def _respelled_descendants(
     lockfile, decision, walk, local_roots, label, modules_dir: Path
 ) -> dict[str, tuple[str, str, Any, str]]:
-    """Kept local descendants whose winning edge spells the same directory differently.
+    """Local descendants whose winning edge respells their directory (#5091).
 
     A case-only spelling on a case-insensitive filesystem, or a symlinked
     spelling, resolves to the same package directory, but a fresh install
@@ -259,6 +262,12 @@ def plan_local_reanchor(
         declaring_parents,
         resolved_by,
         moves=moves,
+        children={
+            key: tuple(
+                sorted(child for child, edges in walk.declaring_edges.items() if key in edges)
+            )
+            for key in nodes
+        },
         visit_order=dict(getattr(walk, "visit_order", {}) or {}),
     )
 
@@ -559,30 +568,34 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
             if row.resolved_by in renames:
                 row.resolved_by = renames[row.resolved_by]
             lockfile.dependencies[renames.get(key, key)] = row
-    _reidentify_children(lockfile, old_identity, renames, replacements)
+    _reidentify_children(lockfile, old_identity, renames, replacements, plan.children)
     for row in lockfile.dependencies.values():
         _rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
     return True
 
 
-def _reidentify_children(lockfile, old_identity: dict, renames: dict, replacements) -> None:
-    """Point children at a re-identified parent's new identity (#5091).
+def _reidentify_children(
+    lockfile, old_identity: dict, renames: dict, replacements, children: dict
+) -> None:
+    """Point a re-identified parent's own children at its new identity (#5091).
 
     Without replacements a child names its parent by repository identity, not
     by lock key, so a respelled parent (``_local/F`` -> ``_local/f``) would
-    leave its children naming a parent that no longer exists.
+    leave its children naming a parent that no longer exists. That identity
+    is not unique (another ``F`` directory has the same one), so only the
+    children the walk saw this parent declare are updated.
     """
     from ...deps.lockfile import lockfile_parent_identity
 
-    moved = {}
     for key, before in old_identity.items():
         row = lockfile.dependencies.get(renames.get(key, key))
         after = lockfile_parent_identity(row, replacements) if row is not None else before
-        if after != before:
-            moved[before] = after
-    for row in lockfile.dependencies.values():
-        if row.resolved_by in moved:
-            row.resolved_by = moved[row.resolved_by]
+        if after == before:
+            continue
+        for child in children.get(key, ()):
+            child_row = lockfile.dependencies.get(renames.get(child, child))
+            if child_row is not None and child_row.resolved_by == before:
+                child_row.resolved_by = after
 
 
 def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> LocalReanchorPlan:
@@ -601,7 +614,7 @@ def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> L
 
 
 def roll_back(plan: LocalReanchorPlan) -> list[str]:
-    """Restore apm.yml and apm.lock.yaml to the snapshot; return what could not be restored.
+    """Restore apm.yml, apm.lock.yaml and the receipts to the snapshot; return what was not.
 
     Every path is attempted. One that cannot be restored keeps its snapshot
     beside it (``<name>.apm-reanchor-backup``) and is named in the result, so
@@ -611,6 +624,11 @@ def roll_back(plan: LocalReanchorPlan) -> list[str]:
 
     failures: list[str] = []
     for path, text in plan.snapshot:
+        # A file still holding its snapshot is not rewritten: a read-only
+        # receipt directory must not fail a rollback that changed nothing.
+        with contextlib.suppress(OSError):
+            if path.is_file() and path.read_bytes() == text.encode("utf-8"):
+                continue
         try:
             atomic_write_text(path, text, normalize_line_endings=False)
         except OSError as exc:
@@ -797,7 +815,14 @@ def _plan_reanchor_or_exit(
             "declaration in apm.yml."
         )
         sys.exit(1)
-    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+    if not plan.renames:
+        return plan
+    from ...core.deployment_ledger import materialization_evidence_paths
+
+    # The receipts go back with the lock: an interrupt after their rename never
+    # leaves lock and receipts naming different owners (#5077).
+    receipts, _identity = materialization_evidence_paths(project_root, InstallScope.PROJECT)
+    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root), receipts))
 
 
 def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:

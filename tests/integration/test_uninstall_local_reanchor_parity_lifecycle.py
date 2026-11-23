@@ -607,12 +607,18 @@ def _case_insensitive(path: Path) -> bool:
 
 
 def _respelled_world(
-    tmp_path: Path, apm_binary_path: Path, link_f, f_deps: tuple[str, ...] = (), prod_chain=False
+    tmp_path: Path,
+    apm_binary_path: Path,
+    link_f,
+    f_deps: tuple[str, ...] = (),
+    prod_chain=False,
+    other_f=False,
 ) -> ReplayWorld:
     """e -> ../F direct, dev d -> e and a -> ../f; *link_f* makes vendor/f.
 
     *prod_chain* adds production p -> q -> ../F, which the walk reaches first
-    although a's shallower dev edge wins F's spelling.
+    although a's shallower dev edge wins F's spelling. *other_f* adds an
+    unrelated direct ./other/F -> ../h, whose parent identity is also _local/F.
     """
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"
@@ -622,6 +628,9 @@ def _respelled_world(
     if prod_chain:
         _skill_package(vendor / "q", "q", ("../F",))
         _skill_package(vendor / "p", "p", ("../q",))
+    if other_f:
+        _skill_package(world.project / "other/F", "o", ("../h",))
+        _skill_package(world.project / "other/h", "h")
     link_f(vendor)
     _skill_package(vendor / "e", "e", ("../F",))
     _skill_package(vendor / "d", "d", ("../e",))
@@ -631,7 +640,13 @@ def _respelled_world(
             "name": "proj",
             "version": "1.0.0",
             "targets": ["claude"],
-            "dependencies": {"apm": ["./vendor/e", *(["./vendor/p"] if prod_chain else [])]},
+            "dependencies": {
+                "apm": [
+                    "./vendor/e",
+                    *(["./vendor/p"] if prod_chain else []),
+                    *(["./other/F"] if other_f else []),
+                ]
+            },
             "devDependencies": {"apm": ["./vendor/d", "./vendor/a"]},
         },
         world.project / "apm.yml",
@@ -643,12 +658,17 @@ def _respelled_world(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 @pytest.mark.parametrize(
-    ("f_deps", "prod_chain"),
-    [((), False), (("../g",), False), (("../g",), True)],
-    ids=["leaf", "with-child", "cross-root-child"],
+    ("f_deps", "prod_chain", "other_f"),
+    [
+        ((), False, False),
+        (("../g",), False, False),
+        (("../g",), True, False),
+        (("../g",), True, True),
+    ],
+    ids=["leaf", "with-child", "cross-root-child", "unrelated-same-name-parent"],
 )
 def test_a_descendant_spelled_through_a_symlink_reanchors_to_the_fresh_spelling(
-    tmp_path: Path, apm_binary_path: Path, f_deps: tuple[str, ...], prod_chain: bool
+    tmp_path: Path, apm_binary_path: Path, f_deps: tuple[str, ...], prod_chain: bool, other_f
 ) -> None:
     """vendor/f links to vendor/F: a's ../f wins after e goes, so F takes that spelling;
     a child g beneath F then names F by that spelling too."""
@@ -660,6 +680,7 @@ def test_a_descendant_spelled_through_a_symlink_reanchors_to_the_fresh_spelling(
         lambda vendor: (vendor / "f").symlink_to(vendor / "F", target_is_directory=True),
         f_deps,
         prod_chain,
+        other_f,
     )
 
     world.apm("uninstall", "./vendor/e")
@@ -679,7 +700,7 @@ def test_a_case_only_descendant_spelling_reanchors_to_the_fresh_spelling(
     world.apm("uninstall", "./vendor/e")
 
     _assert_no_frozen_rewrites_nothing(world)
-    assert not [key for key in _modules(world.project) if ".apm-reanchor-" in key]
+    assert not list((world.project / "apm_modules").rglob(".apm-case-*"))
 
 
 def test_two_packages_that_differ_only_by_case_stay_distinct(
