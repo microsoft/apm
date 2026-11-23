@@ -942,6 +942,30 @@ def _retain_alias_anchors(
     )
 
 
+def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
+    """Why a survivor cannot be re-parented by prune, or None when it can.
+
+    Re-parenting records the nearest surviving parent; that parent must keep
+    a lock row (an unlocked parent leaves the survivor unresolvable) and must
+    spell the survivor by its own identity (an alias would re-key it).
+    """
+    if not nearest:
+        return None
+    parent = min(nearest)
+    if parent not in lockfile.dependencies:
+        return (
+            f"{repo_url} still resolves through it, and the package that now declares "
+            f"{repo_url} is not in apm.lock.yaml"
+        )
+    declared = walk.local_edge_repos.get((key, nearest[0]), (None, None))[0]
+    if declared in (None, repo_url):
+        return None
+    return (
+        f"{repo_url} still resolves through it, and the package that still "
+        f"needs {repo_url} declares it as {declared}"
+    )
+
+
 def _alias_anchors(lockfile, removed_keys, retained, walk) -> dict[str, str]:
     """Removed rows prune keeps because a survivor would change identity (#4989).
 
@@ -971,16 +995,11 @@ def _alias_anchors(lockfile, removed_keys, retained, walk) -> dict[str, str]:
             for parent in walk.declaring_edges.get(key, {})
             if walk.depths.get(parent) == depth - 1
         ]
-        declared = (
-            walk.local_edge_repos.get((key, nearest[0]), (None, None))[0] if nearest else None
-        )
-        if declared in (None, row.repo_url):
+        reason = _anchor_reason(lockfile, walk, key, row.repo_url, nearest)
+        if reason is None:
             continue
         parent = gone.get(row.resolved_by)
         while parent is not None and parent not in anchors:
-            anchors[parent] = (
-                f"{row.repo_url} still resolves through it, and the package that still "
-                f"needs {row.repo_url} declares it as {declared}"
-            )
+            anchors[parent] = reason
             parent = gone.get(lockfile.dependencies[parent].resolved_by)
     return anchors
