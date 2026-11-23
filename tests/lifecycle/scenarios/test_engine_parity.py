@@ -29,6 +29,7 @@ command fails the cell even at main.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -747,7 +748,24 @@ def _raw_state(world: World) -> dict[str, dict[str, str]]:
     """
     roots = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
     roots.update({f"cache:{root}": root for root in _cache_roots(world)})
-    return {name: digest(root, _RAW_SKIP, world) for name, root in roots.items()}
+    return {name: _raw_digest(root) for name, root in roots.items()}
+
+
+def _raw_digest(root: Path) -> dict[str, str]:
+    """No normalization: raw bytes, raw symlink targets, directories and full lstat modes."""
+    entries: dict[str, str] = {}
+    for path in sorted(root.rglob("*")) if root.exists() else ():
+        rel = path.relative_to(root).as_posix()
+        if any(rel == s or rel.startswith(s + "/") for s in _RAW_SKIP):
+            continue
+        mode = oct(path.lstat().st_mode)
+        if path.is_symlink():
+            entries[rel] = f"{mode}:link:{path.readlink()}"
+        elif path.is_dir():
+            entries[rel] = f"{mode}:dir"
+        else:
+            entries[rel] = f"{mode}:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    return entries
 
 
 # The decide seam's exit on a decline: distinct and non-zero, so it can never pass for
@@ -985,8 +1003,9 @@ def test_escaped_hidden_unicode_in_a_deployed_hook_declines(twin: Twin) -> None:
         f"{ORG}/p-exec", {".apm/hooks/session.json": text}, tag="v1.0.0"
     )
     twin.each(lambda w: _declare(w, *BOTH))
-    for argv in (("install",), ("approve", f"{ORG}/p-exec"), ("install",)):
-        twin.run(*argv)  # a scanner finding may block: parity holds either way
+    twin.run("install")  # a scanner finding may block: parity holds either way
+    twin.ok("approve", f"{ORG}/p-exec")  # the grant itself must succeed
+    twin.run("install")
     decision = twin.run("install")
     _assert_decision(decision, FULL)
     # Either guard may decline first: the content scan, or the deploy store refusing a
