@@ -280,7 +280,12 @@ def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
     machine.update()
     machine.decide("hook", "approve")
     machine.install("plain")
-    assert "hook" not in machine.world.observe().deployed
+    world = machine.world
+    approve = world.run(("approve", str(world.packages["hook"])))
+    output = " ".join(f"{approve.stdout}\n{approve.stderr}".split())
+    assert approve.returncode == 1, output
+    assert "is still denied" in output and "org policy denies it" in output, output
+    assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
 
 
 @pytest.mark.parametrize("scope", SCOPES)
