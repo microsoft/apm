@@ -746,7 +746,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     except AgentPluginTargetExcludedError:
                         continue
                     carry_kept_loose_into_replay(
-                        result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
+                        result,
+                        lock_dep,
+                        deployment_frame[1],
+                        scratch_root,
+                        config.user_scope,
+                        live_targets,
                     )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(

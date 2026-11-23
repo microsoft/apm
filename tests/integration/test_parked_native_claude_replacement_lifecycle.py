@@ -318,5 +318,5 @@ def test_a_parked_native_replacement_keeps_legacy_layout_skills_in_a_project(
 
     assert set(kept) <= set(before), before
     assert not (world.cwd / ".agents" / "skills" / "demo").exists(), _evidence(upgraded)
-    assert "Kept .github/skills/demo" in _text(upgraded), _evidence(upgraded)
+    assert "Kept .claude/skills/demo, .github/skills/demo:" in _text(upgraded), _evidence(upgraded)
     _assert_kept_and_bound(world, kept, upgraded)

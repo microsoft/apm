@@ -139,3 +139,20 @@ def test_replay_never_carries_a_kept_value_through_a_symlinked_parent(tmp_path: 
 
     # Never stand in for the replay: drift then reports the linked copy.
     assert not (scratch / ".claude/skills/demo/SKILL.md").exists()
+
+
+def test_a_claude_root_at_home_matches_claims_recorded_without_a_dot_prefix() -> None:
+    # CLAUDE_CONFIG_DIR=$HOME scopes the Claude root to "." while claims
+    # record as "skills/..." (#5092; the loose install itself is #5096).
+    from dataclasses import replace
+
+    plan = _plan(parked="Parked native plugin pkg: denied")
+    home_root = replace(KNOWN_TARGETS["claude"], root_dir=".")
+    plan.target_selection.targets[0] = home_root
+
+    kept = plan.kept_loose_values(
+        ("skills/demo", "skills/demo/SKILL.md", "settings.json", ".agents/skills/demo/SKILL.md"),
+        user_scope=True,
+    )
+
+    assert sorted(kept) == ["skills/demo", "skills/demo/SKILL.md"]
