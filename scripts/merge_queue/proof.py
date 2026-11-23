@@ -14,6 +14,7 @@ GATE_JOB, GUARD_JOB = "train-gate", "guard"
 GUARD_CHECKS = frozenset(
     {
         "Lint chain",
+        "Known cells cite open issues (live GitHub state)",
         "Run ratchet contract tests",
         "Run remaining quality tests",
         "Verify NOTICE is up to date",

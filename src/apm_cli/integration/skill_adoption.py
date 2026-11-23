@@ -417,7 +417,10 @@ def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple
     from apm_cli.integration.skill_layout import resolve_skill_layout
 
     targets = list(integrator._skill_targets or ())
-    active_names = {target.name for target in targets}
+    # A harness a native plugin route serves is not outside this install (#5036).
+    active_names = {target.name for target in targets} | set(
+        getattr(integrator, "_skill_native_harnesses", frozenset())
+    )
     active_roots = {
         target.skills_deploy_path(project_root).resolve()
         for target in targets

@@ -287,7 +287,6 @@
     "src/apm_cli/utils/__init__.py",
     "src/apm_cli/utils/diagnostics.py",
     "src/apm_cli/utils/exclude.py",
-    "src/apm_cli/utils/file_ops.py",
     "src/apm_cli/utils/guards.py",
     "src/apm_cli/utils/helpers.py",
     "src/apm_cli/utils/install_tui.py",

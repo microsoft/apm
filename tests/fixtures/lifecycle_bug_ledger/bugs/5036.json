@@ -1,0 +1,16 @@
+{
+  "issue": 5036,
+  "fixed_in": "Unreleased",
+  "summary": "install -g of an upgrade whose native Claude plugin was parked deleted the dependency's loose Claude skill and exited 0; the parked plan now keeps the prior loose files with their lock claims, names them, and drift replay and audit agree on the kept state.",
+  "failure_modes": [
+    "cleanup",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_parked_native_claude_replacement_lifecycle.py::test_a_parked_native_replacement_keeps_the_loose_claude_skill",
+    "tests/integration/test_parked_native_claude_replacement_lifecycle.py::test_an_admitted_native_replacement_still_retires_the_loose_claude_skill"
+  ]
+}
