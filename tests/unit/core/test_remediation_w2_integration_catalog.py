@@ -48,6 +48,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "cowork-skills-dir-undetected": _COWORK,
     "hook-config-unreadable": "same dropped-target cleanup as hook-sidecar-unreadable, which "
     "is executed",
+    "hook-event-malformed": "executed as printed by "
+    "test_install_malformed_deployed_hook_event_lifecycle (fix the event, rerun apm install)",
     "hook-path-escapes-package": _SOURCE,
     "hook-plugin-root-unresolved": _SOURCE,
     "instruction-frontmatter-rejected": _SOURCE,
