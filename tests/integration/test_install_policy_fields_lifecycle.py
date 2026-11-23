@@ -154,6 +154,17 @@ def test_scripts_deny_refuses_before_any_fetch(
         _assert_ok(world, "install", spec)
 
 
+def test_scripts_deny_refuses_an_install_with_no_dependency_work(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "scripts-deny")
+    _apm(world, "audit", "--ci")  # discovers the policy once, so its cache is warm
+    _add_scripts(world.project / "apm.yml")
+
+    _assert_refused(world, _SCRIPTS)
+
+
 def test_scripts_deny_judges_the_manifest_root_redirects_from(
     lifecycle_world: World,  # noqa: F811
 ) -> None:

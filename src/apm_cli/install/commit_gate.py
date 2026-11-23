@@ -320,16 +320,37 @@ def blocking_install_policy(ctx: InstallContext) -> Any:
 
 
 def _refuse_denied_scripts_before_fetch(ctx: InstallContext) -> None:
-    """Refuse ``manifest.scripts: deny`` before resolution writes a byte (#4826).
+    """Refuse ``manifest.scripts: deny`` before resolution writes a byte (#4826)."""
+    from apm_cli.core.scope import is_user_scope, manifest_root
 
-    The verdict reads only apm.yml, so a blocking policy refuses before any
-    fetch, cache or deploy write. ``warn`` is reported at deploy time.
+    refuse_denied_scripts(
+        ctx.apm_package,
+        manifest_root(ctx.project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))),
+        no_policy=ctx.no_policy,
+        dry_run=ctx.dry_run,
+        logger=ctx.logger,
+    )
+
+
+def refuse_denied_scripts(
+    apm_package: Any, policy_root: Path, *, no_policy: bool, dry_run: bool, logger: Any
+) -> None:
+    """Refuse a ``scripts:`` block a blocking ``manifest.scripts: deny`` forbids (#4826).
+
+    The verdict reads only the parsed manifest, so it runs before any fetch,
+    cache or deploy write, also for an install with no APM dependencies.
+    ``warn`` and ``--dry-run`` are reported at deploy time.
     """
-    if not getattr(ctx.apm_package, "scripts", None):
+    if dry_run or not getattr(apm_package, "scripts", None):
         return
-    policy = blocking_install_policy(ctx)
-    if policy is not None and policy.manifest.scripts == "deny":
-        _enforce_install_policy_checks(ctx, policy, [_scripts_check(ctx, policy)])
+    from apm_cli.policy.install_preflight import prefetch_identity_policy
+    from apm_cli.policy.policy_checks import _check_scripts_policy
+
+    policy = prefetch_identity_policy(policy_root, no_policy=no_policy)
+    if policy is None or policy.manifest.scripts != "deny":
+        return
+    check = _check_scripts_policy({"scripts": apm_package.scripts}, policy.manifest)
+    _report_install_policy_checks(logger, policy, [check], dry_run=False, source=None)
 
 
 def policy_depth_limit(ctx: InstallContext) -> tuple[Any, int]:
@@ -569,25 +590,35 @@ def _enforced_install_policy(ctx: InstallContext) -> Any:
 
 
 def _enforce_install_policy_checks(ctx: InstallContext, policy: Any, checks: list[Any]) -> None:
-    """Refuse (``block``) or warn (``warn``) on failed org-policy *checks*.
+    """Refuse (``block``) or warn (``warn``) on failed org-policy *checks* of this install."""
+    _report_install_policy_checks(
+        ctx.logger,
+        policy,
+        checks,
+        dry_run=ctx.dry_run,
+        source=getattr(getattr(ctx, "policy_fetch", None), "source", None),
+    )
 
-    Violations are reported through the install policy reporter, which names
-    the policy field and the fix. A ``--dry-run`` previews the verdict and
-    never stops.
+
+def _report_install_policy_checks(
+    logger: Any, policy: Any, checks: list[Any], *, dry_run: bool, source: str | None
+) -> None:
+    """Report failed *checks* through the install policy reporter; refuse under ``block``.
+
+    The reporter names the policy field and the fix. A ``--dry-run``
+    previews the verdict and never stops.
     """
     from apm_cli.policy.install_preflight import emit_check_violations, render_dry_run_verdicts
     from apm_cli.policy.models import CIAuditResult
 
     failed = [check for check in checks if not check.passed]
-    logger = ctx.logger
     if not failed:
         return
-    if ctx.dry_run:
+    if dry_run:
         if logger is not None:
             render_dry_run_verdicts(logger, CIAuditResult(checks=failed), policy.enforcement)
         return
     severity = "block" if policy.enforcement == "block" else "warn"
-    source = getattr(getattr(ctx, "policy_fetch", None), "source", None)
     if logger is not None:
         for check in failed:
             emit_check_violations(logger, check, severity=severity, source=source)

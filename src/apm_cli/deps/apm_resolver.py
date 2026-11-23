@@ -997,16 +997,6 @@ class APMDependencyResolver:
                 # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
 
-                # Check maximum depth to prevent infinite recursion. Exceeding
-                # the cap fails resolution naming the chain (req-rs-006, #4277).
-                if depth > self.max_depth:
-                    chain = self._depth_limit_chain(dep_ref, parent_node)
-                    self.depth_limit_chains.append(chain)
-                    tree.resolution_errors.append(
-                        f"Dependency depth limit ({self.max_depth}) exceeded: {chain}"
-                    )
-                    continue
-
                 # Check if we already processed this dependency at this level or higher
                 existing_node = tree.nodes.get(dep_ref.get_resolution_key())
                 if existing_node and existing_node.depth <= depth:
@@ -1035,6 +1025,18 @@ class APMDependencyResolver:
                             )
                         )
                         scheduled_nodes.add(existing_node.get_id())
+                    continue
+
+                # Check maximum depth to prevent infinite recursion. Exceeding
+                # the cap fails resolution naming the chain (req-rs-006, #4277).
+                # An edge to a node already resolved no deeper reuses it above,
+                # so only a node that would be created past the cap is refused.
+                if depth > self.max_depth:
+                    chain = self._depth_limit_chain(dep_ref, parent_node)
+                    self.depth_limit_chains.append(chain)
+                    tree.resolution_errors.append(
+                        f"Dependency depth limit ({self.max_depth}) exceeded: {chain}"
+                    )
                     continue
 
                 # Create a new node for this dependency
