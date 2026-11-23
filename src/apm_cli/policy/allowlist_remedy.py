@@ -372,7 +372,7 @@ def _uninstall_clears(
     if transitive.rescued_roots or not denied_keys - set(roots) <= transitive.removed_keys:
         return False
     cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
-    linked = _final_symlinks(cleanup_keys, project)
+    linked = _final_symlinks(cleanup_keys, removed, project)
     if linked is None:
         return False
     if linked:
@@ -397,25 +397,53 @@ def _deployment_paths_validate(cleanup_keys: set[str], project: AllowlistProject
     )
 
 
-def _final_symlinks(cleanup_keys: set[str], project: AllowlistProject) -> list[str] | None:
-    """Files the uninstall would delete that are final symlinks (#5008).
+def _final_symlinks(
+    cleanup_keys: set[str], removed: list[object], project: AllowlistProject
+) -> list[str] | None:
+    """Final symlinks the uninstall would delete but cleanup keeps (#5008, #5035).
 
     Target cleanup keeps such a path, out of the project
     (``allow_final_symlink=False`` containment) or in it (a link carries no
-    receipt or render evidence), so the uninstall would stop. A path a
-    surviving dependency still claims is kept anyway and does not count.
+    receipt or render evidence), so the uninstall would stop. Paths a
+    shrinking survivor selection retires count too. A path a surviving
+    dependency still claims is kept anyway and does not count, nor does a
+    dangling in-project link, which cleanup counts as already gone, nor a
+    retired-only hook link the hook sync unlinks.
     """
+    from ..commands.uninstall.engine import project_shrunk_selections
     from ..commands.uninstall.selection_shrink import uninstall_deletion_candidates
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..integration.cleanup import (
+        final_link_handled,
+        hook_sync_unlinks,
+        managed_hook_prefixes,
+    )
 
     root = project.project_root
+    lock = project.lock
     try:
+        shrunk = project_shrunk_selections(lock, removed, project.modules_dir, manifest_file(root))
+        # Uninstall's own snapshot: canonical ledger hashes first, as the hook sync reads them.
+        owners = set(cleanup_keys) | set(shrunk)
+        hashes = DeploymentLedgerCodec.cleanup_snapshot(lock, owners).hashes
+        # Removed owners' files go through stale cleanup; retired-only ones through the syncs.
+        removed_paths = set(uninstall_deletion_candidates(lock, cleanup_keys))
+        hook_prefixes = managed_hook_prefixes()
+
+        def handled(path: str) -> bool:
+            # The cleanup route decides first: the hook sync keeps its own absence rule.
+            if path not in removed_paths and path.startswith(hook_prefixes):
+                return hook_sync_unlinks(path, root, recorded_hash=hashes.get(path))
+            return final_link_handled(path, root)
+
         return [
             path
-            for path in uninstall_deletion_candidates(project.lock, cleanup_keys)
-            if "://" not in path and (root / path).is_symlink()
+            for path in uninstall_deletion_candidates(lock, cleanup_keys, shrunk=shrunk)
+            if "://" not in path and (root / path).is_symlink() and not handled(path)
         ]
-    except OSError:
-        return None  # an unreadable claim proves nothing: the advice is admin-only
+    except (OSError, ValueError, RuntimeError):
+        # An unreadable or looping link proves nothing: the advice is admin-only.
+        return None
 
 
 def _deletions_have_evidence(

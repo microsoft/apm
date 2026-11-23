@@ -737,6 +737,7 @@ install-deployment-target-file-contraction
 install-deployment-trust-fingerprint
 install-deployment-trust-policy-outcome
 install-deployment-local-bundle-hook-trust
+install-deployment-uninstall-absence-proof
 install-deployment-uninstall-preflight
 install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability

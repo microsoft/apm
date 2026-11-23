@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import tomllib
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -381,6 +381,30 @@ def scan_deployed_trees(project_root: Path) -> tuple[dict[str, list[ScanFinding]
     return result.findings_by_file, len(result.scanned_files)
 
 
+def surface_candidates(
+    surfaces: Sequence[PrimitiveSurface],
+) -> Callable[[Path], list[PrimitiveSurface]]:
+    """Return a lookup of the surfaces that may hold a path, in *surfaces* order.
+
+    Exactly ``[s for s in surfaces if s.contains(p) or (s.pattern is not None
+    and p.is_relative_to(s.path))]``: an exact surface holds only its own
+    path, and a pattern surface holds its path and every descendant. Indexing
+    by surface path turns one scan over every surface per claimed file into
+    lookups of the path and its ancestors.
+    """
+    by_path: dict[Path, list[tuple[int, PrimitiveSurface]]] = {}
+    for index, surface in enumerate(surfaces):
+        by_path.setdefault(surface.path, []).append((index, surface))
+
+    def candidates(path: Path) -> list[PrimitiveSurface]:
+        hits = list(by_path.get(path, ()))
+        for ancestor in path.parents:
+            hits.extend(hit for hit in by_path.get(ancestor, ()) if hit[1].pattern is not None)
+        return [surface for _index, surface in sorted(hits, key=lambda hit: hit[0])]
+
+    return candidates
+
+
 def _scan_claimed_files(
     project_root: Path,
     claims: dict[str, str],
@@ -403,6 +427,7 @@ def _scan_claimed_files(
         and not profile.user_root_resolver
     ] + list(reversed(targets))
     surfaces = primitive_surfaces(project_root, profiles, user_scope=user_scope)
+    candidates_for = surface_candidates(surfaces)
     results: list[FileScanResult] = []
     cache = {} if cache is None else cache
     for rel_path, owner in claims.items():
@@ -424,11 +449,7 @@ def _scan_claimed_files(
             if decoded is None:
                 continue
             abs_path = decoded
-        candidates = [
-            s
-            for s in surfaces
-            if s.contains(abs_path) or (s.pattern is not None and abs_path.is_relative_to(s.path))
-        ]
+        candidates = candidates_for(abs_path)
         try:
             if candidates and not safe_surface_path(candidates[0], abs_path):
                 continue

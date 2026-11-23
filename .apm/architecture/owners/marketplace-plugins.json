@@ -179,7 +179,8 @@
       "owner": "deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources, resolve_plugin_root_placeholders)",
       "selectors": [
         "src/apm_cli/deps/plugin_parser.py",
-        "src/apm_cli/integration/skill_integrator.py"
+        "src/apm_cli/integration/skill_integrator.py",
+        "src/apm_cli/integration/skill_bundle_routes.py"
       ],
       "guards": ["marketplace-integrations-legacy-skill-membership"]
     },

@@ -162,7 +162,16 @@ def mark_bundle_retiring(scope_dir: Path, slug: str, exec_type: str) -> None:
 
 def retiring_bundle_slugs(scope_dir: Path, exec_type: str) -> set[str]:
     """Slugs whose uninstall began retiring *exec_type* and did not finish its record update."""
-    return {slug for slug, entry in _read(scope_dir).items() if exec_type in _retiring(entry)}
+    return set(retiring_bundle_keys(scope_dir, exec_type))
+
+
+def retiring_bundle_keys(scope_dir: Path, exec_type: str) -> dict[str, str | None]:
+    """Each retiring slug with the approval key its install recorded (#5003)."""
+    return {
+        slug: entry.get("approval_key") if isinstance(entry.get("approval_key"), str) else None
+        for slug, entry in _read(scope_dir).items()
+        if exec_type in _retiring(entry)
+    }
 
 
 def drop_bundle_exec_type(scope_dir: Path, slug: str, exec_type: str) -> None:
