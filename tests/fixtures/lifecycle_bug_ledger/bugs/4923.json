@@ -10,6 +10,8 @@
   ],
   "regression_tests": [
     "tests/unit/commands/test_approve_deny.py::test_approve_refuses_an_org_denied_package_before_any_write",
-    "tests/integration/test_deny_remediation_lifecycle.py::test_approve_exits_1_when_another_layer_still_denies"
+    "tests/integration/test_deny_remediation_lifecycle.py::test_approve_exits_1_when_another_layer_still_denies",
+    "tests/unit/commands/test_approve_deny.py::test_approve_refuses_a_denied_package_before_writing_a_named_bundle",
+    "tests/unit/commands/test_approve_deny.py::test_refused_approve_keeps_legacy_personal_approvals"
   ]
 }

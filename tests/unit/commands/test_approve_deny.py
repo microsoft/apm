@@ -7,6 +7,7 @@ to ``~/.apm/config.json`` only with ``--user`` (personal, lowest authority).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1091,3 +1092,61 @@ def test_approve_records_a_package_no_layer_denies(
     allow = yaml.safe_load(manifest.read_text(encoding="utf-8"))["executables"]["allow"]
     assert any("fine" in key for key in allow), result.output
     assert not any("org-denied" in key for key in allow), result.output
+
+
+def test_approve_refuses_a_denied_package_before_writing_a_named_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundle key named beside an org-denied package is not saved either (#4923)."""
+    from apm_cli.install.local_bundle_pending import record_bundle_executables
+
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    record_bundle_executables(manifest.parent, "bun", _BUNDLE_KEY, ["hooks"])
+    before = manifest.read_bytes()
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, [_BUNDLE_KEY, "org-denied"])
+
+    assert result.exit_code == 1, result.output
+    assert manifest.read_bytes() == before, result.output
+    assert "org-denied is still denied (org-deny)" in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize(
+    "args", [["org-denied"], ["--user", "org-denied"]], ids=["project", "user"]
+)
+def test_refused_approve_keeps_legacy_personal_approvals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """The refusal reads legacy approvals.yml without migrating it (#4923)."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    legacy = tmp_path / "home" / ".apm" / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    config = tmp_path / "home" / ".apm" / "config.json"
+    before = (manifest.read_bytes(), legacy.read_bytes())
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, args)
+
+    assert result.exit_code == 1, result.output
+    assert (manifest.read_bytes(), legacy.read_bytes()) == before, result.output
+    assert not config.exists(), result.output
+
+
+def test_user_approve_retires_legacy_approvals_on_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: a successful --user approve folds approvals.yml into config.json."""
+    _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    legacy = tmp_path / "home" / ".apm" / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    config = tmp_path / "home" / ".apm" / "config.json"
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, ["--user", "fine"])
+
+    assert result.exit_code == 0, result.output
+    allow = json.loads(config.read_text(encoding="utf-8"))["executables"]["allow"]
+    assert allow["acme/old"] == {"hooks": True}
+    assert any("fine" in key for key in allow), result.output
+    assert not legacy.exists()

@@ -129,12 +129,14 @@ def _installed_identities(manifest: Path) -> frozenset[str]:
 
 
 def _load_store(
-    manifest: Path, user_scope: bool
+    manifest: Path, user_scope: bool, *, migrate_legacy: bool = True
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
     """Load the (allow, deny) grant maps from the selected store.
 
     A key written as an install spec is stored under the package identity
-    when this store is saved (#4189).
+    when this store is saved (#4189). With *migrate_legacy* False a legacy
+    ``approvals.yml`` is folded in memory only; :func:`_save_store` retires
+    it, so a refused command writes nothing (#4923).
     """
     from ..security.executables import (
         _readable_lockfile,
@@ -144,7 +146,7 @@ def _load_store(
     )
 
     if user_scope:
-        allow, deny = load_user_executables()
+        allow, deny = load_user_executables(migrate_legacy=migrate_legacy)
     else:
         allow, deny, used_alias = load_project_executables(manifest)
         if used_alias:
@@ -165,10 +167,16 @@ def _save_store(
     deny: dict[str, dict[str, bool]],
 ) -> None:
     """Persist the (allow, deny) grant maps to the selected store."""
-    from ..security.executables import save_user_executables, write_project_executables
+    from ..security.executables import (
+        _migrate_legacy_approvals,
+        save_user_executables,
+        write_project_executables,
+    )
 
     if user_scope:
         save_user_executables(allow, deny)
+        # *allow* already holds any legacy grants; retire approvals.yml now.
+        _migrate_legacy_approvals(allow)
     else:
         write_project_executables(manifest, allow, deny)
 
@@ -296,7 +304,7 @@ def approve_cmd(
             _show_pending(manifest, logger=logger)
             return
 
-        allow, deny = _load_store(manifest, user_scope)
+        allow, deny = _load_store(manifest, user_scope, migrate_legacy=False)
 
         if recommended:
             _approve_recommended(manifest, user_scope, allow, deny, logger=logger)
@@ -312,12 +320,18 @@ def approve_cmd(
         packages = tuple(pkg for pkg in packages if not _is_content_bound_key(pkg))
         bundles = _resolve_bundle_keys(manifest, bundle_keys)
         packages = _canonical_specs(manifest, packages) if packages else ()
+        selected, missing = _select_packages(manifest, packages)
+        # Refuse a still-denied package before any approval path writes (#4923).
+        _refuse_still_denied(manifest, user_scope, deny, selected, logger=logger)
         if bundle_keys:
             _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
             if not packages:
                 return
-            allow, deny = _load_store(manifest, user_scope)
-        _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
+            allow, deny = _load_store(manifest, user_scope, migrate_legacy=False)
+        if selected:
+            _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger)
+        if missing:
+            sys.exit(1)
     except PolicyViolationError as exc:
         _report_policy_block(exc)
         sys.exit(1)
@@ -414,15 +428,23 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
         )
 
 
-def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
-    """Build the org / project / user trust context the install gate resolves."""
+def _effective_trust_context(
+    manifest: Path, *, logger: CommandLogger, migrate_user_legacy: bool = True
+):
+    """Build the org / project / user trust context the install gate resolves.
+
+    *migrate_user_legacy* False reads a legacy ``approvals.yml`` without
+    persisting the migration, for checks that run before approve writes.
+    """
     from ..models.manifest_io import load_manifest
     from ..security.executables import build_exec_trust_context
 
     data = load_manifest(manifest) if manifest.is_file() else None
     project_data = data if isinstance(data, dict) else {}
     policy = _load_org_policy(manifest.parent, logger=logger)
-    return build_exec_trust_context(policy=policy, project_data=project_data)
+    return build_exec_trust_context(
+        policy=policy, project_data=project_data, migrate_user_legacy=migrate_user_legacy
+    )
 
 
 def explain_decision(package: str, *, logger: CommandLogger, global_scope: bool = False) -> None:
@@ -783,16 +805,12 @@ def _approve_all_pending(
     _record_and_save(manifest, user_scope, allow, deny, pending, logger=logger, bulk=True)
 
 
-def _approve_packages(
-    manifest: Path,
-    user_scope: bool,
-    allow: dict[str, dict[str, bool]],
-    deny: dict[str, dict[str, bool]],
-    packages: tuple[str, ...],
-    *,
-    logger: CommandLogger,
-) -> None:
-    """Approve specific packages by name; exit 1 when any name matches nothing."""
+def _select_packages(
+    manifest: Path, packages: tuple[str, ...]
+) -> tuple[list[ExecutableDeclaration], int]:
+    """Installed packages with executables that *packages* name, and the count matching nothing."""
+    if not packages:
+        return [], 0
     declarations = _scan_installed_packages(manifest)
 
     selected = []
@@ -809,10 +827,7 @@ def _approve_packages(
             _rich_info(f"{pkg}: no executable primitives to approve.", symbol="info")
             continue
         selected.append(decl)
-    if selected:
-        _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger)
-    if missing:
-        sys.exit(1)
+    return selected, missing
 
 
 def _resolve_bundle_keys(manifest: Path, keys: Sequence[str]) -> list:
@@ -1112,11 +1127,15 @@ def _first_approval_parks(
     policy = _load_org_policy(manifest.parent, logger=logger)
     if project_executables_gate_enabled(project_data):
         return []
-    before = build_exec_trust_context(policy=policy, project_data=project_data)
+    before = build_exec_trust_context(
+        policy=policy, project_data=project_data, migrate_user_legacy=False
+    )
     if before.gate_enabled:
         return []
     after = build_exec_trust_context(
-        policy=policy, project_data={"executables": {"allow": allow, "deny": deny}}
+        policy=policy,
+        project_data={"executables": {"allow": allow, "deny": deny}},
+        migrate_user_legacy=False,
     )
     approving_keys = {decl.package_key for decl in approving}
     parked = []
@@ -1166,8 +1185,8 @@ def _record_and_save(
 
     Naming a package clears its deny in the same store, mirroring how
     ``apm deny`` drops the matching allow; ``--all`` and ``--recommended``
-    (*bulk*) skip denied packages instead of lifting them. A named package
-    that another layer still denies is refused before any write (#4923).
+    (*bulk*) skip denied packages instead of lifting them. Callers refuse a
+    named package another layer still denies before any write (#4923).
     Exits 1 when any requested package could not be pinned, the user
     declined, or another layer still denies it, so an approval never reports
     success without effect (#3957).
@@ -1180,8 +1199,6 @@ def _record_and_save(
     recorded: list[ExecutableDeclaration] = []
     cleared: list[str] = []
     refused = 0
-    if not bulk:
-        _refuse_still_denied(manifest, user_scope, deny, declarations, logger=logger)
     # Bulk approval is eligible only where no layer denies (#3957): an org or
     # other-store deny is skipped with its reason and no allow is written.
     layer_denied = (
@@ -1313,7 +1330,10 @@ def _still_denied(
 
     if not declarations:
         return []
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    ctx = replace(
+        _effective_trust_context(manifest, logger=logger, migrate_user_legacy=False),
+        gate_enabled=True,
+    )
     if deny is not None:
         store = "user_deny" if user_scope else "project_deny"
         ctx = replace(ctx, **{store: _deny_types(deny)})
