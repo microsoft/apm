@@ -251,6 +251,8 @@ def test_config_that_cannot_touch_an_https_fetch_stays_eligible():
         ("credential.https://github.com.helper", ""),
         ("http.sslbackend", "openssl"),
         ("http.sslcainfo", "/ca.pem"),
+        ("credential.interactive", "never"),
+        ("credential.https://dev.azure.com.usehttppath", "true"),
     )
 
     assert arl._classify(entries) == {"http.sslbackend": "openssl", "http.sslcainfo": "/ca.pem"}

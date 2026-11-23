@@ -115,6 +115,10 @@ def _list_key(key: str) -> tuple[str, str] | None:
 def _classify(entries) -> dict[str, str] | None:
     """CA/backend values when *entries* cannot change git's anonymous request, else ``None``.
 
+    Other ``credential.*`` keys (``interactive``, ``useHttpPath``, ...) only
+    shape the credential exchange after a 401, which always falls back to git;
+    proactive auth needs ``http.*`` keys, which fall back here.
+
     ``credential.helper`` and ``http.extraHeader`` are multi-valued in git: an
     empty value resets the list. Resets apply only within one exact URL scope
     (unscoped is its own scope), and any scope left holding a value falls
@@ -131,7 +135,7 @@ def _classify(entries) -> dict[str, str] | None:
             lists[list_key] = [*live, entry.value] if entry.value else []
         elif key in (_CA_KEY, _BACKEND_KEY):
             values[key] = entry.value
-        elif key.startswith(("url.", "http.", "credential.", "protocol.https.")) or key in (
+        elif key.startswith(("url.", "http.", "protocol.https.")) or key in (
             "protocol.allow",
             "core.gitproxy",
             "core.askpass",
