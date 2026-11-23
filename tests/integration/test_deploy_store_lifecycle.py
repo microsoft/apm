@@ -80,12 +80,17 @@ def test_every_deployed_file_hash_has_a_verified_store_entry(
         assert canonical_digest(entry.read_bytes()) == victim, "a full install heals the entry"
 
 
+# A per-install identifier that differs on every run by design.
+_PER_RUN = {".apm-local/installation"}
+
+
 def _tree(root: Path) -> dict[str, bytes]:
-    return {
+    files = {
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in sorted(root.rglob("*"))
         if path.is_file() and ".git" not in path.parts
     }
+    return {rel: data for rel, data in files.items() if rel not in _PER_RUN}
 
 
 def test_an_empty_or_deleted_store_changes_nothing(apm_binary_path: Path, tmp_path: Path) -> None:
@@ -102,3 +107,38 @@ def test_an_empty_or_deleted_store_changes_nothing(apm_binary_path: Path, tmp_pa
         _install(apm_binary_path, without_store, world.env)
 
         assert _tree(without_store) == _tree(with_store)
+
+
+def test_cache_clean_after_an_install_empties_the_store(
+    apm_binary_path: Path, tmp_path: Path
+) -> None:
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        project = tmp_path / "project"
+        shutil.copytree(tree.project, project)
+        _install(apm_binary_path, project, world.env)
+        store = world.cache_dir / _BUCKET
+        stored = [path for path in store.rglob("*") if path.is_file()]
+        assert stored
+
+        info = subprocess.run(
+            [str(apm_binary_path), "cache", "info"],
+            cwd=project,
+            env=world.env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert info.returncode == 0, info.stdout + info.stderr
+        assert "Deployed file entries:" in info.stdout
+        cleaned = subprocess.run(
+            [str(apm_binary_path), "cache", "clean", "--force"],
+            cwd=project,
+            env=world.env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert cleaned.returncode == 0, cleaned.stdout + cleaned.stderr
+        assert not [path for path in store.rglob("*") if path.is_file()]

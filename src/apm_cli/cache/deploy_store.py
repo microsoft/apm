@@ -47,12 +47,48 @@ MAX_DEPLOY_ENTRY_BYTES = 4 * 1024 * 1024
 _KEY_RE = re.compile(r"[0-9a-f]{64}")
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
+# A FIFO planted at an entry path must be a miss, not a blocked open.
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 # Windows junctions and other reparse points pass lstat as directories.
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 
 def _is_reparse(info: os.stat_result) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & _REPARSE)
+
+
+def _oversized(entry: Path) -> bool:
+    try:
+        info = os.lstat(entry)
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and info.st_size > MAX_DEPLOY_ENTRY_BYTES
+
+
+def _read_bounded(entry: Path) -> bytes | None:
+    """Read a regular, non-linked entry of at most the entry bound; ``None`` otherwise.
+
+    Opens without following links and without blocking (a FIFO is refused by
+    the descriptor type check), and reads at most one byte past the bound so
+    an entry grown out of band cannot exhaust memory.
+    """
+    try:
+        fd = os.open(entry, os.O_RDONLY | _NOFOLLOW | _BINARY | _NONBLOCK)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_DEPLOY_ENTRY_BYTES:
+            return None
+        if os.path.islink(entry) or _is_reparse(os.lstat(entry)):
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            data = handle.read(MAX_DEPLOY_ENTRY_BYTES + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return data if len(data) <= MAX_DEPLOY_ENTRY_BYTES else None
 
 
 class DeployStore:
@@ -98,31 +134,22 @@ class DeployStore:
         entry = self._entry(key)
         if entry is None or not (self._real_dir(self._root) and self._real_dir(entry.parent)):
             return None
-        try:
-            fd = os.open(entry, os.O_RDONLY | _NOFOLLOW | _BINARY)
-        except OSError:
-            return None
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or os.path.islink(entry):
-                return None
-            if _is_reparse(os.lstat(entry)):
-                return None
-            with os.fdopen(fd, "rb", closefd=False) as handle:
-                data = handle.read()
-        except OSError:
-            return None
-        finally:
-            os.close(fd)
-        if canonical_digest(data) != key:
-            with contextlib.suppress(OSError):
-                entry.unlink()
+        data = _read_bounded(entry)
+        if data is None or canonical_digest(data) != key:
+            if data is not None or _oversized(entry):
+                with contextlib.suppress(OSError):
+                    entry.unlink()
             return None
         if raw_sha256 is not None and hashlib.sha256(data).hexdigest() != raw_sha256:
             return None
         with contextlib.suppress(OSError):
             os.utime(entry, None)
         return data
+
+    def _holds(self, entry: Path, key: str) -> bool:
+        """Whether the existing entry is a regular file whose bytes still hash to *key*."""
+        data = _read_bounded(entry)
+        return data is not None and canonical_digest(data) == key
 
     def _prepare(self, entry: Path, size: int) -> bool | None:
         """Create the bucket dirs; ``True`` if a same-size entry exists, ``None`` to refuse."""
@@ -135,8 +162,8 @@ class DeployStore:
             existing = os.lstat(entry)
         except FileNotFoundError:
             return False
-        # Reads verify; a same-size regular entry is left alone so a warm
-        # install costs one lstat, while a damaged one is rewritten.
+        # A same-size regular entry is verified before it is kept; a damaged
+        # or different-size one is atomically replaced.
         return stat.S_ISREG(existing.st_mode) and existing.st_size == size
 
     def put(self, key: str, data: bytes) -> bool:
@@ -145,14 +172,14 @@ class DeployStore:
         *data* must hash to *key*; a mismatch is refused and nothing is written.
         """
         entry = self._entry(key)
-        if entry is None or len(data) > MAX_DEPLOY_ENTRY_BYTES:
+        if entry is None or len(data) > MAX_DEPLOY_ENTRY_BYTES or key != canonical_digest(data):
             return False
         try:
             ready = self._prepare(entry, len(data))
-            if ready is not False:
-                return bool(ready)
-            if key != canonical_digest(data):
+            if ready is None:
                 return False
+            if ready and self._holds(entry, key):
+                return True
             fd, temp = tempfile.mkstemp(dir=entry.parent, prefix=".tmp-", suffix=".part")
         except OSError:
             return False
@@ -179,32 +206,49 @@ class DeployStore:
             if info.st_size > MAX_DEPLOY_ENTRY_BYTES:
                 return False
             ready = self._prepare(entry, info.st_size)
-            if ready is not False:
-                return bool(ready)
+            if ready is None:
+                return False
+            if ready and self._holds(entry, key):
+                return True
             data = path.read_bytes()
         except OSError:
             return False
         return self.put(key, data)
 
-    def enforce_size_cap(self, limit: int = MAX_DEPLOY_STORE_BYTES) -> int:
-        """Evict least recently used entries above *limit*, down to 80% of it; return count."""
+    def _scan(self) -> list[tuple[float, int, str]]:
+        """``(mtime, size, path)`` of every key-named entry in its own real shard."""
+        found: list[tuple[float, int, str]] = []
         if not self._real_dir(self._root):
-            return 0
-        entries: list[tuple[float, int, str]] = []
-        total = 0
+            return found
         try:
             with os.scandir(self._root) as shards:
                 for shard in shards:
-                    if not shard.is_dir(follow_symlinks=False):
+                    # Windows junctions pass is_dir(follow_symlinks=False); refuse them.
+                    if len(shard.name) != 2 or not self._real_dir(Path(shard.path)):
                         continue
                     with os.scandir(shard.path) as files:
                         for item in files:
-                            if item.is_file(follow_symlinks=False):
-                                info = item.stat(follow_symlinks=False)
-                                entries.append((info.st_mtime, info.st_size, item.path))
-                                total += info.st_size
+                            if not (
+                                _KEY_RE.fullmatch(item.name)
+                                and item.name.startswith(shard.name)
+                                and item.is_file(follow_symlinks=False)
+                            ):
+                                continue
+                            info = item.stat(follow_symlinks=False)
+                            found.append((info.st_mtime, info.st_size, item.path))
         except OSError:
-            return 0
+            return []
+        return found
+
+    def get_stats(self) -> dict[str, int]:
+        """Entry count and total size of the stored deployed bytes."""
+        entries = self._scan()
+        return {"entry_count": len(entries), "total_size_bytes": sum(e[1] for e in entries)}
+
+    def enforce_size_cap(self, limit: int = MAX_DEPLOY_STORE_BYTES) -> int:
+        """Evict least recently used entries above *limit*, down to 80% of it; return count."""
+        entries = self._scan()
+        total = sum(size for _mtime, size, _path in entries)
         if total <= limit:
             return 0
         evicted = 0

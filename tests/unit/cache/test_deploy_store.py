@@ -47,7 +47,7 @@ def test_a_stored_entry_reads_back_verified(tmp_path: Path) -> None:
     assert [p.name for p in entry.parent.iterdir()] == [key], "no temp file is left behind"
 
 
-def test_a_tampered_entry_is_rejected_and_evicted(tmp_path: Path) -> None:
+def test_a_tampered_entry_is_rejected_and_evicted_on_read(tmp_path: Path) -> None:
     store, root = _store(tmp_path)
     key = canonical_digest(_TEXT)
     store.put(key, _TEXT)
@@ -220,3 +220,81 @@ def test_cache_clean_empties_the_store(tmp_path: Path) -> None:
     assert store.clean_all() == []
     assert list(root.iterdir()) == []
     assert DeployStore(tmp_path / "never-used").clean_all() == []
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")
+def test_a_fifo_at_an_entry_path_is_a_miss_not_a_hang(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    (root / key[:2]).mkdir(parents=True)
+    os.mkfifo(root / key[:2] / key)
+
+    assert store.get(key) is None
+    assert stat.S_ISFIFO(os.lstat(root / key[:2] / key).st_mode), "the FIFO was only refused"
+
+
+def test_a_same_size_tampered_entry_is_healed_by_the_next_store(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    store.put(key, _TEXT)
+    entry = root / key[:2] / key
+    entry.write_bytes(bytes(reversed(_TEXT)))  # same length, other bytes
+
+    assert store.put(key, _TEXT)
+    assert entry.read_bytes() == _TEXT
+    entry.write_bytes(bytes(reversed(_TEXT)))
+    source = tmp_path / "deployed.md"
+    source.write_bytes(_TEXT)
+    assert store.put_file(key, source)
+    assert entry.read_bytes() == _TEXT
+
+
+def test_same_length_bytes_for_another_digest_are_refused(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    store.put(key, _TEXT)
+
+    assert not store.put(key, bytes(reversed(_TEXT)))
+    assert (root / key[:2] / key).read_bytes() == _TEXT
+
+
+def test_an_entry_grown_past_the_bound_is_a_miss_and_evicted(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    store.put(key, _TEXT)
+    entry = root / key[:2] / key
+    with entry.open("ab") as handle:
+        handle.truncate(MAX_DEPLOY_ENTRY_BYTES + 1)
+
+    assert store.get(key) is None
+    assert not entry.exists()
+
+
+def test_eviction_touches_only_key_named_entries_in_their_shard(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    store.put(key, _TEXT)
+    shard = root / key[:2]
+    strays = [shard / ".tmp-abc.part", shard / "notes.txt", root / "ff" / key]
+    for stray in strays:
+        stray.parent.mkdir(parents=True, exist_ok=True)
+        stray.write_bytes(b"x" * 4096)
+
+    assert store.get_stats() == {"entry_count": 1, "total_size_bytes": len(_TEXT)}
+    assert store.enforce_size_cap(limit=1) == 1
+    assert not (shard / key).exists()
+    assert all(stray.read_bytes() == b"x" * 4096 for stray in strays)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_eviction_never_follows_a_linked_shard(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / key).write_bytes(_TEXT)
+    root.mkdir(parents=True)
+    (root / key[:2]).symlink_to(outside, target_is_directory=True)
+
+    assert store.enforce_size_cap(limit=0) == 0
+    assert (outside / key).read_bytes() == _TEXT

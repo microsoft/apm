@@ -38,12 +38,21 @@ def info() -> None:
     http_cache = HttpCache(root)
     http_stats = http_cache.get_stats()
 
-    total_bytes = git_stats["total_size_bytes"] + http_stats["total_size_bytes"]
+    from ..cache.deploy_store import DeployStore
+
+    deploy_stats = DeployStore(root).get_stats()
+
+    total_bytes = (
+        git_stats["total_size_bytes"]
+        + http_stats["total_size_bytes"]
+        + deploy_stats["total_size_bytes"]
+    )
 
     click.echo()
     _rich_echo(f"  Git repositories (db):    {git_stats['db_count']}", symbol="list")
     _rich_echo(f"  Git checkouts:            {git_stats['checkout_count']}", symbol="list")
     _rich_echo(f"  HTTP cache entries:       {http_stats['entry_count']}", symbol="list")
+    _rich_echo(f"  Deployed file entries:    {deploy_stats['entry_count']}", symbol="list")
     click.echo()
     _rich_echo(f"  Total size:               {_format_size(total_bytes)}", symbol="list")
     _rich_echo(
@@ -51,6 +60,10 @@ def info() -> None:
     )
     _rich_echo(
         f"    HTTP:                   {_format_size(http_stats['total_size_bytes'])}", symbol="list"
+    )
+    _rich_echo(
+        f"    Deployed files:         {_format_size(deploy_stats['total_size_bytes'])}",
+        symbol="list",
     )
 
 
