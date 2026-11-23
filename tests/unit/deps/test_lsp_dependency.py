@@ -45,7 +45,18 @@ class TestFromString:
         with pytest.raises(ValueError, match=rf"Invalid LSP dependency name '{name}': reserved"):
             LSPDependency.from_string(name)
 
-    @pytest.mark.parametrize("name", ["proto", "my-constructor", "prototype-lsp", "_proto_"])
+    # LSP config keys keep the full name, so a namespaced name is not reserved.
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "proto",
+            "my-constructor",
+            "prototype-lsp",
+            "_proto_",
+            "io.github.acme/constructor",
+            "@scope/prototype",
+        ],
+    )
     def test_name_containing_reserved_word_accepted(self, name):
         assert LSPDependency.from_string(name).name == name
 
@@ -57,10 +68,6 @@ class TestFromString:
     def test_trailing_newline_ordinary_name_still_accepted(self):
         name = "ok-name\n"
         LSPDependency.from_string(name)
-
-    @pytest.mark.parametrize("name", ["io.github.acme/constructor", "@scope/prototype"])
-    def test_namespaced_name_accepted_because_lsp_keys_keep_the_full_name(self, name):
-        assert LSPDependency.from_string(name).name == name
 
 
 # ===========================================================================
