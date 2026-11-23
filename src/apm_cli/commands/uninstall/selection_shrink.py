@@ -155,7 +155,9 @@ def uninstall_deletion_candidates(
     from ...integration.base_integrator import BaseIntegrator
     from .cli import _collect_deployed_cleanup_state
 
-    if not lockfile or not cleanup_keys:
+    # A declaration-only uninstall removes no lock row but can still shrink a
+    # survivor's selection and retire its files.
+    if not lockfile or (not cleanup_keys and not shrunk):
         return []
     selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
     survivors, survivor_hashes = _collect_deployed_cleanup_state(
