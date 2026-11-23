@@ -99,16 +99,6 @@ def test_a_record_in_a_vcs_tracked_store_never_deletes(tmp_path, monkeypatch) ->
     assert config.is_file()
 
 
-def test_a_record_store_inside_the_project_never_deletes(tmp_path, monkeypatch) -> None:
-    project = tmp_path / "project"
-    monkeypatch.setenv("APM_HOME", str(project / ".apm-home"))
-    config = project / ".mcp.json"
-    _apm_writes(config, _WITH_ENTRY)
-
-    assert _apm_empties(config, root=project) is False
-    assert config.is_file()
-
-
 def test_a_stale_created_record_never_claims_a_file_the_user_recreated(tmp_path, apm_home) -> None:
     """APM created the file, it went away (for example a rolled-back install), and the
     user created their own: the stale record must not make it APM's."""
@@ -148,6 +138,24 @@ def test_a_pre_provenance_install_records_its_existing_files_as_legacy(tmp_path,
 
     assert config_file_origin(config) is Origin.LEGACY
     assert _apm_empties(config, root=project) is True
+    assert not config.exists()
+
+
+def test_an_empty_skeleton_in_an_installation_with_a_lockfile_is_the_users(
+    tmp_path, apm_home
+) -> None:
+    """An install that wrote a lockfile but no config file yet (MCP not approved) meets
+    the user's empty skeleton: it holds nothing APM wrote, so it stays the user's."""
+    project = tmp_path / "project"
+    (project / "apm.lock.yaml").parent.mkdir(parents=True)
+    (project / "apm.lock.yaml").write_text("lockfile_version: '1'\n", encoding="utf-8")
+    config = project / ".mcp.json"
+    config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=project) is False
+    assert config.is_file()
 
 
 # -- Q4: provenance keyed by the resolved file --------------------------------------
@@ -160,6 +168,7 @@ def test_a_profile_path_with_spaces_and_non_ascii_keeps_its_record(tmp_path, apm
 
     assert config_file_origin(config) is Origin.CREATED
     assert _apm_empties(config, root=tmp_path) is True
+    assert not config.exists()
 
 
 def test_a_missing_file_is_keyed_through_its_resolved_parent(tmp_path, apm_home) -> None:
@@ -173,6 +182,8 @@ def test_a_missing_file_is_keyed_through_its_resolved_parent(tmp_path, apm_home)
     assert config_file_key(alias / ".mcp.json") == config_file_key(real / ".mcp.json")
     _apm_writes(alias / ".mcp.json", _WITH_ENTRY)
     assert config_file_origin(real / ".mcp.json") is Origin.CREATED
+    assert _apm_empties(real / ".mcp.json", root=real) is True
+    assert not (real / ".mcp.json").exists()
 
 
 def test_a_config_file_symlinked_outside_is_never_removed_or_followed(tmp_path, apm_home) -> None:
@@ -208,6 +219,9 @@ def test_nfc_and_nfd_spellings_name_one_record(tmp_path, apm_home) -> None:
     assert nfc != nfd
 
     assert config_file_key(tmp_path / nfd / "x.json") == config_file_key(tmp_path / nfc / "x.json")
+    _apm_writes(tmp_path / nfd / "x.json", _WITH_ENTRY)
+    store = json.loads((apm_home / "deployment-receipts" / "config-files.json").read_text("utf-8"))
+    assert config_file_key(tmp_path / nfc / "x.json") in store["files"]
 
 
 def _case_insensitive(directory: Path) -> bool:
@@ -229,6 +243,8 @@ def test_a_differently_cased_spelling_finds_the_record_on_a_case_insensitive_fs(
     _apm_writes(config, _WITH_ENTRY)
 
     assert config_file_origin(tmp_path / "project" / ".mcp.json") is Origin.CREATED
+    assert _apm_empties(tmp_path / "project" / ".mcp.json", root=tmp_path) is True
+    assert not config.exists()
 
 
 def test_traversal_in_a_config_path_names_the_resolved_file(tmp_path, apm_home) -> None:
@@ -238,6 +254,8 @@ def test_traversal_in_a_config_path_names_the_resolved_file(tmp_path, apm_home) 
     _apm_writes(tmp_path / "project" / "sub" / ".." / ".mcp.json", _WITH_ENTRY)
 
     assert config_file_origin(config) is Origin.CREATED
+    assert _apm_empties(config, root=tmp_path / "project") is True
+    assert not config.exists()
 
 
 def test_a_tampered_record_with_a_relative_or_traversing_path_is_ignored(
@@ -261,6 +279,7 @@ def test_a_tampered_record_with_a_relative_or_traversing_path_is_ignored(
 
     assert config_file_origin(config) is Origin.PREEXISTING
     assert _apm_empties(config, root=project) is False
+    assert config.is_file()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")

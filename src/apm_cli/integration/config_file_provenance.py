@@ -1,0 +1,315 @@
+"""Whether APM may delete a native MCP or hook config file it emptied (#4867).
+
+Single owner of that decision. Integrators decide only the content fact (the
+file holds nothing but APM's empty skeleton after their cleanup) and hand it
+to :func:`delete_emptied_config`, which deletes only when all of these hold:
+
+(a) this machine's record says APM created the file;
+(b) after cleanup the file holds only APM's empty skeleton (the content fact);
+(c) the record store is local state outside any VCS-tracked path, so a clone
+    can never ship a "created by APM" record.
+
+A file the record shows APM did not create (for example an empty skeleton the
+user wrote before APM merged into it) is kept. A file with no record, written
+before records existed, keeps the content proof (#4852) until APM next creates
+it. Records are keyed by the resolved file and stored additively beside the
+deployment receipts (machine-local state under ``$APM_HOME``); they are written by
+:func:`recorded_config_write` around every APM write of such a file.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+import stat
+import unicodedata
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+_log = logging.getLogger(__name__)
+
+_VERSION = 1
+_VCS_MARKERS = (".git", ".hg", ".svn")
+_LOCKFILE = "apm.lock.yaml"
+
+# Per process: whether an installation had its own records when first seen, so
+# every write of one install classifies unrecorded files alike.
+_tracked_at_start: dict[str, bool] = {}
+
+
+class Origin(Enum):
+    """Who created a config file, as this machine recorded it."""
+
+    CREATED = "created"
+    PREEXISTING = "preexisting"
+    # Written into by an install that predates the records: cannot tell; content proof.
+    LEGACY = "legacy"
+
+
+def config_file_key(path: str | os.PathLike[str]) -> str:
+    """The record key of *path*: the resolved absolute file, NFC-normalized.
+
+    A missing file resolves through its parent; ``..`` and linked directories
+    collapse into the one file they name.
+    """
+    resolved = Path(os.path.abspath(path)).resolve(strict=False)
+    return unicodedata.normalize("NFC", resolved.as_posix())
+
+
+def installation_root(project_root: Path, user_scope: bool) -> Path:
+    """The root holding an installation's manifest and lockfile (``$APM_HOME`` at user scope)."""
+    from apm_cli.core.scope import InstallScope, get_apm_dir
+
+    return get_apm_dir(InstallScope.USER) if user_scope else project_root
+
+
+def _store_path() -> Path:
+    from apm_cli.core.deployment_ledger import materialization_evidence_paths
+    from apm_cli.core.scope import InstallScope
+
+    # The deployment owner names the receipts directory; one file there serves every root.
+    receipt, _ = materialization_evidence_paths(Path(os.sep), InstallScope.USER)
+    return receipt.parent / "config-files.json"
+
+
+def _digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _regular(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _regular_bytes(path: Path) -> bytes | None:
+    """The bytes of *path* when it is a regular file (never opens a FIFO or a link)."""
+    return path.read_bytes() if _regular(path) else None
+
+
+def _present(key: str) -> bool:
+    """Whether the file a key names exists, spelled NFC or NFD (a Linux NFD directory)."""
+    return any(os.path.lexists(unicodedata.normalize(form, key)) for form in ("NFC", "NFD"))
+
+
+class _UnreadableStore(ValueError):
+    pass
+
+
+@dataclass
+class _Store:
+    path: Path
+    files: dict[str, dict[str, Any]] = field(default_factory=dict)
+    installations: set[str] = field(default_factory=set)
+
+    @classmethod
+    def load(cls) -> _Store:
+        path = _store_path()
+        store = cls(path)
+        if not os.path.lexists(path):
+            return store
+        try:
+            if not _regular(path):
+                raise ValueError("not a regular file")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("version") != _VERSION:
+                raise ValueError("unknown version")
+            files, installations = data.get("files", {}), data.get("installations", [])
+            if not isinstance(files, dict) or not isinstance(installations, list):
+                raise TypeError("invalid layout")
+        except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+            raise _UnreadableStore(f"{path}: {exc}") from exc
+        store.files = {
+            key: row
+            for key, row in files.items()
+            # A key that is not its own resolved form (relative, "..") proves nothing.
+            if isinstance(key, str)
+            and isinstance(row, dict)
+            and Path(key).is_absolute()
+            and config_file_key(key) == key
+        }
+        store.installations = {item for item in installations if isinstance(item, str)}
+        return store
+
+    def lookup(self, path: Path) -> tuple[str, dict[str, Any] | None]:
+        """The key and record of *path*; another spelling of the same file finds it too."""
+        key = config_file_key(path)
+        if key in self.files:
+            return key, self.files[key]
+        if os.path.lexists(path):
+            for other, row in self.files.items():
+                try:
+                    if os.path.samefile(other, path):  # case-insensitive or NFD file system
+                        return other, row
+                except OSError:
+                    continue
+        return key, None
+
+    def local(self) -> bool:
+        """(c): no ancestor of the store is a VCS working tree."""
+        directory = self.path.parent.absolute()
+        return not any(
+            os.path.lexists(parent / marker)
+            for parent in (directory, *directory.parents)
+            for marker in _VCS_MARKERS
+        )
+
+    def save(self) -> None:
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
+
+        live = {key: row for key, row in self.files.items() if _present(key)}
+        data = {
+            "version": _VERSION,
+            "installations": sorted(self.installations),
+            "files": dict(sorted(live.items())),
+        }
+        mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
+        # Machine-local evidence, not a user-editable config.
+        text = json.dumps(data, indent=2)  # architecture-authority-exempt: evidence
+        atomic_write_text(self.path, text + "\n", new_file_mode=0o600)
+
+
+def _origin(row: dict[str, Any] | None) -> Origin | None:
+    try:
+        return Origin(row.get("origin")) if row is not None else None
+    except ValueError:
+        return None
+
+
+def config_file_origin(path: str | os.PathLike[str]) -> Origin | None:
+    """The recorded origin of *path*, or ``None`` when unrecorded or unreadable."""
+    try:
+        return _origin(_Store.load().lookup(Path(path))[1])
+    except _UnreadableStore:
+        return None
+
+
+def _holds_entries(data: bytes) -> bool:
+    """Whether a config holds any entry: a non-empty mapping or list at its top level.
+
+    An empty skeleton (``{}``, ``{"mcpServers": {}}``, ``{"version": 1}``) holds none.
+    Unparseable content counts as entries, so it is never taken for a skeleton.
+    """
+    try:
+        parsed = json.loads(data.decode("utf-8")) if data.strip() else {}
+    except (UnicodeError, ValueError):
+        return True
+    if not isinstance(parsed, dict):
+        return True
+    return any(isinstance(value, (dict, list)) and value for value in parsed.values())
+
+
+def _unrecorded_origin(store: _Store, manifest_root: Path, before: bytes) -> Origin:
+    """A file APM writes into that already existed and has no record.
+
+    Only an installation from before the records (it has a lockfile but no
+    records yet) can hold such a file APM created: one with entries is that
+    install's file (content proof); an empty skeleton holds nothing APM wrote,
+    so it is the user's.
+    """
+    installation = config_file_key(manifest_root)
+    tracked = _tracked_at_start.setdefault(installation, installation in store.installations)
+    store.installations.add(installation)
+    if not tracked and (manifest_root / _LOCKFILE).exists() and _holds_entries(before):
+        return Origin.LEGACY
+    return Origin.PREEXISTING
+
+
+def _note(path: Path, before: bytes | None, after: bytes, manifest_root: Path | None) -> None:
+    store = _Store.load()
+    key, row = store.lookup(path)
+    recorded = _origin(row)
+    if before is None:
+        origin = Origin.CREATED
+    elif recorded is Origin.CREATED and row.get("hash") != _digest(before):
+        # Not the bytes APM last wrote: the file was replaced since, not APM's.
+        origin = Origin.PREEXISTING
+    elif recorded is not None:
+        origin = recorded
+    elif manifest_root is None:
+        return  # a rewrite of an unrecorded file stays unrecorded
+    else:
+        origin = _unrecorded_origin(store, Path(manifest_root), before)
+    store.files[key] = {"origin": origin.value, "hash": _digest(after)}
+    store.save()
+
+
+@contextmanager
+def recorded_config_write(
+    path: str | os.PathLike[str], *, manifest_root: str | os.PathLike[str] | None = None
+) -> Iterator[None]:
+    """Record who created *path* around one APM write of it.
+
+    *manifest_root* (the project, or ``$APM_HOME`` at user scope) classifies a
+    file that existed without a record; a cleanup rewrite passes none and only
+    keeps an existing record current. A link or other non-regular path is
+    never recorded. Recording failures never fail the write.
+    """
+    path = Path(path)
+    linked = os.path.lexists(path) and not _regular(path)
+    try:
+        before = None if linked else _regular_bytes(path)
+    except OSError:
+        linked = True
+    yield
+    if linked:
+        return
+    try:
+        after = _regular_bytes(path)
+        if after is not None:
+            _note(path, before, after, Path(manifest_root) if manifest_root else None)
+    except (OSError, ValueError):
+        _log.debug("Could not record the creation of %s", path, exc_info=True)
+
+
+def recorded_install_write(
+    path: str | os.PathLike[str], project_root: Path, user_scope: bool
+) -> AbstractContextManager[None]:
+    """:func:`recorded_config_write` for an install write at *project_root*'s scope."""
+    return recorded_config_write(path, manifest_root=installation_root(project_root, user_scope))
+
+
+def delete_emptied_config(
+    path: str | os.PathLike[str], *, root: str | os.PathLike[str] | None, empty: bool
+) -> bool:
+    """Delete *path* if APM may, after a cleanup left it *empty*; return whether it did.
+
+    *empty* is the caller's content fact: the file now holds only APM's empty
+    skeleton. *root* (project or home) bounds the file: without it, or when
+    any component below it is a link, nothing is deleted. A non-regular file
+    (link, FIFO) is never deleted or followed.
+    """
+    from apm_cli.integration.write_seam import unlink
+    from apm_cli.utils.path_security import has_symlink_component
+
+    path = Path(path)
+    if not empty or root is None or not _regular(path):
+        return False
+    if has_symlink_component(Path(root), path):
+        return False
+    try:
+        store = _Store.load()
+    except _UnreadableStore:
+        _log.debug("Unreadable config file records; keeping %s", path, exc_info=True)
+        return False
+    key, row = store.lookup(path)
+    origin = _origin(row)
+    if row is not None and origin is None:
+        return False  # a record APM cannot read proves nothing either way
+    if origin is Origin.PREEXISTING or (origin is Origin.CREATED and not store.local()):
+        return False
+    unlink(path)
+    if row is not None:
+        store.files.pop(key, None)
+        try:
+            store.save()
+        except OSError:
+            _log.debug("Could not forget the record of %s", path, exc_info=True)
+    return True

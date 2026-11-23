@@ -709,12 +709,16 @@ class MCPClientAdapter(ABC):
         config_path.parent.mkdir(parents=True, exist_ok=True)
         trailing_newline = self.json_config_trailing_newline
         if shared and self._is_project_config_path(config_path):
-            write_json_config(
-                config_path,
-                config,
-                default_trailing_newline=trailing_newline,
-                new_file_mode=umask_file_mode(config_path),
-            )
+            from ...integration.config_file_provenance import recorded_config_write
+
+            # The project file may later be deleted once emptied, only if APM created it.
+            with recorded_config_write(config_path, manifest_root=self.project_root):
+                write_json_config(
+                    config_path,
+                    config,
+                    default_trailing_newline=trailing_newline,
+                    new_file_mode=umask_file_mode(config_path),
+                )
             return
         if config_path.is_file():
             # Tighten first: the atomic write keeps an existing file's mode.
