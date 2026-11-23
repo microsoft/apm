@@ -648,6 +648,7 @@ install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-spelling-aliases
 install-deployment-cleanup-target-roots
 install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata

@@ -2549,6 +2549,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Cleanup drops the integrate phase's skip set and deletes a kept member.",
     ),
     MutationCase(
+        guard_id="install-deployment-cleanup-spelling-aliases",
+        rule_id="install-deployment-cleanup-spelling-aliases",
+        path="src/apm_cli/integration/cleanup.py",
+        old="        return (key, *self._spellings.aliases(key, self._deploy_root))\n",
+        new="        return (key,)\n",
+        intent="Consent stops pooling case-variant spellings, so one file reads as two claims.",
+    ),
+    MutationCase(
         guard_id="install-deployment-cleanup-target-roots",
         rule_id="install-deployment-cleanup-target-roots",
         path="src/apm_cli/integration/base_integrator.py",
