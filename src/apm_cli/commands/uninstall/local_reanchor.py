@@ -25,7 +25,6 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
-import contextlib
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -467,20 +466,31 @@ def _refuse_unverifiable_local_survivors(
 
     project_root = Path(apm_yml_path).parent
     local = {}
+    unresolved = []
     for package in packages:
         row = lockfile.get_dependency(_removed_lock_key(package, lockfile))
         if row is not None and row.source == "local" and row.local_path:
             raw = Path(row.local_path).expanduser()
-            with contextlib.suppress(OSError, RuntimeError):
+            try:
                 directory = raw.resolve() if raw.is_absolute() else (project_root / raw).resolve()
-                local[directory] = package
-    if not local:
+            except (OSError, RuntimeError):
+                unresolved.append(package)  # unverifiable: never dropped from the check
+                continue
+            local[directory] = package
+    if not local and not unresolved:
         return []
     direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
     from ...deps.reachability import local_sources_reach
 
-    if not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local)):
+    # Replacement rules can turn a remote survivor into a local source; the
+    # offline check does not evaluate them, so it cannot prove anything unused.
+    if (
+        not unresolved
+        and not lockfile.replacements
+        and not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local))
+    ):
         return []
+    local = {**local, **{index: package for index, package in enumerate(unresolved)}}
     if dry_run:
         # A preview writes nothing: it shows the package kept, as the real run would.
         for package in () if quiet else local.values():

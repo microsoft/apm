@@ -454,6 +454,17 @@ def _hold_native_registration(native_before, logger: CommandLogger) -> None:
         )
 
 
+def _persist_in_reanchor_transaction(
+    lockfile, lockfile_path, logger, integration_cleanup, repair
+) -> _LockPersistence:
+    """Persist survivors; post-commit binding is part of a re-anchor's transaction (#4889)."""
+    try:
+        return _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    except Exception:
+        _abort_unsaved_reanchor(repair, logger)
+        raise
+
+
 def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
     """Move re-anchored roots' apm_modules directories before the lock commits (#4999)."""
     plan = repair.reanchor
@@ -474,19 +485,18 @@ def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
 def _persist_reanchored_lockfile(
     lockfile, lockfile_path, logger, integration_cleanup, moved, modules_dir, repair
 ):
-    """Persist the lock; with re-anchor moves made, any failure rolls them all back (#4999)."""
-    try:
-        return _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
-    except Exception as exc:
-        if not moved:
-            raise
-        # One transaction: the moved directories and the re-anchor go back together.
-        from .local_reanchor import _roll_back_and_exit
+    """Persist the lock in the re-anchor transaction; any failure also moves the dirs back.
 
-        _restore_reanchored_dirs(moved, modules_dir)
-        _roll_back_and_exit(
-            repair.reanchor, logger, f"The re-anchored lockfile could not be committed ({exc})"
+    :func:`_persist_in_reanchor_transaction` restores apm.yml and the lock (#4889);
+    the directories the re-anchor moved go back with them (#4999).
+    """
+    try:
+        return _persist_in_reanchor_transaction(
+            lockfile, lockfile_path, logger, integration_cleanup, repair
         )
+    except BaseException:
+        _restore_reanchored_dirs(moved, modules_dir)
+        raise
 
 
 def _restore_reanchored_dirs(moved: tuple, modules_dir) -> None:

@@ -102,3 +102,38 @@ def test_a_failed_rollback_names_what_it_kept_and_exits_nonzero(
     assert "could not be restored" in message and str(backup) in message, message
     assert "were restored" not in message
     assert manifest.read_text(encoding="utf-8") == "name: proj\n"
+
+
+def test_a_failed_postcommit_binding_rolls_the_reanchor_back(tmp_path: Path) -> None:
+    manifest, lock, repair = _planned(tmp_path)
+    lockfile = MagicMock()
+    session = MagicMock()
+    session.bind_committed_claims.side_effect = RuntimeError("receipt store unavailable")
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _persist_lock_then_resync_native(
+            lock_changed=True,
+            persist_allowed=True,
+            lockfile=lockfile,
+            lockfile_path=lock,
+            logger=logger,
+            integration_cleanup=IntegrationCleanupOutcome(
+                counts={},
+                deployed_files={},
+                failed_paths=[],
+                error_count=0,
+                materialization_session=session,
+            ),
+            deploy_root=tmp_path,
+            modules_dir=tmp_path / "apm_modules",
+            scope=None,
+            native_before=None,
+            still_needed_repairs=repair,
+        )
+
+    assert exc.value.code == 1
+    assert "./vendor/e" in manifest.read_text(encoding="utf-8")
+    assert lock.read_text(encoding="utf-8") == "lockfile_version: '4'\n"
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "were restored" in message, message
