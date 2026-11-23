@@ -16,7 +16,23 @@ from scripts.architecture_linter.models import Violation
 GUARD_UNINSTALL_ABSENCE_PROOF = "install-deployment-uninstall-absence-proof"
 _CLI = "src/apm_cli/commands/uninstall/cli.py"
 _OWNER = "src/apm_cli/commands/uninstall/hook_absence.py"
-_PROBES = frozenset({"exists", "is_file", "is_dir", "lexists", "lstat", "stat", "isfile", "isdir"})
+# Every call _retain_failed_claims may make. absence_proven is its only
+# filesystem-touching call; any other probe (os.access, islink, a directory
+# scan, open, resolve) or local helper fails closed.
+_ALLOWED_CALLS = frozenset(
+    {
+        "absence_proven",
+        "Path",
+        "list",
+        "failed.extend",
+        "removed_rows.values",
+        # Lockfile reconciliation of the already-decided failed paths.
+        "retain_failed_claims",
+        "logger.warning",
+        "logger.verbose_detail",
+        "LOCKFILE_STATE_UNRECONCILED.sentence",
+    }
+)
 _OWNER_LITERALS = (
     "os.O_NOFOLLOW",
     "dir_fd=handle",
@@ -47,11 +63,14 @@ def check_uninstall_absence_proof(provider: FactsProvider) -> tuple[Violation, .
                     rule_id, _CLI, "_retain_failed_claims must prove absence via absence_proven"
                 )
             )
-        elif any(name.rsplit(".", 1)[-1] in _PROBES for name in retain):
-            findings.append(
+        else:
+            findings.extend(
                 violation(
-                    rule_id, _CLI, "_retain_failed_claims must not probe the filesystem itself"
+                    rule_id,
+                    _CLI,
+                    f"_retain_failed_claims may decide absence only through absence_proven: {name}",
                 )
+                for name in sorted(set(retain) - _ALLOWED_CALLS)
             )
         command = _calls_in(facts, "uninstall")
         if command is None or "root_identity" not in command:

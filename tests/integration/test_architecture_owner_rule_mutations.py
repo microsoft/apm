@@ -3197,6 +3197,30 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="An aborted uninstall sync probes the file itself, following a swapped link.",
     ),
     MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-access",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="if not absence_proven(Path(deploy_root), path, pinned=root_pin)",
+        new=(
+            "if os.access(Path(deploy_root, path), os.F_OK)"
+            " or not absence_proven(Path(deploy_root), path, pinned=root_pin)"
+        ),
+        intent="The absence decision consults os.access beside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof-helper",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="    failed = list(integration_cleanup.failed_paths)\n",
+        new=(
+            "    def _gone(target):\n"
+            "        return not Path(target).exists()\n"
+            "\n"
+            "    failed = [p for p in integration_cleanup.failed_paths if not _gone(p)]\n"
+        ),
+        intent="A local helper wrapping Path.exists decides absence beside the owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-preflight",
         rule_id="install-deployment-uninstall-preflight",
         path="src/apm_cli/commands/uninstall/cli.py",

@@ -296,10 +296,16 @@ RULES: tuple[Rule, ...] = (
         "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
         check_cleanup_target_roots,
     ),
-    _rule(
-        GUARD_UNINSTALL_ABSENCE_PROOF,
-        "An aborted uninstall sync proves a removed file absent only through its owner.",
-        check_uninstall_absence_proof,
+    Rule(
+        id=GUARD_UNINSTALL_ABSENCE_PROOF,
+        group="install_deployment",
+        guard_ids=(
+            GUARD_UNINSTALL_ABSENCE_PROOF,
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-access",
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-helper",
+        ),
+        description="An aborted uninstall sync proves a removed file absent only through its owner.",
+        check=check_uninstall_absence_proof,
     ),
     _rule(
         GUARD_RECEIPT_COLLECTION,
