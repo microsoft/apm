@@ -1010,3 +1010,129 @@ class TestMcpHashCarryForward:
         DeploymentLedgerCodec.refresh_from_legacy(lockfile)
         hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
         assert hashes == {"copilot": {"server-a": _HASH_A}}
+
+
+def _owned_lockfile(*records: DeploymentRecord, recorded: bool = True) -> LockFile:
+    lockfile = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha"),
+            "beta": LockedDependency(repo_url="beta"),
+        }
+    )
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={record.locator.key: record for record in records}
+    )
+    lockfile._deployments_present = recorded
+    return lockfile
+
+
+def _scoped(value: str, scope: str, *, target: str = "claude") -> DeploymentRecord:
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target=target,
+        value=value,
+        runtime=None,
+        scope=scope,
+    )
+    return _record(locator, owners=("alpha",), active="alpha")
+
+
+def _owned_values(lockfile: LockFile, owner: str, scope: str) -> list[str]:
+    index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope=scope)
+    assert index is not None
+    return sorted(row.locator.value for row in index.get(owner, ()))
+
+
+class TestRecordedOwnerIndex:
+    """``recorded_owner_index``: the per-owner view of the recorded ledger, built in one pass."""
+
+    @pytest.mark.parametrize(
+        ("lockfile", "expected"),
+        [
+            pytest.param(
+                LockFile(
+                    dependencies={
+                        "alpha": LockedDependency(
+                            repo_url="alpha", deployed_files=[".claude/rules/a.md"]
+                        )
+                    }
+                ),
+                None,
+                id="a ledger inferred from legacy paths is no evidence",
+            ),
+            pytest.param(
+                _owned_lockfile(_scoped(".claude/rules/a.md", "project"), recorded=False),
+                None,
+                id="a ledger not flagged as recorded is no evidence",
+            ),
+            pytest.param(
+                _owned_lockfile(),
+                {},
+                id="a recorded ledger without rows is an empty index, not no evidence",
+            ),
+        ],
+    )
+    def test_distinguishes_no_evidence_from_a_recorded_ledger_without_rows(
+        self, lockfile: LockFile, expected: dict[str, tuple[DeploymentRecord, ...]] | None
+    ) -> None:
+        index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope="project")
+        assert index == expected
+
+    def test_credits_every_co_owner_and_only_rows_in_the_requested_scope(self) -> None:
+        def held(value: str, scope: str, *owners: str) -> DeploymentRecord:
+            locator = _scoped(value, scope).locator
+            return _record(locator, owners=owners, active=owners[0])
+
+        lockfile = _owned_lockfile(
+            held(".claude/rules/solo.md", "project", "alpha"),
+            held(".claude/rules/shared.md", "project", "alpha", "beta"),
+            held(".claude/rules/user-only.md", "user", "beta"),
+        )
+        index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope="project")
+        assert index is not None
+        assert {owner: [r.locator.value for r in rows] for owner, rows in index.items()} == {
+            "alpha": [".claude/rules/solo.md", ".claude/rules/shared.md"],
+            "beta": [".claude/rules/shared.md"],
+        }
+
+    def test_an_owner_without_rows_reads_as_holding_none_in_a_recorded_ledger(self) -> None:
+        lockfile = _owned_lockfile(_scoped(".claude/rules/a.md", "project"))
+        index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope="project")
+        assert index is not None and index.get("beta", ()) == ()
+        assert _owned_values(lockfile, "beta", "project") == []
+
+    @pytest.mark.parametrize(
+        ("path", "recorded_scope", "in_project", "in_user"),
+        [
+            (".claude/rules/a.md", "project", True, True),
+            (".copilot/rules/a.md", "user", True, True),
+            (".claude/rules/a.md", "user", False, True),
+            (".copilot/rules/a.md", "project", True, False),
+        ],
+        ids=[
+            "project-path-recorded-project-is-in-both",
+            "user-path-recorded-user-is-in-both",
+            "project-path-recorded-user-is-user-only",
+            "user-path-recorded-project-is-project-only",
+        ],
+    )
+    def test_characterization_a_row_recorded_at_the_scope_its_path_implies_is_in_both_scopes(
+        self, path: str, recorded_scope: str, in_project: bool, in_user: bool
+    ) -> None:
+        """Pins existing canonical behavior of ``locator_in_scope``; it is not a goal.
+
+        A row whose recorded scope equals the scope inferred from its path cannot
+        be told apart from one rebuilt from legacy views, so it is accepted in both
+        scopes. Only a recorded scope that contradicts the inference is exclusive.
+        """
+        lockfile = _owned_lockfile(_scoped(path, recorded_scope))
+        assert bool(_owned_values(lockfile, "alpha", "project")) is in_project
+        assert bool(_owned_values(lockfile, "alpha", "user")) is in_user
+
+
+def test_recorded_target_names_keeps_its_strict_scope_comparison() -> None:
+    """Unlike ``recorded_owner_index``, a row for another scope is never counted here."""
+    lockfile = _owned_lockfile(_scoped(".claude/rules/a.md", "project"))
+    names = DeploymentLedgerCodec.recorded_target_names
+    assert names(lockfile, scope="project", supported_targets={"claude"}) == ("claude",)
+    assert names(lockfile, scope="user", supported_targets={"claude"}) == ()

@@ -85,6 +85,13 @@
       "guards": ["transport-platform-windows-stable-path"]
     },
     {
+      "id": "deploy-store",
+      "decision": "Content-addressed store of deployed file bytes: hex-digest keys, verify on every read, no symlink following, atomic owner-only writes",
+      "owner": "cache/deploy_store.py (DeployStore); install/phases/lockfile_deploy_records.py stages the lockfile phase's deployed bytes and package records through it",
+      "selectors": ["src/apm_cli/cache/deploy_store.py", "src/apm_cli/install/phases/lockfile_deploy_records.py"],
+      "guards": ["transport-platform-deploy-store-verified-reads"]
+    },
+    {
       "id": "cached-repository-git",
       "decision": "Git runs in persisted repositories: their config is allow-listed before any run, and every run is inert",
       "owner": "cache/cached_repo.py (require_trusted_cached_repo / inert_git_args / cached_repo_env)",

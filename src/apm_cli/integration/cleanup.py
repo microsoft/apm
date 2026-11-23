@@ -76,6 +76,16 @@ UNREADABLE = "unreadable"
 # A member of a claimed directory replaced by a symlink: cleanup keeps the directory (#4451).
 SYMLINKED = "symlinked"
 
+# Reasons a path-safety gate refuses a path at cleanup time (#4815).
+REJECTED_TRAVERSAL = "its path contains a '..' component"
+REJECTED_PREFIX = "it is not under a known integration prefix"
+REJECTED_UNSAFE_PATH = (
+    "it failed the path safety check: it escapes the deploy root, is not under "
+    "a managed prefix, or is reached through a symbolic link"
+)
+REJECTED_DIRECTORY = "it is a directory entry, and APM only deletes individual files"
+REJECTED_REPLACED = "it was replaced or moved since APM checked it"
+
 
 class DeploymentEvidence:
     """Proof that APM deployed the bytes a lockfile-driven deletion removes (#3701).
@@ -135,6 +145,8 @@ class DeploymentEvidence:
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
         self._spellings: SpellingAliasIndex | None = None
+        # Cowork claims by their path under the resolved Cowork root (#4815).
+        self._cowork_spellings: tuple[SpellingAliasIndex, dict[str, str], Path] | None = None
         self._receipt_spellings: SpellingAliasIndex | None = None
         self._consent_refused: dict[str, None] = {}
         self._reported: set[str] = set()
@@ -406,9 +418,34 @@ class DeploymentEvidence:
         Case- or normalization-insensitive filesystems make ``A.md`` and
         ``a.md`` one file; case-sensitive ones never alias.
         """
+        from .copilot_cowork_paths import COWORK_URI_SCHEME
+
+        if key.startswith(COWORK_URI_SCHEME):
+            return (key, *self._cowork_aliases(key))
         if self._spellings is None:
             self._spellings = SpellingAliasIndex({*self._recorded_hashes, *self._owners})
         return (key, *self._spellings.aliases(key, self._deploy_root))
+
+    def _cowork_aliases(self, key: str) -> tuple[str, ...]:
+        """Recorded ``cowork://`` keys naming the same file as *key* under the Cowork root."""
+        from .copilot_cowork_paths import COWORK_URI_SCHEME, resolve_copilot_cowork_skills_dir
+
+        if self._cowork_spellings is None:
+            try:
+                root = resolve_copilot_cowork_skills_dir()
+            except Exception:
+                root = None
+            if root is None:
+                return ()
+            claims = {
+                claim[len(COWORK_URI_SCHEME) :].removeprefix("skills/"): claim
+                for claim in {*self._recorded_hashes, *self._owners}
+                if claim.startswith(COWORK_URI_SCHEME)
+            }
+            self._cowork_spellings = (SpellingAliasIndex(claims), claims, root)
+        index, claims, root = self._cowork_spellings
+        relative = key[len(COWORK_URI_SCHEME) :].removeprefix("skills/")
+        return tuple(claims[alias] for alias in index.aliases(relative, root))
 
     def _owners_of(self, claim: str) -> tuple[str, ...]:
         """Return the locked owners of *claim* and of every claimed enclosing directory.
@@ -511,12 +548,16 @@ class DeploymentEvidence:
         return fresh
 
     def consent_kept_link(self, claim: str, physical: Path) -> bool:
-        """Whether *physical* is a link this consented uninstall classified as kept (#4295)."""
-        return (
-            self._lockfile_consent
-            and _claim_key(claim) in self._consent_refused
-            and physical.is_symlink()
-        )
+        """Whether consent keeps *physical* because it is now a symbolic link (#4295).
+
+        Judged on the current file kind, whatever the earlier verdict: a file
+        replaced by a link after preflight is kept too (#4815), and recorded as
+        kept so the uninstall does not report it as a failure.
+        """
+        if not (self._lockfile_consent and physical.is_symlink()):
+            return False
+        self._consent_refused[_claim_key(claim)] = None
+        return True
 
     def kept_under_consent(self) -> frozenset[str]:
         """Claims a deletion decision kept, despite ``--trust-lockfile`` consent, for their evidence."""
@@ -591,7 +632,7 @@ class DeploymentEvidence:
             and self._lockfile_consent
             and self.lockfile_consentable(claim, physical)
         ):
-            self._consented[_claim_key(claim)] = None
+            self._consented[self._key(claim)] = None
             return AUTHORIZED
         return rendered
 
@@ -674,6 +715,7 @@ def unconsented(retained: Iterable[str], evidence: DeploymentEvidence | None) ->
     """Drop from *retained* what --trust-lockfile consent kept for its evidence (#4295).
 
     A file consent keeps is not a cleanup failure; every other retained path is.
+    Callers must not pass a path-safety rejection here: see :func:`consent_outcome`.
     """
     kept = evidence.kept_under_consent() if evidence is not None else frozenset()
     return [path for path in retained if _claim_key(path) not in kept]
@@ -687,10 +729,13 @@ def consent_outcome(
     Consent waives only evidence-based retention: a deletion that was
     authorized but failed stays a failure even for a claim consent kept
     earlier (for example in the uninstall preflight), and a file consent kept
-    for its evidence is not a path-safety refusal.
+    for its evidence is not a path-safety refusal. A path this cleanup's
+    safety gates rejected is always both, whatever consent kept earlier (#4815).
     """
-    failures = list(dict.fromkeys([*cleanup.failed, *unconsented(cleanup.retained, evidence)]))
-    return failures, unconsented(cleanup.skipped_unmanaged, evidence)
+    rejected = list(cleanup.rejected)
+    failures = [*cleanup.failed, *rejected, *unconsented(cleanup.retained, evidence)]
+    unsafe = [*rejected, *unconsented(cleanup.skipped_unmanaged, evidence)]
+    return list(dict.fromkeys(failures)), list(dict.fromkeys(unsafe))
 
 
 def _hash_envelope(value: str) -> str:
@@ -813,6 +858,11 @@ class CleanupResult:
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
 
+    rejected: dict[str, str] = field(default_factory=dict)
+    """Paths a path-safety gate refused during this cleanup, mapped to the
+    reason; also listed in ``skipped_unmanaged``. A current safety rejection
+    is always a failure: consent never waives it (#4815)."""
+
     unproven: list[str] = field(default_factory=list)
     """Files kept because no deployment evidence proves APM wrote them (#3701);
     also listed in ``skipped_unmanaged``. Callers name them to the user."""
@@ -838,6 +888,11 @@ class CleanupResult:
 
     user_scope: bool = False
     """Whether paths are relative to the user's home (shown with ``~/``)."""
+
+    def reject(self, rel_path: str, reason: str) -> None:
+        """Record that a path-safety gate refused *rel_path* for *reason*."""
+        self.skipped_unmanaged.append(rel_path)
+        self.rejected[rel_path] = reason
 
     @property
     def announced_paths(self) -> list[str]:
@@ -916,6 +971,7 @@ def _safe_remove_skill_directory(
     dep_key: str,
     failed_path_retained: bool,
     protected: Callable[[str], bool] = lambda _rel: False,
+    path_gate: Callable[[str, bool], bool] = lambda _rel, _final_link: False,
 ) -> None:
     """Attempt safe removal of an APM-deployed skill directory.
 
@@ -998,12 +1054,14 @@ def _safe_remove_skill_directory(
 
     if blocking and evidence.lockfile_consent:
         # Consent decides per file (#4295): proven members go, the rest stay named.
-        _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key)
+        _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key, path_gate)
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
         # prevented cleanup (reviewer feedback on PR #1767).
-        preview = blocking[:5]
-        suffix = f" (and {len(blocking) - 5} more)" if len(blocking) > 5 else ""
+        # Under consent every kept member is named: it decides per file (#4815).
+        cap = len(blocking) if evidence.lockfile_consent else 5
+        preview = blocking[:cap]
+        suffix = f" (and {len(blocking) - cap} more)" if len(blocking) > cap else ""
         file_list = ", ".join(preview) + suffix
         release = user_content_only and not failed_path_retained
         if release:
@@ -1027,7 +1085,9 @@ def _safe_remove_skill_directory(
 
     if shared:
         # The survivor's members stay; this owner's proven members go one by one.
-        if _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key):
+        if _remove_proven_members(
+            skill_dir, proven, evidence, result, diagnostics, dep_key, path_gate
+        ):
             result.released.append(rel_path)
         else:
             result.skipped_unmanaged.append(rel_path)
@@ -1041,6 +1101,7 @@ def _safe_remove_skill_directory(
             (evidence, result, diagnostics),
             dep_key=dep_key,
             failed_path_retained=failed_path_retained,
+            path_gate=path_gate,
         )
         return
 
@@ -1064,6 +1125,7 @@ def _remove_consented_skill_directory(
     *,
     dep_key: str,
     failed_path_retained: bool,
+    path_gate: Callable[[str, bool], bool] = lambda _rel, _final_link: False,
 ) -> None:
     """Consent decides per file (#4295).
 
@@ -1072,7 +1134,9 @@ def _remove_consented_skill_directory(
     file that appears after the scan keeps its directory.
     """
     evidence, result, diagnostics = context
-    if not _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key) or any(
+    if not _remove_proven_members(
+        skill_dir, proven, evidence, result, diagnostics, dep_key, path_gate
+    ) or any(
         child.is_symlink()
         or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
         for child in skill_dir.rglob("*")
@@ -1124,6 +1188,40 @@ def _remove_empty_directory(path: Path) -> bool:
     return True
 
 
+def _keep_consent_link(result: CleanupResult, diagnostics, stale_path: str, dep_key: str) -> None:
+    """Keep a final symbolic link under ``--trust-lockfile`` and name it (#4295)."""
+    result.skipped_unmanaged.append(stale_path)
+    diagnostics.warn(
+        kept_note(
+            stale_path,
+            "it is a symbolic link, which --trust-lockfile never removes",
+            KEPT_DELETE_MANUALLY,
+        ),
+        package=dep_key,
+    )
+
+
+def _consent_kept_final_link(
+    stale_path: str, project_root: Path, evidence: DeploymentEvidence, *, targets, user_scope: bool
+) -> bool:
+    """Whether a path that failed the strict gate is only a consent-kept final link (#4815).
+
+    Its parent must pass the same gate with a final link allowed: a symlinked
+    ancestor stays a safety rejection.
+    """
+    return (
+        evidence.lockfile_consent
+        and BaseIntegrator.validate_deploy_path(
+            stale_path,
+            project_root,
+            targets=targets,
+            user_scope=user_scope,
+            allow_final_symlink=True,
+        )
+        and evidence.consent_kept_link(stale_path, project_root / stale_path)
+    )
+
+
 def _remove_proven_members(
     skill_dir: Path,
     proven: list[tuple[str, Path]],
@@ -1131,19 +1229,30 @@ def _remove_proven_members(
     result: CleanupResult,
     diagnostics,
     dep_key: str,
+    path_gate: Callable[[str, bool], bool] = lambda _rel, _final_link: False,
 ) -> bool:
     """Remove each proven member of a skill directory that must itself stay.
 
     The deletion gates run again immediately before each unlink, so a file
     changed since the directory scan is kept and named, never removed: the
     member must still be a regular file, reached through no symlinked
-    directory and contained in *skill_dir*, and its evidence must still
+    directory from the deploy root (*path_gate*, the canonical path gate) and
+    contained in *skill_dir*, and its evidence must still
     authorize its bytes. Returns whether every member was removed.
     """
     complete = True
     for member_rel, member in proven:
-        if not _member_still_safe(skill_dir, member):
-            result.skipped_unmanaged.append(member_rel)
+        if not (_member_still_safe(skill_dir, member) and path_gate(member_rel, False)):
+            if (
+                _member_parents_safe(skill_dir, member)
+                and path_gate(member_rel, True)
+                and evidence.consent_kept_link(member_rel, member)
+            ):
+                # A final link whose every ancestor is safe is consent retention (#4815).
+                _keep_consent_link(result, diagnostics, member_rel, dep_key)
+                complete = False
+                continue
+            result.reject(member_rel, REJECTED_REPLACED)
             diagnostics.warn(
                 f"Skipped removing {member_rel}: it was replaced or moved since APM "
                 "checked it. Inspect it and delete it manually if no longer needed.",
@@ -1175,15 +1284,27 @@ def _member_still_safe(skill_dir: Path, member: Path) -> bool:
     from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
     try:
-        if skill_dir.is_symlink() or member.is_symlink() or not member.is_file():
+        if member.is_symlink() or not member.is_file():
+            return False
+        if not _member_parents_safe(skill_dir, member):
+            return False
+        ensure_path_within(member, skill_dir)
+    except (OSError, PathTraversalError):
+        return False
+    return True
+
+
+def _member_parents_safe(skill_dir: Path, member: Path) -> bool:
+    """Return whether *member* is reached from *skill_dir* through no symlinked directory."""
+    try:
+        if skill_dir.is_symlink():
             return False
         parent = member.parent
         while parent != skill_dir:
             if parent.is_symlink() or parent == parent.parent:
                 return False
             parent = parent.parent
-        ensure_path_within(member, skill_dir)
-    except (OSError, PathTraversalError):
+    except OSError:
         return False
     return True
 
@@ -1366,6 +1487,16 @@ def remove_stale_deployed_files(
     live_index = SpellingAliasIndex(live_paths)
     live_set = frozenset(path.replace("\\", "/").rstrip("/") for path in live_paths)
 
+    def path_gate(rel_path: str, final_link: bool) -> bool:
+        # The canonical gate from the deploy root, rechecked before each member unlink (#4815).
+        return BaseIntegrator.validate_deploy_path(
+            rel_path,
+            project_root,
+            targets=targets,
+            user_scope=user_scope,
+            allow_final_symlink=final_link,
+        )
+
     def protected(rel_path: str) -> bool:
         # A survivor's claim may spell the same file differently on this filesystem.
         return rel_path in live_set or live_index.alias(rel_path, project_root) is not None
@@ -1394,13 +1525,13 @@ def remove_stale_deployed_files(
         if stale_path.startswith(COWORK_URI_SCHEME):
             # Basic security: reject path-traversal components.
             if ".." in stale_path:
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_TRAVERSAL)
                 continue
             # Verify the path starts with a known integration prefix.
             from .targets import get_integration_prefixes
 
             if not stale_path.startswith(get_integration_prefixes(targets=targets)):
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_PREFIX)
                 continue
             # Resolve the cowork:// URI to a real filesystem path.
             try:
@@ -1437,7 +1568,12 @@ def remove_stale_deployed_files(
                 user_scope=user_scope,
                 allow_final_symlink=allow_final_symlink,
             ):
-                result.skipped_unmanaged.append(stale_path)
+                if not allow_final_symlink and _consent_kept_final_link(
+                    stale_path, project_root, evidence, targets=targets, user_scope=user_scope
+                ):
+                    _keep_consent_link(result, diagnostics, stale_path, dep_key)
+                    continue
+                result.reject(stale_path, REJECTED_UNSAFE_PATH)
                 continue
             stale_target = project_root / stale_path
 
@@ -1474,7 +1610,7 @@ def remove_stale_deployed_files(
             if _is_skill_directory_entry(stale_path):
                 _deferred_dirs.append((stale_path, stale_target))
             else:
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_DIRECTORY)
                 diagnostics.warn(
                     (
                         f"Refused to remove directory entry {stale_path}: APM "
@@ -1491,15 +1627,7 @@ def remove_stale_deployed_files(
         # bytes; a lockfile hash alone never authorizes deletion. Fails
         # CLOSED: edited, unproven or unreadable files are kept with a warning.
         if evidence.consent_kept_link(stale_path, stale_target):
-            result.skipped_unmanaged.append(stale_path)
-            diagnostics.warn(
-                kept_note(
-                    stale_path,
-                    "it is a symbolic link, which --trust-lockfile never removes",
-                    KEPT_DELETE_MANUALLY,
-                ),
-                package=dep_key,
-            )
+            _keep_consent_link(result, diagnostics, stale_path, dep_key)
             continue
         # Unlinking a managed final symlink removes no file content, so it
         # keeps its own rule (callers opt in via allow_final_symlink).
@@ -1562,6 +1690,7 @@ def remove_stale_deployed_files(
             dep_key,
             failed_path_retained,
             protected,
+            path_gate,
         )
 
     # One-time warnings for cowork edge cases (mirrors sync_remove_files).

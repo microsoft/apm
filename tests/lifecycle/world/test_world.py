@@ -914,6 +914,7 @@ _POLICY_EXIT = {
     "scripts-deny": 0,
     "unmanaged-deny": 0,
     "unmanaged-deny-dirs": 0,
+    "fields-warn": 0,
     "max-depth-1": 0,
     "max-depth-2": 0,
 }

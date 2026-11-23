@@ -133,6 +133,9 @@ datas.extend(template_files)
 
 # Hidden imports for APM modules that might not be auto-detected
 hiddenimports = [
+    # libyaml's scanner/parser for the lockfile loader (utils/yaml_io.py);
+    # without it the bounded pure-Python loader is used.
+    'yaml._yaml',
     'apm_cli',
     'apm_cli.cli',
     'apm_cli.config',

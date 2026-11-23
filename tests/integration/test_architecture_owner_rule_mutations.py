@@ -67,6 +67,18 @@ def _shared_linter_session() -> Iterator[LinterSession]:
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/utils/archive.py",
+            "stream = _BoundedStream(compressed, cap)",
+            "stream = compressed",
+            id="tar-stream-unbounded",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/registry/extractor.py",
+            "open_tar_gz(fileobj=io.BytesIO(data), error_type=UnsafeTarballError)",
+            'tarfile.open(fileobj=io.BytesIO(data), mode="r:gz")',
+            id="registry-tar-opened-raw",
+        ),
+        pytest.param(
             "src/apm_cli/deps/registry/extractor.py",
             "    safe_extract_tar(tar, dest_root, error_type=UnsafeTarballError)",
             "    tar.extractall(dest_root)",
@@ -2558,6 +2570,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Cleanup drops the integrate phase's skip set and deletes a kept member.",
     ),
     MutationCase(
+        guard_id="install-deployment-cleanup-spelling-aliases",
+        rule_id="install-deployment-cleanup-spelling-aliases",
+        path="src/apm_cli/integration/cleanup.py",
+        old="        return (key, *self._spellings.aliases(key, self._deploy_root))\n",
+        new="        return (key,)\n",
+        intent="Consent stops pooling case-variant spellings, so one file reads as two claims.",
+    ),
+    MutationCase(
         guard_id="install-deployment-cleanup-target-roots",
         rule_id="install-deployment-cleanup-target-roots",
         path="src/apm_cli/integration/base_integrator.py",
@@ -3059,6 +3079,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A transitive edge reaches queue dedup without being recorded for the merge.",
     ),
     MutationCase(
+        guard_id="install-deployment-server-name-rule",
+        rule_id="install-deployment-server-name-rule",
+        path="src/apm_cli/models/dependency/lsp.py",
+        old='        validate_server_name(self.name, "LSP")\n',
+        new='        if not self.name.isprintable():\n            raise ValueError("bad LSP name")\n',
+        intent="LSP server names stop using the shared server-name rule.",
+    ),
+    MutationCase(
         guard_id="install-deployment-single-file-materialization",
         rule_id="install-deployment-single-file-materialization",
         path="src/apm_cli/install/phases/local_content.py",
@@ -3418,8 +3446,11 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-ref-pin-commit",
         rule_id="marketplace-integrations-ref-pin-commit",
         path="src/apm_cli/install/transaction.py",
-        old="            try:\n                self._ref_pins.discard()\n                try:",
-        new="            try:\n                try:",
+        old=(
+            "                self._discard_deploy_evidence()\n"
+            "                self._ref_pins.discard()\n                try:"
+        ),
+        new="                self._discard_deploy_evidence()\n                try:",
         intent="A rolled-back install keeps its staged ref pins for a later commit.",
     ),
     MutationCase(
@@ -3823,6 +3854,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '                click.echo(body["token"])\n'
         ),
         intent="apm config echoes a stored registry token outside the owner's mask.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-deploy-store-verified-reads",
+        rule_id="transport-platform-deploy-store-verified-reads",
+        path="src/apm_cli/cache/deploy_store.py",
+        old="if data is None or canonical_digest(data) != key:",
+        new="if data is None:",
+        intent="A deploy store read returns bytes without re-hashing them against the key.",
     ),
     MutationCase(
         guard_id="transport-platform-egress-route-policy",
@@ -6208,7 +6247,7 @@ def test_manifest_target_declaration_guard_rejects_raw_readers(
     [
         pytest.param(
             "src/apm_cli/models/manifest_io.py",
-            "    reject_manifest_anchors(manifest_path, text)\n",
+            "        reject_manifest_anchors(manifest_path, text)\n",
             "",
             id="read-owner-stops-rejecting-anchors",
         ),
