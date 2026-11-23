@@ -42,15 +42,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
-from apm_cli.install.journal_modes import (
-    apply_entry_modes,
-    apply_own_mode,
-    never_wider,
-    recorded_mode,
-    stage_private,
-    verified_mode,
-    with_recorded_mode,
-)
+from apm_cli.install import journal_modes as _modes
 from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
@@ -191,7 +183,7 @@ class DeployJournal:
         # The unit line also opens the first write: what it will leave there.
         line["expected"] = expected
         if unit.copy is not None:
-            line["mode"] = recorded_mode(unit.copy, unit.kind)  # never the copy's later bits
+            line["mode"] = _modes.recorded_mode(unit.copy, unit.kind)  # never the copy's later bits
         if unit.kind == "file" and unit.copy is not None:
             line["hash"] = compute_file_hash(unit.copy)
         if unit.kind == "dir" and unit.copy is not None:
@@ -620,10 +612,10 @@ def _validate_unit(
     copy, expected = _journaled_copy(line, store)
     if not metadata:
         _check_vouched(rel, kind, expected, ledger)
-    mode = verified_mode(line.get("mode"), kind, copy)
+    mode = _modes.verified_mode(line.get("mode"), kind, copy)
     if mode is None:
         raise _Unproven(rel, "the journal does not record a verifiable mode")
-    prior = with_recorded_mode(_state(copy), mode)
+    prior = _modes.with_recorded_mode(_state(copy), mode)
     return _Replay(rel, path, kind, copy, expected, ancestors, prior=prior, mode=mode)
 
 
@@ -722,15 +714,15 @@ def _apply(unit: _Replay) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix=".apm-replay-", dir=path.parent)) / "staged"
     try:
-        stage_private(unit.copy, staged, unit.kind, _read_no_follow)
+        _modes.stage_private(unit.copy, staged, unit.kind, _read_no_follow)
         written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
         if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
-        apply_entry_modes(staged, unit.mode)
+        _modes.apply_entry_modes(staged, unit.mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)
-        apply_own_mode(path, unit.mode)
+        _modes.apply_own_mode(path, unit.mode)
     finally:
         robust_rmtree(staged.parent)
 
@@ -773,7 +765,9 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
             ours = False  # unreadable now: never destroy what cannot be inspected
         if not ours:
             kept.append((unit.rel, _KEEP_CHANGED))
-        elif unit.copy is not None and not never_wider(unit.path, unit.copy, unit.kind, unit.mode):
+        elif unit.copy is not None and not _modes.never_wider(
+            unit.path, unit.copy, unit.kind, unit.mode
+        ):
             kept.append((unit.rel, _KEEP_WIDER))  # never widen beyond what is there (#5134)
         else:
             apply.append(unit)
