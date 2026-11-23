@@ -70,6 +70,9 @@ from scripts.architecture_linter.checks.transport_revision_pins import (
 from scripts.architecture_linter.checks.transport_revision_pins import (
     RULES as _REVISION_PIN_RULES,
 )
+from scripts.architecture_linter.checks.transport_rmtree_link_safety import (
+    RULES as _RMTREE_LINK_RULES,
+)
 from scripts.architecture_linter.checks.transport_sparse_and_updates import (
     COLLECTORS as _SPARSE_COLLECTORS,
 )
@@ -84,6 +87,7 @@ RULES = (
     + _EGRESS_ROUTE_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
+    + _RMTREE_LINK_RULES
     + _DEPLOY_STORE_RULES
     + _CACHED_REPO_GIT_RULES
     + _CHECKOUT_VERIFY_RULES

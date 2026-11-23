@@ -55,7 +55,7 @@ RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
 # A job that hits its cap ends "cancelled", which hides the ratchet result.
-RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 5}
+RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 10}
 MAIN_PUSH_RATCHET_WORKFLOW = "main-architecture-ratchets.yml"
 MAIN_PUSH_RATCHET_CHECK = "Architecture Ratchet Contracts (main)"
 RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
@@ -3656,10 +3656,139 @@ def _assert_h4_step(step: WorkflowNode) -> None:
     assert len(commands) == 3
 
 
+_LIVE_KNOWN_CELLS = (
+    "uv run --frozen --extra dev python -m tests.quality.known_cell_issues --check-live"
+)
+_LIVE_STEP = "Known cells cite open issues (live GitHub state)"
+KNOWN_CELLS_LIVE_WORKFLOW = "known-cells-live.yml"
+
+
+def _assert_live_known_cells_step(step: WorkflowNode) -> None:
+    """The live known-cell check (#5072): one exact command, the job token, fail-closed."""
+    assert step["name"] == _LIVE_STEP, step.get("name")
+    assert all(key not in step for key in ("if", "continue-on-error")), step
+    assert step["run"].strip() == _LIVE_KNOWN_CELLS, step["run"]
+    assert step.get("env") == {"GH_TOKEN": "${{ github.token }}"}, step.get("env")
+
+
+def _live_steps(workflow: WorkflowNode) -> list[tuple[str, WorkflowNode]]:
+    return [
+        (job_id, step)
+        for job_id, job in workflow["jobs"].items()
+        for step in _run_steps(job)
+        if "--check-live" in str(step.get("run", ""))
+    ]
+
+
+def _assert_known_cells_live_placement(workflows: Mapping[str, WorkflowNode], chain) -> None:
+    """PR Lint and the main push gate read no live issue state; a train fails closed
+    on it; main pushes and a daily run read it as a ledger-state signal (#5072)."""
+    assert not any("--check-live" in str(step.get("run", "")) for step in chain)
+    # The main push gate never sees it, so a closed issue is never a code red on main.
+    for name in ("ci.yml", MAIN_PUSH_GATE_WORKFLOW):
+        assert not _live_steps(workflows[name]), name
+    train = workflows[MERGE_TRAIN_WORKFLOW]
+    live = _live_steps(train)
+    assert [job_id for job_id, _ in live] == [TRAIN_GUARD_JOB], live
+    guard_steps = _run_steps(workflow_job(train, TRAIN_GUARD_JOB))
+    chain_at = next(
+        i for i, step in enumerate(guard_steps) if step.get("uses") == LINT_CHAIN_ACTION
+    )
+    assert guard_steps[chain_at + 1] is live[0][1], "the live step follows the lint chain"
+    _assert_live_known_cells_step(live[0][1])
+    ledger = workflows[KNOWN_CELLS_LIVE_WORKFLOW]
+    assert "ledger state" in ledger["name"], ledger["name"]
+    triggers = ledger["on"]
+    assert set(triggers) == {"push", "schedule", "workflow_dispatch"}, sorted(triggers)
+    assert triggers["push"] == {"branches": ["main"]}, triggers["push"]
+    assert not triggers["workflow_dispatch"], triggers["workflow_dispatch"]
+    assert ledger.get("permissions") == {"contents": "read"}, ledger.get("permissions")
+    check = workflow_job(ledger, "check")
+    assert check["permissions"] == {"contents": "read", "issues": "read", "pull-requests": "read"}
+    assert all(key not in check for key in ("if", "continue-on-error")), check
+    assert check["outputs"] == {"cells": "${{ steps.live.outputs.cells }}"}, check.get("outputs")
+    live_step = workflow_step(check, _LIVE_STEP)
+    assert live_step.get("id") == "live" and "continue-on-error" not in live_step, live_step
+    assert live_step.get("env") == {"GH_TOKEN": "${{ github.token }}"}, live_step.get("env")
+    lines = [line.strip() for line in live_step["run"].strip().splitlines()]
+    assert any(line.startswith(_LIVE_KNOWN_CELLS + " ") for line in lines), lines
+    assert lines[-1] == 'exit "$status"', "the step keeps the check's exit status"
+    assert 'delimiter="cells_$(openssl rand -hex 16)"' in lines, "an unguessable output delimiter"
+    signal = workflow_job(ledger, "signal")
+    assert signal["needs"] == ["check"], signal.get("needs")
+    assert signal["permissions"] == {"issues": "write"}, signal.get("permissions")
+    assert signal["if"] == "always() && github.event_name != 'workflow_dispatch'", signal.get("if")
+    # Serialized across runs: two failures never open two issues.
+    assert signal.get("concurrency") == {
+        "group": "known-cells-live-signal",
+        "cancel-in-progress": False,
+    }
+    step = workflow_step(signal, "Open, update or close the tracking issue")
+    assert step["env"] == {
+        "RESULT": "${{ needs.check.result }}",
+        "CELLS": "${{ needs.check.outputs.cells }}",
+    }, step["env"]
+    script = step["with"]["script"]
+    assert "ledger-state red" in script, "the issue names the classification"
+    assert "### Affected cells" in script and "recorded > context.runId" in script, script
+    assert "['````', cells, '````']" in script, "a four-backtick fence: a cell line cannot close it"
+
+
+def _known_cells_workflows() -> dict[str, WorkflowNode]:
+    workflows = REPO_ROOT / ".github" / "workflows"
+    names = ("ci.yml", MAIN_PUSH_GATE_WORKFLOW, MERGE_TRAIN_WORKFLOW, KNOWN_CELLS_LIVE_WORKFLOW)
+    return {name: load_workflow(workflows / name) for name in names}
+
+
+def test_live_known_cell_check_never_runs_on_pull_requests() -> None:
+    _assert_known_cells_live_placement(_known_cells_workflows(), _lint_chain_steps())
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "in-chain",
+        "in-main-gate",
+        "soft-train",
+        "drop-train",
+        "no-main-push",
+        "unserialized-signal",
+        "masked-exit",
+        "no-signal",
+    ],
+)
+def test_live_known_cell_placement_drift_fails(mutation: str) -> None:
+    workflows = _known_cells_workflows()
+    chain = deepcopy(_lint_chain_steps())
+    train_live = _live_steps(workflows[MERGE_TRAIN_WORKFLOW])[0][1]
+    if mutation == "in-chain":
+        chain.append(deepcopy(train_live))
+    elif mutation == "in-main-gate":
+        gate = workflows[MAIN_PUSH_GATE_WORKFLOW]["jobs"]["main-push-gate"]
+        gate["steps"].append(deepcopy(train_live))
+    elif mutation == "soft-train":
+        train_live["continue-on-error"] = True
+    elif mutation == "drop-train":
+        steps = workflows[MERGE_TRAIN_WORKFLOW]["jobs"][TRAIN_GUARD_JOB]["steps"]
+        steps.remove(train_live)
+    elif mutation == "no-main-push":
+        workflows[KNOWN_CELLS_LIVE_WORKFLOW]["on"].pop("push")
+    elif mutation == "unserialized-signal":
+        workflows[KNOWN_CELLS_LIVE_WORKFLOW]["jobs"]["signal"].pop("concurrency")
+    elif mutation == "masked-exit":
+        step = workflows[KNOWN_CELLS_LIVE_WORKFLOW]["jobs"]["check"]["steps"][-1]
+        step["run"] = step["run"].replace('exit "$status"', "exit 0")
+    else:
+        workflows[KNOWN_CELLS_LIVE_WORKFLOW]["jobs"]["signal"]["if"] = "always()"
+    with pytest.raises((AssertionError, StopIteration)):
+        _assert_known_cells_live_placement(workflows, chain)
+
+
 def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> None:
     """ci.yml's Lint job and the train guard run the one lint-chain action."""
     lint = workflow_job(ci, "lint")
     assert lint["name"] == "Lint"
+    # PR Lint reads no live issue state (#5072); the train guard does (GraphQL).
     assert lint["permissions"] == {"contents": "read", "pull-requests": "read"}
     lint_steps = _run_steps(lint)
     assert [str(step.get("uses", "")).partition("@")[0] for step in lint_steps] == [
@@ -3671,6 +3800,7 @@ def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> No
     assert lint_steps[2]["with"] == {"base-sha": LINT_CHAIN_BASE}
     _assert_h4_step(lint_steps[3])
     guard = workflow_job(train, TRAIN_GUARD_JOB)
+    assert guard["permissions"] == {"contents": "read", "issues": "read", "pull-requests": "read"}
     chain = [step for step in _run_steps(guard) if step.get("uses") == LINT_CHAIN_ACTION]
     assert len(chain) == 1 and chain[0]["with"] == {"base-sha": TRAIN_BASE}
     action_steps = _lint_chain_steps()

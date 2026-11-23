@@ -32,7 +32,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from itertools import combinations
 
-from tests.lifecycle.generator.factors import ON, ORDER, TRIPLES, cell_id
+from tests.lifecycle.generator.factors import ON, ORDER, TRIPLES, cell_id, parse_cell
 
 SOURCE_SPINE = (
     "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
@@ -98,6 +98,48 @@ GATE_PLUGIN_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::"
     "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
 )
+_OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
+# Witnesses whose package can deploy a bin/ artifact, with the scope it lands at
+# (#4981). Loose bin/ deploys only for a user-scope marketplace plugin with a
+# Claude target, and a whole trusted Claude plugin carries bin/ to either scope
+# (U-BIN). A row or spine acting on p-exec or a bundle at project scope never
+# deploys bin/, so it cannot credit a bin cell: the gate decided nothing there.
+BIN_WITNESSES: Mapping[str, str] = {
+    GATE_BIN_SPINE: "user",
+    GATE_PLUGIN_BIN_SPINE: "project",
+    **{
+        _OWNERSHIP + name: "user"
+        for name in (
+            "test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin",
+            "test_a_plugin_bin_without_a_lock_is_kept",
+            "test_an_edited_plugin_bin_is_restored_and_said",
+        )
+    },
+    "tests/lifecycle/scenarios/test_user_scope.py::"
+    "test_a_plugin_bin_deploys_under_home_once_trusted": "user",
+    "tests/lifecycle/scenarios/test_policy_pairs.py::"
+    "test_a_denied_plugin_with_bin_is_refused_at_user_scope": "user",
+    **{
+        "tests/lifecycle/scenarios/test_lock_states.py::"
+        f"test_user_bin_plugin_under_a_drifted_lock[{lock}]": "user"
+        for lock in ("stale", "newer-generator")
+    },
+    **{
+        "tests/lifecycle/scenarios/test_user_scope.py::"
+        f"test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[{change}]": "user"
+        for change in ("single-narrowed", "single-widened", "multi-narrowed", "multi-widened")
+    },
+}
+
+
+def credits_bin(node: str, cell: Mapping[str, str]) -> bool:
+    """Whether *node* may credit *cell*: a non-bin cell, or bin/ deployed at its scope."""
+    if cell.get("PRIM") != "bin":
+        return True
+    scope = BIN_WITNESSES.get(node)
+    return scope is not None and cell.get("SCOPE", scope) == scope
+
+
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "bundle": ("bundle-install", ()),
@@ -295,7 +337,7 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
         for key in credits(cell):
-            if key in obligations:
+            if key in obligations and credits_bin(cell.witness, parse_cell(key)[1]):
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
     for key, nodes in sorted(by_node.items()):
@@ -367,7 +409,11 @@ def scenario_witnesses(
     by_key: dict[str, list] = {}
     for credit in scenario_credits():
         for key in implied(credit.assignment):
-            if key in obligations and lanes.get(key) in SCENARIO_LANES:
+            if (
+                key in obligations
+                and lanes.get(key) in SCENARIO_LANES
+                and credits_bin(credit.node, parse_cell(key)[1])
+            ):
                 by_key.setdefault(key, []).append(credit)
     witnesses: dict[str, Witness] = {}
     for key, found in sorted(by_key.items()):
