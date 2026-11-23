@@ -67,18 +67,15 @@ given:
   - .github/extensions
 - run: apm install p-skill p-exec p-canvas
   cells:
-  - T3|OP=install|SRC=local-path|PRIM=bin
   - T3|OP=install|SRC=local-path|PRIM=hook
   - T3|OP=install|SRC=local-path|PRIM=mcp
   - T3|OP=install|SRC=local-path|PRIM=skill
   - pair|GATE=none|TGT=multi-unchanged
   - pair|GATE=unapproved-exec|TGT=multi-unchanged
-  - pair|PRIM=bin|TGT=multi-unchanged
   - pair|PRIM=canvas|TGT=multi-unchanged
   - pair|PRIM=hook|TGT=multi-unchanged
   - pair|PRIM=skill|TGT=multi-unchanged
   - pair|SRC=local-path|GATE=none
-  - pair|SRC=local-path|PRIM=bin
   - pair|SRC=local-path|PRIM=hook
   - pair|SRC=local-path|PRIM=mcp
   - pair|SRC=local-path|PRIM=skill
@@ -87,14 +84,12 @@ given:
 when:
 - run: apm deny p-exec p-canvas
   cells:
-  - T3|OP=approve-deny|SRC=local-path|PRIM=bin
   - T3|OP=approve-deny|SRC=local-path|PRIM=hook
   - T3|OP=approve-deny|SRC=local-path|PRIM=mcp
   - pair|DEPLOYED=clean|TGT=multi-unchanged
   - pair|LOCK=consistent|TGT=multi-unchanged
 - run: apm install
   cells:
-  - T1|OP=install|PRIM=bin|GATE=denied-executable
   - T1|OP=install|PRIM=canvas|GATE=denied-executable
   - T1|OP=install|PRIM=hook|GATE=denied-executable
   - T1|OP=install|PRIM=mcp|GATE=denied-executable
@@ -103,7 +98,6 @@ when:
   - pair|GATE=denied-executable|TGT=multi-unchanged
   - pair|LOCK=consistent|GATE=denied-executable
   - pair|OP=install|GATE=denied-executable
-  - pair|PRIM=bin|GATE=denied-executable
   - pair|PRIM=canvas|GATE=denied-executable
   - pair|PRIM=hook|GATE=denied-executable
   - pair|PRIM=mcp|GATE=denied-executable
@@ -133,29 +127,23 @@ when:
   - pair|GATE=denied-executable|FROZEN=on
 - run: apm update --dry-run
   cells:
-  - T1|OP=update|PRIM=bin|GATE=denied-executable
   - T1|OP=update|PRIM=canvas|GATE=denied-executable
   - T1|OP=update|PRIM=hook|GATE=denied-executable
   - T1|OP=update|PRIM=mcp|GATE=denied-executable
-  - T3|OP=update|SRC=local-path|PRIM=bin
   - T3|OP=update|SRC=local-path|PRIM=hook
   - T3|OP=update|SRC=local-path|PRIM=mcp
   - T3|OP=update|SRC=local-path|PRIM=skill
   - pair|OP=update|GATE=denied-executable
 - run: apm compile --dry-run
   cells:
-  - T1|OP=compile|PRIM=bin|GATE=denied-executable
   - T1|OP=compile|PRIM=canvas|GATE=denied-executable
-  - T3|OP=compile|SRC=local-path|PRIM=bin
   - T3|OP=compile|SRC=local-path|PRIM=skill
   - pair|OP=compile|GATE=denied-executable
 - run: apm lock
   cells:
-  - T1|OP=lock|PRIM=bin|GATE=denied-executable
   - T1|OP=lock|PRIM=canvas|GATE=denied-executable
   - T1|OP=lock|PRIM=hook|GATE=denied-executable
   - T1|OP=lock|PRIM=mcp|GATE=denied-executable
-  - T3|OP=lock|SRC=local-path|PRIM=bin
   - T3|OP=lock|SRC=local-path|PRIM=hook
   - T3|OP=lock|SRC=local-path|PRIM=mcp
   - T3|OP=lock|SRC=local-path|PRIM=skill
@@ -163,18 +151,15 @@ when:
   - pair|OP=lock|TGT=multi-unchanged
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=denied-executable
   - T1|OP=audit|PRIM=canvas|GATE=denied-executable
   - T1|OP=audit|PRIM=hook|GATE=denied-executable
   - T1|OP=audit|PRIM=mcp|GATE=denied-executable
-  - T3|OP=audit|SRC=local-path|PRIM=bin
   - T3|OP=audit|SRC=local-path|PRIM=hook
   - T3|OP=audit|SRC=local-path|PRIM=mcp
   - T3|OP=audit|SRC=local-path|PRIM=skill
   - pair|OP=audit|GATE=denied-executable
 - run: apm approve --list
   cells:
-  - T1|OP=approve-deny|PRIM=bin|GATE=denied-executable
   - T1|OP=approve-deny|PRIM=canvas|GATE=denied-executable
   - T1|OP=approve-deny|PRIM=hook|GATE=denied-executable
   - T1|OP=approve-deny|PRIM=mcp|GATE=denied-executable
@@ -184,11 +169,9 @@ when:
   - '*'
 - run: apm prune --dry-run
   cells:
-  - T1|OP=prune|PRIM=bin|GATE=denied-executable
   - T1|OP=prune|PRIM=canvas|GATE=denied-executable
   - T1|OP=prune|PRIM=hook|GATE=denied-executable
   - T1|OP=prune|PRIM=mcp|GATE=denied-executable
-  - T3|OP=prune|SRC=local-path|PRIM=bin
   - T3|OP=prune|SRC=local-path|PRIM=hook
   - T3|OP=prune|SRC=local-path|PRIM=mcp
   - T3|OP=prune|SRC=local-path|PRIM=skill
@@ -211,14 +194,11 @@ when:
   - pair|OP=uninstall|TGT=multi-unchanged
 - run: apm uninstall p-exec
   cells:
-  - T1|OP=uninstall|PRIM=bin|GATE=denied-executable
   - T1|OP=uninstall|PRIM=hook|GATE=denied-executable
   - T1|OP=uninstall|PRIM=mcp|GATE=denied-executable
-  - T3|OP=uninstall|SRC=local-path|PRIM=bin
   - T3|OP=uninstall|SRC=local-path|PRIM=hook
   - T3|OP=uninstall|SRC=local-path|PRIM=mcp
   - pair|OP=uninstall|GATE=denied-executable
-  - pair|OP=uninstall|PRIM=bin
   - pair|OP=uninstall|PRIM=hook
   - pair|OP=uninstall|PRIM=mcp
 - run: apm uninstall p-canvas

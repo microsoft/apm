@@ -51,23 +51,19 @@ when:
   - pair|GATE=unapproved-exec|FROZEN=on
 - run: apm update --dry-run
   cells:
-  - T1|OP=update|PRIM=bin|GATE=unapproved-exec
   - T1|OP=update|PRIM=hook|GATE=unapproved-exec
   - T1|OP=update|PRIM=mcp|GATE=unapproved-exec
   - pair|OP=update|GATE=unapproved-exec
 - run: apm compile --dry-run
   cells:
-  - T1|OP=compile|PRIM=bin|GATE=unapproved-exec
   - pair|OP=compile|GATE=unapproved-exec
 - run: apm lock
   cells:
-  - T1|OP=lock|PRIM=bin|GATE=unapproved-exec
   - T1|OP=lock|PRIM=hook|GATE=unapproved-exec
   - T1|OP=lock|PRIM=mcp|GATE=unapproved-exec
   - pair|OP=lock|GATE=unapproved-exec
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=unapproved-exec
   - T1|OP=audit|PRIM=hook|GATE=unapproved-exec
   - T1|OP=audit|PRIM=mcp|GATE=unapproved-exec
   - pair|OP=audit|GATE=unapproved-exec
@@ -81,7 +77,6 @@ when:
   - pair|OP=pack|GATE=none
   - pair|OP=pack|GATE=unapproved-exec
   - pair|OP=pack|LOCK=consistent
-  - pair|OP=pack|PRIM=bin
   - pair|OP=pack|PRIM=hook
   - pair|OP=pack|PRIM=mcp
   - pair|OP=pack|PRIM=skill
@@ -102,7 +97,6 @@ when:
   - pair|OP=pack|GATE=allowed
 - run: apm prune --dry-run
   cells:
-  - T1|OP=prune|PRIM=bin|GATE=allowed
   - T1|OP=prune|PRIM=hook|GATE=allowed
   - T1|OP=prune|PRIM=mcp|GATE=allowed
   - pair|OP=prune|GATE=allowed
@@ -113,10 +107,8 @@ when:
   - pair|OP=uninstall|SRC=git
 - run: apm uninstall p-exec
   cells:
-  - T1|OP=uninstall|PRIM=bin|GATE=allowed
   - T1|OP=uninstall|PRIM=hook|GATE=allowed
   - T1|OP=uninstall|PRIM=mcp|GATE=allowed
-  - T3|OP=uninstall|SRC=git|PRIM=bin
   - T3|OP=uninstall|SRC=git|PRIM=hook
   - T3|OP=uninstall|SRC=git|PRIM=mcp
   - pair|OP=uninstall|GATE=allowed

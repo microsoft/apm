@@ -36,6 +36,25 @@ class ClaudeNativePluginError(RuntimeError):
     """Native registration cannot safely honor the requested package."""
 
 
+# The one install-summary notice for a dependency installed through the native
+# plugin route (#4998). Extend this owner, never add a second notice.
+NATIVE_ROUTE_NOTICE = (
+    "installed as a native plugin. Native plugins are reported not to load in "
+    "git worktrees, in non-interactive claude -p runs (including "
+    "claude-code-action) and in Copilot CLI 1.0.106."
+)
+# Only a Claude-format plugin at project scope deploys loose under a skills:
+# selection; at user scope it parks, and an Agent Plugin stays native.
+_LOOSE_ROUTE_HINT = (
+    ' To deploy its skills loose instead, set skills: ["*"] on this dependency in apm.yml.'
+)
+
+
+def native_route_notice(*, loose_route: bool) -> str:
+    """The native-route notice, with the loose-route hint where that route exists."""
+    return NATIVE_ROUTE_NOTICE + _LOOSE_ROUTE_HINT if loose_route else NATIVE_ROUTE_NOTICE
+
+
 @dataclass(frozen=True, slots=True)
 class ClaudeNativePlugin:
     """An admitted dependency, not a claim of native activation or execution.
@@ -57,6 +76,29 @@ class ClaudeNativePlugin:
     warning: str | None = None
     approved_pin: str | None = None
     harnesses: frozenset[str] = frozenset({CLAUDE})
+    # Admitted as an Agent Plugin (always native), not a Claude-format plugin.
+    agent_plugin: bool = False
+
+
+def has_loose_route(plugin: ClaudeNativePlugin, *, user_scope: bool) -> bool:
+    """Whether ``skills: ["*"]`` would deploy *plugin*'s skills loose instead.
+
+    Only a Claude-format plugin at project scope deploys loose under a skills:
+    selection (an Agent Plugin stays native; at user scope it parks), and only
+    a plugin with selectable skills: otherwise the selection matches nothing.
+    """
+    if user_scope or plugin.agent_plugin:
+        return False
+    from types import SimpleNamespace
+
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(
+            install_path=plugin.source_root, package_type=PackageType.MARKETPLACE_PLUGIN
+        )
+    )
+    return bool(available)
 
 
 def fingerprint_native_claude_source(root: Path, *, portable: bool = False) -> str:

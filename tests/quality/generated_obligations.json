@@ -703,6 +703,7 @@
     "J|J05|1|O5": "tests/lifecycle/journeys/test_journeys.py::test_journey[J05]",
     "J|J05|2|O3": "tests/lifecycle/journeys/test_journeys.py::test_journey[J05]",
     "J|J05|2|O4": "tests/lifecycle/journeys/test_journeys.py::test_journey[J05]",
+    "J|J05|3|O1": "tests/lifecycle/journeys/test_journeys.py::test_journey[J05]",
     "J|J05|3|O3": "tests/lifecycle/journeys/test_journeys.py::test_journey[J05]",
     "J|J05|3|O4": "tests/lifecycle/journeys/test_journeys.py::test_journey[J05]",
     "J|J05|3|O6": "tests/lifecycle/journeys/test_journeys.py::test_journey[J05]",

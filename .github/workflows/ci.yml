@@ -46,7 +46,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      issues: read
       pull-requests: read
 
     steps:
