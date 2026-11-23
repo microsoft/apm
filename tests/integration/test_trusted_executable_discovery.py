@@ -653,3 +653,40 @@ def test_apm_script_path_drops_a_directory_linking_into_the_project(tmp_path: Pa
 
     assert env is None or str(tools) not in env["PATH"].split(os.pathsep)
     assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory permissions")
+def test_apm_script_path_drops_an_unlistable_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A searchable PATH directory APM cannot list is dropped, since its links can't be checked."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    _plant_project_binary(project, "probe")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "probe").symlink_to(project / "probe")
+    safe = tmp_path / "safe"
+    safe.mkdir()
+    if os.geteuid() == 0:
+        # Root lists any directory, so make the listing itself fail.
+        real_iterdir = Path.iterdir
+
+        def _iterdir(self: Path):
+            if self == tools:
+                raise PermissionError("not listable")
+            return real_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", _iterdir)
+    else:
+        tools.chmod(0o311)
+    monkeypatch.chdir(project)
+    try:
+        env = trusted_path_environment({"PATH": os.pathsep.join([str(tools), str(safe)])})
+    finally:
+        tools.chmod(0o755)
+
+    assert env["PATH"].split(os.pathsep) == [str(safe)]
