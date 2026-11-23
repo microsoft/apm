@@ -617,11 +617,13 @@ def compute_forward_reachable_keys(
             manifest_dir = install_path
             node_key = visit_key
 
+        if ref.is_local and manifest_dir.is_file():
+            continue  # a standalone primitive file declares no dependencies
         try:
             package = _read_node(manifest_dir, local=ref.is_local)
             if package is None:
                 continue
-        except (FileNotFoundError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             # Missing or malformed manifest: this subtree's true children
             # are unknown. Do NOT treat it as childless -- record it and
             # let the caller preserve every candidate this run instead of
