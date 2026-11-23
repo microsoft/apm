@@ -1101,3 +1101,63 @@ def test_uninstall_user_bundle_with_a_home_rooted_claude_config(
     claims = load_yaml(lock_path).get("local_deployed_files") or []
     assert not [p for p in claims if p.endswith("/x.sh")], claims
     assert not (home / "hooks" / "hookpkg").exists()
+
+
+def test_uninstall_bundle_keeps_a_script_an_edited_hook_still_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4679 review: a bundle hook whose matcher was edited keeps its script and claim.
+
+    The edited entry no longer matches what the bundle deployed, so retirement
+    leaves it registered; deleting the script it runs would leave a broken hook
+    behind a successful uninstall. The script and its claim stay and the
+    config is named for repair.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "edited-matcher-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    settings = consumer / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    for entry in data["hooks"]["PreToolUse"]:
+        if entry.get("matcher") == "Bash":
+            entry["matcher"] = "Write"
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    assert script in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+
+    assert ".claude/settings.json" in text, text
+    assert "Removed hooks from local bundle 'hookpkg'" not in text, text
+    assert "Traceback" not in text, text
+    assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
+    assert (consumer / script).is_file()
+    assert script in _claims(world, consumer)
+
+
+def test_uninstall_user_bundle_with_a_claude_config_outside_home(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4679 review: scripts under a CLAUDE_CONFIG_DIR outside HOME leave with their claims."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    home = world.isolated.home
+    claude_root = world.isolated.root / "claude-profile"
+    claude_root.mkdir()
+    world.env["CLAUDE_CONFIG_DIR"] = str(claude_root)
+    write(home / ".apm" / "apm.yml", "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    _allow(home / ".apm", key)
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle))
+    lock_path = home / ".apm" / "apm.lock.yaml"
+    scripts = [
+        p for p in load_yaml(lock_path).get("local_deployed_files") or [] if p.endswith("/x.sh")
+    ]
+    assert scripts and all(Path(p).is_file() for p in scripts), load_yaml(lock_path)
+
+    text = output(world.apm(world.isolated.work_root, "uninstall", "-g", "hookpkg"))
+
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    claims = load_yaml(lock_path).get("local_deployed_files") or []
+    assert not [p for p in claims if p.endswith("/x.sh")], claims
+    assert not any(Path(p).exists() for p in scripts), scripts
