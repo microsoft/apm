@@ -422,6 +422,20 @@ def test_frozen_refuses_a_narrowed_native_harness(lifecycle_world) -> None:
     scenario.finish()
 
 
+def test_frozen_replays_a_native_harness_its_target_flag_still_names(lifecycle_world) -> None:
+    """#4874 control: apm.yml declares copilot and a --target run also declared the plugin
+    to claude; repeating that run with --frozen keeps Claude's entry and changes nothing."""
+    scenario = _deployed_native(lifecycle_world, ("copilot",))
+    scenario.source_moved()  # The model has no --target override; this run widens.
+    scenario.run("install --target claude,copilot")
+    enabled = _settings(scenario, "claude").get("enabledPlugins", {})
+    assert [on for key, on in enabled.items() if key.startswith(f"{_NATIVE}@")] == [True]
+    step = scenario.run("install --frozen --target claude,copilot", exit=0)
+    assert_changes(step.changed, (), label="frozen replay")
+    assert _settings(scenario, "claude").get("enabledPlugins") == enabled
+    scenario.finish()
+
+
 def test_mcp_only_package_removal_keeps_unmanaged_and_sibling(lifecycle_world) -> None:
     factory = LocalPackageFactory(lifecycle_world.root / "owned")
     server = {
