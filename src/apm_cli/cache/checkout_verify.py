@@ -284,9 +284,6 @@ class _Attributes:
         self._rules: dict[str, list[tuple[bool, re.Pattern[str], list[tuple[str, object]]]]] = {}
         self._unknown: set[str] = set()
         self._macros: dict[str, tuple[tuple[str, object], ...]] = dict(_BUILTIN_MACROS)
-        self._expanded: dict[str, tuple[tuple[str, object], ...]] = {}
-        self._expanding: set[str] = set()
-        self._cyclic = False
         self._load("")
 
     def _load(self, directory: str) -> None:
@@ -320,36 +317,29 @@ class _Attributes:
                 )
         self._rules[directory] = rules
 
-    def _expansion(self, name: str) -> tuple[tuple[str, object], ...]:
-        """What macro *name* sets, nested macros included; each macro is expanded once."""
-        done = self._expanded.get(name)
-        if done is not None:
-            return done
-        if name in self._expanding:
-            self._cyclic = True  # a macro that names itself is not verified
-            return ()
-        self._expanding.add(name)
-        sequence: dict[str, object] = {}
-        for macro_name, macro_value in self._macros[name]:
-            steps = ((macro_name, macro_value),)
-            if macro_value is True and macro_name in self._macros:
-                steps += self._expansion(macro_name)
-            for step_name, step_value in steps:
-                sequence.pop(step_name, None)  # the last assignment wins, as in order
-                sequence[step_name] = step_value
-        self._expanding.discard(name)
-        self._expanded[name] = tuple(sequence.items())
-        return self._expanded[name]
+    def _fill(self, state: dict[str, object], assigned: list[tuple[str, object]]) -> None:
+        """Resolve as Git's attr.c does: highest priority first, each name set once.
 
-    def _apply(self, state: dict[str, object], name: str, value: object) -> None:
-        state[name] = value
-        if value is True and name in self._macros:
-            state.update(self._expansion(name))
+        A macro expands only when its own final state is set, so a later ``-macro``
+        cancels it, and every macro expands at most once per path.
+        """
+        pending = [reversed(assigned)]
+        while pending:
+            step = next(pending[-1], None)
+            if step is None:
+                pending.pop()
+                continue
+            name, value = step
+            if name in state:
+                continue
+            state[name] = value
+            if value is True and name in self._macros:
+                pending.append(reversed(self._macros[name]))
 
     def state(self, path: str) -> dict[str, object] | None:
         """The attributes of *path*, or None when a ``.gitattributes`` cannot be read here."""
         parts = path.split("/")
-        state: dict[str, object] = {}
+        assigned: list[tuple[str, object]] = []
         for depth in range(len(parts)):
             directory = "/".join(parts[:depth])
             self._load(directory)
@@ -358,9 +348,10 @@ class _Attributes:
             relative = "/".join(parts[depth:])
             for anchored, regex, attributes in self._rules[directory]:
                 if regex.fullmatch(relative if anchored else parts[-1]):
-                    for name, value in attributes:
-                        self._apply(state, name, value)
-        return None if self._cyclic else state
+                    assigned.extend(attributes)
+        state: dict[str, object] = {}
+        self._fill(state, assigned)
+        return state
 
 
 def _accepted(attributes: _Attributes, attribute_path: str, blob: bytes) -> tuple[bytes, ...]:

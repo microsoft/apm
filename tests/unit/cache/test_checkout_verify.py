@@ -560,11 +560,20 @@ def test_widely_shared_macros_expand_once_each(tmp_path: Path) -> None:
     assert _within(30, lambda: verify_checkout(repo, sha, env=neutral_git_env()))
 
 
-def test_a_macro_that_names_itself_is_not_verified(tmp_path: Path) -> None:
+def test_a_macro_that_names_itself_expands_once(tmp_path: Path) -> None:
     repo, sha = _attributes_repo(
         tmp_path, b"[attr]loop loop loop loop loop\npkg/*.md loop text eol=crlf\n"
     )
     (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\r\n")
 
-    assert not _within(30, lambda: verify_checkout(repo, sha, env=neutral_git_env()))
-    assert (repo / "pkg" / "AGENTS.md").read_bytes() == b"Package instructions\r\n"
+    assert _within(30, lambda: verify_checkout(repo, sha, env=neutral_git_env()))
+
+
+def test_a_macro_unset_by_a_later_line_converts_nothing(tmp_path: Path) -> None:
+    repo, sha = _attributes_repo(tmp_path, b"[attr]docs text eol=crlf\n*.md docs\n*.md -docs\n")
+    agents = repo / "pkg" / "AGENTS.md"
+
+    agents.write_bytes(b"Package instructions\r\n")
+    assert not verify_checkout(repo, sha, env=neutral_git_env())
+    agents.write_bytes(b"Package instructions\n")
+    assert verify_checkout(repo, sha, env=neutral_git_env())
