@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -337,10 +338,22 @@ def _publish_skill(twin: Twin, body: str, tag: str) -> None:
     twin.fast.services.publish_revision(f"{ORG}/p-skill", {skill: text}, tag=tag)
 
 
+def _clear_readonly(function, path, _exc) -> None:
+    """Windows refuses to delete read-only files (git pack objects): clear the bit, retry."""
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def _rmtree(path: Path) -> None:
+    """Remove *path* completely, or fail: a partial delete would differ between twins."""
+    if os.path.lexists(path):
+        shutil.rmtree(path, onexc=_clear_readonly)
+
+
 def _remove_deployed(world: World) -> None:
     for path in _deployed(world):
         path.unlink()
-    shutil.rmtree(world.project / "apm_modules", ignore_errors=True)
+    _rmtree(world.project / "apm_modules")
 
 
 def _checkout(world: World, files: dict[str, bytes]) -> None:
@@ -397,7 +410,7 @@ def _cache_roots(world: World) -> list[Path]:
 def _empty_store(world: World) -> None:
     _remove_deployed(world)
     for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree(root)
 
 
 def _tamper_store(world: World) -> None:
@@ -458,7 +471,7 @@ SOURCES: dict[str, Callable[[Twin], None]] = {
 
 def _clear_policy_cache(world: World) -> None:
     for root in _cache_roots(world):
-        shutil.rmtree(root / POLICY_CACHE, ignore_errors=True)
+        _rmtree(root / POLICY_CACHE)
 
 
 def _deny_executables_at_the_same_origin(twin: Twin) -> None:
@@ -491,18 +504,18 @@ def _fresh_checkout(world: World) -> None:
     """
     _remove_deployed(world)
     (world.project / "apm.lock.yaml").unlink()
-    shutil.rmtree(world.project / ".apm-local", ignore_errors=True)
+    _rmtree(world.project / ".apm-local")
     for folder in {
         world.home / ".apm" / "deployment-receipts",
         world.apm_home / "deployment-receipts",
     }:
-        shutil.rmtree(folder, ignore_errors=True)
+        _rmtree(folder)
 
 
 def _fresh_store_miss(world: World) -> None:
     _fresh_checkout(world)
     for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree(root)
 
 
 def _fresh_tampered_store(world: World) -> None:
