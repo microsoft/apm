@@ -191,10 +191,12 @@ def _i7(
     writes: tuple[str, ...],
     returncode: int = 1,
     surface: tuple[str, str] | None = None,
+    symlink: str | None = None,
 ) -> list[str]:
     """I7 after a failed install that rewrote the lock and *writes*.
 
-    *surface* is a ``(cell, path)`` the install newly deployed.
+    *surface* is a ``(cell, path)`` the install newly deployed; *symlink* is a
+    path the install newly made a symlink to a directory outside the root.
     """
     (root / "apm.lock.yaml").write_text("lockfile_version: '1'\n", encoding="ascii")
     for relative in (_HOOK, _SCRIPT):
@@ -216,6 +218,11 @@ def _i7(
     for relative in writes:
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).write_text("v2\n", encoding="ascii")
+    if symlink is not None:
+        outside = root.parent / "outside"
+        outside.mkdir(exist_ok=True)
+        (root / symlink).parent.mkdir(parents=True, exist_ok=True)
+        (root / symlink).symlink_to(outside, target_is_directory=True)
     cells = {surface[0]: frozenset({surface[1]})} if surface else {}
     after = observe(frozenset(cells), cells)
     result = SimpleNamespace(returncode=returncode, stdout=output, stderr="", command=("install",))
@@ -265,6 +272,16 @@ def test_a_new_directory_never_covers_an_unlisted_write(tmp_path: Path) -> None:
     assert violations == [
         f"failed install changed durable files: ['project:{new_dir}', 'project:{_NEW_SCRIPT}']"
     ]
+
+
+def test_a_new_symlink_never_passes_as_the_directory_of_a_listed_write(tmp_path: Path) -> None:
+    """I7-X2 exempts only a created real directory, not a symlink (#4626 review)."""
+    root = tmp_path / "project"
+    root.mkdir()
+    new_dir = _NEW_SCRIPT.rsplit("/", 1)[0]
+    violations = _i7(root, _KEPT_BLOCKED + _wrote(_NEW_SCRIPT), writes=(), symlink=new_dir)
+
+    assert violations == [f"failed install changed durable files: ['project:{new_dir}']"]
 
 
 def test_a_kept_edit_install_may_deploy_a_new_surface_it_lists(tmp_path: Path) -> None:

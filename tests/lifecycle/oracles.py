@@ -703,7 +703,7 @@ def _i7_failure_preserves_state(
         and path.split(":", 1)[1] != report
         and not _within_retirement(path, retirement)
         and not (retirement and _RETIREMENT_BOOKKEEPING in path)
-        and not _i7_x2_written(path, before, kept_writes)
+        and not _i7_x2_written(path, before, after, kept_writes)
     ]
     if changed:
         found.append(Violation("I7", f"failed {op.name} changed durable files: {changed}"))
@@ -760,11 +760,14 @@ def _i7_x2_retirement(
     return _i7_x1_retirement(before, replace(after, deployed=after.deployed - appeared), model)
 
 
-def _i7_x2_written(path: str, before: Observation, kept_writes: frozenset[str] | None) -> bool:
+def _i7_x2_written(
+    path: str, before: Observation, after: Observation, kept_writes: frozenset[str] | None
+) -> bool:
     """I7-X2: *path* is a listed write, or a directory created only to hold one.
 
     Listed writes are relative to the deploy root; the same relative path
-    under another snapshot root is never covered.
+    under another snapshot root is never covered. A created ancestor must be a
+    real directory: a new symlink or file at that path is an unlisted change.
     """
     if not kept_writes:
         return False
@@ -774,8 +777,16 @@ def _i7_x2_written(path: str, before: Observation, kept_writes: frozenset[str] |
         return False
     if relative in kept_writes:
         return True
-    created = relative not in snapshot.paths
-    return created and any(write.startswith(relative + "/") for write in kept_writes)
+    if relative in snapshot.paths:
+        return False
+    created = next(
+        (e for e in after.artifacts.snapshot(root).entries if e.relative_path == relative), None
+    )
+    return (
+        created is not None
+        and created.kind == "directory"
+        and any(write.startswith(relative + "/") for write in kept_writes)
+    )
 
 
 def _requested_report(command) -> str | None:
