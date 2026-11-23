@@ -148,3 +148,31 @@ def test_a_compile_may_not_replace_an_ancestor_file_of_its_record(tmp_path: Path
     assert _written(tmp_path, record).exists(), record
     assert len(messages) == 1 and f"'{ancestor}'" in messages[0], messages
     assert f"'{record}'" not in messages[0], messages
+
+
+def test_a_validate_only_compile_may_not_write_the_record(tmp_path: Path) -> None:
+    record = oracles.compile_home_record(tmp_path / "project")
+
+    messages = _i5(tmp_path, ("compile", "--validate"), record)
+
+    assert _written(tmp_path, record).exists(), record
+    assert len(messages) == 1 and messages[0].startswith("compile wrote home:"), messages
+    assert record in messages[0], messages
+
+
+def test_a_redirected_compile_may_write_its_output_roots_record(tmp_path: Path) -> None:
+    record = oracles.compile_home_record(tmp_path / "project" / "out")
+
+    messages = _i5(tmp_path, ("compile", "--root", "out"), record)
+
+    assert _written(tmp_path, record).exists(), record
+    assert messages == [], messages
+
+
+def test_a_redirected_compile_may_not_write_the_projects_record(tmp_path: Path) -> None:
+    record = oracles.compile_home_record(tmp_path / "project")
+
+    messages = _i5(tmp_path, ("compile", "--root", "out"), record)
+
+    assert _written(tmp_path, record).exists(), record
+    assert len(messages) == 1 and record in messages[0], messages
