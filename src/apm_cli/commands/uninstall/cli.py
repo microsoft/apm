@@ -528,6 +528,10 @@ def _persist_reanchored_lockfile(
         raise
 
 
+# The lock was not saved: the re-anchor rolls back, as for any non-exit failure.
+_UNSAVED_LOCK = RuntimeError("the lockfile was not saved")
+
+
 def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger) -> None:
     """Move the re-anchored directories back; anything but a handled exit also restores
     apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor.
@@ -603,9 +607,10 @@ def _persist_lock_then_resync_native(
             still_needed_repairs,
         )
     if lock_changed and (saved is None or not saved.saved):
-        unrestored = _restore_reanchored_dirs(moved, modules_dir)
         _hold_native_registration(native_before, logger)
-        _report_unrestored(unrestored, logger)
+        if moved:
+            # Roll back first, then one combined report of anything left (#4999).
+            _undo_reanchor(_UNSAVED_LOCK, moved, modules_dir, still_needed_repairs, logger)
         _abort_unsaved_reanchor(still_needed_repairs, logger)
         return
     try:
