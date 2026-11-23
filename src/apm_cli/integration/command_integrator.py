@@ -363,9 +363,20 @@ class CommandIntegrator(BaseIntegrator):
         """
         if target_name != "claude" or diagnostics is None or self._overwrite_plan is not None:
             return
-        command_name, _post, _warnings, dropped_keys = self._transform_prompt_to_command(
-            source, target_name
-        )
+        try:
+            command_name, _post, _warnings, dropped_keys = self._transform_prompt_to_command(
+                source, target_name
+            )
+        except yaml.YAMLError as exc:
+            # Kept by a raw-bytes match; report it per file, never abort the run.
+            diagnostics.warn(
+                message=(
+                    f"Kept command {source.name} unchanged: malformed or "
+                    f"over-budget YAML frontmatter ({exc})."
+                ),
+                package=pkg_name,
+            )
+            return
         withheld = [k for k in dropped_keys if k in _CLAUDE_WITHHELD_COMMAND_KEYS]
         self._warn_withheld_command_keys(command_name, withheld, diagnostics, pkg_name)
 

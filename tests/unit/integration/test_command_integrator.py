@@ -1932,6 +1932,30 @@ class TestClaudeNativeCommandFrontmatter:
         warnings = [w.message for w in diag.by_category().get("warning", [])]
         assert any("hooks withheld" in w for w in warnings), warnings
 
+    def test_claude_retained_malformed_command_reports_and_continues(self, temp_project):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        bad = "---\ndescription: [unclosed\n---\nRun.\n"
+        pkg_info = _make_package(
+            temp_project,
+            {"bad.prompt.md": bad, "ok.prompt.md": "---\ndescription: d\n---\nRun.\n"},
+        )
+        commands = temp_project / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        (commands / "bad.md").write_text(bad, encoding="utf-8")
+
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"], pkg_info, temp_project, diagnostics=diag
+        )
+
+        assert (commands / "ok.md").is_file()
+        assert (commands / "bad.md").read_text(encoding="utf-8") == bad
+        assert result.files_adopted == 1, result
+        warnings = [w.message for w in diag.by_category().get("warning", [])]
+        assert any("bad.prompt.md" in w and "malformed" in w for w in warnings), warnings
+
     def test_claude_still_drops_name_and_paths(self, temp_project):
         warnings = self._install(
             temp_project,
