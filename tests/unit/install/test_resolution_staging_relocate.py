@@ -432,7 +432,6 @@ def test_a_destination_substituted_right_after_publish_is_never_taken_for_ours(
     assert [path for path, _reason in issues] == [destination]
 
 
-
 def test_removing_a_created_apm_modules_after_commit_leaves_none_behind(tmp_path: Path) -> None:
     """Commit keeps the directory; the locked apply removes it when empty (#5159 I2)."""
     modules = tmp_path / "apm_modules"
