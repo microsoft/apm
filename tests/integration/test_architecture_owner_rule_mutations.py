@@ -5618,7 +5618,10 @@ def test_version_rendering_guard_rejects_dropped_lazy_delegation() -> None:
     """entrypoint.py must preserve lazy delegation to apm_cli.cli.main."""
     path = "src/apm_cli/entrypoint.py"
     source = _source(path)
-    old = "from apm_cli.cli import main as cli_main\n\n    cli_main()"
+    old = (
+        "from apm_cli.cli import main as cli_main\n\n"
+        "    with verdict_record.recording(argv):\n        cli_main()"
+    )
     new = "import apm_cli.commands.install  # bypass"
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)
