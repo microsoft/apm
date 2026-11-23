@@ -5369,6 +5369,13 @@ def test_owner_rules_report_nothing_before_mutation(
             id="retired-heal-deletes-an-emptied-file-without-provenance-4867",
         ),
         pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/install/deploy_snapshot.py",
+            "        return vouches_for_current_bytes(path, prior)",
+            "        return True",
+            id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
+        ),
+        pytest.param(
             "install-deployment-outcome",
             "src/apm_cli/commands/mcp.py",
             'cli.main(args=forwarded, prog_name="apm")',
