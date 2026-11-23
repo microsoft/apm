@@ -432,7 +432,7 @@ def discover_trust_policy(project_root: Path) -> PolicyFetchResult:
 
     try:
         return discover_policy_with_chain(Path(project_root))
-    except (OSError, ValueError, RuntimeError) as exc:
+    except POLICY_DISCOVERY_ERRORS as exc:
         return discovery_failure_result(exc)
 
 
