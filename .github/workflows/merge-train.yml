@@ -177,6 +177,7 @@ jobs:
     if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
     permissions:
       contents: read
+      pull-requests: read
     uses: ./.github/workflows/ci.yml
     with:
       base_sha: ${{ needs.scope.outputs.base_sha }}
