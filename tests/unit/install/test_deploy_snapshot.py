@@ -1337,3 +1337,32 @@ def test_a_directory_a_user_made_where_a_killed_unlink_removed_a_file_is_kept(
 
     assert outcome.kept == (("run.sh", "it changed after the interrupted install"),)
     assert script.is_dir()
+
+
+def test_a_partial_directory_with_an_unlistable_subtree_is_kept(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5087: replay never rolls back a directory it could not fully inspect."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill, ledger = _partial_skill(project)
+    assets = skill / "assets"
+    assets.mkdir()
+    (assets / "a.md").write_bytes(b"asset\n")
+    ledger[".kiro/skills/s/assets/a.md"] = compute_file_hash(assets / "a.md")
+    _kill_partway_through_rmtree(monkeypatch, apm_home, project, lambda: write_seam.rmtree(skill))
+    (assets / "mine.md").write_bytes(b"mine\n")
+    scandir = os.scandir
+
+    def unlistable(path="."):
+        if not isinstance(path, int) and os.fspath(path) == str(assets):
+            raise PermissionError(13, "Permission denied", str(assets))
+        return scandir(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", unlistable)
+        outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == ((".kiro/skills/s", "it changed after the interrupted install"),)
+    assert (assets / "mine.md").read_bytes() == b"mine\n"

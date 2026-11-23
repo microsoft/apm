@@ -765,6 +765,7 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
 
 def _holds_apm_state(unit: _Replay) -> bool:
     """Whether the path holds only what APM put there (see :func:`_decide`)."""
+    _ensure_listable(unit.path)
     current = _state(unit.path)
     whole = unit.events.get("")
     sealed = whole[2] if isinstance(whole, tuple) else whole
@@ -785,6 +786,22 @@ def _holds_apm_state(unit: _Replay) -> bool:
 
 
 _ABSENT_EXPECTED = "absent"
+
+
+def _ensure_listable(path: Path) -> None:
+    """Raise ``OSError`` when a directory below *path* cannot be listed.
+
+    ``Path.rglob`` skips such a subtree silently, so its fingerprint would
+    omit entries a user may have changed.
+    """
+    if not path.is_dir() or path.is_symlink():
+        return
+
+    def fail(exc: OSError) -> None:
+        raise exc
+
+    for _ in os.walk(path, onerror=fail):
+        pass
 
 
 def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:

@@ -12,6 +12,7 @@
     "tests/unit/install/test_deploy_snapshot.py::test_a_kill_partway_through_an_rmtree_rolls_the_directory_back",
     "tests/unit/install/test_deploy_snapshot.py::test_a_kill_partway_through_a_skill_path_migration_rolls_it_back",
     "tests/unit/install/test_deploy_snapshot.py::test_a_partial_directory_a_user_changed_after_the_kill_is_kept",
-    "tests/unit/install/test_deploy_snapshot.py::test_a_directory_a_user_made_where_a_killed_unlink_removed_a_file_is_kept"
+    "tests/unit/install/test_deploy_snapshot.py::test_a_directory_a_user_made_where_a_killed_unlink_removed_a_file_is_kept",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_partial_directory_with_an_unlistable_subtree_is_kept"
   ]
 }
