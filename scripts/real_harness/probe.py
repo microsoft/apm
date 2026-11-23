@@ -132,9 +132,15 @@ def _text(value: object) -> str:
 class Cell:
     """One (harness, env, scope) probe under an isolated HOME."""
 
-    def __init__(self, out: Path, harness: str, env: str, scope: str) -> None:
+    def __init__(
+        self, out: Path, harness: str, env: str, scope: str, *, register_known: bool = False
+    ) -> None:
         self.harness, self.env, self.scope = harness, env, scope
-        self.id = f"{harness}-{env}-{scope}"
+        # Scratch oracle for the #5176 fix design: keep the committed relative
+        # path and also register the marketplace in Claude's user-level registry.
+        self.register_known = register_known
+        suffix = "-known" if register_known else ""
+        self.id = f"{harness}-{env}-{scope}{suffix}"
         self.root = (out / self.id).resolve()
         if self.root.exists():
             shutil.rmtree(self.root)
@@ -394,6 +400,19 @@ class Cell:
         self.evidence["native_settings"] = _read(settings)
         shutil.rmtree(self.home / ".claude" / "plugins", ignore_errors=True)
 
+    def register_known_marketplace(self) -> None:
+        """Write the known_marketplaces.json entry Claude writes for a directory marketplace."""
+        root = str(self.install_root / ".agents" / "plugins")
+        registry = self.home / ".claude" / "plugins" / "known_marketplaces.json"
+        data = json.loads(_read(registry) or "{}")
+        data[self.marketplace()] = {
+            "source": {"source": "directory", "path": root},
+            "installLocation": root,
+            "lastUpdated": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+        }
+        _json(registry, data)
+        self.evidence["known_marketplaces"] = _read(registry)
+
     def absolutize_project_marketplace(self) -> None:
         settings = self.project / ".claude" / "settings.json"
         data = json.loads(_read(settings))
@@ -586,6 +605,8 @@ class Cell:
         if self.apm_install(plugin):
             self.run("git-add", ["git", "add", "-A"], self.install_root)
             self.run("git-commit", ["git", "commit", "-q", "-m", "apm install"], self.install_root)
+            if self.register_known and self.harness == "claude" and self.scope == "project":
+                self.register_known_marketplace()
             if self.env in ("worktree", "headless-wt-after-main"):
                 self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             cwd = self.run_dir()
@@ -602,6 +623,7 @@ class Cell:
             "env": self.env,
             "scope": self.scope,
             "fixture": "agent-plugin" if self.agent_plugin else "claude-plugin",
+            "register_known": self.register_known,
             "harness_version": self.harness_version(),
             "verdict": verdict,
             "reason": reason,
@@ -635,6 +657,7 @@ def main() -> int:
     run.add_argument("--env", choices=ENVS + DIAG_ENVS, action="append")
     run.add_argument("--scope", choices=SCOPES, action="append")
     run.add_argument("--out", type=Path, required=True)
+    run.add_argument("--register-known-marketplace", action="store_true")
     summ = sub.add_parser("summarize")
     summ.add_argument("out", type=Path)
     args = parser.parse_args()
@@ -643,7 +666,10 @@ def main() -> int:
         return 0
     for env in args.env or ENVS:
         for scope in args.scope or SCOPES:
-            result = Cell(args.out, args.harness, env, scope).execute()
+            cell = Cell(
+                args.out, args.harness, env, scope, register_known=args.register_known_marketplace
+            )
+            result = cell.execute()
             print(f"{result['cell']}: {result['verdict']} ({result['reason']})", flush=True)
     return 0
 

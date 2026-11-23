@@ -83,6 +83,9 @@ jobs:
               --env headless-rerun --env headless-abspath --env headless-untrusted \
               --env headless-native --env headless-wt-branch \
               --env headless-wt-after-main --scope project
+            python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
+              --scope project --register-known-marketplace \
+              --env normal --env worktree --env headless --env headless-wt-branch
           fi
 
       - name: Summary
