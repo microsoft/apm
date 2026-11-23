@@ -22,7 +22,6 @@ from apm_cli.install.package_resolution import EffectiveDependencySelection
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.content_hash import canonical_digest
 from apm_cli.version import get_version
-from tests.lifecycle.known import KnownFailure
 
 pytestmark = [
     pytest.mark.component,
@@ -481,11 +480,6 @@ def test_two_prompts_for_one_destination_replay_live(tmp_path: Path) -> None:
 # -- intact() reads served scratch files without following them (#5103) -----------
 
 _SERVED = b"served bytes\n"
-_NOT_A_FILE = KnownFailure(
-    "#5103",
-    "intact() follows a link (or blocks on a FIFO) at a served scratch destination",
-    r"a served destination that is no regular file counts as intact",
-)
 
 
 def _records(scratch: Path):
@@ -542,20 +536,29 @@ def test_a_served_regular_file_with_its_bytes_is_intact(tmp_path: Path) -> None:
     assert _intact_within(_records(tmp_path), tmp_path / "rule.md") is True
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks and FIFOs")
-@pytest.mark.parametrize("kind", ["symlink", "fifo"])
-@_NOT_A_FILE.mark()
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX links, FIFOs and devices")
+@pytest.mark.parametrize("kind", ["symlink", "fifo", "device", "device-link", "directory"])
 def test_a_served_destination_that_is_no_regular_file_is_not_intact(
     tmp_path: Path, kind: str
 ) -> None:
-    """A link to the served bytes, or a FIFO, replays everything live, without blocking."""
+    """A link, FIFO, device or directory at a served destination replays everything live."""
     destination = tmp_path / "rule.md"
     if kind == "symlink":
         target = tmp_path / "elsewhere.md"
         target.write_bytes(_SERVED)
         destination.symlink_to(target)
-    else:
+    elif kind == "fifo":
         os.mkfifo(destination)
+    elif kind == "device":
+        try:
+            os.mknod(destination, 0o600 | stat.S_IFCHR, os.makedev(1, 3))
+        except (PermissionError, AttributeError):
+            pytest.skip("creating a device node needs privileges")
+    elif kind == "device-link":
+        # An endless device read through a link must not be followed.
+        destination.symlink_to("/dev/zero")
+    else:
+        destination.mkdir()
 
     verdict = _intact_within(_records(tmp_path), destination)
 
