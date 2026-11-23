@@ -181,7 +181,9 @@ class _Store:
                     # record never transfers to the file that link reaches.
                     if config_file_key(other) == other and os.path.samefile(other, path):
                         return other, row
-                except OSError:
+                except (OSError, RuntimeError):
+                    # RuntimeError: a key that became a symlink loop (Python < 3.13);
+                    # its record stays, it just never aliases another file.
                     continue
         return key, None
 

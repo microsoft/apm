@@ -26,6 +26,7 @@ from apm_cli.integration.skill_adoption import (
     skill_tree_baselines,
     tree_equals_install_output,
 )
+from apm_cli.integration.skill_bundle_routes import promoted_skill_name
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
 )
@@ -365,6 +366,9 @@ class SkillIntegrator(BaseIntegrator):
         # Only successful writes establish same-run ownership, keyed by the
         # actual destination rather than a basename shared by several targets.
         self._native_skill_session_owners: dict[Path, str | None] = {}
+        # Harnesses a native plugin route serves for the package being integrated.
+        self._skill_native_harnesses: frozenset[str] = frozenset()
+        self._pending_native_harnesses: frozenset[str] = frozenset()
         self._ownership_snapshots: (
             dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
         ) = None
@@ -566,6 +570,14 @@ class SkillIntegrator(BaseIntegrator):
                 for path in copied
             )
         return copied
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, targets, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """See :func:`apm_cli.integration.skill_bundle_routes.verbatim_destinations`."""
+        from apm_cli.integration.skill_bundle_routes import verbatim_destinations
+
+        return verbatim_destinations(self, package_info, project_root, targets, source_plan)
 
     def _ownership_maps(self, lockfile_root: Path) -> tuple[Mapping[str, str], Mapping[str, str]]:
         """Read durable ownership once per used root in the current integration phase."""
@@ -951,8 +963,7 @@ class SkillIntegrator(BaseIntegrator):
             # --skill filter: skip skills not in the requested subset
             if name_filter is not None and raw_sub_name not in name_filter:
                 continue
-            is_valid, _ = validate_skill_name(raw_sub_name)
-            sub_name = raw_sub_name if is_valid else normalize_skill_name(raw_sub_name)
+            sub_name = promoted_skill_name(raw_sub_name)
             target = target_skills_root / sub_name
             rewriter = link_rewriter or SkillIntegrator()
             rel_path = rewriter._skill_path_entry(target, materialization_root)
@@ -1584,6 +1595,15 @@ class SkillIntegrator(BaseIntegrator):
             complete=self._skill_materialization_complete(project_root),
         )
 
+    def serve_natively(self, harnesses: frozenset[str]) -> None:
+        """Name the harnesses a native plugin route serves for the next package (#5036).
+
+        Their skill roots are not "outside this install": the native route
+        owns them, so no kept-copy line is reported there. The next
+        :meth:`integrate_package_skill` call consumes it.
+        """
+        self._pending_native_harnesses = frozenset(harnesses)
+
     def integrate_package_skill(
         self,
         package_info,
@@ -1611,6 +1631,9 @@ class SkillIntegrator(BaseIntegrator):
         never become a package's ownership proof.
         """
         enforce_agent_plugin_deployment_boundary(package_info)
+        # Consume the package's native harnesses so they never reach another package.
+        self._skill_native_harnesses = self._pending_native_harnesses
+        self._pending_native_harnesses = frozenset()
         from apm_cli.core.scope import InstallScope, get_apm_dir
 
         lockfile_root = (

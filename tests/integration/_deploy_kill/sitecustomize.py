@@ -14,6 +14,8 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
 * ``deploy+kill``: exit mid-deploy, before the next journal record once
   ``APM_TEST_DEPLOY_KILL_AFTER`` paths were journaled, written and sealed, or
   before journaling the first path ending in ``APM_TEST_DEPLOY_KILL_BEFORE``.
+* ``path+kill``: exit once the write to ``APM_TEST_DEPLOY_KILL_PATH`` (POSIX,
+  relative) finished, before its post-write seal.
 * ``unsealed+kill``: exit once the ``APM_TEST_DEPLOY_KILL_AFTER``-th journaled
   path is written, before its post-write seal.
 
@@ -57,6 +59,16 @@ if _FAULT:
             return _record(self, path, **kwargs)
 
         deploy_snapshot.DeployJournal.record = _record_or_kill
+    elif "path" in faults:
+        _target = os.environ["APM_TEST_DEPLOY_KILL_PATH"]
+        _seal = deploy_snapshot.DeployJournal.after_write
+
+        def _seal_path_or_kill(self, path):
+            if path.as_posix().endswith(f"/{_target}"):
+                os._exit(_KILLED_EXIT)
+            return _seal(self, path)
+
+        deploy_snapshot.DeployJournal.after_write = _seal_path_or_kill
     elif "unsealed" in faults:
         _after = int(os.environ["APM_TEST_DEPLOY_KILL_AFTER"])
         _seal = deploy_snapshot.DeployJournal.after_write

@@ -95,6 +95,8 @@ TREE_RECIPES: dict[str, TreeRecipe] = {
         base,
         replace(base, name=f"{base.name}-multi", hosts=_MULTI_HOSTS),
         replace(base, name=f"{base.name}-mcp", primitives=_MCP_HEAVY),
+        # Rule-dir and command targets render instructions and prompts (#4940).
+        replace(base, name=f"{base.name}-claude", targets=("claude",)),
     )
 }
 

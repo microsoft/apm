@@ -230,8 +230,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "packages. Parsed-then-refused shapes are refusal cells, one per message class: "
         "marketplace add of a source without a catalog, uninstall of an MCP server "
         "(a registry name is not found in apm.yml; an inline name is an MCP server), and a "
-        "local bundle, which writes no manifest entry (uninstall refuses it; update and "
-        "prune leave it untouched). A native plugin carries no canvas primitive",
+        "local bundle, which writes no manifest entry (uninstall removes only its deployed "
+        "hooks and refuses a bundle with none; update and prune leave it untouched). "
+        "A native plugin carries no canvas primitive",
         (
             Ev(_INSTALL, "install", "detect_local_bundle"),
             Ev(_INSTALL, "install", '"--registry"'),
@@ -257,9 +258,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
                 "was not found in apm.yml",
             ),
             Ev(
-                "src/apm_cli/commands/uninstall/engine.py",
-                "_mcp_server_hint",
-                "cannot remove local-bundle",
+                "src/apm_cli/commands/uninstall/local_bundle.py",
+                "uninstall_local_bundles",
+                "has no hooks deployed",
             ),
             Ev(
                 "src/apm_cli/commands/update.py",
@@ -438,8 +439,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "False at $APM_HOME and install, lock, update and install --mcp at -g discover no "
         "org policy; the local executables gate still parks bin/ there, and project scope "
         "refuses the denied plugin with exit 1. A user-scope cell whose GATE is "
-        "denied-dependency under one of those commands is removed until #3703 lands; "
-        "PRIM=bin with no SCOPE counts as user scope (U-BIN). Self-reinstating: "
+        "denied-dependency under one of those commands is removed until #3703 lands; a "
+        "scope-free PRIM=bin cell is not (a whole native plugin carries bin/ at project "
+        "scope, where the org deny refuses it). Self-reinstating: "
         "generator/bin_pin.py hashes the predicate, and when the hash differs from "
         "U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails",
         (
@@ -548,8 +550,8 @@ UNINSTALL_MCP_REFUSALS: Mapping[str, str] = {
     "mcp-registry": "rule|U8|uninstall-refuses-a-registry-mcp-name",
     "inline-mcp": "rule|U8|uninstall-refuses-an-inline-mcp-name",
 }
-# A local bundle writes no manifest entry: uninstall refuses it, update and
-# prune parse and leave it untouched (one cell per message class).
+# A local bundle writes no manifest entry: uninstall refuses one with no deployed
+# hooks (#3700), update and prune parse and leave it untouched (one cell per message class).
 LOCAL_BUNDLE_REFUSALS: Mapping[str, str] = {
     "uninstall": "rule|U8|uninstall-refuses-a-local-bundle",
     "update": "rule|U8|update-leaves-a-local-bundle-untouched",
@@ -560,7 +562,7 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     MARKETPLACE_ADD_REFUSAL: (1, r"No marketplace\.json found in"),
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
-    LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
+    LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"Local bundle 'p-exec' has no hooks deployed\."),
     # p-exec ships only executables the gate parks, so its bundle install records
     # nothing: update has no bundle to name (#4318 names a recorded one).
     LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
@@ -853,9 +855,10 @@ def u_user_org_policy_applies(cell: Mapping[str, str]) -> bool:
     """A user-scope cell whose promise is that an org dependency deny governs it."""
     if cell.get("GATE") != "denied-dependency":
         return False
-    user = cell.get("SCOPE") == "user" or (cell.get("PRIM") == "bin" and "SCOPE" not in cell)
+    # Only an explicit user-scope cell: a scope-free bin cell is reachable at project
+    # scope too, where a whole native plugin carries bin/ and the org deny refuses it.
     op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
-    return user and op in ORG_DENY_OPS
+    return cell.get("SCOPE") == "user" and op in ORG_DENY_OPS
 
 
 def u_user_org_policy_pinned() -> bool:

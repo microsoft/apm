@@ -126,7 +126,7 @@ def kept_file_message(
 
 
 def dependency_not_allowed_advice(
-    packages: Sequence[str], denied: int, policy_source: str | None
+    packages: Sequence[str], denied: int, policy_source: str | None, withheld: str | None = None
 ) -> tuple[Remediation | None, str]:
     """Render the next step for *denied* dependencies outside the org allow list (#4570).
 
@@ -134,12 +134,14 @@ def dependency_not_allowed_advice(
     dependency (a transitive one goes with the entry that brings it in).
     Returns the bound :data:`DEPENDENCY_NOT_ALLOWED` remediation, or ``None``
     when no entry is known, and the sentence ``apm audit --ci`` prints.
+    *withheld* names why an uninstall is not suggested, when one is known (#5008).
     """
     them = "it" if denied == 1 else "them"
     source = f" (policy source: {policy_source})" if policy_source else ""
     ask = f"ask your org admin to allow {them}{source}"
     if not packages:
-        return None, _sentence(ask)
+        reason = f"; an uninstall is not suggested because {withheld}" if withheld else ""
+        return None, _sentence(ask + reason)
     subject = "the dependency" if denied == 1 else f"the {denied} dependencies"
     remedy = DEPENDENCY_NOT_ALLOWED.bind(packages=" ".join(packages), subject=subject)
     return remedy, _sentence(f"{remedy.clause()}, or {ask}")
@@ -383,6 +385,14 @@ UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
     "apm uninstall {packages} --trust-lockfile",
     "delete the files marked deletable and keep the rest",
     before="if the source is gone for good",
+)
+# A kept local descendant whose source changed since install refuses the
+# re-anchor (#5058); reinstalling recopies it, then the uninstall can proceed.
+UNINSTALL_REANCHOR_STALE_COPY = _entry(
+    "uninstall-reanchor-stale-copy",
+    "apm install --no-frozen",
+    "recopy the edited local source into apm_modules",
+    then="retry the uninstall",
 )
 # -- end W2 integration --
 # -- W2 marketplace --
@@ -1677,6 +1687,18 @@ REPOSITORY_NOT_FOUND = _entry(
 )
 LOCAL_BUNDLE_UPDATE = _entry(
     "local-bundle-update", "apm install <newer-bundle-file>", "update a bundle"
+)
+# A local bundle is not in apm.yml, so it is uninstalled apart from packages (#3700).
+LOCAL_BUNDLE_UNINSTALL_APART = _entry(
+    "local-bundle-uninstall-apart",
+    "apm uninstall <bundle>",
+    "remove a local bundle's hooks",
+    then="uninstall the other packages in a separate command",
+)
+LOCAL_BUNDLE_UNINSTALL_BY_NAME = _entry(
+    "local-bundle-uninstall-by-name",
+    "apm uninstall <installed-name>",
+    "remove one installed local bundle's hooks",
 )
 NATIVE_PLUGIN_UPDATE_HELD = _entry(
     "native-plugin-update-held", "apm install", "update it", before="drop --target"

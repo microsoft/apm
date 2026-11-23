@@ -1,0 +1,15 @@
+{
+  "issue": 5003,
+  "fixed_in": "Unreleased",
+  "summary": "after apm uninstall of a local bundle installed with --as removed its hooks but failed to update the pending record, a retry by the bundle path did not find the aliased bundle; path selection now also maps a retiring bundle's recorded approval key to its name, while two retiring copies stay ambiguous.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_retry_by_bundle_path_finishes_an_aliased_bundle_record",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_retry_by_bundle_path_refuses_two_aliased_copies"
+  ]
+}
