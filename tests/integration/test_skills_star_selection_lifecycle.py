@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -153,3 +154,35 @@ def test_star_mixed_with_names_is_refused_before_any_write(
     assert world.snap() == before
     # Nothing at all was written: apm.yml is still the project's only entry.
     assert sorted(path.name for path in world.project.iterdir()) == ["apm.yml"]
+
+
+def test_star_absorbs_a_named_selection_of_the_same_plugin(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """["*"] beside another package's ["alpha"] records ["*"]; frozen and audit agree."""
+    world = _World(tmp_path, apm_binary_path, ["*"])
+    helper = world.project / "packages" / "helper"
+    helper.mkdir(parents=True)
+    (helper / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "helper",
+                "version": "1.0.0",
+                "dependencies": {"apm": [{"git": _DEPENDENCY, "ref": "main", "skills": ["alpha"]}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads((world.project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"].append({"path": "./packages/helper"})
+    (world.project / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+
+    world.apm("install")
+
+    assert world.loose_skills() == {"alpha", "beta"}
+    world.assert_not_native()
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    (plugin,) = [d for d in lock["dependencies"] if d.get("repo_url", "").endswith("star-plugin")]
+    assert plugin["skill_subset"] == ["*"]
+    world.apm("install", "--frozen")
+    world.apm("audit", "--ci")
