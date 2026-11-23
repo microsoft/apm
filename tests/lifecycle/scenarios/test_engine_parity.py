@@ -51,8 +51,9 @@ pytestmark = [
 
 
 @pytest.fixture
-def twin(lifecycle_template: World, tmp_path: Path) -> Twin:
-    return make_twin(lifecycle_template, tmp_path)
+def twin(lifecycle_template: World, _world_dir: Path) -> Twin:
+    # The short world root (Windows: git's '$GIT_DIR too big' workaround), both clones.
+    return make_twin(lifecycle_template, _world_dir.parent)
 
 
 @NEEDS_NOOP

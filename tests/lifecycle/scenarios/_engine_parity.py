@@ -33,9 +33,7 @@ import hashlib
 import importlib.util
 import os
 import re
-import shutil
 import signal
-import stat
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -55,7 +53,7 @@ from tests.lifecycle.scenarios._deploy_diff import (
     rooted,
 )
 from tests.lifecycle.world import World
-from tests.lifecycle.world.clone import clone
+from tests.lifecycle.world.clone import clone, remove_tree
 from tests.lifecycle.world.packages import MCP_SERVER
 from tests.lifecycle.world.scopes import use_policy, use_registry
 from tests.lifecycle.world.services import (
@@ -338,16 +336,13 @@ def _publish_skill(twin: Twin, body: str, tag: str) -> None:
     twin.fast.services.publish_revision(f"{ORG}/p-skill", {skill: text}, tag=tag)
 
 
-def _clear_readonly(function, path, _exc) -> None:
-    """Windows refuses to delete read-only files (git pack objects): clear the bit, retry."""
-    os.chmod(path, stat.S_IWRITE)
-    function(path)
-
-
 def _rmtree(path: Path) -> None:
-    """Remove *path* completely, or fail: a partial delete would differ between twins."""
-    if os.path.lexists(path):
-        shutil.rmtree(path, onexc=_clear_readonly)
+    """Remove *path* completely, or fail: a partial delete would differ between twins.
+
+    remove_tree clears the read-only bit git sets on pack files, which Windows
+    would otherwise refuse to delete.
+    """
+    remove_tree(path, missing_ok=True)
 
 
 def _remove_deployed(world: World) -> None:
