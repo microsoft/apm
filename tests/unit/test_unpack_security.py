@@ -191,6 +191,34 @@ class TestUnpackDestinationContainment:
 
         assert not any(output.rglob("*"))
 
+    def test_unportable_lockfile_names_refused_before_any_write(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, {".github/instructions/ok.md": "ok\n"})
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[
+                    ".github/instructions/ok.md",
+                    ".github/instructions/a. /x.md",
+                    ".github/instructions/x.md:y",
+                    ".github/instructions/aux.md",
+                ],
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        output = tmp_path / "project"
+        (output / ".github" / "instructions").mkdir(parents=True)
+        (output / ".github" / "instructions" / "mine.md").write_bytes(b"mine\n")
+        tree = sorted(output.rglob("*"))
+        before = {p: p.read_bytes() for p in tree if p.is_file()}
+
+        with pytest.raises(ValueError, match="unsafe path"):
+            unpack_bundle(bundle, output, skip_verify=True)
+
+        assert sorted(output.rglob("*")) == tree
+        assert {p: p.read_bytes() for p in tree if p.is_file()} == before
+
     def test_linked_bundle_directory_is_not_read(self, tmp_path):
         bundle = _build_bundle_dir(
             tmp_path,
