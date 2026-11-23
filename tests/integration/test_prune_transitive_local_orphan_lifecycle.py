@@ -674,3 +674,33 @@ def test_prune_matches_hard_linked_primitive_files_by_path(
     assert not any("dropped" in key for key in rows), sorted(rows)
     assert any("kept" in key for key in rows), sorted(rows)
     assert (agents / "kept.agent.md").is_file()
+
+
+def test_prune_keeps_the_parent_chain_when_the_new_parent_is_unlocked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """a now declares an uninstalled z -> f: f must not be recorded under a row-less z."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ("../f",)), ("d", ("../e",)), ("a", ())):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _skill_package(vendor / "z", "z", ("../f",))
+    _skill_package(vendor / "a", "a", ("../z",))
+    _manifest(world, ["./vendor/a"])
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(rows), sorted(rows)
+    assert "_local/z" not in rows, sorted(rows)
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/e"
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    lock_bytes = (world.project / "apm.lock.yaml").read_bytes()
+    world.apm("prune")
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock_bytes
