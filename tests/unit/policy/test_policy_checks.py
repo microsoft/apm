@@ -912,6 +912,8 @@ def test_an_unreadable_recorded_path_makes_the_proof_fail_not_the_audit(tmp_path
     lock.add_dependency(
         LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])
     )
-    project = SimpleNamespace(project_root=_UnreadablePath(tmp_path), lock=lock)
+    project = SimpleNamespace(
+        project_root=_UnreadablePath(tmp_path), lock=lock, modules_dir=tmp_path / "apm_modules"
+    )
 
-    assert _final_symlinks(set(lock.dependencies), project) is None
+    assert _final_symlinks(set(lock.dependencies), [], project) is None

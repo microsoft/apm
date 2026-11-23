@@ -122,7 +122,9 @@ class PromptIntegrator(BaseIntegrator):
         prompts_dir = self._prompts_dir(target, mapping, project_root)
         name = getattr(getattr(package_info, "package", None), "name", "")
         files = self.find_prompt_files(package_info.install_path, source_plan)
-        return {prompts_dir / self.get_target_filename(f, name): f for f in files}
+        return self.unique_destinations(
+            (prompts_dir / self.get_target_filename(f, name), f) for f in files
+        )
 
     def get_target_filename(self, source_file: Path, package_name: str) -> str:
         """Generate target filename (clean, no suffix).

@@ -369,7 +369,7 @@ class InstructionIntegrator(BaseIntegrator):
             return None
         deploy_dir = self._deploy_dir(target, mapping, project_root)
         files = self.find_instruction_files(Path(package_info.install_path), source_plan)
-        return {self._verbatim_target(deploy_dir, source): source for source in files}
+        return self.unique_destinations((self._verbatim_target(deploy_dir, f), f) for f in files)
 
     def deployed_rule_matches(self, source: Path, target: TargetProfile, deploy_root: Path) -> bool:
         """Prove native delivery using the same filename and renderer as install.
