@@ -42,15 +42,16 @@ NATIVE_ROUTE_NOTICE = (
     "git worktrees, in non-interactive claude -p runs (including "
     "claude-code-action) and in Copilot CLI 1.0.106."
 )
-# At user scope a skills: selection parks the plugin instead of deploying loose.
+# Only a Claude-format plugin at project scope deploys loose under a skills:
+# selection; at user scope it parks, and an Agent Plugin stays native.
 _LOOSE_ROUTE_HINT = (
     ' To deploy its skills loose instead, set skills: ["*"] on this dependency in apm.yml.'
 )
 
 
-def native_route_notice(*, user_scope: bool) -> str:
-    """The native-route notice; the loose-route hint applies at project scope only."""
-    return NATIVE_ROUTE_NOTICE if user_scope else NATIVE_ROUTE_NOTICE + _LOOSE_ROUTE_HINT
+def native_route_notice(*, loose_route: bool) -> str:
+    """The native-route notice, with the loose-route hint where that route exists."""
+    return NATIVE_ROUTE_NOTICE + _LOOSE_ROUTE_HINT if loose_route else NATIVE_ROUTE_NOTICE
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +75,11 @@ class ClaudeNativePlugin:
     warning: str | None = None
     approved_pin: str | None = None
     harnesses: frozenset[str] = frozenset({CLAUDE})
+
+
+def has_loose_route(plugin: ClaudeNativePlugin, *, user_scope: bool) -> bool:
+    """Whether a skills: selection would deploy *plugin* loose instead (project scope)."""
+    return not user_scope and (plugin.source_root / ".claude-plugin/plugin.json").is_file()
 
 
 def fingerprint_native_claude_source(root: Path, *, portable: bool = False) -> str:

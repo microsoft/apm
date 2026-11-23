@@ -115,11 +115,24 @@ def test_global_install_notice_omits_the_project_only_loose_hint(
     factory = LocalGitRepositoryFactory(isolated.repository_root, env=isolated.subprocess_env())
     native = _plugin(factory, "native-kit")
     env = factory.url_rewrite_subprocess_env(native, "https://github.com/fixture/native-kit.git")
+    user_manifest = isolated.home / ".apm" / "apm.yml"
+    user_manifest.parent.mkdir(parents=True, exist_ok=True)
+    user_manifest.write_text(
+        json.dumps(
+            {
+                "name": "user",
+                "version": "1.0.0",
+                "targets": ["claude"],
+                "dependencies": {"apm": [{"git": "fixture/native-kit", "ref": "main"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
     cwd = isolated.work_root / "anywhere"
     cwd.mkdir()
 
     result = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180).run(
-        ("install", "-g", "--target", "claude", "fixture/native-kit#main"), cwd=cwd, env=env
+        ("install", "-g"), cwd=cwd, env=env
     )
 
     assert result.returncode == 0, _evidence(result)
