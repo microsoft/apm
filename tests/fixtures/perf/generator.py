@@ -325,7 +325,11 @@ def remove_tree(path: Path) -> None:
 
     def retry(func, target, _exc) -> None:
         with contextlib.suppress(OSError):
-            os.chmod(target, stat.S_IWRITE)
+            # Never follow a link: only the entry itself is made writable.
+            if os.chmod in os.supports_follow_symlinks:
+                os.chmod(target, stat.S_IWRITE, follow_symlinks=False)
+            elif not os.path.islink(target):
+                os.chmod(target, stat.S_IWRITE)
             func(target)
 
     if sys.version_info >= (3, 12):

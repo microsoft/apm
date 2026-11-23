@@ -264,6 +264,8 @@ def _wait4_with_deadline(proc: subprocess.Popen, timeout_s: float) -> tuple[int,
 
 _CREATE_SUSPENDED = 0x00000004
 _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 
 
 def _job_popen(argv: list[str], **kwargs) -> tuple[subprocess.Popen, int]:
@@ -272,14 +274,44 @@ def _job_popen(argv: list[str], **kwargs) -> tuple[subprocess.Popen, int]:
     The process starts suspended and resumes only once it is in the job, so
     every descendant (the venv launcher's python.exe, git and its helpers)
     lands in the job too. Were it started running, children spawned before
-    ``AssignProcessToJobObject`` would be missed.
+    ``AssignProcessToJobObject`` would be missed. The job kills its processes
+    when its last handle closes, so a crashed harness orphans nothing.
     """
     import ctypes
     from ctypes import wintypes
 
+    class _BasicLimits(ctypes.Structure):
+        _fields_ = (
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        )
+
+    class _ExtendedLimits(ctypes.Structure):
+        _fields_ = (
+            ("BasicLimitInformation", _BasicLimits),
+            ("IoInfo", ctypes.c_uint64 * 6),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        )
+
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
     kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    )
     kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
     kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
     ntdll = ctypes.WinDLL("ntdll")
@@ -287,22 +319,29 @@ def _job_popen(argv: list[str], **kwargs) -> tuple[subprocess.Popen, int]:
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
         raise ctypes.WinError(ctypes.get_last_error())
-    proc = subprocess.Popen(argv, creationflags=_CREATE_SUSPENDED, **kwargs)
-    # Popen keeps the process handle in the private ``_handle``.
-    handle = int(proc._handle)
-    if not kernel32.AssignProcessToJobObject(job, handle):
-        error = ctypes.WinError(ctypes.get_last_error())
-        kernel32.TerminateJobObject(job, 1)
-        proc.kill()
-        proc.wait()
+    proc = None
+    try:
+        limits = _ExtendedLimits()
+        limits.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        proc = subprocess.Popen(argv, creationflags=_CREATE_SUSPENDED, **kwargs)
+        # Popen keeps the process handle in the private ``_handle``.
+        handle = int(proc._handle)
+        if not kernel32.AssignProcessToJobObject(job, handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+        status = ntdll.NtResumeProcess(handle)
+        if status:
+            raise OSError(f"NtResumeProcess failed: NTSTATUS {status & 0xFFFFFFFF:#010x}")
+    except BaseException:
+        if proc is not None:
+            kernel32.TerminateJobObject(job, 1)
+            proc.kill()
+            proc.wait()
         _close_job(job)
-        raise error
-    status = ntdll.NtResumeProcess(handle)
-    if status:
-        kernel32.TerminateJobObject(job, 1)
-        proc.wait()
-        _close_job(job)
-        raise OSError(f"NtResumeProcess failed: NTSTATUS {status & 0xFFFFFFFF:#010x}")
+        raise
     return proc, job
 
 
