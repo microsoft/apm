@@ -222,6 +222,94 @@ def _outcomes(lock: Any, files: list, records: dict[str, dict]) -> list[PackageO
     return out
 
 
+def _live_resolver() -> Any:
+    """The tiered ref resolver a fresh install uses (always upstream: CURRENT_REMOTE)."""
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy, build_tiered_ref_resolver
+
+    resolver = build_tiered_ref_resolver(
+        downloader=GitHubPackageDownloader(),
+        git_cache=None,
+        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+    )
+    if resolver is None:
+        raise Decline("tiered resolver disabled")
+    return resolver
+
+
+def _memo_lock(project_root: Path) -> tuple[Any, str]:
+    """A fresh install's lockfile from the resolution memo, every ref re-resolved live.
+
+    The resolver is a function of the manifest, the resolution environment, the
+    ref -> commit answers and the package manifests at those commits (content
+    addressed). The memo key binds the first two; every observed ref is resolved
+    again here and must answer the recorded commit. Anything else declines.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from apm_cli.cache.deploy_store import (
+        DeployStore,
+        resolution_env_fingerprint,
+        resolution_memo_key,
+    )
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.version import get_version
+
+    deploy = DeployStore.open_default()
+    if deploy is None:
+        raise Decline("no deploy store")
+    key = resolution_memo_key(
+        _manifest_bytes(project_root), get_version(), resolution_env_fingerprint()
+    )
+    memo = deploy.resolution_memo(key)
+    if not memo:
+        raise Decline("no resolution memo")
+    text = memo["lock"]
+    lock = LockFile.from_yaml(text)
+    observations = memo["observations"]
+    deps = lock.dependencies
+    if sorted(o[0] for o in observations) != sorted(k for k in deps if k != "."):
+        raise Decline("memo dependency set")
+    for dep_key, host, repo_url, ref, commit in observations:
+        dep = deps[dep_key]
+        recorded = (dep.host, dep.repo_url, dep.resolved_ref, dep.resolved_commit)
+        if recorded != (host, repo_url, ref, commit) or not ref or not commit:
+            raise Decline("memo observation")
+        if getattr(dep, "source", None) is not None:
+            raise Decline("non-git source")
+    resolver = _live_resolver()
+
+    def resolve(observation: list) -> bool:
+        resolved = resolver.resolve(deps[observation[0]].to_dependency_ref())
+        return (resolved.resolved_commit or "").lower() == str(observation[4]).lower()
+
+    with ThreadPoolExecutor(max_workers=min(8, len(observations) or 1)) as pool:
+        if not all(pool.map(resolve, observations)):
+            raise Decline("a ref moved since the memo")
+    return lock, text
+
+
+def _fresh_preconditions(project_root: Path, lock: Any, fetch: Any) -> None:
+    """Inputs the resolution memo does not key: any of them takes the full run (QL S4')."""
+    if fetch is not None and getattr(fetch, "found", False):
+        raise Decline("org policy in force")
+    for config in (getattr(lock, "mcp_configs", None) or {}).values():
+        if not isinstance(config, dict) or config.get("registry") is not False:
+            raise Decline("registry MCP server")
+    from apm_cli.utils.yaml_io import load_yaml_str
+
+    manifest = load_yaml_str(_manifest_bytes(project_root).decode("utf-8")) or {}
+    if not isinstance(manifest, dict) or not manifest.get("targets", manifest.get("target")):
+        raise Decline("no explicit targets")
+
+
+def _write_new_lock(lock_path: Path, text: str) -> None:
+    """Create the lockfile a fresh full install would write; never replace one."""
+    fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
 def _within(root: Path, rel: str) -> Path:
     if (
         not rel
@@ -424,9 +512,15 @@ def try_apply(
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
 
         lock_path = get_lockfile_path(project_root)
-        lock = LockFile.read(lock_path)
-        if lock is None:
-            raise Decline("no lockfile")
+        fresh_lock: str | None = None
+        if lock_path.exists():
+            lock = LockFile.read(lock_path)
+            if lock is None:
+                raise Decline("unreadable lockfile")
+        elif frozen_disposition.replay:
+            raise Decline("frozen without a lockfile")
+        else:
+            lock, fresh_lock = _memo_lock(project_root)
         if lock.apm_version != installed_apm_version():
             raise Decline("lockfile from another apm version")
         if lock.lsp_servers or lock.local_deployed_files:
@@ -439,6 +533,8 @@ def try_apply(
             admits, fetch = noop_diff._policy_admits(project_root)
         if not admits:
             raise Decline("policy")
+        if fresh_lock is not None:
+            _fresh_preconditions(project_root, lock, fetch)
         if not noop_diff.sources_scan_clean(project_root, lock):
             raise Decline("security scan findings")
         from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
@@ -461,9 +557,12 @@ def try_apply(
         records = _package_records(lock, targets, deploy)
         files = _plan_files(project_root, lock, records, deploy, receipts)
         outcomes = _outcomes(lock, files, records)
-        extras = _plan_extras(project_root, lock_path.read_text(encoding="utf-8"), store)
+        lock_text = fresh_lock if fresh_lock is not None else lock_path.read_text("utf-8")
+        extras = _plan_extras(project_root, lock_text, store)
         if not all(data.isascii() for _p, data in extras):
             raise Decline("non-ASCII deployed content")
+        if fresh_lock is not None:
+            _write_new_lock(lock_path, fresh_lock)
         for checkout, install_path, sha in packages:
             _copy_package(checkout, install_path, sha)
         for path, data, _d, _o in files:
