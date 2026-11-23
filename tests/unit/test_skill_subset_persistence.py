@@ -360,6 +360,25 @@ class TestSkillSubsetAdditiveMerge:
         assert isinstance(entry, dict)
         assert sorted(entry["skills"]) == ["grill-me", "qa"]
 
+    def test_skill_name_added_to_a_select_all_entry_keeps_select_all(self):
+        """--skill alpha on an existing skills: ["*"] writes back ["*"], not a mix."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"git": "owner/repo", "skills": ["*"]}]
+        with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+            outcomes, _invalid, _validated, _mktplace, entries, _changed = (
+                _resolve_package_references(
+                    ["owner/repo"], current_deps, {"owner/repo"}, skill_subset=("alpha",)
+                )
+            )
+
+        assert len(outcomes) == 1
+        assert entries["owner/repo"]["skills"] == ["*"]
+        # The written entry parses back cleanly: no mixed "*" and names.
+        assert DependencyReference.parse_from_dict(entries["owner/repo"]).skill_subset == ["*"]
+
     def test_skill_names_no_duplicates(self):
         """Re-adding an existing skill name does not produce duplicates."""
         from unittest.mock import patch
