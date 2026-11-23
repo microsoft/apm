@@ -976,6 +976,10 @@ def run_mcp_integration(  # noqa: PLR0913
             exclude=exclude,
             logger=logger,
             retire=pre_install_lock is None and not frozen,
+            manifest=apm_package,
+            dependencies=mcp_deps,
+            runtime=runtime,
+            target_decision=target_decision,
         )
 
     if prepared.omission_view is not None and lockfile_exists(lock_path):
