@@ -284,6 +284,14 @@ def test_a_new_symlink_never_passes_as_the_directory_of_a_listed_write(tmp_path:
     assert violations == [f"failed install changed durable files: ['project:{new_dir}']"]
 
 
+def test_a_new_file_never_passes_as_the_directory_of_a_listed_write(tmp_path: Path) -> None:
+    """I7-X2: a regular file at the ancestor path is an unlisted change (#4626 review)."""
+    new_dir = _NEW_SCRIPT.rsplit("/", 1)[0]
+    violations = _i7(tmp_path, _KEPT_BLOCKED + _wrote(_NEW_SCRIPT), writes=(new_dir,))
+
+    assert violations == [f"failed install changed durable files: ['project:{new_dir}']"]
+
+
 def test_a_kept_edit_install_may_deploy_a_new_surface_it_lists(tmp_path: Path) -> None:
     output = _KEPT_BLOCKED + _wrote(_CANVAS)
 
