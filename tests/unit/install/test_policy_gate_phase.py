@@ -965,3 +965,31 @@ class TestExplicitIncludesWiring:
 
         with pytest.raises(PolicyViolationError):
             run(ctx)
+
+
+@pytest.mark.parametrize("package_info", [None, "instruction"], ids=["no-targets", "instruction"])
+def test_content_types_gate_judges_only_materializations_that_deploy(tmp_path, package_info):
+    """A no-targets materialization (package_info None) deploys nothing and passes."""
+    from types import SimpleNamespace
+
+    from apm_cli.install.phases.policy_gate import enforce_content_types
+    from apm_cli.policy.schema import ManifestPolicy
+
+    package = tmp_path / "pkg"
+    (package / ".apm" / "instructions").mkdir(parents=True)
+    (package / ".apm" / "instructions" / "i.instructions.md").write_text("x\n", encoding="utf-8")
+    policy = ApmPolicy(
+        enforcement="block", manifest=ManifestPolicy(content_types={"allow": ["skill"]})
+    )
+    ctx = SimpleNamespace(
+        policy_enforcement_active=True,
+        policy_fetch=SimpleNamespace(policy=policy, source="org:acme/.github"),
+        logger=None,
+    )
+    info = None if package_info is None else SimpleNamespace(install_path=package)
+    materialized = [(SimpleNamespace(dep_key="acme/pkg"), SimpleNamespace(package_info=info))]
+    if package_info is None:
+        enforce_content_types(ctx, materialized)
+    else:
+        with pytest.raises(PolicyViolationError, match=r"manifest\.content_types"):
+            enforce_content_types(ctx, materialized)

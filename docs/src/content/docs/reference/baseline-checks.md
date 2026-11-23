@@ -176,8 +176,8 @@ the [policy schema](../policy-schema/).
 ### `kept-mcp-entries`
 
 - **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable). It appears only when such an entry exists.
-- **Fails when.** A kept entry is still in its config and the lockfile does not manage its server, or this machine's MCP write record cannot be used. The detail names the server, the config file and the runtime, or the unusable record file.
-- **Remediation.** Remove each entry you no longer use, or declare the server again, then run `apm install`. Audit does not change the native configuration.
+- **Fails when.** A kept entry is still in the selected config and the lockfile does not manage its server, or this machine's MCP write record cannot be used (without a lockfile, or once an install without a lockfile met it, also after the lockfile is rewritten). The detail names the server, the config file and the runtime, or the unusable record file.
+- **Remediation.** Remove each entry you no longer use, or declare the server again, and remove an unusable record file, then run `apm install`. Audit does not change the native configuration.
 
 ### `content-integrity`
 
@@ -190,8 +190,8 @@ the [policy schema](../policy-schema/).
 ### `hook-approval-pins`
 
 - **What it verifies.** That every hook file the lockfile records as deployed is still admitted by its pinned approval in `apm.yml` (see [pinned approvals](../cli/approve/#pinned-approvals)). It runs after `content-integrity` and uses the same check as `apm install --frozen`, so both reach one verdict.
-- **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead. It also fails when a file the lockfile does not record sits at one of a package's own hook destinations (such as `.github/hooks/<package>-<name>.json`) while the executables gate withholds that package's hooks (denied or not approved); the detail names the path. `apm install` keeps such a file and warns naming it, because no lock record proves APM wrote it.
-- **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`. For an unrecorded file at a withheld package's hook path, delete it if you did not write it yourself, then run `apm audit --ci`.
+- **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead. It also fails when a file the lockfile does not record sits at one of a package's own hook destinations (such as `.github/hooks/<package>-<name>.json`) while the executables gate withholds that package's hooks (denied or not approved); the detail names the path. For targets that merge hooks into one config file (such as `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`), it fails on an entry that matches such a package's own hook and that no ownership record attributes to another source; the detail names the file and the event. `apm install` keeps such a file or entry and warns naming it, because no lock record proves APM wrote it.
+- **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`. For an unrecorded file at a withheld package's hook path, delete it if you did not write it yourself, then run `apm audit --ci`; for a named merged-config entry, remove the entry if you did not add it yourself.
 
 ### `includes-consent`
 

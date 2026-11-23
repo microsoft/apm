@@ -155,6 +155,24 @@ def _recorded_deployed_types(dep: Any, exec_types: tuple[str, ...]) -> tuple[str
     return tuple(exec_type for exec_type in exec_types if exec_type in dep.exec_allowed_types)
 
 
+def _retired_kinds(
+    dep: Any, package_info: Any, allowed: tuple[str, ...], withheld: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Kinds a gate retirement's rebuild removes (#4567).
+
+    The types the lock records as deployed that the gate no longer allows,
+    plus *withheld* (``hooks`` for a pin mismatch), filtered by
+    :func:`~apm_cli.security.exec_kinds.rebuild_retired_kinds`; empty when
+    none is a kind the rebuild removes.
+    """
+    from apm_cli.security.exec_kinds import rebuild_retired_kinds
+
+    declared = _declared_exec_types(package_info, dep.get_unique_key())[3]
+    deployed = _recorded_deployed_types(dep, declared)
+    retired = set(withheld) | {kind for kind in deployed if kind not in allowed}
+    return rebuild_retired_kinds(deployed, retired, dep.deployed_files)
+
+
 def resolve_bin_skip(
     bin_approved: bool,
     trust_bin: bool | None,

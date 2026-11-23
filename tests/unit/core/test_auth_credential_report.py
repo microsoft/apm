@@ -99,11 +99,16 @@ def _run(
     path: str = REPO_PATH,
 ):
     resolver = resolver or AuthResolver()
-    with patch(
+    with _patched_bearer(bearer):
+        return resolver.try_with_fallback(host, operation, org="contoso", port=port, path=path)
+
+
+def _patched_bearer(bearer: MagicMock | None = None):
+    """Patch the az bearer provider; enter it once per test, never per worker thread."""
+    return patch(
         "apm_cli.core.azure_cli.get_bearer_provider",
         return_value=bearer or _unavailable_bearer(),
-    ):
-        return resolver.try_with_fallback(host, operation, org="contoso", port=port, path=path)
+    )
 
 
 def _accept_secret(token, _env):
@@ -153,8 +158,14 @@ def test_accepted_helper_credential_is_approved_once_with_fill_description(helpe
 
 def test_concurrent_workers_report_once_per_key(helper):
     resolver = AuthResolver()
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(lambda _: _run(_accept_secret, resolver=resolver), range(8)))
+
+    def _attempt(_):
+        return resolver.try_with_fallback(HOST, _accept_secret, org="contoso", path=REPO_PATH)
+
+    # One patch in the main thread: overlapping per-thread patches of one module
+    # global restore each other's mock and leave it patched for the worker (#4830).
+    with _patched_bearer(), ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_attempt, range(8)))
     assert results == ["ok"] * 8
     assert len(_actions(helper, "store")) == 1
 

@@ -3,6 +3,8 @@
 These tests run in the NORMAL test suite (no ``@pytest.mark.benchmark``).
 They compare execution time at two input sizes and assert the ratio stays
 below a threshold, catching O(n^2) regressions without full benchmarking.
+Guards whose timings are too small to survive shared-runner noise count
+the work done instead of timing it (#4753, #4857).
 
 Threshold rationale
 -------------------
@@ -12,8 +14,12 @@ An O(n^2) algorithm would give ~100x.  Each guard's threshold is set to
 flake while quadratic regressions are still caught.
 """
 
+import argparse
+import json
 import os
 import statistics
+import subprocess
+import sys
 import tempfile  # noqa: F401
 import time
 from dataclasses import dataclass, field  # noqa: F401
@@ -30,6 +36,7 @@ from apm_cli.models.dependency.replacement import (
     ReplacementRule,
     parse_replace_block,
 )
+from tests.benchmarks import ci_bench, journeys
 
 pytestmark = pytest.mark.component
 
@@ -263,38 +270,63 @@ class TestDiscoveryScaling:
 # ---------------------------------------------------------------------------
 
 
+def _console_operation_counts(get_console) -> tuple[dict[int, int], dict[int, int]]:
+    """Count Rich console constructions for 50 and 500 calls (#4857).
+
+    Returns the construction count and the number of distinct consoles
+    handed out per call count. Only the Rich ``Console`` collaborator is
+    replaced, by a counting factory returning a cheap sentinel, so the real
+    singleton and ``_ascii_console`` run but Rich construction time does not.
+    """
+    from apm_cli.utils import console
+
+    counts: dict[int, int] = {}
+    instances: dict[int, int] = {}
+    for n in (50, 500):
+        console._reset_console()
+        ops = [0]
+
+        def build(*_args, _ops=ops, **_kwargs):
+            _ops[0] += 1
+            return object()
+
+        with patch.object(console, "Console", build):
+            consoles = [get_console() for _ in range(n)]
+        instances[n] = len({id(c) for c in consoles})
+        console._reset_console()
+        counts[n] = ops[0]
+    assert counts[50] > 0
+    return counts, instances
+
+
+def _seeded_quadratic_get_console():
+    """Same singleton, rebuilt once per prior call."""
+    from apm_cli.utils import console
+
+    _seeded_quadratic_get_console.calls += 1
+    for _ in range(_seeded_quadratic_get_console.calls):
+        built = console._ascii_console(console.Console)
+    return built
+
+
 class TestConsoleSingletonScaling:
-    """Repeated _get_console() calls must be O(1) per call after init."""
+    """_get_console() must build once and stay O(1) per call, counted not timed (#4857)."""
 
-    def setup_method(self):
-        from apm_cli.utils.console import _reset_console
-
-        _reset_console()
-
-    def teardown_method(self):
-        from apm_cli.utils.console import _reset_console
-
-        _reset_console()
-
-    def test_scaling_ratio(self):
+    def test_operation_count_grows_linearly(self):
         from apm_cli.utils.console import _get_console
 
-        def call_n(n):
-            for _ in range(n):
-                _get_console()
-
-        t_small = _median_time(lambda: call_n(1000))
-        t_large = _median_time(lambda: call_n(10000))
-
-        if t_small < 1e-7:
-            pytest.skip("below measurement threshold -- too fast to measure reliably")
-
-        ratio = t_large / t_small
-        assert ratio < 15, (
-            f"Scaling ratio {ratio:.1f}x for 10x calls suggests "
-            f"caching regression (t_small={t_small:.6f}s, "
-            f"t_large={t_large:.6f}s)"
+        counts, instances = _console_operation_counts(_get_console)
+        assert instances == {50: 1, 500: 1}, (
+            f"_get_console handed out {instances} distinct consoles, a caching regression"
         )
+        assert _grows_linearly(counts), (
+            f"_get_console built {counts[500]} consoles for 500 calls and "
+            f"{counts[50]} for 50, a super-linear regression"
+        )
+        # Negative control: the same singleton rebuilt quadratically fails the guard.
+        _seeded_quadratic_get_console.calls = 0
+        seeded, _ = _console_operation_counts(_seeded_quadratic_get_console)
+        assert not _grows_linearly(seeded), seeded
 
 
 # ---------------------------------------------------------------------------
@@ -980,3 +1012,131 @@ class TestRewriteHooksDataScaling:
             f"super-linear regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
         )
+
+
+# ---------------------------------------------------------------------------
+# CI bench tooling (tests/benchmarks/ci_bench.py, journeys.py): the Perf bench
+# workflow never runs pytest, so its report and runner contracts live here.
+# ---------------------------------------------------------------------------
+
+
+def _write_bench_record(
+    root: Path, shard: int, side: str, pair: int, cpu: float, error: str = ""
+) -> None:
+    directory = root / f"perf-bench-shard-{shard}" / f"{side}-{pair:02d}"
+    directory.mkdir(parents=True)
+    record = {
+        "fixture": "tree-10",
+        "journey": "install-noop",
+        "rtt_ms": 30.0,
+        "cpu_p50_s": cpu,
+        "traffic": {"requests": 4 if side == "base" else 0},
+        "spawns": {"git": 8} if side == "base" else {},
+        "modules": 900,
+        "error": error,
+    }
+    (directory / "journeys-abc.json").write_text(json.dumps({"results": [record]}))
+
+
+def _bench_report(root: Path, shards: int, pairs: int, result: Path | None = None) -> int:
+    args = argparse.Namespace(
+        root=str(root),
+        json=str(result) if result else None,
+        base="a",
+        new="b",
+        shards=str(shards),
+        pairs=str(pairs),
+    )
+    return ci_bench.report(args)
+
+
+def test_bench_paired_ratio_cancels_a_slower_runner(tmp_path: Path, capsys) -> None:
+    # Runner 2 is twice as slow on both sides; new is exactly half of base everywhere.
+    for shard, scale in ((1, 1.0), (2, 2.0)):
+        for pair in range(2):
+            _write_bench_record(tmp_path, shard, "base", pair, 3.0 * scale)
+            _write_bench_record(tmp_path, shard, "new", pair, 1.5 * scale)
+    result = tmp_path / "result.json"
+
+    assert _bench_report(tmp_path, shards=2, pairs=2, result=result) == 0
+    (row,) = json.loads(result.read_text(encoding="utf-8"))["rows"]
+    assert "| 0.500 | 4->0 | 8->0 | 4/4 | 0/0 |" in capsys.readouterr().out
+    assert row["paired_new_over_base"] == 0.5
+
+
+def test_bench_report_fails_on_a_failed_sample(tmp_path: Path, capsys) -> None:
+    _write_bench_record(tmp_path, 1, "base", 0, 3.0)
+    _write_bench_record(tmp_path, 1, "new", 0, 1.0, error="install failed")
+
+    assert _bench_report(tmp_path, shards=1, pairs=1) == 1
+    assert "| - | 4->0 | 8->0 | 1/0 | 0/1 |" in capsys.readouterr().out
+
+
+def test_bench_report_fails_when_a_shard_is_missing(tmp_path: Path, capsys) -> None:
+    # Two runners x one pair were requested; only runner 1 uploaded.
+    _write_bench_record(tmp_path, 1, "base", 0, 3.0)
+    _write_bench_record(tmp_path, 1, "new", 0, 1.5)
+
+    assert _bench_report(tmp_path, shards=2, pairs=1) == 1
+    assert "| 1/1 | 0/0 |" in capsys.readouterr().out
+
+
+def test_bench_timed_run_kills_a_hung_command(tmp_path: Path) -> None:
+    marker = tmp_path / "still-running"
+    script = f"import time, pathlib; time.sleep(30); pathlib.Path({str(marker)!r}).touch()"
+    proc = subprocess.Popen([sys.executable, "-c", script])
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        journeys._wait4_with_deadline(proc, 0.2)
+    assert proc.poll() is not None
+    assert not marker.exists()
+
+
+def test_bench_run_measured_reports_job_cpu_and_exit_code_on_windows(monkeypatch) -> None:
+    # Job Object times are 100 ns units of user plus kernel time.
+    assert journeys._job_cpu_seconds(12_500_000, 2_500_000) == 1.5
+
+    class _Proc:
+        returncode = 3
+
+    proc = _Proc()
+    calls: list[tuple] = []
+
+    def fake_popen(argv, **kwargs):
+        calls.append(("popen", argv, kwargs))
+        return proc, 42
+
+    def fake_wait(waited, job, timeout_s):
+        calls.append(("wait", waited, job, timeout_s))
+        return 1.25
+
+    def no_wait4(*_args):
+        raise AssertionError("wait4 must not run on Windows")
+
+    monkeypatch.setattr(journeys, "_job_popen", fake_popen)
+    monkeypatch.setattr(journeys, "_job_wait_with_deadline", fake_wait)
+    monkeypatch.setattr(journeys, "_wait4_with_deadline", no_wait4)
+
+    result = journeys._run_measured(["apm", "install"], 9.0, platform="win32", cwd="x")
+
+    assert result == (proc.returncode, 1.25)
+    assert calls == [("popen", ["apm", "install"], {"cwd": "x"}), ("wait", proc, 42, 9.0)]
+
+
+def test_bench_run_measured_counts_a_grandchild(tmp_path: Path) -> None:
+    # wait4 on POSIX, the Job Object on Windows: the grandchild's CPU counts.
+    burn = (
+        "import time\nt = time.process_time()\n"
+        "while time.process_time() - t < 0.3: pass\nprint('burned')"
+    )
+    parent = (
+        f"import subprocess, sys; subprocess.run([sys.executable, '-c', {burn!r}]); sys.exit(5)"
+    )
+    log = tmp_path / "child.out"
+
+    with log.open("w") as out:
+        code, cpu = journeys._run_measured([sys.executable, "-c", parent], 30.0, stdout=out)
+
+    assert log.read_text() == "burned\n"
+    assert code == 5
+    assert cpu >= 0.3

@@ -35,23 +35,41 @@ connection (TCP + TLS) and 1 for each request.
 ## Journey harness
 
 `tests/benchmarks/journeys.py` runs the CLI as a subprocess. It finds the CLI
-from `--apm`, then `APM_BINARY_PATH`, then `.venv/bin/apm`. The journeys are:
+from `--apm`, then `APM_BINARY_PATH`, then `.venv/bin/apm` (`.venv/Scripts/apm.exe`
+on Windows). The journeys are:
 
 - boot: `--version`, `--help`
 - install: cold and warm cache, no-op, `--frozen` CI replay (committed
-  lockfile, cold cache), `-g` cold and warm
+  lockfile, cold cache), locked warm (`install-locked-warm`) and `--frozen`
+  warm (`install-frozen-warm`): a committed lockfile, no `apm_modules`, warm
+  cache; `-g` cold and warm
 - `update -y`, `uninstall`
 - local: `compile`, `audit`, `pack`, and `install-bundle` (the supported
   unpack path: a fresh project runs `apm install <bundle>`; `apm unpack` refuses
   bundles that carry hooks)
 
 It writes `journeys-<sha>.json` and `.md`. Each cell reports wall p50 and p90,
-request, round-trip and connect counts, and the 1-min load of every sample. It
-also adds a scaling table for the tree sizes.
+CPU p50 (user + sys of the `apm` child and every descendant it waited for; on
+Windows, every process of its Job Object; so the mirror's server-side work is
+excluded), request, round-trip and connect
+counts, and the 1-min load of every sample. It also adds a scaling table for
+the tree sizes. `--counts` adds subprocess spawns per executable and the
+number of imported modules, through an audit-hook `sitecustomize` on the
+child's `PYTHONPATH` (`tests/benchmarks/spawn_counter/`).
+
+The North Star scoreboard is one preset: tree-10 at 30 ms RTT, 5 runs, with
+counts. Its modes are no-op, warm (`install-locked-warm`), fresh
+(`install-warm`), frozen (`install-frozen-warm`), empty cache
+(`install-cold`, network-bound) and boot (`--version`). `--scoreboard FILE`
+appends one row per run with wall and CPU p50 per mode and the gap to 1 s.
+Explicit flags override the preset, for example `--runs 1 --profile`.
 
 ```bash
 # Smoke: one run, no RTT
 uv run python -m tests.benchmarks.journeys run --fixtures tree-10 --runs 1 --rtt 0
+
+# North Star scoreboard (tree-10, rtt 30, 5 runs, CPU and counts)
+uv run python -m tests.benchmarks.journeys run --preset scoreboard --scoreboard scoreboard.md
 
 # Baseline: scaling curve x RTT profiles, cProfile per cell
 uv run python -m tests.benchmarks.journeys run \
