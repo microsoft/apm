@@ -1110,7 +1110,6 @@ def test_a_rolled_back_install_restores_an_mcp_config_it_wrote(
     journal_config_write(config, '{"mcpServers": {"mine": {}, "apm-srv": {}}}\n')
     config.write_bytes(b'{"mcpServers": {"mine": {}, "apm-srv": {}}}\n')
     journal_config_write(created, "{}\n")
-    created.parent.mkdir(parents=True)
     created.write_bytes(b"{}\n")
     transaction.rollback()
 

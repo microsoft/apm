@@ -1,0 +1,16 @@
+{
+  "issue": 5087,
+  "fixed_in": "Unreleased",
+  "summary": "A kill partway through a journaled rmtree or skill-path migration left a partial directory that replay kept and reported as changed. Replay now rolls a partial directory holding only journaled entries back whole, and still keeps a directory the user changed.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_deploy_snapshot.py::test_a_kill_partway_through_an_rmtree_rolls_the_directory_back",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_kill_partway_through_a_skill_path_migration_rolls_it_back",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_partial_directory_a_user_changed_after_the_kill_is_kept"
+  ]
+}

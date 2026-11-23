@@ -745,8 +745,9 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
     A unit is restored only while what is there now is APM's: nothing, its
     prior state, the bytes APM's last write sealed, or a write APM began and
     never sealed (a kill mid-write; the unit line itself opens the first
-    write). Anything else, such as a file a user edited after the kill, is
-    kept.
+    write). A directory a removal APM began left partial holds only entries
+    APM journaled: it is rolled back whole. Anything else, such as a file a
+    user edited after the kill, is kept.
     """
     apply: list[_Replay] = []
     kept: list[tuple[str, str]] = []
@@ -770,6 +771,9 @@ def _holds_apm_state(unit: _Replay) -> bool:
     if current in (_ABSENT, unit.prior, sealed):
         return True
     if isinstance(whole, tuple):
+        if whole[1] == _ABSENT_EXPECTED and "dir" in current:
+            # A removal killed partway leaves part of the tree (#5087).
+            return _dir_holds_apm_state(unit, current, sealed)
         if not _matches_expected(current, whole[1]):
             return False
         if "dir" not in current or whole[1] is None:
@@ -777,6 +781,9 @@ def _holds_apm_state(unit: _Replay) -> bool:
     if "dir" not in current:
         return False
     return _dir_holds_apm_state(unit, current, sealed)
+
+
+_ABSENT_EXPECTED = "absent"
 
 
 def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
