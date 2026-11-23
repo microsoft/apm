@@ -537,6 +537,7 @@ def _git_env_include() -> bool:
 _SECTION_RE = re.compile(rb"^\s*\[\s*([A-Za-z][A-Za-z0-9.-]*)", re.MULTILINE)
 _INCLUDE_PATH_RE = re.compile(rb"^\s*path\s*=\s*(.*?)\s*$", re.IGNORECASE)
 _GIT_INCLUDE_LIMIT = 64
+_INCLUDE_UNPARSED = re.compile(rb"[;#\\]|%\(")
 
 
 def _git_includes(config: Path, data: bytes) -> list[Path]:
@@ -551,13 +552,20 @@ def _git_includes(config: Path, data: bytes) -> list[Path]:
         header = _SECTION_RE.match(line)
         if header is not None:
             section = header.group(1).lower()
+            if section.startswith(b"include") and line[line.rindex(b"]") + 1 :].strip():
+                raise ValueError("git include: a key on the section line")
             continue
         if not section.startswith(b"include"):
             continue
         match = _INCLUDE_PATH_RE.match(line)
         if match is None:
             continue
-        value = match.group(1).strip(b'"').decode("utf-8", "surrogateescape")
+        raw = match.group(1)
+        if _INCLUDE_UNPARSED.search(raw) or (os.name == "nt" and raw.lstrip(b'"').startswith(b"~")):
+            # Comments, escapes, continuations, %(prefix)/ and Windows ~ are git syntax
+            # this reader does not parse: fail closed rather than under-key (W3d R3).
+            raise ValueError("git include: unparsed value syntax")
+        value = raw.strip(b'"').decode("utf-8", "surrogateescape")
         target = Path(os.path.expanduser(value))
         found.append(target if target.is_absolute() else config.parent / target)
     return found

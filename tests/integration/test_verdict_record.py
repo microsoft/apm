@@ -418,6 +418,25 @@ def test_a_git_config_include_is_followed_and_keyed(project: Path, capsys) -> No
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize(
+    "config",
+    [
+        "[include]\n\tpath = extra.gitconfig ; a comment\n",
+        '[include]\n\tpath = "C:\\\\Users\\\\me\\\\extra.gitconfig"\n',
+        "[include] path = extra.gitconfig\n",
+        "[include]\n\tpath = %(prefix)/etc/extra.gitconfig\n",
+    ],
+    ids=["inline-comment", "quoted-backslash", "key-on-header", "prefix-form"],
+)
+def test_include_syntax_the_reader_does_not_parse_is_never_recorded(
+    project: Path, config: str
+) -> None:
+    """W3d R3: an include value the lexical reader could under-key fails closed."""
+    (project.parent / "user" / ".gitconfig").write_text(config, encoding="utf-8")
+    _record()
+    assert not (_home(project) / "verdicts").exists()
+
+
 @pytest.mark.parametrize("row", ["  source: local\n", "  virtual_path: skills/x\n"])
 def test_a_package_copy_a_hit_cannot_prove_is_never_recorded(project: Path, row: str) -> None:
     with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
