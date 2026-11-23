@@ -63,27 +63,36 @@ def _plugins(tmp_path: Path) -> dict[str, ClaudeNativePlugin]:
     }
 
 
-def _notices(tmp_path: Path, scope: InstallScope) -> dict[str, str]:
+def _notices(tmp_path: Path, scope: InstallScope, capsys) -> tuple[dict[str, str], str]:
+    """The recorded notice per plugin, and the install summary as printed."""
     ctx = SimpleNamespace(
         diagnostics=DiagnosticCollector(), scope=scope, claude_native_plugins=_plugins(tmp_path)
     )
     _note_native_route(ctx)
-    return {d.package: d.message for d in ctx.diagnostics.by_category()["warning"]}
+    recorded = {d.package: d.message for d in ctx.diagnostics.by_category()["warning"]}
+    ctx.diagnostics.render_summary()
+    return recorded, " ".join(capsys.readouterr().out.split())
 
 
 def test_project_scope_hint_only_for_a_claude_format_plugin_with_skills(
-    tmp_path: Path,
+    tmp_path: Path, capsys
 ) -> None:
-    assert _notices(tmp_path, InstallScope.PROJECT) == {
+    recorded, shown = _notices(tmp_path, InstallScope.PROJECT, capsys)
+    assert recorded == {
         "owner/skills-kit": NATIVE_ROUTE_NOTICE + _HINT,
         "owner/commands-kit": NATIVE_ROUTE_NOTICE,
         "owner/agent-kit": NATIVE_ROUTE_NOTICE,
     }
+    assert shown.count("[!] [owner/") == 3, shown
+    assert shown.count(" ".join(_HINT.split())) == 1, shown
 
 
-def test_user_scope_never_offers_the_loose_route(tmp_path: Path) -> None:
-    assert _notices(tmp_path, InstallScope.USER) == {
+def test_user_scope_never_offers_the_loose_route(tmp_path: Path, capsys) -> None:
+    recorded, shown = _notices(tmp_path, InstallScope.USER, capsys)
+    assert recorded == {
         "owner/skills-kit": NATIVE_ROUTE_NOTICE,
         "owner/commands-kit": NATIVE_ROUTE_NOTICE,
         "owner/agent-kit": NATIVE_ROUTE_NOTICE,
     }
+    assert shown.count("[!] [owner/") == 3, shown
+    assert " ".join(_HINT.split()) not in shown, shown
