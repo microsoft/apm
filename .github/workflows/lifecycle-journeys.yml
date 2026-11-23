@@ -182,7 +182,7 @@ jobs:
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 4 --dist loadgroup --durations=20 -m "not live" \
-            -rxXs tests/lifecycle/security/test_integrity.py tests/lifecycle/security/test_origin_and_credentials.py
+            -rxXs tests/lifecycle/security/test_integrity.py tests/lifecycle/security/test_origin_and_credentials.py -k "disk-or-cache or mcp-header-secret or missing_digest"
 
       # This job runs every required witness under tests/lifecycle outside journeys
       # (promise witnesses and the generated security, replay and machine rows), so
