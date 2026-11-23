@@ -448,4 +448,3 @@ def test_backslash_traversal_is_refused_before_any_write(fmt, tmp_path):
         _extract(fmt, data, tmp_path / "out")
     assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
     assert not (tmp_path / "x.md").exists()
-
