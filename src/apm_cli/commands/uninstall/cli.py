@@ -2,9 +2,11 @@
 
 import builtins
 import contextlib
+import os
 import sys
 import traceback
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import click
@@ -518,6 +520,9 @@ def _sync_integrations_for_manifest(
                     fix="resolve the org policy issue above"
                 ).sentence()
             )
+        elif isinstance(sync_err, PathTraversalError):
+            logger.warning(str(sync_err))
+            logger.warning(INTEGRATIONS_UNSYNCED.sentence())
         else:
             logger.warning(INTEGRATIONS_UNSYNCED.sentence())
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
@@ -587,17 +592,29 @@ def _pop_lock_rows(lockfile, keys, removed_rows: dict) -> bool:
 
 
 def _retain_failed_claims(
-    lockfile, removed_rows: dict, integration_cleanup, removed_hashes: dict, logger
+    lockfile, removed_rows: dict, sync: tuple, removed_hashes: dict, deploy_root, logger
 ) -> bool:
-    """Restore claims sync could not remove (#4851); return whether the lock may persist."""
-    if not removed_rows or not integration_cleanup.failed_paths:
+    """Restore claims sync could not remove (#4851); return whether the lock may persist.
+
+    *sync* is ``(integration_cleanup, integration_cleanup_error)``. A sync that
+    aborted (a path-safety refusal, for one) reports no per-path result, so
+    every removed path still on disk keeps its claim.
+    """
+    integration_cleanup, sync_error = sync
+    failed = list(integration_cleanup.failed_paths)
+    if sync_error is not None:
+        failed.extend(
+            path
+            for row in removed_rows.values()
+            for path in row.deployed_files
+            if os.path.lexists(Path(deploy_root) / path)
+        )
+    if not removed_rows or not failed:
         return True
     from .lockfile_state import retain_failed_claims
 
     try:
-        retain_failed_claims(
-            lockfile, removed_rows, integration_cleanup.failed_paths, removed_hashes
-        )
+        retain_failed_claims(lockfile, removed_rows, failed, removed_hashes)
     except Exception as state_err:
         logger.warning(
             f"Lockfile state could not be reconciled. {LOCKFILE_STATE_UNRECONCILED.sentence()}"
@@ -1599,7 +1616,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         lockfile_updated = lsp_lock_updated or lockfile_updated
         lockfile_ready = lockfile_ready and _retain_failed_claims(
-            lockfile, removed_rows, integration_cleanup, all_deployed_file_hashes, logger
+            lockfile,
+            removed_rows,
+            (integration_cleanup, integration_cleanup_error),
+            all_deployed_file_hashes,
+            deploy_root,
+            logger,
         )
 
         # Persist survivors, then rebuild APM-owned native plugin registrations

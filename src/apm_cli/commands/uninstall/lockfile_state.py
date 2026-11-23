@@ -132,20 +132,13 @@ def _anchor_claim_row(row, present: set[str]) -> None:
     A parent removed in the same uninstall is gone; the claim anchors at the
     root instead, so the replacement graph stays valid and the lock persists.
     """
-    from dataclasses import replace
-
     if row.resolved_by is not None and row.resolved_by not in present:
         row.resolved_by = None
     if row.declaring_parent is not None and row.declaring_parent not in present:
         row.declaring_parent = None
     binding = row.replacement
-    if binding is None:
-        return
-    if any(request.parent is None or request.parent in present for request in binding.requests):
-        binding.retain_parents(present)
-        return
-    first = next(iter(binding.requests))
-    binding.requests = {replace(first, parent=None): None}
+    if binding is not None:
+        binding.retain_parents_or_root(present)
 
 
 def lockfile_has_persisted_state(lockfile) -> bool:

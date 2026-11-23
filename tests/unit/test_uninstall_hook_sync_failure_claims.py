@@ -199,3 +199,50 @@ def test_a_retained_claim_whose_parent_was_also_removed_still_persists(tmp_path:
     assert persisted.dependencies[child.get_unique_key()].parent_keys == (None,)
     assert persisted.dependencies[child.get_unique_key()].deployed_files == [hook]
     assert persisted.dependencies["owner/plain"].resolved_by is None
+
+
+def test_a_parent_swapped_for_a_symlink_keeps_the_hook_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hook_package(tmp_path / "pkg")
+    project = tmp_path / "app"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: app\nversion: 1.0.0\ntargets: [copilot]\n"
+        "dependencies:\n  apm:\n    - path: ../pkg\n",
+        encoding="ascii",
+    )
+    monkeypatch.chdir(project)
+    runner = CliRunner()
+    install = runner.invoke(cli, ["install", "--target", "copilot"])
+    assert install.exit_code == 0, install.output
+    hooks = [path for path in _claims(project)["hooked"] if "/hooks/" in path]
+    hook = project / hooks[0]
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / hook.name).write_text("outside bytes", encoding="ascii")
+    moved = hook.parent.with_name("hooks-moved")
+    unlink = Path.unlink
+    target = hook.resolve()
+
+    def swap_parent(self: Path, *args, **kwargs) -> None:
+        # Selected cleanup's unlink is undone, and the hook's parent is swapped
+        # for a symlink to an outside directory before hook sync runs.
+        if self.resolve() == target and not moved.exists():
+            hook.parent.rename(moved)
+            hook.parent.symlink_to(outside, target_is_directory=True)
+            return
+        unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", swap_parent)
+
+    uninstall = runner.invoke(cli, ["uninstall", "../pkg"])
+
+    monkeypatch.undo()
+    assert moved.is_dir(), uninstall.output
+    assert uninstall.exit_code == 1, uninstall.output
+    assert ".github/hooks" in uninstall.output
+    assert "Error uninstalling packages" not in uninstall.output
+    assert (moved / hook.name).is_file()
+    assert (outside / hook.name).read_text(encoding="ascii") == "outside bytes"
+    assert set(hooks) <= set(_claims(project).get("hooked", [])), _claims(project)

@@ -13,6 +13,8 @@
     "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_uninstall_keeps_the_claim_of_a_hook_sync_could_not_remove",
     "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_retained_hook_claim_does_not_keep_its_mcp_server",
     "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_retained_claim_keeps_the_canonical_hash_baseline",
-    "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_retained_claim_whose_parent_was_also_removed_still_persists"
+    "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_retained_claim_whose_parent_was_also_removed_still_persists",
+    "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_parent_swapped_for_a_symlink_keeps_the_hook_claim",
+    "tests/unit/deps/test_replacement_binding.py::test_retain_parents_or_root_keeps_surviving_requests_and_root_anchors_orphans"
   ]
 }
