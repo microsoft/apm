@@ -223,3 +223,31 @@ def test_dependency_sections_never_creates_the_other_section() -> None:
     data: dict = {}
     dependency_sections(data, dev=False)
     assert data == {"dependencies": {"apm": []}}
+
+
+@pytest.mark.parametrize("ref", ["v2", "v1"], ids=["new-ref", "same-ref"])
+def test_a_positional_ref_keeps_the_other_fields_of_an_object_entry(ref: str) -> None:
+    """``install owner/repo#<ref>`` changes only the ref of an object entry (#5154)."""
+    existing = {
+        "git": "owner/repo",
+        "ref": "v1",
+        "skills": ["alpha"],
+        "targets": ["copilot"],
+        "alias": "kit",
+    }
+    requested = f"owner/repo#{ref}"
+    dep_ref = DependencyReference.parse(requested)
+    current_deps = [dict(existing)]
+
+    changed = update_existing_dependency_entry_if_needed(
+        current_deps,
+        already_in_deps=True,
+        apm_yml_entries={dep_ref.to_canonical(): requested},
+        canonical=dep_ref.to_canonical(),
+        dep_ref=dep_ref,
+        identity=dep_ref.get_identity(),
+        dependency_reference_cls=DependencyReference,
+    )
+
+    assert changed is (ref != "v1")
+    assert current_deps == [{**existing, "ref": ref}]

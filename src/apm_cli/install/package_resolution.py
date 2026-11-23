@@ -510,6 +510,22 @@ def try_update_existing_dependency_entry(
     return updated, None
 
 
+def _positional_ref_update(existing: Any, requested: Any, requested_ref: Any) -> dict | None:
+    """The existing object entry with only its ref changed, for ``install <pkg>#<ref>`` (#5154).
+
+    A positional request carries identity and ref only, so it must not drop
+    the object's other fields (skills, targets, alias, ...). ``None`` when
+    the request is not a positional ref on a ``git:`` object entry: a bare
+    positional still resets the entry, and an object request still replaces it.
+    """
+    if not (isinstance(existing, dict) and isinstance(requested, str) and requested_ref.reference):
+        return None
+    git = existing.get("git")
+    if not isinstance(git, str) or "#" in git:
+        return None
+    return {**existing, "ref": requested_ref.reference}
+
+
 def merge_structured_entry_into_current_deps(
     current_deps: builtins.list,
     structured_entry: str | dict,
@@ -567,6 +583,12 @@ def merge_structured_entry_into_current_deps(
                 and (not requires_explicit_path or has_explicit_path)
             ):
                 return False
+            if (
+                ref_update := _positional_ref_update(dep_entry, structured_entry, requested_ref)
+            ) is not None:
+                if ref_update == dep_entry:
+                    return False
+                structured_entry = ref_update
             current_deps[idx] = structured_entry
             if logger:
                 logger.verbose_detail(
