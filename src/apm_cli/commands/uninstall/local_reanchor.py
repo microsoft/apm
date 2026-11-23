@@ -25,6 +25,8 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -739,8 +741,6 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     leave them dangling until the next install rewrites them. Only paths the
     deploy-path gate accepts are read; any other claim refuses too.
     """
-    import re
-
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...utils.paths import portable_relpath
 
@@ -751,9 +751,15 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     if not spellings:
         return None
     # The copy's own path, not a longer sibling name such as ``_local/e2``.
-    names = re.compile(
+    literal = re.compile(
         b"(?:" + b"|".join(re.escape(s.encode()) for s in sorted(spellings)) + b")(?![\\w.-])"
     )
+    dirs = _moving_dirs(plan.moves)
+
+    def names(member: Path) -> bool:
+        data = member.read_bytes()
+        return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
+
     for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
         if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
@@ -780,11 +786,49 @@ def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
             else [(deployed, path)]
         )
         return any(
-            not gated(claim) or (member.is_file() and names.search(member.read_bytes()))
-            for claim, member in members
+            not gated(claim) or (member.is_file() and names(member)) for claim, member in members
         )
     except OSError:
         return True  # an unreadable file cannot be cleared
+
+
+# A path-like token: anything between whitespace, brackets, quotes and separators.
+_PATH_TOKEN = re.compile(r"[^\s()<>\[\]\"'`|,;*]+")
+
+
+def _moving_dirs(moves) -> tuple[str, ...]:
+    """Each moving copy as written and as resolved (a symlinked apm_modules root)."""
+    dirs = set()
+    for current, _target in moves:
+        dirs.add(os.path.normcase(os.path.normpath(os.fspath(current))))
+        dirs.add(os.path.normcase(os.path.realpath(current)))
+    return tuple(sorted(dirs))
+
+
+def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bool:
+    """Whether a path token in *data* names a moving copy once normalized (#5133).
+
+    Each token resolves against the file's directory and the project root:
+    ``.`` and ``..`` segments are folded, and the result is compared both as
+    written and through symlinks, so ``_local/./e`` or a link through a
+    symlinked apm_modules root counts as the copy itself.
+    """
+
+    def under(candidate: str) -> bool:
+        candidate = os.path.normcase(candidate)
+        return any(candidate == d or candidate.startswith(d + os.sep) for d in dirs)
+
+    for token in _PATH_TOKEN.findall(data.decode("utf-8", "replace")):
+        path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
+        if "/" not in path or "://" in path:
+            continue
+        if not path.endswith(".."):
+            path = path.rstrip(".:")
+        for base in (member.parent, project_root):
+            candidate = os.path.normpath(os.path.join(base, path))
+            if under(candidate) or under(os.path.realpath(candidate)):
+                return True
+    return False
 
 
 def _native_owned(lockfile) -> bool:
