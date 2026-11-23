@@ -338,9 +338,14 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
             raise Decline("local content or LSP")
         if (project_root / ".apm").exists():
             raise Decline("root project primitives")
-        admits, fetch = noop_diff._policy_admits(project_root)
+        from apm_cli.install.fast_output import quiet
+
+        with quiet():
+            admits, fetch = noop_diff._policy_admits(project_root)
         if not admits:
             raise Decline("policy")
+        if not noop_diff.sources_scan_clean(project_root, lock):
+            raise Decline("security scan findings")
         from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
         from apm_cli.core.scope import InstallScope
         from apm_cli.policy.ci_checks import resolve_audit_scope
@@ -363,11 +368,13 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
             _write(path, data)
         for path, data in extras:
             _write(path, data)
-        if not (
-            noop_diff._copies_valid(project_root, lock)
-            and _audit_passes(project_root, fetch, content_integrity=not ascii_ok[0])
-            and noop_diff._policy_checks_pass(project_root, fetch)
-        ):
+        with quiet():
+            verified = (
+                noop_diff._copies_valid(project_root, lock)
+                and _audit_passes(project_root, fetch, content_integrity=not ascii_ok[0])
+                and noop_diff._policy_checks_pass(project_root, fetch)
+            )
+        if not verified:
             raise Decline("post-apply audit")
         by_owner: dict[str, dict[Path, str]] = {}
         for path, _data, digest, owner in files:

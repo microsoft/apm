@@ -19,12 +19,30 @@ Every line here comes from the owner the pipeline uses for it:
 
 from __future__ import annotations
 
+import contextlib
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 PackageBody = Callable[[Any], None]
+
+
+@contextlib.contextmanager
+def quiet() -> Iterator[None]:
+    """Silence a fast path's own verification: its readers' notices are printed
+    by the phases ``render`` runs, in the full run's order (a policy miss, for
+    one, is announced by the policy gate, not by the first trust reader)."""
+    import io
+    import logging
+
+    previous = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        logging.disable(previous)
 
 
 def render(
