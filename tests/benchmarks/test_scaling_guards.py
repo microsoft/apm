@@ -307,6 +307,8 @@ class TestConsoleSingletonScaling:
             results.extend(id(console._get_console()) for _ in range(10_000))
 
         with patch.object(console, "Console", _CountingConsole):
+            # Autouse fixtures may build the console after setup_method; start empty.
+            console._reset_console()
             first = console._get_console()
             # Held by this thread: a call that takes the lock would block the worker.
             with console._console_lock:
