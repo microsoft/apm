@@ -102,7 +102,7 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("install", "plain"),
     ("set_policy", "org-deny"),
     # A new approval under the org deny is refused, names the org layer (#4919), and
-    # still writes the grant (strict #4923).
+    # writes nothing (#4923).
     ("decide", "hook", "revoke"),
     ("decide", "hook", "approve"),
     ("install", "frozen"),
@@ -297,22 +297,20 @@ def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
     assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
 
 
-def test_approving_a_denied_hook_under_an_org_deny_drops_only_its_own_deny(
+def test_approving_a_denied_hook_under_an_org_deny_writes_nothing(
     tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
 ) -> None:
-    """Review replay (#4923): approve removes the package's own deny before it saves
-    the grant; the known cell excuses exactly that change, nothing else."""
+    """Review replay (#4923): approve under the org deny keeps the package's own deny
+    and records no grant; the refusal comes before any write."""
     machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
     machine.declare("hook")
     machine.install("plain")
     machine.decide("hook", "deny")
     machine.set_policy("org-deny")
     world = machine.world
+    before = world.store()
     machine.decide("hook", "approve")
-    store = world.store()
-    path = str(world.packages["hook"])
-    assert any(k == path or k.startswith(path + "#") for k in store.get("allow") or {}), store
-    assert not any(k == path or k.startswith(path + "#") for k in store.get("deny") or {}), store
+    assert world.store() == before
     assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
 
 
