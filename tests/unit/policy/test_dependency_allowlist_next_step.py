@@ -385,3 +385,48 @@ def test_a_surviving_dev_dependency_that_reaches_the_denied_one_falls_back_to_th
 
     assert _stderr(capsys, check)[4] == _ADMIN_ONLY
     assert check.remediations == ()
+
+
+def test_a_null_dev_dependencies_section_still_yields_the_advice(tmp_path: Path, capsys) -> None:
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+        devDependencies=None,
+    )
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'")
+
+
+@pytest.mark.parametrize(
+    ("deps", "locked", "children"),
+    [
+        pytest.param(
+            ["acme/evil-pkg", "contoso/keep"],
+            [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+            {"contoso/keep": ["acme/evil-pkg"]},
+            id="a-surviving-package-rescues-the-denied-root",
+        ),
+        pytest.param(
+            ["contoso/parent", "contoso/keep"],
+            [
+                _locked("contoso/parent"),
+                _locked("contoso/keep"),
+                _locked("acme/hidden", parent="contoso/parent"),
+            ],
+            {"contoso/parent": ["acme/hidden"], "contoso/keep": ["contoso/parent"]},
+            id="a-surviving-package-rescues-the-allowed-parent-of-a-denied-descendant",
+        ),
+    ],
+)
+def test_a_rescued_removal_root_falls_back_to_the_admin(
+    tmp_path: Path, capsys, deps, locked, children
+) -> None:
+    check = _allowlist(_project(tmp_path, deps, locked, children))
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()

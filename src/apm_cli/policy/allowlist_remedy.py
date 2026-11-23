@@ -217,7 +217,9 @@ def _uninstall_clears(
         return False
     if not set(paths.values()) <= set(direct.removed_paths):
         return False
-    if not denied_keys - set(roots) <= transitive.removed_keys:
+    # A rescued root loses only its declaration: uninstall keeps its lock row
+    # and subtree, so the denied dependency (or its descendant) stays.
+    if transitive.rescued_roots or not denied_keys - set(roots) <= transitive.removed_keys:
         return False
     cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
     return (

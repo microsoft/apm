@@ -90,7 +90,10 @@ def read_survivor_direct_refs(apm_yml_path, packages_to_remove):
 
     refs: dict[str, list] = {"dependencies": [], "devDependencies": []}
     for section_name, section_refs in refs.items():
-        for dep_entry in data.get(section_name, {}).get("apm", []) or []:
+        section = data.get(section_name) if isinstance(data, dict) else None
+        # ``devDependencies: null`` (accepted by the manifest parser) declares nothing.
+        entries = section.get("apm") if isinstance(section, dict) else None
+        for dep_entry in entries if isinstance(entries, list) else ():
             try:
                 ref = _parse_dependency_entry(dep_entry)
             except (ValueError, TypeError, AttributeError, KeyError):
