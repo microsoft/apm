@@ -446,3 +446,20 @@ def test_a_retained_hook_claim_survives_the_removal_of_an_emptied_mcp_config(
     assert not lock.get("mcp_servers"), lock
     assert all((project / path).is_file() for path in hooks)
     assert set(hooks) <= set(_claims(project).get("hooked", [])), _claims(project)
+
+
+def test_a_backslash_claim_through_a_symlinked_parent_is_not_proven_absent(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.commands.uninstall.cli import _absence_proven
+
+    moved = tmp_path / ".github" / "hooks-moved"
+    moved.mkdir(parents=True)
+    (moved / "h.json").write_text("{}", encoding="ascii")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (tmp_path / ".github" / "hooks").symlink_to(empty, target_is_directory=True)
+
+    assert not _absence_proven(tmp_path, ".github\\hooks\\h.json")
+    assert not _absence_proven(tmp_path, ".github/hooks/h.json")
+    assert (moved / "h.json").is_file()

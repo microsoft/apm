@@ -7,7 +7,7 @@ import stat
 import sys
 import traceback
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple
 
 import click
@@ -650,7 +650,7 @@ def _absence_proven(deploy_root: Path, relative: str) -> bool:
     fate unknown, so its claim stays.
     """
     current = deploy_root
-    parts = Path(relative).parts
+    parts = PurePosixPath(str(relative).replace("\\", "/")).parts
     try:
         for part in parts[:-1]:
             current = current / part
