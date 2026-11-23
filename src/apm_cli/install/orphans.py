@@ -480,6 +480,7 @@ def _decide_installed_paths(
 
     declared = [entry for entry in intended if not isinstance(entry, str)]
     unverified: dict[str, str] = {}
+    anchors: dict[str, str] = {}
     walks: list = []
     retained = (
         retained_lock_keys(
@@ -488,27 +489,14 @@ def _decide_installed_paths(
             reachability.apm_modules_dir,
             list(reachability.direct_refs),
             unverified=unverified,
+            anchored=anchors,
             walks=walks,
         )
         if lockfile is not None
         else frozenset()
     )
     walk = walks[0] if walks and walks[0].complete else None
-    # Rows kept because a survivor reached through an alias still resolves
-    # through them join the retained graph before any selection, so
-    # inspection (deps list, compile) agrees with prune.
     declared_keys = {ref.get_unique_key() for ref in declared}
-    anchors = _alias_anchors(
-        lockfile,
-        {
-            key
-            for key in (lockfile.dependencies if lockfile is not None else ())
-            if key != _SELF_KEY and key not in declared_keys and key not in retained
-        },
-        retained,
-        walk,
-    )
-    retained = frozenset(retained | set(anchors))
     apm_modules_dir = installed_paths.root
     expected = _build_expected_install_paths(
         declared,
@@ -566,48 +554,6 @@ def _decide_installed_paths(
         ),
         reachability=walk,
     )
-
-
-def _alias_anchors(lockfile, removed_keys, retained, walk) -> dict[str, str]:
-    """Removed rows prune keeps because a survivor would change identity (#4989).
-
-    When the surviving edge spells a local survivor under another identity (a
-    symlink alias), install would re-record and relocate it; prune does not
-    re-key packages, so it keeps the survivor's recorded parent chain instead.
-    """
-    if walk is None or lockfile is None or not removed_keys:
-        return {}
-    gone = {
-        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements): key
-        for key in removed_keys
-        if key in lockfile.dependencies
-    }
-    anchors: dict[str, str] = {}
-    for key in sorted(retained):
-        row = lockfile.dependencies.get(key)
-        if row is None or row.source != "local" or row.replacement is not None:
-            continue
-        if row.resolved_by not in gone or key not in walk.depths:
-            continue
-        depth = walk.depths[key]
-        nearest = [
-            parent
-            for parent in walk.declaring_edges.get(key, {})
-            if walk.depths.get(parent) == depth - 1
-        ]
-        declared = (
-            walk.local_edge_repos.get((key, nearest[0]), (None, None))[0] if nearest else None
-        )
-        if declared in (None, row.repo_url):
-            continue
-        parent = gone.get(row.resolved_by)
-        while parent is not None and parent not in anchors:
-            anchors[parent] = (
-                f"{row.repo_url} still resolves through it, and the package that still "
-                f"needs {row.repo_url} declares it as {declared}"
-            )
-            parent = gone.get(lockfile.dependencies[parent].resolved_by)
-    return anchors
 
 
 def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:

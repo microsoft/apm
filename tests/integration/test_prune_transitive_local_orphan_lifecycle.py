@@ -404,8 +404,9 @@ def test_prune_keeps_the_parent_of_a_survivor_reached_through_an_alias(
     vendor = world.project / "vendor"
     for name, deps in (
         ("g", ()),
+        ("h", ()),
         ("f", ("../g",)),
-        ("e", ("../f", "../g")),
+        ("e", ("../f", "../g", "../h")),
         ("d", ("../e",)),
         ("z", ("../f-link",)),
         ("a", ("../z",)),
@@ -430,6 +431,9 @@ def test_prune_keeps_the_parent_of_a_survivor_reached_through_an_alias(
     assert "orphaned package(s) found" not in listed, listed
     rows = _rows(world)
     assert "_local/e" in rows, sorted(rows)
+    # e is kept, so h, which only e declares, keeps its row and files too.
+    assert "_local/h" in rows, sorted(rows)
+    assert (world.project / ".claude/skills/h-skill/SKILL.md").is_file()
     assert _row_named(world, "f") == f_row
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
     assert (world.project / _F_SKILL / "SKILL.md").is_file()

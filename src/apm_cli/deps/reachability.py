@@ -717,6 +717,7 @@ def retained_lock_keys(
     declared_refs: list[DependencyReference],
     *,
     unverified: dict[str, str] | None = None,
+    anchored: dict[str, str] | None = None,
     walks: list[ReachabilityResult] | None = None,
 ) -> frozenset[str]:
     """Return the lock keys a project still needs beyond its declarations.
@@ -732,7 +733,9 @@ def retained_lock_keys(
     An incomplete walk, or a local entry whose directory cannot be resolved,
     fails closed and retains every such entry; each one kept only for that
     reason is named in *unverified* with the reason, for the caller to report.
-    The walk, when one ran, is appended to *walks* for parent repairs.
+    The walk, when one ran, is appended to *walks* for parent repairs. A row
+    kept because a survivor reached through a symlink alias still resolves
+    through it is named in *anchored*; what it declares is retained too.
     """
     declared = {ref.get_unique_key() for ref in declared_refs}
     retained: set[str] = set()
@@ -774,38 +777,56 @@ def retained_lock_keys(
             walks.append(walk)
         if walk.complete:
             retained |= candidates & walk.reachable
+            _retain_alias_anchors(
+                lockfile,
+                project_root,
+                apm_modules_dir,
+                walk,
+                candidates,
+                retained,
+                reasons,
+                anchored if anchored is not None else {},
+            )
         else:
             retained |= candidates
             detail = "; ".join(f"{name}: {reason}" for name, reason in walk.unverifiable)
             reasons.update(dict.fromkeys(candidates - walk.reachable, detail))
-    _retain_children_of_policy_rows(
-        lockfile, project_root, apm_modules_dir, candidates, retained, reasons
+    _retain_reached_from(
+        lockfile,
+        project_root,
+        apm_modules_dir,
+        [
+            dep.to_dependency_ref()
+            for dep in lockfile.get_package_dependencies()
+            if dep.get_unique_key() in retained
+            and dep.replacement is not None
+            and dep.is_local_source
+        ],
+        candidates,
+        retained,
+        reasons,
     )
     if unverified is not None:
         unverified.update(reasons)
     return frozenset(retained)
 
 
-def _retain_children_of_policy_rows(
+def _retain_reached_from(
     lockfile: LockFile,
     project_root: Path,
     apm_modules_dir: Path,
+    roots: list[DependencyReference],
     candidates: set[str],
     retained: set[str],
     reasons: dict[str, str],
 ) -> None:
-    """Keep what a retained, locally replaced package still declares (#4989).
+    """Retain the pending candidates a walk from *roots* reaches (#4989).
 
-    A replaced transitive stays under the remote retention policy even when
-    no survivor reaches it; its own manifest is local, so its local children
-    are still needed. A second walk, rooted at those rows, retains them (and
-    is not used for parent or depth repairs). An incomplete walk keeps all.
+    Roots are rows kept without a surviving declaration: a locally replaced
+    transitive under the remote retention policy, or an alias anchor. Their
+    manifests still declare children, which stay too. The walk is not used
+    for parent or depth repairs; an incomplete walk keeps every pending row.
     """
-    roots = [
-        dep.to_dependency_ref()
-        for dep in lockfile.get_package_dependencies()
-        if dep.get_unique_key() in retained and dep.replacement is not None and dep.is_local_source
-    ]
     pending = candidates - retained
     if not roots or not pending:
         return
@@ -818,3 +839,89 @@ def _retain_children_of_policy_rows(
     retained |= pending
     detail = "; ".join(f"{name}: {reason}" for name, reason in walk.unverifiable)
     reasons.update(dict.fromkeys(pending, detail))
+
+
+def _retain_alias_anchors(
+    lockfile: LockFile,
+    project_root: Path,
+    apm_modules_dir: Path,
+    walk: ReachabilityResult,
+    candidates: set[str],
+    retained: set[str],
+    reasons: dict[str, str],
+    anchored: dict[str, str],
+) -> None:
+    """Keep the parent chain of a survivor reached only through an alias, and its children.
+
+    The chain is walked from its root-declared top so every package it still
+    declares stays; a chain whose top is not root-declared keeps all pending
+    rows (fail closed).
+    """
+    anchors = _alias_anchors(lockfile, candidates - retained, retained, walk)
+    if not anchors:
+        return
+    anchored.update(anchors)
+    retained |= set(anchors)
+    tops = [
+        lockfile.dependencies[key]
+        for key in anchors
+        if lockfile.dependencies[key].resolved_by is None
+    ]
+    if not tops:
+        pending = candidates - retained
+        retained |= pending
+        reasons.update(dict.fromkeys(pending, "an alias anchor has no root-declared top"))
+        return
+    _retain_reached_from(
+        lockfile,
+        project_root,
+        apm_modules_dir,
+        [top.to_dependency_ref() for top in tops],
+        candidates,
+        retained,
+        reasons,
+    )
+
+
+def _alias_anchors(lockfile, removed_keys, retained, walk) -> dict[str, str]:
+    """Removed rows prune keeps because a survivor would change identity (#4989).
+
+    When the surviving edge spells a local survivor under another identity (a
+    symlink alias), install would re-record and relocate it; prune does not
+    re-key packages, so it keeps the survivor's recorded parent chain instead.
+    """
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    if walk is None or lockfile is None or not removed_keys:
+        return {}
+    gone = {
+        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements): key
+        for key in removed_keys
+        if key in lockfile.dependencies
+    }
+    anchors: dict[str, str] = {}
+    for key in sorted(retained):
+        row = lockfile.dependencies.get(key)
+        if row is None or row.source != "local" or row.replacement is not None:
+            continue
+        if row.resolved_by not in gone or key not in walk.depths:
+            continue
+        depth = walk.depths[key]
+        nearest = [
+            parent
+            for parent in walk.declaring_edges.get(key, {})
+            if walk.depths.get(parent) == depth - 1
+        ]
+        declared = (
+            walk.local_edge_repos.get((key, nearest[0]), (None, None))[0] if nearest else None
+        )
+        if declared in (None, row.repo_url):
+            continue
+        parent = gone.get(row.resolved_by)
+        while parent is not None and parent not in anchors:
+            anchors[parent] = (
+                f"{row.repo_url} still resolves through it, and the package that still "
+                f"needs {row.repo_url} declares it as {declared}"
+            )
+            parent = gone.get(lockfile.dependencies[parent].resolved_by)
+    return anchors
