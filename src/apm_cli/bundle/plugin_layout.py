@@ -80,6 +80,10 @@ PLUGIN_RENDERING_PREFERENCE: dict[str, tuple[str, ...]] = {
     "instructions": (".instructions.md", ".md", ".mdc"),
 }
 
+# Formats a Claude plugin loads as-is: preferred over another target's
+# rendering with the same extension (a Kiro prompt drops its frontmatter).
+PLUGIN_NATIVE_FORMATS = frozenset({"claude_agent", "claude_command"})
+
 # Each rule format scopes paths its own way and none converts to another, so
 # instruction renderings are dropped only next to the APM rendering.
 _DROP_ONLY_BESIDE: dict[str, str] = {"instructions": ".instructions.md"}
@@ -106,27 +110,12 @@ def deployed_rendering_extension(deployed_rel: str) -> str | None:
 def deployed_rendering_rank(deployed_rel: str) -> int | None:
     """Rank a deployed rendering within its own plugin directory's preference (lower is kept)."""
     found = _deployed_rendering(deployed_rel)
-    if found is None:
-        return None
-    preference = PLUGIN_RENDERING_PREFERENCE[found[0]]
-    return preference.index(found[1]) if found[1] in preference else len(preference)
+    return None if found is None else _extension_rank(found[0], found[1])
 
 
-def kept_shared_path_rendering(deployed_rels: list[str]) -> int | None:
-    """Return the index of the rendering kept among deployed files sharing one plugin path.
-
-    ``None`` keeps them all as a collision: when one is no target rendering, or
-    when the preferred one is not a rendering the others may be dropped beside
-    (Claude ``.claude/rules/py.md`` and Kiro ``.kiro/steering/py.md`` are two
-    native rule formats and neither converts to the other, #3686).
-    """
-    found = [_deployed_rendering(rel) for rel in deployed_rels]
-    if any(rendering is None for rendering in found):
-        return None
-    ranks = [deployed_rendering_rank(rel) for rel in deployed_rels]
-    kept = min(range(len(found)), key=lambda index: (ranks[index], index))
-    head, extension = found[kept]
-    return kept if _DROP_ONLY_BESIDE.get(head, extension) == extension else None
+def _extension_rank(head: str, extension: str) -> int:
+    preference = PLUGIN_RENDERING_PREFERENCE[head]
+    return preference.index(extension) if extension in preference else len(preference)
 
 
 def deployed_rendering_suffix(deployed_rel: str) -> str | None:
@@ -135,8 +124,12 @@ def deployed_rendering_suffix(deployed_rel: str) -> str | None:
     return found[1] if found else None
 
 
-def _deployed_rendering(deployed_rel: str) -> tuple[str, str] | None:
-    """Return ``(plugin directory, target extension)`` of a deployed rendering."""
+def _deployed_rendering(deployed_rel: str) -> tuple[str, str, str, str] | None:
+    """Return ``(plugin directory, target extension, format id, stem)`` of a rendering.
+
+    The stem is the path under the target's primitive directory without the
+    target's own extension, the identity every rendering of a primitive shares.
+    """
     from ..integration.targets import KNOWN_TARGETS
 
     heads = {
@@ -150,39 +143,42 @@ def _deployed_rendering(deployed_rel: str) -> tuple[str, str] | None:
             prefix = f"{root.strip('/')}/{mapping.subdir}/"
             if kind not in heads or not mapping.subdir or not mapping.extension:
                 continue
-            if deployed_rel.startswith(prefix) and deployed_rel.endswith(mapping.extension):
-                return heads[kind], mapping.extension
+            stem = deployed_rel[len(prefix) : -len(mapping.extension)]
+            if (
+                deployed_rel.startswith(prefix)
+                and deployed_rel.endswith(mapping.extension)
+                and stem
+            ):
+                return heads[kind], mapping.extension, mapping.format_id, stem
     return None
 
 
-def duplicate_plugin_renderings(renderings: dict[str, str | None]) -> set[str]:
-    """Return plugin paths that duplicate a kept rendering of one primitive.
+def superseded_plugin_renderings(deployed_rels: list[str | None]) -> dict[int, int]:
+    """Return ``{dropped index: kept index}`` over one package's deployed files (#3686).
 
-    *renderings* maps each plugin path of one package to the extension of the
-    target that deployed it (:func:`deployed_rendering_extension`). Two paths
-    render one primitive only when their names match once each target's own
-    extension is removed, so ``agents/rv.md`` (Claude) and
-    ``agents/rv.agent.md`` (Copilot) pair up, while two Claude agents never do.
+    Renderings of one primitive share a plugin directory and the name left once
+    each deploying target's own extension is removed: ``.claude/agents/rv.md``
+    and ``.github/agents/rv.agent.md`` are both ``agents/rv``, while a Claude
+    ``rv.agent.md`` is another primitive, ``agents/rv.agent``. Each primitive
+    keeps its preferred rendering (:data:`PLUGIN_RENDERING_PREFERENCE`, then a
+    Claude plugin format over another target's same-extension rendering).
+    Instruction renderings drop only beside the APM rendering, since native rule
+    formats never convert. Different primitives that share a plugin path are
+    left for the caller to report as a collision.
     """
-    groups: dict[str, list[tuple[int, str]]] = {}
-    for rel, extension in renderings.items():
-        head, _, tail = rel.partition("/")
-        preference = PLUGIN_RENDERING_PREFERENCE.get(head)
-        if not preference or not extension or len(tail) <= len(extension):
-            continue
-        if not tail.endswith(extension):
-            continue
-        rank = preference.index(extension) if extension in preference else len(preference)
-        groups.setdefault(f"{head}/{tail[: -len(extension)]}", []).append((rank, rel))
-    dropped: set[str] = set()
-    for primitive, members in groups.items():
-        rank, kept = min(members)
-        preference = PLUGIN_RENDERING_PREFERENCE[primitive.partition("/")[0]]
-        kept_extension = preference[rank] if rank < len(preference) else None
-        if _DROP_ONLY_BESIDE.get(primitive.partition("/")[0], kept_extension) != kept_extension:
-            continue
-        dropped.update(rel for _rank, rel in members if rel != kept)
-    return dropped
+    groups: dict[tuple[str, str], list[tuple[tuple[int, int], int, str]]] = {}
+    for index, rel in enumerate(deployed_rels):
+        found = _deployed_rendering(rel) if rel else None
+        if found is not None:
+            head, extension, format_id, stem = found
+            key = (_extension_rank(head, extension), format_id not in PLUGIN_NATIVE_FORMATS)
+            groups.setdefault((head, stem), []).append((key, index, extension))
+    superseded: dict[int, int] = {}
+    for (head, _stem), members in groups.items():
+        _key, kept, extension = min(members)
+        if _DROP_ONLY_BESIDE.get(head, extension) == extension:
+            superseded.update({index: kept for _key, index, _ext in members if index != kept})
+    return superseded
 
 
 PLUGIN_LAYOUT: dict[str, PluginDirSpec] = {

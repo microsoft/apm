@@ -1234,9 +1234,26 @@ class TestExportPluginBundle:
         ]
         assert (instructions / "py.instructions.md").read_text() == "copilot py"
 
-    def test_two_native_rule_renderings_report_a_collision(self, tmp_path):
-        """#3686: Claude and Kiro rules never convert, so neither is dropped as a duplicate."""
-        rules = [(".claude/rules/py.md", "claude"), (".kiro/steering/py.md", "kiro")]
+    @pytest.mark.parametrize(
+        ("rules", "shared"),
+        [
+            # Claude and Kiro rules never convert, so neither is a duplicate.
+            (
+                [(".claude/rules/py.md", "claude"), (".kiro/steering/py.md", "kiro")],
+                "instructions/py.md",
+            ),
+            # Stems rv.agent (Claude) and rv (Copilot) are two primitives.
+            (
+                [
+                    (".claude/agents/rv.agent.md", "claude"),
+                    (".github/agents/rv.agent.md", "copilot"),
+                ],
+                "agents/rv.agent.md",
+            ),
+        ],
+    )
+    def test_shared_path_without_one_primitive_reports_a_collision(self, tmp_path, rules, shared):
+        """#3686: only renderings of one primitive drop; others keep the collision report."""
         project = _setup_plugin_project(tmp_path)
         for rel, body in rules:
             (project / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -1252,9 +1269,9 @@ class TestExportPluginBundle:
             bundle = export_plugin_bundle(project, tmp_path / "build").bundle_path
 
         # First writer wins; the collision names the shared path.
-        assert (bundle / "instructions" / "py.md").read_text() == "claude"
+        assert (bundle / shared).read_text() == "claude"
         warnings = [str(call) for call in warning.call_args_list]
-        assert any("instructions/py.md -- collision" in w for w in warnings), warnings
+        assert any(f"{shared} -- collision" in w for w in warnings), warnings
         assert not any("rendering" in str(call) for call in info.call_args_list)
 
     def test_native_markdown_prompts_keep_their_stem(self, tmp_path):

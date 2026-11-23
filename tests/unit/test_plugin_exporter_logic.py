@@ -302,25 +302,37 @@ class TestDuplicatePluginRenderings:
         ],
     )
     def test_drops_only_other_target_renderings(self, deployed, dropped):
-        from apm_cli.bundle.plugin_layout import (
-            deployed_rendering_extension,
-            duplicate_plugin_renderings,
-        )
+        from apm_cli.bundle.plugin_layout import superseded_plugin_renderings
 
-        renderings = {rel: deployed_rendering_extension(src) for src, rel in deployed.items()}
-        assert duplicate_plugin_renderings(renderings) == dropped
+        sources = list(deployed)
+        superseded = superseded_plugin_renderings(sources)
+        assert {deployed[sources[index]] for index in superseded} == dropped
+
+    @pytest.mark.parametrize("claude_first", [True, False])
+    @pytest.mark.parametrize(
+        ("claude", "other", "superseded"),
+        [
+            # Same extension: the Claude plugin format beats Kiro's lossy prompt.
+            (".claude/commands/review.md", ".kiro/prompts/review.md", True),
+            (".claude/agents/rv.md", ".kiro/agents/rv.md", True),
+            # Stems rv.agent and rv: two primitives, left to collide.
+            (".claude/agents/rv.agent.md", ".github/agents/rv.agent.md", False),
+        ],
+    )
+    def test_rendering_identity_and_format_decide_the_kept_one(
+        self, claude, other, superseded, claude_first
+    ):
+        from apm_cli.bundle.plugin_layout import superseded_plugin_renderings
+
+        sources = [claude, other] if claude_first else [other, claude]
+        expected = {sources.index(other): sources.index(claude)} if superseded else {}
+        assert superseded_plugin_renderings(sources) == expected
 
     def test_prompt_rename_keeps_distinct_commands_apart(self):
         """A Claude command and a renamed Copilot prompt with a dotted stem stay distinct."""
-        from apm_cli.bundle.plugin_layout import (
-            deployed_rendering_extension,
-            duplicate_plugin_renderings,
-        )
+        from apm_cli.bundle.plugin_layout import superseded_plugin_renderings
 
         deployed = [".claude/commands/review.md", ".github/prompts/review.prompt.prompt.md"]
-        renderings = {
-            _plugin_rel_for_deployed_path(src, None): deployed_rendering_extension(src)
-            for src in deployed
-        }
-        assert set(renderings) == {"commands/review.md", "commands/review.prompt.md"}
-        assert duplicate_plugin_renderings(renderings) == set()
+        plugin_rels = {_plugin_rel_for_deployed_path(src, None) for src in deployed}
+        assert plugin_rels == {"commands/review.md", "commands/review.prompt.md"}
+        assert superseded_plugin_renderings(deployed) == {}

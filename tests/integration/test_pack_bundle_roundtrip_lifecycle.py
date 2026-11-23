@@ -233,7 +233,9 @@ def test_multi_target_pack_ships_one_rendering_per_primitive(
     )
     dropped = [line for line in packed.splitlines() if "[i]" in line and "rendering" in line]
     assert len(dropped) == 1, packed
-    assert "agents/rv.agent.md" in dropped[0] and "instructions/py.md" in dropped[0], dropped
+    # Dropped renderings are named by the path their target deployed.
+    assert ".github/agents/rv.agent.md" in dropped[0], dropped
+    assert ".claude/rules/py.md" in dropped[0], dropped
     assert (bundle / "instructions" / "py.instructions.md").read_text() == _SCOPED_RULE
     assert "collision" not in packed, packed
     # Pack only adds the generated ecosystem manifests to the project.

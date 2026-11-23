@@ -388,7 +388,7 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
             inv,
             _RID_BUNDLE_LAYOUT,
             _PLUGIN_EXPORTER_LAYOUT,
-            ("duplicate_plugin_renderings(", "deployed_rendering_extension("),
+            ("superseded_plugin_renderings(", "deployed_rendering_extension("),
             "plugin pack must drop per-target renderings through plugin_layout",
         )
     )

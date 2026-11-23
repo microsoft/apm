@@ -49,9 +49,8 @@ from .plugin_layout import (
     deployed_rendering_extension,
     deployed_rendering_rank,
     deployed_rendering_suffix,
-    duplicate_plugin_renderings,
     find_plugin_root_sources,
-    kept_shared_path_rendering,
+    superseded_plugin_renderings,
 )
 
 # ---------------------------------------------------------------------------
@@ -1525,49 +1524,14 @@ def _drop_duplicate_renderings(
 
     A multi-target install deploys a primitive once per target (for example
     ``.claude/agents/rv.md`` and ``.github/agents/rv.agent.md``); the bundle
-    carries only the rendering :mod:`.plugin_layout` prefers. Each file's
-    deployed path names the target that rendered it. Renderings that export to
-    one plugin path (Claude ``commands/x.md`` and Copilot ``prompts/x.prompt.md``)
-    keep the preferred one, named by its deployed path when dropped.
+    carries only the rendering :mod:`.plugin_layout` prefers, and each dropped
+    one is named by its deployed path. Distinct primitives that share a plugin
+    path stay a collision for :func:`_merge_file_map` to report.
     """
-    components = _drop_same_path_renderings(components, project_root, rendered, dropped)
-    duplicates = duplicate_plugin_renderings(
-        {
-            rel: deployed_rendering_extension(_deployed_path(source, project_root, rendered) or "")
-            for source, rel in components
-        }
-    )
-    dropped.extend(sorted(duplicates))
-    return [component for component in components if component[1] not in duplicates]
-
-
-def _drop_same_path_renderings(
-    components: list[tuple[Path, str]],
-    project_root: Path,
-    rendered: dict[Path, str],
-    dropped: list[str],
-) -> list[tuple[Path, str]]:
-    """Keep the preferred of several deployed renderings that share one plugin path.
-
-    :func:`.plugin_layout.kept_shared_path_rendering` picks the kept one; any
-    other shared path stays a collision for :func:`_merge_file_map` to report.
-    """
-    by_rel: dict[str, list[tuple[int, str]]] = {}
-    for index, (source, rel) in enumerate(components):
-        deployed = _deployed_path(source, project_root, rendered) or ""
-        by_rel.setdefault(rel, []).append((index, deployed))
-    skip: set[int] = set()
-    for members in by_rel.values():
-        if len(members) < 2:
-            continue
-        kept = kept_shared_path_rendering([deployed for _index, deployed in members])
-        if kept is None:
-            continue
-        for position, (index, deployed) in enumerate(members):
-            if position != kept:
-                skip.add(index)
-                dropped.append(deployed)
-    return [component for index, component in enumerate(components) if index not in skip]
+    deployed = [_deployed_path(source, project_root, rendered) for source, _rel in components]
+    superseded = superseded_plugin_renderings(deployed)
+    dropped.extend(deployed[index] or "" for index in sorted(superseded))
+    return [component for index, component in enumerate(components) if index not in superseded]
 
 
 def _packed_renderings(
