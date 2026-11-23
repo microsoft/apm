@@ -677,10 +677,10 @@ fails, so a red `main` shows on the commit. It is not a required check and
 never saves caches to the `main` scope.
 
 `lifecycle-security.yml` runs `tests/lifecycle/security` on Linux and then
-requires a receipt from every security witness. Pull requests run it only when
-they touch `src/apm_cli/{cache,deps,install,policy,marketplace}/`,
-`src/apm_cli/utils/path_security.py` or the security cells; it is not a
-required check. The Windows and macOS legs stay nightly.
+requires a receipt from every security witness. Pull requests run it when they
+touch `src/apm_cli/`, `tests/lifecycle/`, the receipt ratchet, `pyproject.toml`
+or `uv.lock`; it is not a required check. The Windows and macOS legs stay
+nightly.
 
 ### Merge-train proof
 

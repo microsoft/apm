@@ -4491,18 +4491,17 @@ def test_main_push_cache_save_fails(mutation: str) -> None:
 
 # The tests/lifecycle/security cells (#5159 sat red on main for hours because
 # they ran only nightly): every main push through the main push gate, and pull
-# requests whose diff touches a cache, integrity or admission path. Linux only;
-# the nightly keeps the Windows and macOS legs.
+# requests that touch any product code, the lifecycle harness or cells, the
+# receipt ratchet or the dependency set. Linux only; the nightly keeps the
+# Windows and macOS legs.
 LIFECYCLE_SECURITY_JOB = "lifecycle-security"
 LIFECYCLE_SECURITY_ROOT = "tests/lifecycle/security"
 LIFECYCLE_SECURITY_PATHS = [
-    "src/apm_cli/cache/**",
-    "src/apm_cli/deps/**",
-    "src/apm_cli/install/**",
-    "src/apm_cli/policy/**",
-    "src/apm_cli/marketplace/**",
-    "src/apm_cli/utils/path_security.py",
-    "tests/lifecycle/security/**",
+    "src/apm_cli/**",
+    "tests/lifecycle/**",
+    "tests/quality/test_promise_obligations.py",
+    "pyproject.toml",
+    "uv.lock",
     ".github/workflows/lifecycle-security.yml",
 ]
 LIFECYCLE_SECURITY_RUN_STEP = "Run the lifecycle security cells"
@@ -4555,7 +4554,7 @@ def test_lifecycle_security_placement_drift_fails(mutation: str) -> None:
     workflow = workflows[LIFECYCLE_SECURITY_WORKFLOW]
     job = workflow["jobs"][LIFECYCLE_SECURITY_JOB]
     if mutation == "drop-path":
-        workflow["on"]["pull_request"]["paths"].remove("src/apm_cli/install/**")
+        workflow["on"]["pull_request"]["paths"].remove("src/apm_cli/**")
     elif mutation == "drop-pr":
         workflow["on"].pop("pull_request")
     elif mutation == "soft-run":

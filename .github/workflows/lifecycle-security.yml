@@ -6,8 +6,8 @@ name: Lifecycle Security
 #
 # - Every push to main: main-push-gate.yml calls this workflow (workflow_call)
 #   next to Tier 1 and Tier 2, so a security red turns the main push gate red.
-# - Pull requests: only when the diff touches a cache, integrity or admission
-#   path below, or the security cells themselves. Not a required check.
+# - Pull requests: when the diff touches product code, the lifecycle harness
+#   or cells, the receipt ratchet, or the dependency set. Not a required check.
 #
 # Windows and macOS legs stay in lifecycle-journeys.yml (nightly). The job
 # restores and saves no cache, so a main push adds no default-branch cache.
@@ -18,13 +18,11 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'src/apm_cli/cache/**'
-      - 'src/apm_cli/deps/**'
-      - 'src/apm_cli/install/**'
-      - 'src/apm_cli/policy/**'
-      - 'src/apm_cli/marketplace/**'
-      - 'src/apm_cli/utils/path_security.py'
-      - 'tests/lifecycle/security/**'
+      - 'src/apm_cli/**'
+      - 'tests/lifecycle/**'
+      - 'tests/quality/test_promise_obligations.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/lifecycle-security.yml'
   workflow_call:
 
