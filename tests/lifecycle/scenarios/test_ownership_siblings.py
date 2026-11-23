@@ -1656,6 +1656,92 @@ def test_a_kept_manifest_lsp_edit_fails_and_names_what_it_wrote(lifecycle_world)
     scenario.finish()
 
 
+# -- #4871: a blocked stdio-to-socket upgrade keeps OpenCode's entry -------------
+#
+# PROMISE: P-LAW-ownership.preserve_unowned via I1-X2 -- a server held at its
+# locked render by a kept edit (#4626) is held on every previously managed
+# target that can render that config, including one (OpenCode) the new socket
+# config cannot reach, so stale cleanup never deletes its entry
+# (source: integration/lsp_integrator.py LSPIntegrator._hold_kept_servers).
+
+_OPENCODE = "opencode.json"
+
+
+def _declare_socket_upgrade(world, transport: str, revision: str) -> None:
+    """Declare ``root-s`` over *transport* and a stdio ``root-b`` at *revision*."""
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    upgraded = {
+        "name": "root-s",
+        "command": INERT_COMMAND,
+        "transport": transport,
+        "extensionToLanguage": {".root-s": "root-s"},
+    }
+    if transport == "stdio":
+        upgraded["args"] = ["--stdio"]
+    sibling = {
+        "name": "root-b",
+        "command": INERT_COMMAND,
+        "args": ["--stdio", f"--{revision}"],
+        "extensionToLanguage": {".root-b": "root-b"},
+    }
+    data["dependencies"]["lsp"] = [upgraded, sibling]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _opencode_servers(world) -> dict:
+    return json.loads((world.project / _OPENCODE).read_text(encoding="utf-8"))["lsp"]
+
+
+def _edit_json_entry(scenario: Scenario, relative: str, key: str, field: str, value) -> None:
+    path = scenario.world.project / relative
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config[key]["root-s"][field] = value
+    scenario.user_write(relative, json.dumps(config, indent=2) + "\n")
+
+
+def test_a_blocked_socket_upgrade_keeps_opencodes_entry(lifecycle_world) -> None:
+    """A held Copilot edit blocks the upgrade: OpenCode's edited entry survives (exit 1).
+
+    Once the Copilot edit is moved aside, the same upgrade replaces the
+    Copilot entry and removes the stdio entry OpenCode cannot express.
+    """
+    world = lifecycle_world
+    scenario, tree = _start(world, {}, targets=("copilot", "opencode"))
+    _declare_socket_upgrade(world, "stdio", "v1")
+    scenario.source_moved()
+    scenario.run("install")
+    _edit_json_entry(scenario, _LSP, "lspServers", "args", ["--stdio", "--mine"])
+    _edit_json_entry(scenario, _OPENCODE, "lsp", "command", [INERT_COMMAND, "--mine"])
+    # root-b updates in both files: judge root-s's entries, not whole files.
+    for relative in (_LSP, _OPENCODE):
+        scenario.release_user_write(relative)
+    opencode = _opencode_servers(world)["root-s"]
+    locked = scenario.lock()
+    claims = (locked.lsp_configs["root-s"], dict(locked.lsp_target_servers))
+    _declare_socket_upgrade(world, "socket", "v2")
+    scenario.source_moved()
+
+    step = scenario.run("install", exit=1)
+    _kept(step, f"LSP server 'root-s' in {_LSP}")
+    assert _opencode_servers(world)["root-s"] == opencode, "OpenCode's entry changed"
+    assert _opencode_servers(world)["root-b"]["command"][-1] == "--v2"
+    after = scenario.lock()
+    assert (after.lsp_configs["root-s"], dict(after.lsp_target_servers)) == claims
+    tree.assert_intact("blocked socket upgrade")
+    scenario.finish()
+
+    # Not blocked: the upgrade replaces Copilot's entry and drops OpenCode's.
+    config = json.loads((world.project / _LSP).read_text(encoding="utf-8"))
+    del config["lspServers"]["root-s"]
+    (world.project / _LSP).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    scenario.run("install")
+    servers = json.loads((world.project / _LSP).read_text(encoding="utf-8"))["lspServers"]
+    assert servers["root-s"]["transport"] == "socket"
+    assert set(_opencode_servers(world)) == {"root-b"}
+    scenario.finish()
+
+
 def test_unproven_mismatch_is_kept(lifecycle_world) -> None:
     """Without a receipt or locked render proving APM wrote it, a mismatch is kept; exit 1."""
     scenario, tree = _exec_scenario(lifecycle_world)

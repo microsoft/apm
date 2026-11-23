@@ -671,6 +671,50 @@ class TestKeptEntryReviewThree:
         assert "pyright" not in json.loads(opencode.read_text()).get("lsp", {})
         assert record.kept_unowned.get("opencode") == {"pyright"}
 
+    def _upgrade_to_socket(self, tmp_path, *, edit_copilot: bool, edit_opencode=False):
+        stdio = [_make_dep("pyright", command="p-v1")]
+        targets = ["copilot", "opencode"]
+        LSPIntegrator.install(stdio, project_root=tmp_path, target_runtimes=targets)
+        if edit_copilot:
+            self._edit(tmp_path / ".github" / "lsp.json", "pyright")
+        opencode = tmp_path / "opencode.json"
+        if edit_opencode:
+            data = json.loads(opencode.read_text())
+            data["lsp"]["pyright"]["command"] = ["mine"]
+            opencode.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        before = opencode.read_bytes()
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(stdio))
+        LSPIntegrator.install(
+            [_make_dep("pyright", command=None, transport="socket", extension_to_language=None)],
+            project_root=tmp_path,
+            target_runtimes=targets,
+            managed_target_servers={"copilot": {"pyright"}, "opencode": {"pyright"}},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+        return record, before
+
+    @pytest.mark.parametrize("edit_opencode", [False, True], ids=["unedited", "edited"])
+    def test_a_blocked_upgrade_holds_a_target_the_new_config_cannot_reach(
+        self, tmp_path, edit_opencode
+    ):
+        """#4871: OpenCode keeps its stdio entry, and any edit, while Copilot holds."""
+        record, before = self._upgrade_to_socket(
+            tmp_path, edit_copilot=True, edit_opencode=edit_opencode
+        )
+
+        assert (tmp_path / "opencode.json").read_bytes() == before
+        assert record.held_claims == {"opencode": {"pyright"}}
+        assert "pyright" in record.kept_edits
+
+    def test_an_upgrade_that_is_not_blocked_reaches_no_held_target(self, tmp_path):
+        record, _before = self._upgrade_to_socket(tmp_path, edit_copilot=False)
+
+        copilot = json.loads((tmp_path / ".github" / "lsp.json").read_text())["lspServers"]
+        assert copilot["pyright"]["transport"] == "socket"
+        assert record.held_claims == {}
+        assert record.kept_edits == {}
+
     def test_a_blocking_keep_without_a_collector_fails_the_install(self, tmp_path):
         from apm_cli.install.errors import LSPUserEntryConflictError
 
