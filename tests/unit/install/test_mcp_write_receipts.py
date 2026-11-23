@@ -133,7 +133,7 @@ def test_an_unrecorded_identical_entry_is_never_retired(project: Path) -> None:
     assert not logger.warnings and not logger.removed
 
 
-@pytest.mark.parametrize("change", ["edited", "unusable-hash", "other-config"])
+@pytest.mark.parametrize("change", ["edited", "unusable-hash"])
 def test_an_unproven_entry_is_kept_marked_and_reported(project: Path, change: str) -> None:
     _install_write(project, _Logger())
     if change == "edited":
@@ -141,8 +141,7 @@ def test_an_unproven_entry_is_kept_marked_and_reported(project: Path, change: st
     else:
         path = McpWriteReceipts.open(project, user_scope=False).path
         data = json.loads(path.read_text())
-        field, value = ("hash", "sha256:bad") if change == "unusable-hash" else ("config", "/x")
-        data["writes"][0][field] = value
+        data["writes"][0]["hash"] = "sha256:bad"
         path.write_text(json.dumps(data))
     before = _config(project).read_bytes()
     logger = _Logger()
@@ -419,3 +418,134 @@ def test_a_config_the_remover_cannot_rewrite_keeps_the_entry(
 
     assert SERVER in _config(project).read_text() and not logger.removed
     assert [w for w in logger.warnings if f"Kept MCP server '{SERVER}'" in w]
+
+
+# -- follow-ups (#4801) --------------------------------------------------------
+
+
+def _user_write(home: Path, profile: str, logger: _Logger) -> Path:
+    """A user-scope install with ``COPILOT_HOME`` set to *profile*: write and note the entry."""
+    from apm_cli.factory import ClientFactory
+
+    config = Path(
+        ClientFactory.create_client("copilot", project_root=home, user_scope=True).get_config_path()
+    )
+    assert config.parent == home / profile
+    config.parent.mkdir(parents=True, exist_ok=True)
+    with journal_mcp_writes(home, user_scope=True, logger=logger):
+        config.write_text(json.dumps({"mcpServers": {SERVER: ENTRY}}))
+        note_mcp_write("copilot", SERVER, mcp_native_hash(ENTRY))
+    return config
+
+
+def test_each_runtime_profile_keeps_its_own_record(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = Path.home()
+    monkeypatch.setenv("COPILOT_HOME", str(home / "a"))
+    first = _user_write(home, "a", _Logger())
+    monkeypatch.setenv("COPILOT_HOME", str(home / "b"))
+    second = _user_write(home, "b", _Logger())
+
+    configs = {w.config for w in McpWriteReceipts.open(home, user_scope=True).writes.values()}
+    assert configs == {first.absolute().as_posix(), second.absolute().as_posix()}
+
+    logger = _Logger()
+    retire_undeclared_mcp_writes(
+        set(), project_root=home, user_scope=True, exclude=None, logger=logger
+    )
+
+    assert SERVER not in json.loads(second.read_text())["mcpServers"]
+    assert SERVER in json.loads(first.read_text())["mcpServers"], "another profile changed"
+    assert not logger.warnings, "another profile's record is not this install's to report"
+    monkeypatch.setenv("COPILOT_HOME", str(home / "a"))
+    retire_undeclared_mcp_writes(
+        set(), project_root=home, user_scope=True, exclude=None, logger=_Logger()
+    )
+    assert SERVER not in json.loads(first.read_text())["mcpServers"]
+    assert McpWriteReceipts.open(home, user_scope=True).writes == {}
+
+
+def test_a_record_of_another_config_is_left_untouched(project: Path) -> None:
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    data = json.loads(path.read_text())
+    data["writes"][0]["config"] = "/elsewhere/mcp.json"
+    path.write_text(json.dumps(data))
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert _config(project).read_bytes() == before
+    assert not logger.warnings and not logger.removed
+    (write,) = McpWriteReceipts.open(project, user_scope=False).writes.values()
+    assert write.config == "/elsewhere/mcp.json" and not write.kept
+    assert kept_mcp_writes(project, user_scope=False, managed=()) == []
+
+
+def test_a_kept_entry_is_announced_while_a_lockfile_governs(project: Path) -> None:
+    _install_write(project, _Logger())
+    _write_entries(project, {SERVER: {**ENTRY, "args": ["--edited"]}})
+    _retire(project, _Logger())
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    retire_undeclared_mcp_writes(
+        set(), project_root=project, user_scope=False, exclude=None, logger=logger, retire=False
+    )
+
+    assert _config(project).read_bytes() == before
+    assert [w for w in logger.warnings if f"Kept MCP server '{SERVER}' in .mcp.json" in w]
+    declared = _Logger()
+    retire_undeclared_mcp_writes(
+        {SERVER},
+        project_root=project,
+        user_scope=False,
+        exclude=None,
+        logger=declared,
+        retire=False,
+    )
+    assert not declared.warnings, "a declared server is not announced as kept"
+
+
+def test_unusable_evidence_met_without_a_lockfile_stays_reported(project: Path) -> None:
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.policy.ci_checks import _kept_mcp_entries
+
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    path.write_text("{not json")
+    assert _kept_mcp_entries(project, LockFile(), user_scope=False) == (), "not yet met"
+
+    _retire(project, _Logger())
+
+    (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False)
+    assert any("Invalid MCP write evidence" in detail for detail in check.details)
+    logger = _Logger()
+    retire_undeclared_mcp_writes(
+        set(), project_root=project, user_scope=False, exclude=None, logger=logger, retire=False
+    )
+    assert [w for w in logger.warnings if "Kept every MCP entry" in w]
+    assert path.read_text() == "{not json", "the unusable evidence itself is left as is"
+
+    path.unlink()
+    assert _kept_mcp_entries(project, LockFile(), user_scope=False) == ()
+    _retire(project, _Logger())
+    assert not list(path.parent.glob("*.unusable")), "the note is cleared once evidence is usable"
+
+
+def test_the_unusable_note_is_never_written_through_a_linked_directory(
+    project: Path, tmp_path: Path
+) -> None:
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    receipts = path.parent.parent
+    elsewhere = tmp_path / "elsewhere"
+    receipts.rename(elsewhere)
+    receipts.symlink_to(elsewhere, target_is_directory=True)
+
+    _retire(project, _Logger())
+
+    assert SERVER in _servers(project), "unusable evidence must not remove anything"
+    assert not list(elsewhere.rglob("*.unusable")), "nothing is written outside APM_HOME"

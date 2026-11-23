@@ -6,7 +6,8 @@ order (A B, B A, A B, ...) so runner drift lands on both sides equally. Each
 side keeps its own work directory, so neither CLI reads the other's cache.
 
 ``report`` merges every shard's JSON and prints a markdown table: CPU p50
-(user+sys of apm and its children, from wait4) per side over all samples,
+(user+sys of apm and its children: wait4 on POSIX, a Job Object on Windows)
+per side over all samples,
 the median of the per-pair new/base CPU ratios, and the deterministic counts
 (requests, spawns). Wall time is never reported: runners are shared VMs.
 
