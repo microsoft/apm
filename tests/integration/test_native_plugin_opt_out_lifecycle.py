@@ -332,7 +332,7 @@ def test_the_native_route_prints_one_diagnostic_naming_the_opt_out(
     from apm_cli.claude_plugins.admission import native_route_notice
 
     text = " ".join(f"{result.stdout}\n{result.stderr}".split())
-    notice = native_route_notice(user_scope=False)
+    notice = native_route_notice(loose_route=True)
     assert text.count(notice) == 1, _evidence(result)
     assert text.count("native: false") == 1, _evidence(result)
     for needle in ("worktree", "claude -p", "claude-code-action", "1.0.106"):

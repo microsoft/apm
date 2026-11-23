@@ -40,15 +40,16 @@ class ClaudeNativePluginError(RuntimeError):
 NATIVE_ROUTE_NOTICE = (
     "installed as a native plugin. Native plugins are reported not to load in "
     "git worktrees, in non-interactive claude -p runs (including "
-    "claude-code-action) and in Copilot CLI 1.0.106. To deploy it loose instead, "
-    "set native: false on this dependency in apm.yml."
+    "claude-code-action) and in Copilot CLI 1.0.106."
 )
+# A Claude-format plugin deploys loose under native: false at both scopes (#4995);
+# an Agent Plugin has no loose route, so its notice omits the hint.
+_LOOSE_ROUTE_HINT = " To deploy it loose instead, set native: false on this dependency in apm.yml."
 
 
-def native_route_notice(*, user_scope: bool) -> str:
-    """The native-route notice; ``native: false`` keeps a plugin loose at both scopes (#4995)."""
-    del user_scope
-    return NATIVE_ROUTE_NOTICE
+def native_route_notice(*, loose_route: bool) -> str:
+    """The native-route notice, with the loose-route hint where that route exists."""
+    return NATIVE_ROUTE_NOTICE + _LOOSE_ROUTE_HINT if loose_route else NATIVE_ROUTE_NOTICE
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +73,12 @@ class ClaudeNativePlugin:
     warning: str | None = None
     approved_pin: str | None = None
     harnesses: frozenset[str] = frozenset({CLAUDE})
+
+
+def has_loose_route(plugin: ClaudeNativePlugin, *, user_scope: bool) -> bool:
+    """Whether ``native: false`` would deploy *plugin* loose instead, at either scope."""
+    del user_scope
+    return (plugin.source_root / ".claude-plugin/plugin.json").is_file()
 
 
 def fingerprint_native_claude_source(root: Path, *, portable: bool = False) -> str:
