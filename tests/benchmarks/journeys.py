@@ -753,21 +753,33 @@ class Sample:
     spawns: dict = field(default_factory=dict)
     modules: int = 0
     routes: dict = field(default_factory=dict)
+    spawn_attr: dict = field(default_factory=dict)
 
 
-def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
-    """Spawns by executable summed over every Python process, plus the max module count."""
+def _read_spawn_log(path: Path | None) -> tuple[dict, int, dict]:
+    """Spawns by executable summed over every Python process, the max module count,
+    and the per-class spawn attribution (count, child CPU, parent CPU, wall)."""
     if path is None or not path.is_file():
-        return {}, 0
+        return {}, 0, {}
     spawns: dict[str, int] = {}
     modules = 0
+    attr: dict[str, list] = {}
+    rusage = {"self": 0.0, "children": 0.0, "unreaped": 0, "processes": 0}
     for line in path.read_text(encoding="utf-8").splitlines():
         record = json.loads(line)
         modules = max(modules, record["modules"])
         for name, count in record["spawns"].items():
             spawns[name] = spawns.get(name, 0) + count
+        for key, row in (record.get("attr") or {}).items():
+            acc = attr.setdefault(key, [0, 0.0, 0.0, 0.0])
+            for index, value in enumerate(row):
+                acc[index] = round(acc[index] + value, 4)
+        for key, value in (record.get("rusage") or {}).items():
+            rusage[key] = round(rusage[key] + value, 4)
+        rusage["processes"] += 1
     path.unlink()
-    return dict(sorted(spawns.items())), modules
+    detail = {"classes": dict(sorted(attr.items())), "rusage": rusage} if attr else {}
+    return dict(sorted(spawns.items())), modules, detail
 
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
@@ -787,9 +799,10 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
             output = f"$ apm {' '.join(argv)}\n{tail}"
             break
     wall = time.perf_counter() - start
-    spawns, modules = _read_spawn_log(ctx.spawn_log)
+    spawns, modules, attr = _read_spawn_log(ctx.spawn_log)
     sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
+    sample.spawn_attr = attr
     sample.routes = _routes(_observations(ctx.world)[seen:])
     return sample, output
 
