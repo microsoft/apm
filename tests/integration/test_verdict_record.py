@@ -919,3 +919,26 @@ def test_a_file_under_a_directory_the_package_hash_skips_misses(
 
     assert verdict_record.replay(["install"]) is False
     assert capsys.readouterr().out == ""
+
+
+def test_an_edited_file_named_like_a_hash_skipped_directory_misses(project: Path, capsys) -> None:
+    """content_hash skips any path part named __pycache__ or .git, files included."""
+    odd = project / "apm_modules" / "o" / "p" / "__pycache__"
+    odd.write_text("# before\n", encoding="utf-8")
+    _record()
+    odd.write_text("# after\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_a_fifo_inside_a_package_copy_misses(project: Path, capsys) -> None:
+    """The hash skips non-regular files; a hit cannot prove what the scan would make of one."""
+    _record()
+    os.mkfifo(project / "apm_modules" / "o" / "p" / "pipe")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""

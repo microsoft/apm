@@ -615,7 +615,8 @@ def _deployed_rels(lock: dict) -> frozenset[str]:
 
 def _deployed_intact(root: Path, lock: dict) -> bool:
     """Every deployed file and package copy, re-hashed no-follow (QL D5)."""
-    from apm_cli.utils.content_hash import _EXCLUDED_DIRS, canonical_digest
+    from apm_cli.install.verdict_inputs import hash_blind
+    from apm_cli.utils.content_hash import canonical_digest
 
     if not _provable(lock):
         return False
@@ -641,9 +642,8 @@ def _deployed_intact(root: Path, lock: dict) -> bool:
 
         if not marker_is_current(package, str(dep.get("resolved_commit") or "")):
             return False  # hashing skips .apm-pin; the full run's marker sync repairs it
-        for _rel, files, dirs in _tree(str(package)):
-            if _EXCLUDED_DIRS.intersection(dirs) or any(entry.is_symlink() for entry in files):
-                return False  # the hash skips these; sources_scan_clean scans or refuses them
+        if hash_blind(package):
+            return False
     return True
 
 

@@ -79,3 +79,17 @@ def notice_schedule(entry_time: float) -> tuple[str, float | None]:
     if checked >= entry_time - _CLOCK_GRAIN:
         raise ValueError("this run checked for updates")
     return str(path), checked + _NOTICE_PERIOD
+
+
+def hash_blind(package: Path) -> bool:
+    """Whether a package copy holds entries its content hash skips but the source scan
+    reads or refuses: links, non-regular files, and any entry named like an excluded dir."""
+    from apm_cli.utils.content_hash import _EXCLUDED_DIRS
+
+    for _rel, files, dirs in _tree(str(package)):
+        if _EXCLUDED_DIRS.intersection(dirs) or any(
+            entry.name in _EXCLUDED_DIRS or not entry.is_file(follow_symlinks=False)
+            for entry in files
+        ):
+            return True
+    return False
