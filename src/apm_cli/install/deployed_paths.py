@@ -119,6 +119,21 @@ def deployed_path_entry(
         )
 
 
+def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) -> tuple[str, ...]:
+    """Return the skill directory entry a normal lock records beside a member (#3772)."""
+    for target in targets:
+        if target.name != target_name or not target.supports("skills"):
+            continue
+        skills_root = target.skills_deploy_path(root)
+        try:
+            parts = physical.relative_to(skills_root.resolve()).parts
+        except ValueError:
+            continue
+        if len(parts) > 1:
+            return (deployed_path_entry(skills_root / parts[0], root, [target]),)
+    return ()
+
+
 def skill_bundle_file_entries(
     skill_dir: Path,
     project_root: Path,
