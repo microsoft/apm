@@ -250,9 +250,12 @@ with `skills/<name>/SKILL.md` support `skills: [name]` without root `apm.yml` or
 
 `skills: ["*"]` installs every skill the package ships, including skills added
 in later releases. `"*"` is a whole-list token: `["*", "name"]` is refused, and
-no glob matching applies. Any `skills:` selection deploys skills loose, never as
-a native plugin; use `["*"]` where native plugins do not load (git worktrees,
-non-interactive `claude -p` / claude-code-action, Copilot CLI 1.0.106).
+no glob matching applies. At project scope a `skills:` selection deploys a
+Claude-format plugin's skills loose instead of as a native plugin; use `["*"]`
+there where native plugins do not load (git worktrees, non-interactive
+`claude -p` / claude-code-action, Copilot CLI 1.0.106). It does not help with
+`-g` (the plugin parks), for Agent Plugins (they stay native) or for a plugin
+without skills.
 
 Unknown fields are rejected. A Git `version` field reports an actionable error
 to use `ref` for a branch, tag, or commit; `version` belongs to registry and

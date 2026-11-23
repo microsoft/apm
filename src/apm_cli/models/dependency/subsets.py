@@ -140,6 +140,8 @@ def union_selection_names(*subsets: Iterable[str] | None) -> tuple[str, ...] | N
     for subset in subsets:
         if subset:
             names.update(str(name) for name in subset)
+    if SKILL_SELECT_ALL in names:
+        return (SKILL_SELECT_ALL,)  # select-all absorbs named skills (req-rs-018)
     return tuple(sorted(names)) or None
 
 
@@ -238,6 +240,9 @@ def skill_subset_filter_tokens(skill_subset: Iterable[object] | None) -> set[str
     use these tokens so install and pack apply the same matching rule.
     ``["*"]`` filters nothing and returns ``None``.
     """
+    if skill_subset is None:
+        return None
+    skill_subset = list(skill_subset)  # a one-shot iterable is read once
     if not skill_subset or skill_subset_selects_all(skill_subset):
         return None
 
@@ -523,7 +528,7 @@ def merge_edge_pairings(
     seen = False
     for skills, targets in edges:
         seen = True
-        skill_set = _names(_normalize_axis(skills, "skills"))
+        skill_set = _absorb_select_all(_names(_normalize_axis(skills, "skills")))
         target_set = _names(_normalize_axis(targets, "targets"))
         edge_raw: _RawPairing = {}
         for target in target_set if target_set is not None else (_EVERY_TARGET,):
@@ -561,10 +566,20 @@ def _sorted_names(values: _SkillSet) -> tuple[str, ...] | None:
     return None if values is None else tuple(sorted(values))
 
 
+def _absorb_select_all(skills: _SkillSet) -> _SkillSet:
+    """``skills: ["*"]`` absorbs every named skill: the set is just ``{"*"}`` (req-rs-018).
+
+    It stays a selection, unlike ``None``, so the dependency keeps the loose route.
+    """
+    if skills is not None and SKILL_SELECT_ALL in skills:
+        return frozenset({SKILL_SELECT_ALL})
+    return skills
+
+
 def _union(left: _SkillSet, right: _SkillSet) -> _SkillSet:
     if left is None or right is None:
         return None
-    return left | right
+    return _absorb_select_all(left | right)
 
 
 def _union_all(values: Iterable[_SkillSet]) -> _SkillSet:

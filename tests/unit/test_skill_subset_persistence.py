@@ -90,6 +90,9 @@ class TestDependencyReferenceSkillSubset:
         assert ref.skill_subset == ["*"]
         assert skill_subset_filter_tokens(ref.skill_subset) is None
 
+    def test_a_one_shot_named_selection_still_filters(self):
+        assert skill_subset_filter_tokens(iter(["alpha"])) == {"alpha"}
+
     def test_merged_selection_with_star_selects_every_skill(self):
         # Two declarations, ["*"] and ["alpha"], merge into one union.
         assert skill_subset_filter_tokens(("*", "alpha")) is None
