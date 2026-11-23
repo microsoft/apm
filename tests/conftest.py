@@ -392,6 +392,7 @@ _LAZY_CONSUMERS = (
     "apm_cli.deps.git_reference_resolver",
     "apm_cli.deps.git_semver_resolver",
     "apm_cli.deps.github_downloader",
+    "apm_cli.install.audit_replay",
     "apm_cli.install.integrity",
     "apm_cli.install.legacy_plugin_compat",
     "apm_cli.install.phases.claude_plugins",
