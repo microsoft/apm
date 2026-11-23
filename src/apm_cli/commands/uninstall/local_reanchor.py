@@ -25,6 +25,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -515,6 +516,11 @@ def roll_back(plan: LocalReanchorPlan) -> list[str]:
 
     failures: list[str] = []
     for path, text in plan.snapshot:
+        # A file still holding its snapshot is not rewritten: a read-only
+        # receipt directory must not fail a rollback that changed nothing.
+        with contextlib.suppress(OSError):
+            if path.is_file() and path.read_bytes() == text.encode("utf-8"):
+                continue
         try:
             atomic_write_text(path, text, normalize_line_endings=False)
         except OSError as exc:
