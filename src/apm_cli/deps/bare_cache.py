@@ -261,7 +261,8 @@ def bare_clone_with_fallback(
             # would never match. Copilot review finding (#1135).
             from ..utils.git_env import git_resolve_commit
 
-            full_sha = git_resolve_commit(target, ref, env=env, bare=True)
+            # A commit pin: the full commit its (possibly abbreviated) name expands to.
+            full_sha = git_resolve_commit(target, ref, bare=True, env=env)
             subprocess.run(
                 [git_exe, "--git-dir", str(target), "update-ref", "HEAD", full_sha],
                 env=env,
