@@ -19917,15 +19917,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[newer-generator]"
   },
   "pair|PRIM=bin|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|NET=offline": {
    "family": "pair",
@@ -19964,8 +19966,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|SELECT=on": {
    "family": "pair",
@@ -19978,8 +19981,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[multi-narrowed]"
   },
   "pair|PRIM=bin|TGT=multi-unchanged": {
    "family": "pair",
@@ -19992,15 +19996,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[multi-widened]"
   },
   "pair|PRIM=bin|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-narrowed]"
   },
   "pair|PRIM=bin|TGT=single-unchanged": {
    "family": "pair",
@@ -20013,8 +20019,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-widened]"
   },
   "pair|PRIM=bin|UPDATE=on": {
    "family": "pair",

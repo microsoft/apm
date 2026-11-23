@@ -115,6 +115,16 @@ BIN_WITNESSES: Mapping[str, str] = {
             "test_an_edited_plugin_bin_is_restored_and_said",
         )
     },
+    **{
+        "tests/lifecycle/scenarios/test_lock_states.py::"
+        f"test_user_bin_plugin_under_a_drifted_lock[{lock}]": "user"
+        for lock in ("stale", "newer-generator")
+    },
+    **{
+        "tests/lifecycle/scenarios/test_user_scope.py::"
+        f"test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[{change}]": "user"
+        for change in ("single-narrowed", "single-widened", "multi-narrowed", "multi-widened")
+    },
 }
 
 
