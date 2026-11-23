@@ -174,12 +174,11 @@ def test_trust_lockfile_deletes_locked_bytes_and_keeps_an_edit_when_the_source_i
         expect=None,
         scenario_id="4295-audit",
     )
-    if audit.returncode != 0:
-        failures = [
-            check for check in json.loads(audit.stdout).get("checks", []) if not check.get("passed")
-        ]
-        details = json.dumps(failures)
-        assert "beta" not in details and "gamma" not in details, details
+    # The uninstall leaves a consistent project: every audit check passes (#4799).
+    report = json.loads(audit.stdout)
+    failures = [check for check in report.get("checks", []) if not check.get("passed")]
+    assert audit.returncode == 0 and report.get("passed") is True, json.dumps(failures)
+    assert failures == [], json.dumps(failures)
 
 
 def test_trust_lockfile_keeps_a_user_file_the_lockfile_claims_when_a_render_exists(
