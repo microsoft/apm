@@ -652,13 +652,16 @@ def _i5_write_set(
         observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
         allowed = op.allowed.get(root_id, ())
         dry_run = op.read_only or "DRYRUN" in op.modifiers
+        # Exact files: each admits itself and its ancestor directories, never a descendant.
+        exact: tuple[str, ...] = ()
         if root_id == "home" and op.name == "compile" and not dry_run:
-            allowed = (*allowed, compile_home_record(after.deploy_root))
+            exact = (compile_home_record(after.deploy_root),)
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {
             path
             for path in observed
             if any(_within(path, a) or a.startswith(path + "/") for a in allowed)
+            or any(path == e or e.startswith(path + "/") for e in exact)
         }
         for prefix in op.forbidden.get(root_id, ()):
             hit = sorted(path for path in observed if _within(path, prefix))

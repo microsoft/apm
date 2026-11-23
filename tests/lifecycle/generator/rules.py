@@ -322,9 +322,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "included (#4559, #4808); nor is audit: its drift replay fingerprints that root "
         "(drift.verify_claude_native_cache). An org-policy level stays its own cell (U2 "
         "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. "
-        "Under marketplace that org-policy level stays baseline (Q&L ruling 2026-11-22): "
-        "it exits 0 under the deny and bin/ never deploys at project scope (U_BIN_PIN), "
-        "so any absence witness there is vacuous",
+        "Under marketplace that org-policy level is a real cell (#4894): a trusted "
+        "project-scope plugin deploys whole, bin/ included, and the plugin bin spine "
+        "checks that marketplace leaves that bin/ unchanged under the deny",
         (
             Ev(
                 "src/apm_cli/install/exec_gate.py",

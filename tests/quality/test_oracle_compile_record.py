@@ -87,3 +87,14 @@ def test_no_other_command_may_write_the_record(tmp_path: Path) -> None:
     assert _written(tmp_path, record).exists(), record
     assert len(messages) == 1 and messages[0].startswith("install wrote home:"), messages
     assert record in messages[0], messages
+
+
+def test_a_compile_may_not_write_below_its_record_path(tmp_path: Path) -> None:
+    record = oracles.compile_home_record(tmp_path / "project")
+    below = f"{record}/extra.json"
+
+    messages = _i5(tmp_path, ("compile",), below)
+
+    assert _written(tmp_path, below).exists(), below
+    assert len(messages) == 1 and messages[0].startswith("compile wrote home:"), messages
+    assert below in messages[0], messages
