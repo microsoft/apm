@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Under `fetch_failure_default=warn`, `apm install` now prints a one-time notice when org policy is unavailable and lifecycle scripts are about to run, so the unapplied org `executables` ceiling is visible; the `warn` posture itself is unchanged and the `build_runner_from_context` docstring now documents the fail-closed exception behavior. (closes #4913)
-
 ## [0.38.0] - 2026-11-22
 
 ### Highlights

@@ -780,7 +780,23 @@ def build_runner_from_context(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
 
-    if unresolved_warn:
+    # Apply the project trust filter BEFORE deciding whether to emit the
+    # unresolved-policy notice. If the only scripts are untrusted project
+    # entries that the trust filter removes, no scripts will run, so an
+    # "org policy not applied to lifecycle scripts" notice would be
+    # misleading -- there is nothing for the org ceiling to gate (review
+    # #4917). The notice fires only when at least one script survives.
+    project_trusted = is_fingerprint_trusted(project_yml, project_fp)
+
+    kept: list[ScriptEntry] = []
+    skipped = 0
+    for script in scripts:
+        if script.source == "project" and not project_trusted:
+            skipped += 1
+            continue
+        kept.append(script)
+
+    if unresolved_warn and kept:
         # Scripts run, but the operator must know org policy was not applied
         # before they do. The runner is often built with ``logger=None`` (for
         # example ``apm lifecycle``), so the notice must not depend on a
@@ -808,16 +824,6 @@ def build_runner_from_context(
                     "(policy unavailable; fetch_failure_default=warn)",
                     symbol="warning",
                 )
-
-    project_trusted = is_fingerprint_trusted(project_yml, project_fp)
-
-    kept: list[ScriptEntry] = []
-    skipped = 0
-    for script in scripts:
-        if script.source == "project" and not project_trusted:
-            skipped += 1
-            continue
-        kept.append(script)
 
     return LifecycleScriptRunner(
         scripts=kept,

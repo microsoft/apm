@@ -505,6 +505,57 @@ class TestBuildRunnerFromContext:
         assert "org policy not applied to lifecycle scripts" in out, out
         assert out.count("[!]") == 1, out
 
+    def test_unresolved_org_policy_warn_untrusted_only_emits_no_notice(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Under fetch_failure_default=warn, when the only lifecycle scripts are
+        untrusted project entries that the trust filter removes, NO unresolved-
+        policy notice is emitted -- no scripts will run, so an unapplied-policy
+        warning would be misleading (review #4917)."""
+        from apm_cli.core import lifecycle_scripts
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        lifecycle_scripts._unresolved_warn_noted_roots.discard(str(tmp_path))
+        # Only a project-tier script, which the trust filter will drop.
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {
+                "name": "p",
+                "policy": {"fetch_failure_default": "warn"},
+                "lifecycle": {
+                    "post-install": [{"type": "command", "bash": "echo from-project"}]
+                },
+            },
+        )
+        failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.lines: list[str] = []
+
+            def warning(self, message: str) -> None:
+                self.lines.append(message)
+
+        logger = _Logger()
+        with (
+            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed),
+            patch(
+                "apm_cli.core.script_trust.is_fingerprint_trusted", return_value=False
+            ),
+        ):
+            runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+        # No scripts survive the trust filter.
+        assert runner._scripts == []
+        assert runner._skipped_project_scripts == 1
+        # ...so no unapplied-policy notice should be printed.
+        notices = [
+            line
+            for line in logger.lines
+            if "org policy" in line.lower() and "lifecycle scripts" in line.lower()
+        ]
+        assert notices == [], logger.lines
+
     def test_fetched_policy_warn_emits_no_notice(self, tmp_path: Path, monkeypatch) -> None:
         """A resolved policy under warn prints no new lifecycle notice (#4913)."""
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
