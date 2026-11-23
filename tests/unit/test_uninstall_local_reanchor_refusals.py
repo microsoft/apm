@@ -19,6 +19,7 @@ pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I3", "P-INV-I1")
         ("shrink", "select fewer skills or targets of local:vendor/f"),
         ("native", "native plugin registrations are reconciled separately"),
         ("mixed", "uninstall ./vendor/r in a separate command"),
+        ("lsp", "it supplies a language server"),
     ],
 )
 def test_a_reanchor_that_cannot_be_one_transaction_refuses(
@@ -37,10 +38,12 @@ def test_a_reanchor_that_cannot_be_one_transaction_refuses(
         lambda lockfile: {"plugin": object()} if shape == "native" else {},
     )
     logger = MagicMock()
+    lockfile = MagicMock()
+    lockfile.lsp_config_provenance = {"pyright": "package:./vendor/e"} if shape == "lsp" else {}
 
     with pytest.raises(SystemExit) as exc:
         _plan_reanchor_or_exit(
-            MagicMock(),
+            lockfile,
             SimpleNamespace(),
             [],
             tmp_path / "apm.yml",

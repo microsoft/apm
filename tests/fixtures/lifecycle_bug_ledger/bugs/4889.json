@@ -57,6 +57,7 @@
     "tests/unit/test_uninstall_local_reanchor_refusals.py::test_a_local_row_without_a_path_is_unverified_offline",
     "tests/unit/test_uninstall_local_reanchor_rollback.py::test_an_unreadable_committed_lock_rolls_the_reanchor_back",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_hook_bearing_reanchor_refuses_and_keeps_its_hooks",
-    "tests/unit/test_uninstall_local_reanchor_refusals.py::test_every_declaration_of_one_directory_is_previewed_as_kept"
+    "tests/unit/test_uninstall_local_reanchor_refusals.py::test_every_declaration_of_one_directory_is_previewed_as_kept",
+    "tests/unit/test_uninstall_local_reanchor_rollback.py::test_a_repeated_failed_rollback_keeps_the_earlier_backup"
   ]
 }
