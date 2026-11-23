@@ -175,7 +175,7 @@ def test_the_next_install_replays_only_its_own_abandoned_journals(
         journal.record(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"deployed by a killed install\n")
-        journal.seal()
+        journal.after_write(path)
     retained = store_parent / "retained-needed"
     retained.mkdir()
     (retained / "0").write_bytes(b"prior\n")
@@ -229,7 +229,7 @@ def _journaled_receipt(apm_home: Path, project: Path) -> tuple[Path, Path]:
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(receipt)
     receipt.write_bytes(b"killed\n")
-    journal.seal()
+    journal.after_write(receipt)
     assert journal.store is not None
     return receipt, journal.store
 
@@ -382,7 +382,7 @@ def _killed_journal(apm_home: Path, project: Path, path: Path, *, seal: bool = T
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"killed\n")
     if seal:
-        journal.seal()
+        journal.after_write(path)
     assert journal.store is not None
     return journal.store
 
@@ -420,9 +420,10 @@ def test_a_receipts_directory_the_killed_install_created_is_removed(
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(receipts, contents=False)
     receipts.mkdir(parents=True)
+    journal.after_write(receipts)
     journal.record(receipts / "r.json")
     (receipts / "r.json").write_bytes(b"killed\n")
-    journal.seal()
+    journal.after_write(receipts / "r.json")
 
     outcome = _replay(apm_home, project)
 
@@ -477,7 +478,7 @@ def test_a_directory_restores_only_when_the_ledger_records_all_its_files(
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(skill)
     (skill / "SKILL.md").write_bytes(b"killed\n")
-    journal.seal()
+    journal.after_write(skill / "SKILL.md")
     ledger = {".kiro/skills/s/SKILL.md": digest, ".kiro/skills/s/extra.md": digest}
 
     with pytest.raises(JournalReplayError) as kept:
@@ -614,7 +615,7 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
     journal.record(hook)
     hook.write_bytes(b"#!/bin/sh\necho killed\n")
     hook.chmod(0o644)
-    journal.seal()
+    journal.after_write(hook)
 
     restored = replay_abandoned_journals(
         apm_home / "install-snapshots", project, lambda: ledger, receipts=_receipts(apm_home)

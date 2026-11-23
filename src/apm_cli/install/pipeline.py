@@ -884,9 +884,6 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # The lockfile is staged in its writer scope (#4086): the commit gate
         # checks it before that scope commits it (install/commit_gate.py).
         LockfileBuilder(ctx).build_and_save()
-        # Each gate below may refuse: seal what the journal's paths hold first,
-        # so a killed refusal is replayed without touching later user data (#4863).
-        transaction.seal_deploy_writes()
         check_before_lockfile(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
 
         # ------------------------------------------------------------------
@@ -897,7 +894,6 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             from .phases import post_deps_local as _post_deps_local_phase
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
-            transaction.seal_deploy_writes()
             check_before_release(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
             if materialization_session is not None:
                 after_lockfile_commit(

@@ -26,6 +26,8 @@
     "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_mid_deploy_restores_every_journaled_path",
     "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_tampered_root_copy_is_kept_and_reported_not_restored",
     "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_settling_a_repair_keeps_the_repaired_file",
-    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_an_mcp_install_replays_a_killed_install_first"
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_an_mcp_install_replays_a_killed_install_first",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_file_a_user_edits_after_a_mid_deploy_kill_is_kept",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_write_killed_before_its_seal_is_restored"
   ]
 }

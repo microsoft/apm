@@ -300,6 +300,13 @@ def journal_config_write(config_path: Path) -> None:
     record_before_write(config_path, follow=True)
 
 
+def journal_config_written(config_path: Path) -> None:
+    """Report that APM finished writing an MCP config file, so the journal seals it (#4863)."""
+    from ...integration.write_seam import record_after_write
+
+    record_after_write(config_path, follow=True)
+
+
 def _warn_symlinked_mcp_config(config_path: Path) -> None:
     library_logger().warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
 
@@ -715,6 +722,7 @@ class MCPClientAdapter(ABC):
                 default_trailing_newline=trailing_newline,
                 new_file_mode=umask_file_mode(config_path),
             )
+            journal_config_written(config_path)
             return
         if config_path.is_file():
             # Tighten first: the atomic write keeps an existing file's mode.
@@ -723,6 +731,7 @@ class MCPClientAdapter(ABC):
             config_path, config, default_trailing_newline=trailing_newline, new_file_mode=0o600
         )
         os.chmod(config_path, 0o600)
+        journal_config_written(config_path)
 
     @abstractmethod
     def configure_mcp_server(
