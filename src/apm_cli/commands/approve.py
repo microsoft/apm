@@ -864,11 +864,13 @@ def _approve_bundles(
     # refuse before any write: a failed approve changes nothing (#4933).
     blocked = _bundles_still_denied(manifest, user_scope, remaining, bundles, logger=logger)
     if blocked:
-        for key in keys:
+        global_install = _install_command(manifest).endswith("-g")
+        for key in dict.fromkeys(keys):
             if key in blocked:
+                hint = _lift_deny_hint(blocked[key], key, user_scope=global_install)
                 _rich_error(
-                    f"{key} is still denied by another trust layer; the approval "
-                    "has no effect until that deny is lifted.",
+                    f"{key} is still denied by another trust layer ({blocked[key]}); the "
+                    f"approval has no effect until that deny is lifted: {hint}",
                     symbol="error",
                 )
         _rich_info("Nothing written.", symbol="info")
@@ -897,8 +899,10 @@ def _approve_bundles(
 
 def _bundles_still_denied(
     manifest: Path, user_scope: bool, deny: dict, bundles: list, *, logger: CommandLogger
-) -> set[str]:
-    """Keys of *bundles* a deny blocks once the written store holds *deny* (#4933).
+) -> dict[str, str]:
+    """Keys of *bundles* a deny blocks once the written store holds *deny*, with its layer.
+
+    The first denying layer is reported, as for a named package (#4933).
 
     Reads never persist a legacy ``approvals.yml`` migration, so a refused
     approve leaves the personal store as it found it.
@@ -917,16 +921,13 @@ def _bundles_still_denied(
     )
     store = "user_deny" if user_scope else "project_deny"
     ctx = replace(ctx, gate_enabled=True, **{store: _deny_types(deny)})
-    return {
-        bundle.approval_key
-        for bundle in bundles
-        if any(
-            verdict.state == TRUST_DENIED
-            for verdict in package_type_verdicts(
-                ctx, (bundle.approval_key,), None, bundle.exec_types
-            ).values()
-        )
-    }
+    blocked: dict[str, str] = {}
+    for bundle in bundles:
+        verdicts = package_type_verdicts(ctx, (bundle.approval_key,), None, bundle.exec_types)
+        layers = [v.layer for v in verdicts.values() if v.state == TRUST_DENIED]
+        if layers:
+            blocked.setdefault(bundle.approval_key, layers[0])
+    return blocked
 
 
 def _trust_command(

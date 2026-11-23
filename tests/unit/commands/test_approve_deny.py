@@ -1076,7 +1076,13 @@ def test_bundle_approve_refuses_before_any_write_when_another_layer_denies(
     assert {path: path.read_bytes() for path in stores} == before, result.output
     assert config.exists() == (layer == "user")
     text = " ".join(result.output.split())
-    assert f"{_BUNDLE_KEY} is still denied by another trust layer" in text
+    assert f"{_BUNDLE_KEY} is still denied by another trust layer ({layer}-deny)" in text
+    hint = {
+        "org": "ask its owner to change apm-policy.yml",
+        "user": f"apm approve --user '{_BUNDLE_KEY}'",
+    }[layer]
+    assert hint in text
+    assert "Nothing written." in text
     assert "Approved local bundle" not in text
 
 
