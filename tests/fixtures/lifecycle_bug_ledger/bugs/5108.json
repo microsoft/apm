@@ -1,0 +1,16 @@
+{
+  "issue": 5108,
+  "fixed_in": "Unreleased",
+  "summary": "When a parked native Claude plan kept a package's loose files and another package wrote one of those paths in the same install, the parked package's old claim and hash could win reconciliation, so the next audit and frozen install failed; the writer's claim now wins and replay keeps the writer's copy.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_parked_native_claude_replacement_lifecycle.py::test_a_path_another_package_writes_is_not_kept_for_the_parked_package",
+    "tests/unit/install/test_parked_native_keep.py::test_replay_never_replaces_a_copy_another_package_rendered"
+  ]
+}
