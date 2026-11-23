@@ -561,8 +561,9 @@ def test_a_ledger_only_claim_linking_into_the_moving_copy_keeps_resolving(
     _assert_link_resolves(world, skill + "/SKILL.md")
 
 
+@pytest.mark.parametrize("pin", [False, True], ids=["plain", "with-a-pin-marker"])
 def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, pin: bool
 ) -> None:
     """#5102: e's .git/HEAD (hash-excluded) changes after install; e re-anchors with a
     fresh copy, so the next install rewrites nothing and no copy is left aside."""
@@ -571,6 +572,9 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
         head = project / "vendor/e/.git/HEAD"
         head.parent.mkdir(parents=True)
         head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+        if pin:
+            # Install drops this marker from a local copy; a fresh copy must too.
+            (project / "vendor/e/.apm-pin").write_text("{}\n", encoding="utf-8")
 
     world = _docs_world(tmp_path, apm_binary_path, git_head)
     (world.project / "vendor/e/.git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")

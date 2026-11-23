@@ -930,15 +930,18 @@ def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
         moves = _fresh_copy_moves(plan, modules_dir, staged)
         return move_materializations(moves, modules_dir)
     except (OSError, ValueError) as exc:
-        _discard_dirs(staged, modules_dir)
+        left = _discard_dirs(staged, modules_dir)
+        note = f"; the staged copy {', '.join(left)} could not be removed" if left else ""
         _roll_back_and_exit(
             plan,
             logger,
-            f"The re-anchored package's apm_modules directory could not be moved ({exc})",
+            f"The re-anchored package's apm_modules directory could not be moved ({exc}){note}",
         )
     except BaseException as exc:
-        _discard_dirs(staged, modules_dir)
-        _undo_reanchor(exc, (), modules_dir, repair, logger)
+        # An interrupt names any staged copy it could not remove, never silently.
+        _undo_reanchor(
+            exc, (), modules_dir, repair, logger, left=_discard_dirs(staged, modules_dir)
+        )
         raise
 
 
@@ -966,7 +969,10 @@ def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
         # Registered before the copy starts, so an interrupt never strands it.
         staged.append(stage)
         if not _stage_fresh_copy(stage, current, *fresh[current], modules_dir):
-            _discard_dirs([staged.pop()], modules_dir)
+            if _discard_dirs([stage], modules_dir):
+                # Still registered: the caller reports it and nothing commits.
+                raise OSError(f"its staged copy {_modules_path(stage, modules_dir)} remains")
+            staged.pop()
             moves.append((current, target))
             continue
         moves += [(current, aside), (stage, target)]
@@ -974,7 +980,12 @@ def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
 
 
 def _stage_fresh_copy(stage: Path, current: Path, ref, framed: bool, modules_dir: Path) -> bool:
-    """Write install's image of *ref* to *stage*; whether it hashes as *current* does."""
+    """Write install's image of *ref* to *stage*; whether it hashes as *current* does.
+
+    Install drops a stale ``.apm-pin`` from an unmarkable (local) copy, which
+    the hash does not see, so the staged image gets the same cleanup first.
+    """
+    from ...install.cache_pin import MARKER_FILENAME, _remove_marker
     from ...install.phases.local_content import (
         LocalPackageError,
         compute_local_package_hash,
@@ -984,6 +995,9 @@ def _stage_fresh_copy(stage: Path, current: Path, ref, framed: bool, modules_dir
 
     try:
         materialize_local_package(ref, stage, modules_dir.parent)
+        _remove_marker(stage, modules_dir)
+        if os.path.lexists(stage / MARKER_FILENAME):
+            return False
         return compute_local_package_hash(stage, framed=framed) == compute_local_package_hash(
             current, framed=framed
         )
@@ -1034,14 +1048,15 @@ def discard_set_aside_copies(moved: tuple, modules_dir, logger) -> None:
 _UNSAVED_LOCK = RuntimeError("the lockfile was not saved")
 
 
-def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger) -> None:
+def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger, left=()) -> None:
     """Move the re-anchored directories back; anything but a handled exit also restores
     apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor.
 
     The manifest rollback runs even when a directory cannot be moved back, and
-    anything left unrestored is named and exits 1, never silently.
+    anything left unrestored (or *left* behind by staging) is named and exits
+    1, never silently.
     """
-    unrestored: list[str] = []
+    unrestored: list[str] = list(left)
     try:
         unrestored += _restore_reanchored_dirs(moved, modules_dir)
     finally:

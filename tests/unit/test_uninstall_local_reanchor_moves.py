@@ -559,3 +559,42 @@ def test_a_dangling_link_at_a_staging_path_keeps_the_plain_move(
     assert staged == []
     assert not outside.exists()
     assert (current.parent / f"{prefix}e").is_symlink()
+
+
+class _StuckStage(type(Path())):
+    """A path whose staged copy cannot be inspected, so it cannot be removed."""
+
+    def exists(self, *args, **kwargs) -> bool:
+        if self.name.startswith(".apm-reanchor-fresh-"):
+            raise OSError("the staged copy is busy")
+        return super().exists(*args, **kwargs)
+
+
+def test_a_staged_copy_that_cannot_be_removed_is_reported_and_nothing_commits(
+    tmp_path: Path,
+) -> None:
+    """#5102: a failed staging whose leftover cannot be removed refuses and names it."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        _move_reanchored_dirs,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    modules = tmp_path / "apm_modules"
+    current = _StuckStage(_package(modules, "e"))
+    target = modules / "_local" / "h1" / "e"
+    missing = DependencyReference.parse("./vendor/missing")
+    plan = LocalReanchorPlan(
+        renames={"old": "new"}, moves=((current, target),), fresh=((current, missing, True),)
+    )
+    errors: list[str] = []
+    logger = SimpleNamespace(error=errors.append, progress=errors.append)
+
+    with pytest.raises(SystemExit):
+        _move_reanchored_dirs(SimpleNamespace(reanchor=plan), modules, logger)
+
+    assert "apm_modules/_local/.apm-reanchor-fresh-e" in " ".join(errors), errors
+    assert (current / "apm.yml").is_file()
+    assert not target.exists()
