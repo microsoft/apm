@@ -822,8 +822,9 @@ def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bo
         path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
         if "/" not in path or "://" in path:
             continue
-        if not path.endswith(".."):
-            path = path.rstrip(".:")
+        # Sentence punctuation after a link ("see _local/./e.") is not part of it.
+        while path.endswith((".", ":")) and not path.endswith(".."):
+            path = path[:-1]
         for base in (member.parent, project_root):
             candidate = os.path.normpath(os.path.join(base, path))
             if under(candidate) or under(os.path.realpath(candidate)):
