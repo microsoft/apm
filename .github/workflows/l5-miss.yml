@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -47,6 +47,6 @@ jobs:
       working-directory: harness
       run: |
         if [ "$RUNNER_OS" = "Windows" ]; then b=Scripts/python.exe; else b=bin/python; fi
-        cp ../mine/scripts/perf/l5_benchprobe.py scripts/perf/
+        cp ../mine/scripts/perf/l5_outputs.py scripts/perf/
         if [ "$RUNNER_OS" = "Windows" ]; then a=Scripts/apm.exe; else a=bin/apm; fi
-        uv run --frozen python scripts/perf/l5_benchprobe.py "$GITHUB_WORKSPACE/new/.venv/$a" "$RUNNER_TEMP/l5p"
+        uv run --frozen python scripts/perf/l5_outputs.py "$GITHUB_WORKSPACE/base/.venv/$a" "$RUNNER_TEMP/l5o" tree-10
