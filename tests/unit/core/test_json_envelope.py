@@ -87,3 +87,19 @@ def test_file_uri_scheme_is_case_insensitive_for_cache_paths(
 
     assert safe_source(uri) is None
     assert safe_text(f"See {uri} now") == "See [internal-cache] now"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX behavior for foreign Windows paths")
+@pytest.mark.parametrize(
+    ("uri", "expected"),
+    [
+        ("file:///C:/Users/me/proj", "C:/Users/me/proj"),
+        ("FILE:///c%3A/Users/me/my%20proj", "c:/Users/me/my proj"),
+        ("file://server/share/x", "//server/share/x"),
+        ("file://user:secret@server/share/x", "//server/share/x"),
+    ],
+)
+def test_safe_source_normalizes_windows_file_uris(uri: str, expected: str) -> None:
+    from apm_cli.core.json_envelope import safe_source
+
+    assert safe_source(uri) == expected

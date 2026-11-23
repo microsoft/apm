@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 SCHEMA_VERSION = 1
@@ -84,6 +85,9 @@ def safe_install_path(value: object) -> str | None:
     from apm_cli.cache.paths import cache_roots_for_display
     from apm_cli.config import CONFIG_DIR
 
+    if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", value):
+        # A Windows path cannot be resolved here; resolving would anchor it to the cwd.
+        return PureWindowsPath(value).as_posix()
     try:
         path = Path(value).expanduser().resolve()
         roots = (*cache_roots_for_display(), Path(CONFIG_DIR) / "cache")
@@ -118,15 +122,32 @@ def safe_plugin_source(value: object) -> str | None:
     return "/".join(parts) or "."
 
 
+def _file_uri_to_path(uri: str) -> str | None:
+    """Convert a file URI to a path; Windows drive and UNC forms stay recognizable."""
+    try:
+        parts = urlsplit(uri)
+        path = unquote(parts.path)
+        host = parts.hostname
+    except ValueError:
+        return None
+    if re.match(r"^/[A-Za-z]:(?:/|$)", path):
+        return path[1:]
+    if host and host != "localhost":
+        return f"//{host}{path}"
+    return path
+
+
 def safe_source(value: object) -> str | None:
     """Sanitize a source URL or show a safe local source with home abbreviation."""
     if not isinstance(value, str) or not value:
         return None
     if value[:7].lower() == "file://":
-        try:
-            value = unquote(urlsplit(value).path)
-        except ValueError:
+        value = _file_uri_to_path(value)
+        if value is None:
             return None
+    if re.match(r"^//[^/]", value):
+        # Network share: keep the host; resolving would collapse the leading slashes.
+        return PurePosixPath(value).as_posix()
     if value.startswith(("/", "./", "../", "~", "\\")) or re.match(r"^[A-Za-z]:[\\/]", value):
         local = safe_install_path(value)
         if local is None:
