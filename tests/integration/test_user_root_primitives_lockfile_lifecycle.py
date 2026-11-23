@@ -350,6 +350,25 @@ def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessSc
     assert audit.returncode == 0, describe(audit)
 
 
+def test_install_g_then_audit_accepts_a_user_root_inline_hook(scene: HarnessScene) -> None:
+    """I3: a user-root hook naming no script has no file claim, yet audit --ci replays it."""
+    audit = _install_claude_hook_then_audit(scene, "echo guard")
+
+    assert audit.returncode == 0, describe(audit)
+
+    settings = scene.home / ".claude" / "settings.json"
+    settings.write_text(
+        settings.read_text(encoding="utf-8").replace("echo guard", "echo tampered"),
+        encoding="utf-8",
+    )
+    tampered = scene.runner.run(
+        ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
+    )
+
+    assert tampered.returncode == 1, describe(tampered)
+    assert "drift detected: 1 file(s): .claude/settings.json" in tampered.stdout, describe(tampered)
+
+
 def test_install_g_then_audit_accepts_a_user_root_context_link(scene: HarnessScene) -> None:
     """I3: audit --ci replays a user-root agent's context link as install -g wrote it (#4832).
 
