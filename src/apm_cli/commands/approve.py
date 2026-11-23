@@ -129,12 +129,14 @@ def _installed_identities(manifest: Path) -> frozenset[str]:
 
 
 def _load_store(
-    manifest: Path, user_scope: bool
+    manifest: Path, user_scope: bool, *, migrate_legacy: bool = True
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
     """Load the (allow, deny) grant maps from the selected store.
 
     A key written as an install spec is stored under the package identity
-    when this store is saved (#4189).
+    when this store is saved (#4189). With *migrate_legacy* False a legacy
+    ``approvals.yml`` is folded in memory only; :func:`_save_store` retires
+    it, so a refused command writes nothing (#4923).
     """
     from ..security.executables import (
         _readable_lockfile,
@@ -144,7 +146,7 @@ def _load_store(
     )
 
     if user_scope:
-        allow, deny = load_user_executables()
+        allow, deny = load_user_executables(migrate_legacy=migrate_legacy)
     else:
         allow, deny, used_alias = load_project_executables(manifest)
         if used_alias:
@@ -165,10 +167,16 @@ def _save_store(
     deny: dict[str, dict[str, bool]],
 ) -> None:
     """Persist the (allow, deny) grant maps to the selected store."""
-    from ..security.executables import save_user_executables, write_project_executables
+    from ..security.executables import (
+        _migrate_legacy_approvals,
+        save_user_executables,
+        write_project_executables,
+    )
 
     if user_scope:
         save_user_executables(allow, deny)
+        # *allow* already holds any legacy grants; retire approvals.yml now.
+        _migrate_legacy_approvals(allow)
     else:
         write_project_executables(manifest, allow, deny)
 
@@ -296,7 +304,7 @@ def approve_cmd(
             _show_pending(manifest, logger=logger)
             return
 
-        allow, deny = _load_store(manifest, user_scope)
+        allow, deny = _load_store(manifest, user_scope, migrate_legacy=False)
 
         if recommended:
             _approve_recommended(manifest, user_scope, allow, deny, logger=logger)
@@ -316,7 +324,7 @@ def approve_cmd(
             _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
             if not packages:
                 return
-            allow, deny = _load_store(manifest, user_scope)
+            allow, deny = _load_store(manifest, user_scope, migrate_legacy=False)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
     except PolicyViolationError as exc:
         _report_policy_block(exc)

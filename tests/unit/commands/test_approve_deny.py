@@ -1052,15 +1052,25 @@ def _serve_policy(policy: ApmPolicy):
     return patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=found)
 
 
-@pytest.mark.parametrize("layer", ["org", "user"])
+@pytest.mark.parametrize(
+    ("layer", "store_flag"),
+    [("org", ()), ("user", ()), ("org", ("--user",)), ("project", ("--user",))],
+    ids=["org", "user", "org-user-store", "project-user-store"],
+)
 def test_bundle_approve_refuses_before_any_write_when_another_layer_denies(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str, store_flag: tuple[str, ...]
 ) -> None:
     """A still-denied bundle approve exits 1 and leaves every store unchanged (#4933)."""
     manifest, config = _bundle_project(tmp_path, monkeypatch)
     policy = ApmPolicy()
     if layer == "org":
         policy = ApmPolicy(executables=ExecutablesPolicy(deny=[_BUNDLE_KEY]))
+    elif layer == "project":
+        manifest.write_text(
+            f"name: consumer\nversion: '1.0'\nexecutables:\n  deny:\n"
+            f"    '{_BUNDLE_KEY}':\n      hooks: true\n",
+            encoding="utf-8",
+        )
     else:
         store = {"executables": {"allow": {}, "deny": {_BUNDLE_KEY: {"hooks": True}}}}
         config.write_text(json.dumps(store), encoding="utf-8")
@@ -1070,7 +1080,7 @@ def test_bundle_approve_refuses_before_any_write_when_another_layer_denies(
     before = {path: path.read_bytes() for path in stores}
 
     with _serve_policy(policy):
-        result = CliRunner().invoke(approve_cmd, [_BUNDLE_KEY])
+        result = CliRunner().invoke(approve_cmd, [*store_flag, _BUNDLE_KEY])
 
     assert result.exit_code == 1, result.output
     assert {path: path.read_bytes() for path in stores} == before, result.output
@@ -1080,6 +1090,7 @@ def test_bundle_approve_refuses_before_any_write_when_another_layer_denies(
     hint = {
         "org": "ask its owner to change apm-policy.yml",
         "user": f"apm approve --user '{_BUNDLE_KEY}'",
+        "project": f"apm approve '{_BUNDLE_KEY}'",
     }[layer]
     assert hint in text
     assert "Nothing written." in text
@@ -1107,3 +1118,22 @@ def test_bundle_approve_records_a_grant_no_layer_denies(
     assert executables["allow"][_BUNDLE_KEY] == {"hooks": True}
     assert not executables.get("deny")
     assert "Approved local bundle 'bun': hooks" in " ".join(result.output.split())
+
+
+def test_user_bundle_approve_retires_legacy_approvals_on_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: an unblocked --user bundle approve folds approvals.yml into config.json."""
+    manifest, config = _bundle_project(tmp_path, monkeypatch)
+    legacy = config.parent / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    before = manifest.read_bytes()
+
+    with _serve_policy(ApmPolicy()):
+        result = CliRunner().invoke(approve_cmd, ["--user", _BUNDLE_KEY])
+
+    assert result.exit_code == 0, result.output
+    allow = json.loads(config.read_text(encoding="utf-8"))["executables"]["allow"]
+    assert allow == {"acme/old": {"hooks": True}, _BUNDLE_KEY: {"hooks": True}}
+    assert not legacy.exists()
+    assert manifest.read_bytes() == before
