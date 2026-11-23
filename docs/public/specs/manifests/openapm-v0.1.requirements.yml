@@ -417,7 +417,7 @@ requirements:
     keyword: MUST
     section: "7.5"
     conformance_class: consumer
-    notes: "replay is network-free except one recorded reachability verification per origin and commit; refuses a commit no origin branch or tag reaches; fails closed when the origin cannot be contacted (consumer-configured registry proxy routes exempt)"
+    notes: "replay is network-free except one recorded reachability verification per origin, contacted endpoint and commit; refuses a commit no origin branch or tag reaches; fails closed when the origin cannot be contacted (consumer-configured registry proxy routes exempt)"
   - id: req-rs-016
     keyword: MUST
     section: "7.2"

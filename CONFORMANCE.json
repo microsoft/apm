@@ -2590,8 +2590,9 @@
       "conformance_class": "consumer",
       "id": "req-rs-015",
       "keyword": "MUST",
+      "partial": "an entry whose dependency reference names a registry proxy host is exempt from the reachability verification even without a consumer proxy configuration; tracked in #5021",
       "section": "7.5",
-      "status": "active",
+      "status": "partial",
       "test_count": 9,
       "tests": [
         "tests/spec_conformance/test_resolution_reqs.py::test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused[repo-cached]",
@@ -3468,8 +3469,8 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 111,
-      "partial": 1,
+      "active": 110,
+      "partial": 2,
       "skipped": 2,
       "text-only": 3,
       "unbound": 0,

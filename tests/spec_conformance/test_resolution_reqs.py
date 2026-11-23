@@ -165,16 +165,12 @@ def test_an_unverified_locked_commit_is_verified_once_then_replays_without_conta
 
 
 @pytest.mark.req("req-rs-015")
-@pytest.mark.parametrize(
-    ("path", "no_cache"),
-    [(None, False), (None, True)],
-    ids=["repo-cached", "repo-no-cache"],
-)
+@pytest.mark.parametrize("no_cache", [False, True], ids=["repo-cached", "repo-no-cache"])
 def test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path, no_cache: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_cache: bool
 ) -> None:
     """A rewritten lockfile pinning a commit only refs/pull/* reaches is refused."""
-    _run_pull_only_replay(tmp_path, _PinnedOrigin(tmp_path / "remote"), monkeypatch, path, no_cache)
+    _run_pull_only_replay(tmp_path, _PinnedOrigin(tmp_path / "remote"), monkeypatch, None, no_cache)
     assert not list((tmp_path / "cache2").rglob("verified/*"))
 
 
@@ -471,6 +467,8 @@ def test_resolver_replays_locked_commit_without_network():
         "reachable from a branch or tag",
         "MUST refuse the entry (fail closed)",
         "consumer-local state",
+        "fails the operation",
+        "the endpoint it would contact",
     )
 
 

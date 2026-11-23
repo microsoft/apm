@@ -193,8 +193,12 @@ def test_a_locked_commit_only_a_pull_ref_reaches_is_refused_on_replay(
     replay_env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache2")}
     result = _install(project, origin, monkeypatch, **replay_env)
 
+    output = " ".join(result.output.split())
     assert result.exit_code == 1, result.output
-    assert _UNREACHABLE in " ".join(result.output.split())
+    # The refusal names the entry, the commit and the reachability rule.
+    assert _UNREACHABLE in output
+    assert origin.f1 in output
+    assert "acme/platform/pkg" in output
     assert _installed(project) == []
     assert lock_path.read_text(encoding="utf-8") == lock
 
