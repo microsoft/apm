@@ -181,12 +181,15 @@ _PROJECT_SURFACES = (
     ".claude/settings.json",
     ".codex-native/ownership.json",
     ".apm-local/installation",
+    ".apm-local/.gitignore",
     ".git/config",
     ".gitignore",
     "apm.yml",
     "opencode.json",
 )
 _USER_SURFACES = (
+    ".apm-local/installation",
+    ".apm-local/.gitignore",
     ".claude.json",
     ".codex/config.toml",
     ".codeium/windsurf/mcp_config.json",
@@ -522,8 +525,7 @@ def _inputs(
         digest.file(f"user:{rel}", user / rel)
     from apm_cli.install.locking import _LIFECYCLE_LOCK_NAME
 
-    # The key is the MAC's secret; the lifecycle lock file is held while the record
-    # is read or written (Windows locks its bytes) and is no verdict state.
+    # Not verdict state: the MAC's key, and the held lifecycle lock (Windows locks it).
     unkeyed = (KEY_FILE, _LIFECYCLE_LOCK_NAME)
     for rel, files, _dirs in _tree(str(_apm_home()), skip=(RECORDS_DIR, "cache")):
         for entry in files:
@@ -538,7 +540,7 @@ def _inputs(
                 digest.file(f"policy:{name}", entry.path)
     from apm_cli.install import verdict_inputs
 
-    verdict_inputs.key_startup(digest, root, notice)
+    verdict_inputs.key_startup(digest, root, notice, surfaces)
     for name in _GOVERNED_DIRS:
         base = os.path.join(root, name)
         digest.put(f"target:{name}", b"%d" % os.path.isdir(base))

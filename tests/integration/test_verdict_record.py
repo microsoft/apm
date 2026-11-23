@@ -942,3 +942,35 @@ def test_a_fifo_inside_a_package_copy_misses(project: Path, capsys) -> None:
 
     assert verdict_record.replay(["install"]) is False
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "an orphan package directory",
+        "a leftover fast-apply marker",
+        "a client directory under HOME",
+        "the receipts' gitignore",
+        "a bare repository above the project",
+    ],
+)
+def test_every_input_the_read_set_audit_found_misses(project: Path, capsys, change: str) -> None:
+    """Inputs the recording no-op reads (strace read-set audit) that the record keys."""
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is True
+    if change == "an orphan package directory":
+        (project / "apm_modules" / "o" / "q").mkdir()
+    elif change == "a leftover fast-apply marker":
+        (project / "apm_modules" / ".apm-fast-apply").write_text("{}", encoding="utf-8")
+    elif change == "a client directory under HOME":
+        (project.parent / "user" / ".codeium" / "windsurf").mkdir(parents=True)
+    elif change == "the receipts' gitignore":
+        (project / ".apm-local").mkdir(exist_ok=True)
+        (project / ".apm-local" / ".gitignore").write_text("*\n", encoding="utf-8")
+    else:
+        (project.parent / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""

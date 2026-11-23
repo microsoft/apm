@@ -172,6 +172,13 @@ def _git_includes(config: Path, data: bytes) -> list[Path]:
 
 def _git_config_bytes(digest: _Digest, root: Path, git_system: str) -> None:
     """Every git config file a child git may read, followed through its includes."""
+    from apm_cli.install.verdict_inputs import _kind
+
+    for base in (root, *root.parents):
+        # Discovery also takes a bare repository (its HEAD) in each directory it walks.
+        digest.put(f"git-head:{base}", _kind(str(base / "HEAD")))
+        if os.path.lexists(base / ".git"):
+            break
     queue, seen = list(_git_files(root, git_system)), set()
     while queue:
         path = queue.pop(0)

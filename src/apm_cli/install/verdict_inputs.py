@@ -9,6 +9,7 @@ misses.
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -32,8 +33,11 @@ def tls_surfaces(entry_env: dict[str, str] | None) -> list[str]:
     return [os.path.realpath(path) for path in selectable_ca_files(entry_env)]
 
 
-def key_startup(digest: Any, root: Path, notice: str) -> None:
-    """The administrative lifecycle scripts, the root's identity and the notice schedule."""
+def key_startup(digest: Any, root: Path, notice: str, surfaces: list[str]) -> None:
+    """The administrative lifecycle scripts, the root's identity, the notice schedule,
+    the apm_modules structure and the directories above every keyed surface."""
+    _key_modules(digest, root)
+    _key_parents(digest, root, surfaces)
     from apm_cli.core.lifecycle_scripts import _get_policy_scripts_dir
 
     for rel, files, dirs in _tree(str(_get_policy_scripts_dir())):
@@ -93,3 +97,55 @@ def hash_blind(package: Path) -> bool:
         ):
             return True
     return False
+
+
+_MARK = {b"dir": "/", b"link": "@", b"file": "", b"absent": "?"}
+
+
+def _kind(path: str) -> bytes:
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return b"absent"
+    except NotADirectoryError:
+        return b"absent"
+    return b"dir" if stat.S_ISDIR(mode) else b"link" if stat.S_ISLNK(mode) else b"file"
+
+
+def _key_parents(digest: Any, root: Path, surfaces: list[str]) -> None:
+    """The kind of each directory above a keyed surface file, below HOME or the root:
+    a client's directory appearing can change what the no-op configures."""
+    from apm_cli.install.verdict_record import _PROJECT_SURFACES, _USER_SURFACES
+
+    home = os.path.expanduser("~")
+    files = [*(os.path.join(root, rel) for rel in _PROJECT_SURFACES)]
+    files += [os.path.join(home, rel) for rel in _USER_SURFACES]
+    files += [path for path in surfaces if not path.startswith("\x00")]
+    stops, seen = {str(root), home}, set()
+    for path in sorted(files):
+        parent = os.path.dirname(path)
+        while parent not in stops and parent not in seen and os.path.dirname(parent) != parent:
+            seen.add(parent)
+            digest.put(f"parent:{parent}", _kind(parent))
+            parent = os.path.dirname(parent)
+
+
+def _key_modules(digest: Any, root: Path) -> None:
+    """apm_modules down to the package copies (each one proven against the lock): an
+    orphan directory or a leftover fast-apply marker changes the engine's verdict."""
+    from apm_cli.install.cache_pin import MARKER_FILENAME
+
+    stack = [("apm_modules", os.path.join(root, "apm_modules"))]
+    digest.put("modules", _kind(stack[0][1]))
+    while stack:
+        rel, path = stack.pop()
+        try:
+            with os.scandir(path) as scan:
+                entries = sorted(scan, key=lambda entry: entry.name)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        names = [entry.name + _MARK[_kind(entry.path)] for entry in entries]
+        digest.put(f"modules:{rel}", "\x00".join(names).encode("utf-8", "surrogateescape"))
+        if MARKER_FILENAME in names:
+            continue  # a package copy: its bytes are proven against the lock
+        stack += [(f"{rel}/{e.name}", e.path) for e in entries if e.is_dir(follow_symlinks=False)]
