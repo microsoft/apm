@@ -62,6 +62,7 @@ DIAG_ENVS = (
     "headless-wt-after-main",
     "headless-wt-shared-known",
     "headless-wt-named-known",
+    "headless-wt-local-named",
 )
 _AUTH_BLOCKERS = ("could not be validated", "rate limit exceeded", "No authentication")
 TOOL_PROMPT = (
@@ -549,6 +550,22 @@ class Cell:
         self.hook_marker.unlink(missing_ok=True)
         self.mcp_marker.unlink(missing_ok=True)
 
+    def local_named(self) -> None:
+        """Per-checkout name in the uncommitted settings.local.json; shared name disabled."""
+        shared = self.marketplace()
+        for index, root in enumerate((self.project, self.worktree)):
+            name = f"{shared}-c{index}"
+            path = str(root / ".agents" / "plugins")
+            _json(
+                root / ".claude" / "settings.local.json",
+                {
+                    "extraKnownMarketplaces": {
+                        name: {"source": {"source": "directory", "path": path}}
+                    },
+                    "enabledPlugins": {f"{PLUGIN}@{name}": True, f"{PLUGIN}@{shared}": False},
+                },
+            )
+
     def two_checkouts(self) -> None:
         """Register main and the worktree in Claude's registry; one session in each."""
         main_name = self.marketplace()
@@ -559,14 +576,19 @@ class Cell:
             _write(settings, _read(settings).replace(main_name, wt_name))
         registry = self.home / ".claude" / "plugins" / "known_marketplaces.json"
         data: dict = {}
-        for name, root in ((main_name, self.project), (wt_name, self.worktree)):
+        pairs: tuple = ((main_name, self.project), (wt_name, self.worktree))
+        if self.env == "headless-wt-local-named":
+            self.local_named()
+            pairs = ()
+        for name, root in pairs:
             location = str(root / ".agents" / "plugins")
             data[name] = {
                 "source": {"source": "directory", "path": location},
                 "installLocation": location,
                 "lastUpdated": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
             }
-        _json(registry, data)
+        if data:
+            _json(registry, data)
         self.evidence["known_marketplaces"] = _read(registry)
         sessions = {}
         for key, root in (("main", self.project), ("worktree", self.worktree)):
@@ -589,7 +611,9 @@ class Cell:
                 self.absolutize_project_marketplace()
             if self.env == "headless-native" and self.scope == "project":
                 self.native_oracle(cwd)
-            if self.env.startswith(("headless-wt-shared", "headless-wt-named")):
+            if self.env.startswith(
+                ("headless-wt-shared", "headless-wt-named", "headless-wt-local")
+            ):
                 self.two_checkouts()
                 return
             if self.env == "headless-wt-after-main":
@@ -707,7 +731,12 @@ class Cell:
             if self.register_known and self.harness == "claude" and self.scope == "project":
                 self.register_known_marketplace()
             if self.env == "worktree" or self.env.startswith(
-                ("headless-wt-after-main", "headless-wt-shared", "headless-wt-named")
+                (
+                    "headless-wt-after-main",
+                    "headless-wt-shared",
+                    "headless-wt-named",
+                    "headless-wt-local",
+                )
             ):
                 self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             cwd = self.run_dir()
