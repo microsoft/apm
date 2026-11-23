@@ -55,6 +55,7 @@ from apm_cli.install.audit_target_roots import (
 from apm_cli.install.audit_target_roots import (
     governed_root_dirs as _governed_root_dirs,
 )
+from apm_cli.install.deployment_plan import carry_kept_loose_into_replay
 from apm_cli.install.drift_render import (
     _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
 )
@@ -532,7 +533,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
-    from apm_cli.install.deployment_plan import carry_kept_loose_into_replay
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import (
