@@ -719,7 +719,12 @@ def retained_lock_keys(
     resolved_cache: dict[str, Path] = {}
     for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
-        if dep.depth is not None and dep.depth > 1 and not dep.is_local_source:
+        if (
+            dep.depth is not None
+            and dep.depth > 1
+            and (dep.replacement is not None or dep.source != "local")
+        ):
+            # Remote and replaced rows keep the remote transitive policy.
             retained.add(key)
         elif key not in declared:
             candidates.add(key)

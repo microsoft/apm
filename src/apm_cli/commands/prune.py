@@ -552,7 +552,9 @@ def _reparent_survivors(lockfile, decision) -> None:
         return
     from .uninstall.local_reanchor import LocalReanchorPlan, apply_local_reanchor, reparent_rows
 
-    declaring, resolved = reparent_rows(lockfile, decision.reachability, decision.rescued_parents)
+    declaring, resolved = reparent_rows(
+        lockfile, decision.reachability, decision.rescued_parents, locked_identity=True
+    )
     apply_local_reanchor(
         lockfile, LocalReanchorPlan(declaring_parents=declaring, resolved_by=resolved)
     )
