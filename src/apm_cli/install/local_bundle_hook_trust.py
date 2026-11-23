@@ -297,6 +297,7 @@ def _retire_per_file(
     sidecar that cannot be rewritten keeps its record and is reported, so the
     deleted files' lock rows are still reconciled.
     """
+    from apm_cli.integration import write_seam
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
     from apm_cli.integration.hook_ownership import (
         per_file_bundle_hook_keys,
@@ -310,7 +311,7 @@ def _retire_per_file(
         if hook_file is not None and hook_file.is_file():
             # A failed removal leaves the file on disk; it is retained below.
             with contextlib.suppress(OSError):
-                hook_file.unlink()
+                write_seam.unlink(hook_file)  # journaled like the deploy (#5130)
         literal = Path(value) if Path(value).is_absolute() else Path(project_root) / value
         if literal.is_symlink() or literal.exists():
             kept.add(value)
@@ -589,6 +590,7 @@ def _remove_unedited(
     Returns the rows whose file could not be removed, including a present file
     whose path is refused; their claims must stay.
     """
+    from apm_cli.integration import write_seam
     from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.utils.content_hash import compute_file_hash
 
@@ -607,7 +609,7 @@ def _remove_unedited(
         try:
             digest = recorded.get(value)
             if digest is None or digest == compute_file_hash(path):
-                path.unlink()
+                write_seam.unlink(path)
                 removed.setdefault(root, []).append(path)
         except OSError:
             failed.add(value)

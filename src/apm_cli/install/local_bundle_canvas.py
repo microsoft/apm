@@ -368,6 +368,7 @@ def _retire(
     inside a canvas root are touched; the holding's record keeps the rest.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..integration import write_seam
     from ..integration.base_integrator import BaseIntegrator
     from ..integration.hook_ownership import BUNDLE_RECORD_CANVAS, write_per_file_bundle_record
     from ..utils.content_hash import compute_file_hash
@@ -397,7 +398,7 @@ def _retire(
         if rel not in wanted or path is None or not hashes.get(value):
             continue
         if path.is_file() and compute_file_hash(path) == hashes[value]:
-            path.unlink()
+            write_seam.unlink(path)  # journaled like the deploy (#5130)
             removed.append(path)
         dropped.add(value)
     if dropped and lock_dir is not None:
