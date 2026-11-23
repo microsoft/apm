@@ -6,6 +6,7 @@ Integrates .prompt.md files as commands for any target that supports the
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from pathlib import Path
@@ -354,12 +355,12 @@ class CommandIntegrator(BaseIntegrator):
     def _warn_retained_withheld_keys(
         self, source: Path, target_name: str, diagnostics: Any, pkg_name: str
     ) -> None:
-        """Repeat the withheld-keys warning when an existing command is kept.
+        """Repeat the withheld-keys warning when the rendered command is retained.
 
         Adopted and receipted-unchanged commands skip ``integrate_command()``,
         so without this a source that only gained ``hooks:`` would keep the
-        hook-free command silently.  Planning passes write nothing and stay
-        quiet; the real pass warns.
+        hook-free command silently.  Called only for files identical to the
+        render (``on_identical``); planning passes stay quiet.
         """
         if target_name != "claude" or diagnostics is None or self._overwrite_plan is not None:
             return
@@ -698,7 +699,6 @@ class CommandIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
-            tracked_before = len(target_paths)
             skip, adopted = self._check_adopt_or_skip(
                 target_path,
                 prompt_file,
@@ -710,16 +710,21 @@ class CommandIntegrator(BaseIntegrator):
                 expected_content=self._rendered_command(
                     prompt_file, target_path, mapping, target.name
                 ),
+                # Only a file holding the hook-free render was deployed without
+                # hooks; a kept user file or legacy adopt may carry its own.
+                on_identical=functools.partial(
+                    self._warn_retained_withheld_keys,
+                    prompt_file,
+                    target.name,
+                    diagnostics,
+                    pkg_name,
+                ),
             )
             if skip:
                 if adopted:
                     files_adopted += 1
                 else:
                     files_skipped += 1
-                if len(target_paths) > tracked_before:
-                    self._warn_retained_withheld_keys(
-                        prompt_file, target.name, diagnostics, pkg_name
-                    )
                 continue
 
             prior_bytes = target_path.read_bytes() if target_path.is_file() else None

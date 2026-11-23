@@ -797,6 +797,7 @@ class BaseIntegrator:
         target_paths: list,
         *,
         expected_content: str | None = None,
+        on_identical: Callable[[], None] | None = None,
     ) -> tuple[bool, bool]:
         """Check whether *target_path* should be adopted or skipped.
 
@@ -825,6 +826,9 @@ class BaseIntegrator:
             diagnostics: Optional diagnostics collector; forwarded to
                 :meth:`check_collision`.
             target_paths: Mutable list; *target_path* is appended on adopt.
+            on_identical: Called when the on-disk file already holds the
+                deployed bytes and is retained (adopted or receipted
+                unchanged); never on planning, collision or kept-edit skips.
 
         Returns:
             ``(skip, adopted)`` -- when ``skip`` is ``True`` the caller must
@@ -852,6 +856,8 @@ class BaseIntegrator:
                 # Planning records only files it would keep, and an identical
                 # file is never kept: its receipt cannot change the plan (#4381).
                 return True, False
+            if on_identical is not None:
+                on_identical()
             # Already receipted with these bytes: unchanged, not an adoption (RA-007).
             if self.receipted_unchanged(target_path):
                 return True, False
