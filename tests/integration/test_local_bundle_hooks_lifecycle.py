@@ -1113,7 +1113,7 @@ from pathlib import Path
 from apm_cli.cli import cli
 
 _RECORD = ".local-bundle-pending.json"
-_write_text, _unlink = Path.write_text, Path.unlink
+_write_text, _unlink, _replace = Path.write_text, Path.unlink, os.replace
 
 
 def _locked(path):
@@ -1132,8 +1132,15 @@ def unlink(self, *args, **kwargs):
     return _unlink(self, *args, **kwargs)
 
 
+def replace(src, dst, *args, **kwargs):
+    if _locked(Path(dst)) and '"hooks"' not in Path(src).read_text(encoding="utf-8"):
+        raise PermissionError(errno.EACCES, "injected locked pending record", str(dst))
+    return _replace(src, dst, *args, **kwargs)
+
+
 Path.write_text = write_text
 Path.unlink = unlink
+os.replace = replace
 cli()
 """
 
@@ -1223,4 +1230,23 @@ def test_uninstall_refuses_a_bundle_whose_hooks_are_only_parked(
     refused = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
 
     assert "Local bundle 'hookpkg' has no hooks deployed" in refused, refused
+    assert tree_bytes(consumer) == before
+
+
+def test_uninstall_bundle_refuses_an_unreadable_pending_record(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4992 review: an unreadable pending record stops uninstall before any hook is removed."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "unreadable-pending-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    record = consumer / "apm_modules" / ".local-bundle-pending.json"
+    record.write_text("{not json\n", encoding="utf-8")
+    before = tree_bytes(consumer)
+
+    refused = " ".join(output(world.apm(consumer, "uninstall", str(bundle), expect=1)).split())
+
+    assert "apm_modules/.local-bundle-pending.json cannot be read" in refused, refused
+    assert "no changes were made" in refused, refused
     assert tree_bytes(consumer) == before

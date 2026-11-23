@@ -246,7 +246,7 @@ def _finish_records(slugs: list[str], lock_dir: Path, *, scope: Any, logger: Any
     for slug in slugs:
         try:
             drop_bundle_exec_type(lock_dir, slug, "hooks")
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             failed = True
             logger.error(
                 f"Removed hooks from local bundle '{slug}', but {_PENDING_RECORD} could not "
@@ -290,7 +290,7 @@ def uninstall_local_bundles(
     try:
         for slug in slugs:
             mark_bundle_retiring(lock_dir, slug, "hooks")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         logger.error(
             f"Local bundle hooks were not removed: {_PENDING_RECORD} could not be updated "
             f"({exc}); no changes were made. Fix access to that file, then retry."

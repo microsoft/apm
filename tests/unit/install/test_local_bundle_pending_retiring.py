@@ -51,3 +51,54 @@ def test_a_reinstall_replaces_the_note(tmp_path: Path) -> None:
 
     assert retiring_bundle_slugs(tmp_path, "hooks") == set()
     assert "retiring" not in _bundles(tmp_path)["pkg"]
+
+
+def test_a_failed_update_leaves_the_previous_record_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails part-way never truncates the record (#4992 review)."""
+    import errno
+    import os
+
+    record_bundle_executables(tmp_path, "pkg", "pkg#1@sha256:aa", ["hooks"])
+    record_bundle_executables(tmp_path, "other", "other#1@sha256:bb", ["mcp"])
+    mark_bundle_retiring(tmp_path, "pkg", "hooks")
+    record = tmp_path / _RECORD
+    before = record.read_bytes()
+    write_text, replace = Path.write_text, os.replace
+
+    def truncating(self, data, *args, **kwargs):
+        if self == record:
+            write_text(self, "", *args, **kwargs)
+            raise OSError(errno.ENOSPC, "injected failed write", str(self))
+        return write_text(self, data, *args, **kwargs)
+
+    def refused(src, dst, *args, **kwargs):
+        if Path(dst) == record:
+            raise OSError(errno.EACCES, "injected locked record", str(dst))
+        return replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", truncating)
+    monkeypatch.setattr(os, "replace", refused)
+
+    with pytest.raises(OSError, match="injected"):
+        drop_bundle_exec_type(tmp_path, "pkg", "hooks")
+
+    assert record.read_bytes() == before
+    assert retiring_bundle_slugs(tmp_path, "hooks") == {"pkg"}
+
+
+@pytest.mark.parametrize("update", ["mark", "drop"])
+def test_an_unreadable_record_stops_the_update(tmp_path: Path, update: str) -> None:
+    """Unreadable state is reported, never read as empty and skipped (#4992 review)."""
+    record = tmp_path / _RECORD
+    record.parent.mkdir(parents=True)
+    record.write_text("{not json\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cannot be read"):
+        if update == "mark":
+            mark_bundle_retiring(tmp_path, "pkg", "hooks")
+        else:
+            drop_bundle_exec_type(tmp_path, "pkg", "hooks")
+
+    assert record.read_text(encoding="utf-8") == "{not json\n"
