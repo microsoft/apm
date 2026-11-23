@@ -110,6 +110,7 @@ def test_a_lock_path_under_a_target_root_is_planned(tmp_path: Path) -> None:
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: b"x")
     plan = diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
     assert [(path, data) for path, data, _d, _o in plan] == [(tmp_path / _REL, b"x")]
+    assert not any(tmp_path.iterdir()), "planning writes nothing"
 
 
 def test_a_dependency_without_a_locked_content_hash_declines(tmp_path: Path) -> None:
