@@ -58,13 +58,13 @@ from .schema import ApmPolicy
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Policy repo discovery: cascading candidate repos per host profile
-# ---------------------------------------------------------------------------
-
-# Candidate repo names in precedence order (first valid policy wins).
-# Host profiles select which candidates are valid for a given git host.
+# -- Policy repo discovery: cascading candidate repos per host profile ----------
+# Candidate repo names in precedence order (first valid policy wins); host
+# profiles select which candidates are valid for a given git host.
 _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
+# A command discovers policy several times (preflight, gate, exec trust, MCP) and
+# reuses each answer, except outcomes a retry in the same command may change.
+_RETRY_OUTCOMES = frozenset({"cached_stale", "cache_miss_fetch_fail", "incomplete_chain"})
 
 # Azure DevOps project and repository names cannot begin with ``_``.
 ADO_POLICY_PROJECT = "apm"
@@ -253,6 +253,7 @@ def policy_disabled_by_env() -> bool:
     return os.environ.get("APM_POLICY_DISABLE", "").strip() == "1"
 
 
+@memoized_per_invocation("policy-chain", keep=lambda r: r.outcome not in _RETRY_OUTCOMES)
 def discover_policy_with_chain(
     project_root: Path,
     *,
@@ -284,12 +285,10 @@ def discover_policy_with_chain(
 
     Notes
     -----
-    The escape hatch (``--no-policy`` flag, ``APM_POLICY_DISABLE=1``
-    env var) is enforced by the **callers** (the install pipeline gate
-    and the preflight helpers in ``install_preflight``) **before** this
-    function is invoked, so neither needs a ``no_policy`` parameter
-    here.  The env-var check below remains as a defence-in-depth so
-    third-party callers cannot accidentally bypass the disable switch.
+    The escape hatch (``--no-policy``, ``APM_POLICY_DISABLE=1``) is enforced by
+    the **callers** (the pipeline gate and ``install_preflight``) **before** this
+    function is invoked, so neither needs a ``no_policy`` parameter here. The
+    env-var check below stays as defence-in-depth for third-party callers.
 
     Returns
     -------
