@@ -427,16 +427,28 @@ def discover_trust_policy(project_root: Path) -> PolicyFetchResult:
     A command that has several trust readers discovers once and hands the
     result to each of them (a local bundle install, for example).
     """
-    from .discovery import PolicyFetchResult, discover_policy_with_chain
+    from .discovery import discover_policy_with_chain
 
     try:
         return discover_policy_with_chain(Path(project_root))
     except (OSError, ValueError, RuntimeError) as exc:
-        # The exception text can carry transport detail; report its type only.
-        return PolicyFetchResult(
-            outcome="cache_miss_fetch_fail",
-            fetch_error=f"policy discovery failed ({type(exc).__name__})",
-        )
+        return discovery_failure_result(exc)
+
+
+def discovery_failure_result(exc: BaseException) -> PolicyFetchResult:
+    """Return the fetch-failure result for a policy discovery that raised.
+
+    The result routes through :func:`classify_discovery_outcome` like any
+    other fetch failure, so ``policy.fetch_failure_default`` decides whether
+    it blocks.
+    """
+    from .discovery import PolicyFetchResult
+
+    # The exception text can carry transport detail; report its type only.
+    return PolicyFetchResult(
+        outcome="cache_miss_fetch_fail",
+        fetch_error=f"policy discovery failed ({type(exc).__name__})",
+    )
 
 
 def classify_project_policy(

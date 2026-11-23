@@ -341,6 +341,10 @@ findings are advisory by default and render as `[!] Drift detected`. With
 `security.audit.fail_on_drift: true`, a failed drift check (including one that
 could not run) promotes the audit to exit `1` and drift renders as `[x]`. An advisory cache-miss skip remains non-failing
 (see [Exit codes](#exit-codes)).
+When drift fails and the org policy cannot be resolved, the audit says so:
+`[x] Org policy could not be resolved; fail_on_drift could not be applied: <cause>`
+with exit `1` when the project requires the policy (`policy.fetch_failure_default: block`),
+otherwise a `[!]` notice with drift left advisory.
 
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
 informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
@@ -391,7 +395,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | Clean, info-only findings, advisory drift without `security.audit.fail_on_drift`, an advisory cache-miss skip, or successful `--strip`. |
-| `1` | Critical findings, `PACKAGE` not installed, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, drift-check failures promoted by `security.audit.fail_on_drift`, or (except with `--file`) an `apm.lock.yaml` written by a newer APM (the message names both versions). |
+| `1` | Critical findings, `PACKAGE` not installed, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, drift-check failures promoted by `security.audit.fail_on_drift` or by a required org policy that cannot be resolved, or (except with `--file`) an `apm.lock.yaml` written by a newer APM (the message names both versions). |
 | `2` | Warning-only findings, or usage error (mutually exclusive flags). |
 | `3` | Configuration or infrastructure error (feature not enabled, scanner not found, malformed SARIF). |
 
@@ -400,7 +404,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | All checks passed. |
-| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), an explicit `--policy` source could not be loaded, or `apm.lock.yaml` was written by a newer APM. |
+| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), an explicit `--policy` source could not be loaded, a required org policy (`policy.fetch_failure_default: block`) could not be resolved, or `apm.lock.yaml` was written by a newer APM. |
 
 CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 
