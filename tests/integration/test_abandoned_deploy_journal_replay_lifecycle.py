@@ -372,3 +372,77 @@ def test_a_kill_after_the_lockfile_commit_settles_the_journal(
     assert _stores(chain) == [], _evidence(result)
     _assert_lock_matches_disk(chain.project)
     assert chain.run("audit", "--ci").returncode == 0
+
+
+# -- shared config files: hook settings and the hook sidecar (#5009) ------------------
+#
+# The ledger never claims shared config files; APM's config file records do. A
+# killed install's write is restored when the file still holds exactly what the
+# journal sealed and the record says APM wrote those bytes; else kept and reported.
+
+_SETTINGS = ".claude/settings.json"
+_SIDECAR = ".claude/apm-hooks.json"
+_SHARED_GATE = _Gate("require-hashes", "claude", "hash+kill")
+
+
+def _write_root_hook(chain: Chain, revision: str) -> None:
+    """The project's own hook, deployed into Claude's shared settings and its sidecar."""
+    hooks = chain.project / ".apm" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    command = {"type": "command", "command": f"echo lint-{revision}"}
+    data = {"hooks": {"Stop": [{"hooks": [command]}]}}
+    (hooks / "lint.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _killed_shared_config(tmp_path: Path, binary: Path) -> tuple[Chain, dict[str, str]]:
+    """Install v1 of the project's hook, then kill a refused v2 install that changed it."""
+    chain = Chain(tmp_path / "shared", binary, dirs=(".claude",))
+    chain.write_manifest([], apm=[], targets=["claude"], includes="auto")
+    _write_root_hook(chain, "v1")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    assert {_SETTINGS, _SIDECAR} <= set(before), before
+
+    _write_root_hook(chain, "v2")
+    _kill_mid_refusal(chain, _SHARED_GATE.fault)
+    journal = _journal(_abandoned(chain))
+    assert {_unit(journal, path)["path"] for path in (_SETTINGS, _SIDECAR)} == {
+        _SETTINGS,
+        _SIDECAR,
+    }
+    assert _tree_state(chain.project)[_SETTINGS] != before[_SETTINGS], "nothing changed"
+    _write_root_hook(chain, "v1")
+    return chain, before
+
+
+def test_a_kill_after_a_shared_config_change_is_restored_on_the_next_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    chain, before = _killed_shared_config(tmp_path, apm_binary_path)
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "interrupted install" in _text(result), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert chain.run("audit", "--ci").returncode == 0
+
+
+@pytest.mark.parametrize("damage", ["edited-file", "missing-baseline"])
+def test_a_shared_config_the_records_do_not_vouch_for_is_kept_and_reported(
+    tmp_path: Path, apm_binary_path: Path, damage: str
+) -> None:
+    chain, _before = _killed_shared_config(tmp_path, apm_binary_path)
+    store = _abandoned(chain)
+    settings = chain.project / _SETTINGS
+    if damage == "edited-file":
+        settings.write_text(settings.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    else:
+        records = Path(chain.env["APM_HOME"]) / "deployment-receipts" / "config-files"
+        shutil.rmtree(records)
+    held = settings.read_bytes()
+
+    _assert_kept_and_reported(chain, _SHARED_GATE, store, _SETTINGS)
+    assert settings.read_bytes() == held
