@@ -558,6 +558,120 @@ class TestOnReadonlyRetry:
         _on_readonly_retry(os.unlink, str(tmp_path / "nonexistent"), None)
 
 
+_SYMLINKS = pytest.mark.skipif(
+    sys.platform == "win32", reason="symlink creation needs a privilege on Windows"
+)
+
+
+def _read_only_dir(path: Path) -> int:
+    path.mkdir()
+    (path / "keep.txt").write_text("kept", encoding="utf-8")
+    path.chmod(stat.S_IREAD | stat.S_IEXEC)
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+class TestRmtreeNeverFollowsALink:
+    """Clearing read-only bits never reaches through a link to its target."""
+
+    @_SYMLINKS
+    def test_a_link_root_is_removed_and_its_target_keeps_mode_and_contents(self, tmp_path):
+        target = tmp_path / "target"
+        mode = _read_only_dir(target)
+        link = tmp_path / "link"
+        link.symlink_to(target, target_is_directory=True)
+        try:
+            robust_rmtree(link)
+
+            assert not link.is_symlink() and not link.exists()
+            assert stat.S_IMODE(target.stat().st_mode) == mode
+            assert (target / "keep.txt").read_text(encoding="utf-8") == "kept"
+        finally:
+            target.chmod(stat.S_IRWXU)
+
+    @_SYMLINKS
+    @pytest.mark.parametrize("suffix", [os.sep, f"{os.sep}.{os.sep}", f"{os.sep}.{os.sep}."])
+    def test_a_link_root_named_with_a_trailing_separator_is_removed_itself(self, tmp_path, suffix):
+        target = tmp_path / "target"
+        mode = _read_only_dir(target)
+        link = tmp_path / "link"
+        link.symlink_to(target, target_is_directory=True)
+        try:
+            robust_rmtree(str(link) + suffix)
+
+            assert not link.is_symlink() and not link.exists()
+            assert stat.S_IMODE(target.stat().st_mode) == mode
+            assert (target / "keep.txt").read_text(encoding="utf-8") == "kept"
+        finally:
+            target.chmod(stat.S_IRWXU)
+
+    @_SYMLINKS
+    def test_a_link_whose_removal_failed_is_removed_not_made_writable(self, tmp_path):
+        target = tmp_path / "target.txt"
+        target.write_text("kept", encoding="utf-8")
+        target.chmod(stat.S_IREAD)
+        read_only = stat.S_IMODE(target.stat().st_mode)
+        link = tmp_path / "link.txt"
+        link.symlink_to(target)
+        try:
+            _on_readonly_retry(os.unlink, str(link), None)
+
+            assert not link.is_symlink()
+            assert stat.S_IMODE(target.stat().st_mode) == read_only
+            assert target.read_text(encoding="utf-8") == "kept"
+        finally:
+            target.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    def test_a_nested_read_only_file_is_still_removed(self, tmp_path):
+        tree = tmp_path / "tree"
+        (tree / "objects" / "pack").mkdir(parents=True)
+        pack = tree / "objects" / "pack" / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+
+        robust_rmtree(tree)
+
+        assert not tree.exists()
+
+    def test_windows_without_no_follow_chmod_still_removes_a_read_only_pack(
+        self, tmp_path, monkeypatch
+    ):
+        pack = tmp_path / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+        chmod = os.chmod
+
+        def no_follow_unavailable(path, mode, *, follow_symlinks=True):
+            if not follow_symlinks:
+                raise NotImplementedError("chmod: follow_symlinks unavailable on this platform")
+            chmod(path, mode)
+
+        monkeypatch.setattr(os, "chmod", no_follow_unavailable)
+        monkeypatch.setattr(os, "name", "nt")
+        _on_readonly_retry(os.unlink, str(pack), None)
+        monkeypatch.undo()
+
+        assert not pack.exists()
+
+    def test_without_no_follow_chmod_elsewhere_the_mode_is_left_alone(self, tmp_path, monkeypatch):
+        pack = tmp_path / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+        read_only = stat.S_IMODE(pack.stat().st_mode)
+
+        def no_follow_unavailable(path, mode, *, follow_symlinks=True):
+            raise NotImplementedError("chmod: follow_symlinks unavailable on this platform")
+
+        monkeypatch.setattr(os, "chmod", no_follow_unavailable)
+        monkeypatch.setattr(os, "name", "posix")
+        with pytest.raises(OSError, match="link"):
+            _on_readonly_retry(os.unlink, str(pack), None)
+        monkeypatch.undo()
+
+        assert pack.exists()
+        assert stat.S_IMODE(pack.stat().st_mode) == read_only
+        pack.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
 # ---------------------------------------------------------------------------
 # Integration: _rmtree in github_downloader uses robust_rmtree
 # ---------------------------------------------------------------------------

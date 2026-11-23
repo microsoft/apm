@@ -244,6 +244,26 @@ class TestValidateDeployPath:
     def test_codex_hooks_json_valid(self):
         assert BaseIntegrator.validate_deploy_path(".codex/hooks.json", self.root) is True
 
+    def test_cowork_final_link_allowed_only_with_parent_contained(self, tmp_path, monkeypatch):
+        """cowork:// follows the project rule for final links: contain the parent (#5022)."""
+        cowork = tmp_path / "cowork-skills"
+        (cowork / "alpha").mkdir(parents=True)
+        outside = tmp_path / "outside"
+        (outside / "refs").mkdir(parents=True)
+        (outside / "notes.md").write_text("outside\n", encoding="utf-8")
+        try:
+            (cowork / "alpha" / "notes.md").symlink_to(outside / "notes.md")
+            (cowork / "alpha" / "refs").symlink_to(outside / "refs", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+        monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+        link, nested = "cowork://skills/alpha/notes.md", "cowork://skills/alpha/refs/guide.md"
+
+        assert BaseIntegrator.validate_deploy_path(link, self.root) is False
+        assert BaseIntegrator.validate_deploy_path(link, self.root, allow_final_symlink=True)
+        assert not BaseIntegrator.validate_deploy_path(nested, self.root, allow_final_symlink=True)
+        assert (outside / "notes.md").read_text(encoding="utf-8") == "outside\n"
+
 
 # ---------------------------------------------------------------------------
 # partition_bucket_key

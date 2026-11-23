@@ -875,6 +875,7 @@ transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency
 transport-platform-revision-pin-outcome
+transport-platform-rmtree-callback-no-follow-chmod
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
