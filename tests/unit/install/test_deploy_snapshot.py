@@ -211,6 +211,29 @@ def test_receipts_under_apm_home_replay_without_a_ledger_row(
     assert receipt.read_bytes() == deployed.read_bytes() == b"killed\n"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal, replay_abandoned_journals
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    hook = project / ".github" / "hooks" / "run.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_bytes(b"#!/bin/sh\necho prior\n")
+    hook.chmod(0o755)
+    ledger = {".github/hooks/run.sh": compute_file_hash(hook)}
+    DeployJournal(apm_home / "install-snapshots", root=project).record(hook)
+    hook.write_bytes(b"#!/bin/sh\necho killed\n")
+    hook.chmod(0o644)
+
+    restored = replay_abandoned_journals(apm_home / "install-snapshots", project, lambda: ledger)
+
+    assert restored == 1
+    assert hook.read_bytes() == b"#!/bin/sh\necho prior\n"
+    assert hook.stat().st_mode & 0o777 == 0o755
+    assert not any((apm_home / "install-snapshots").iterdir())
+
+
 def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: Path) -> None:
     """#4159: created roots left empty go; anything else stays."""
     project = tmp_path / "project"

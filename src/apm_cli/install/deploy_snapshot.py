@@ -36,7 +36,7 @@ import tempfile
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
 from apm_cli.utils.content_hash import compute_file_hash
@@ -297,7 +297,10 @@ def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
         text = (store / _MANIFEST).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"journal manifest unreadable: {exc}") from exc
-    lines = [json.loads(line) for line in text.splitlines() if line.strip()]
+    try:
+        lines = [json.loads(line) for line in text.splitlines() if line.strip()]
+    except RecursionError:
+        raise ValueError("journal manifest is nested too deeply") from None
     if not lines or not isinstance(lines[0], dict):
         raise ValueError("journal manifest has no header")
     header = lines[0]
@@ -312,8 +315,8 @@ def _inside(rel: Any, root: Path) -> Path:
     """The path *rel* names under *root*; raise ``PathTraversalError`` when it escapes."""
     if not isinstance(rel, str) or not rel:
         raise PathTraversalError(f"journal path {rel!r} is not a relative path")
-    posix = PurePosixPath(rel)
-    if posix.is_absolute() or ".." in posix.parts or "\\" in rel or ":" in rel:
+    posix, windows = PurePosixPath(rel), PureWindowsPath(rel)
+    if posix.is_absolute() or windows.drive or windows.root or ".." in posix.parts:
         raise PathTraversalError(f"journal path {rel!r} escapes the deploy root")
     path = root.joinpath(*posix.parts)
     ensure_path_within(path, root)
@@ -413,7 +416,7 @@ def _apply(unit: _Replay) -> None:
     staged = Path(tempfile.mkdtemp(prefix=".apm-replay-", dir=path.parent)) / "staged"
     try:
         if unit.kind == "file":
-            shutil.copyfile(unit.copy, staged)
+            shutil.copy2(unit.copy, staged)
             written = {"": compute_file_hash(staged)}
         else:
             shutil.copytree(unit.copy, staged, symlinks=True)
