@@ -2078,6 +2078,11 @@ def run_policy_checks(
     # Manifest checks (14-15)
     if _run(_check_required_manifest_fields(raw_yml, policy.manifest)):
         return result
+    if lock is not None and policy.manifest.content_types is not None:
+        from .content_types_check import audit_content_types
+
+        if _run(audit_content_types(lock, policy.manifest, project_root, modules_root)):
+            return result
     if _run(_check_scripts_policy(raw_yml, policy.manifest)):
         return result
 
