@@ -9,6 +9,15 @@ from apm_cli.runtime.codex_runtime import CodexRuntime
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _runtime_binary_installed():
+    """Resolve the runtime helper to its bare name so argv assertions stay exact."""
+    with patch(
+        "apm_cli.runtime.codex_runtime.require_runtime_binary", side_effect=lambda name: name
+    ):
+        yield
+
+
 class TestCodexRuntime:
     """Test Codex runtime adapter."""
 

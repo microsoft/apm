@@ -34,6 +34,9 @@ from scripts.architecture_linter.checks.transport_deploy_store import RULES as _
 from scripts.architecture_linter.checks.transport_egress_route import (
     RULES as _EGRESS_ROUTE_RULES,
 )
+from scripts.architecture_linter.checks.transport_external_executables import (
+    RULES as _EXTERNAL_EXECUTABLE_RULES,
+)
 from scripts.architecture_linter.checks.transport_github_credential_class import (
     RULES as _GITHUB_CREDENTIAL_CLASS_RULES,
 )
@@ -99,6 +102,7 @@ RULES = (
     + _GITHUB_CREDENTIAL_CLASS_RULES
     + _PROXY_HTTP_TOKEN_RULES
     + _CATALOG_CREDENTIAL_RULES
+    + _EXTERNAL_EXECUTABLE_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS

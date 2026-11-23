@@ -10,6 +10,13 @@ from apm_cli.runtime.llm_runtime import LLMRuntime
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _llm_installed():
+    """Resolve the llm helper to its bare name so argv assertions stay exact."""
+    with patch("apm_cli.runtime.llm_runtime.require_runtime_binary", side_effect=lambda name: name):
+        yield
+
+
 class TestLLMRuntime:
     """Test LLM runtime adapter."""
 
