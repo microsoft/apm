@@ -952,6 +952,47 @@ def test_consent_rejects_a_member_link_under_a_symlinked_skills_root(tmp_path: P
 
 
 @pytest.mark.req("req-lk-024")
+def test_consent_never_unlinks_a_member_moved_under_a_symlinked_skills_root(
+    tmp_path: Path,
+) -> None:
+    """A proven member reached through a skills root swapped for a link is never removed (#4815)."""
+    skill = ".agents/skills/alpha"
+    member = f"{skill}/notes.md"
+    hashes, evidence = _skill_world(tmp_path, {f"{skill}/SKILL.md": "skill\n", member: "notes\n"})
+    (tmp_path / f"{skill}/SKILL.md").write_text("my edit\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    proven = evidence.verdict
+
+    def scan_then_user_relinks(claim: str, physical: Path, **kwargs) -> str:
+        verdict = proven(claim, physical, **kwargs)
+        skills = tmp_path / ".agents/skills"
+        if claim == member and not skills.is_symlink():
+            try:
+                skills.rename(outside / "skills")
+                os.symlink(outside / "skills", skills, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+        return verdict
+
+    evidence.verdict = scan_then_user_relinks
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert (outside / "skills/alpha/notes.md").read_text(encoding="utf-8") == "notes\n"
+    assert member not in result.deleted and member in result.rejected
+
+
+@pytest.mark.req("req-lk-024")
 def test_consent_reports_one_deletion_for_absolute_and_relative_spellings(tmp_path: Path) -> None:
     """A user-scope lock listing a file both ways reports one deletion, not two (#4815)."""
     root = tmp_path / "home"
