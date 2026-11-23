@@ -901,7 +901,8 @@ def test_a_replay_backed_audit_binds_the_live_package_root(tmp_path) -> None:
         assert config.read_bytes() == before, "audit never writes the native config"
         return found
 
-    assert audit(f"{live.as_posix()}/bin/srv") == ()
+    # --frozen substitutes the root in its native spelling (backslashes on Windows).
+    assert audit(f"{live}/bin/srv") == ()
     (check,) = audit("/usr/bin/personal")
     assert check.name == "native-mcp-drift" and not check.passed
     assert "'root-srv'" in check.details[0]
