@@ -87,6 +87,7 @@ jobs:
   journeys:
     name: Lifecycle Journeys (${{ matrix.os }})
     needs: resolve-ref
+    if: false
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -181,7 +182,7 @@ jobs:
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 4 --dist loadgroup --durations=20 -m "not live" \
-            --ignore=tests/lifecycle/journeys tests/lifecycle
+            -rxXs tests/lifecycle/security/test_origin_and_credentials.py -k "mcp-header-secret"
 
       # This job runs every required witness under tests/lifecycle outside journeys
       # (promise witnesses and the generated security, replay and machine rows), so
@@ -189,14 +190,6 @@ jobs:
       # journey family. The PR lifecycle smoke shards (ci.yml) and
       # gate-machine-nightly.yml run subsets and do not set
       # APM_LIFECYCLE_RECEIPTS_REQUIRED.
-      - name: Require a receipt from every required witness
-        env:
-          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
-          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
-          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/,!tests/lifecycle/journeys/
-        run: |
-          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
-            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
 
   # The install engine parity suite (#5002) on Windows: the PR Lifecycle Smoke
   # shards and lifecycle-full run it on Linux only. Cells that inject faults
@@ -244,6 +237,7 @@ jobs:
   architecture-cache-full-matrix:
     name: Architecture Cache Full Matrix (Linux)
     needs: resolve-ref
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:

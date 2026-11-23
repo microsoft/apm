@@ -978,9 +978,16 @@ def _changed_paths(before: ArtifactSnapshotSet, after: ArtifactSnapshotSet) -> l
     """Changed files, comparing the lockfile semantically (generation time may move)."""
     changed = []
     for root_id, snapshot in before.snapshots:
-        for path in sorted(_durable_changes(snapshot, after.snapshot(root_id))):
+        later = after.snapshot(root_id)
+        difference = snapshot.diff(later)
+        for path in sorted(_durable_changes(snapshot, later)):
             if path.rsplit("/", 1)[-1] != "apm.lock.yaml":
-                changed.append(f"{root_id}:{path}")
+                how = (
+                    "added" if path in difference.added
+                    else "removed" if path in difference.removed else "changed"
+                )
+                inside = sorted(p for p in later.paths | snapshot.paths if p.startswith(path + "/"))
+                changed.append(f"{root_id}:{path} [{how}; inside={inside[:20]}]")
     return changed
 
 
