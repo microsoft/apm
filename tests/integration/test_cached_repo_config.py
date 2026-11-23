@@ -360,22 +360,25 @@ def test_a_local_helper_is_refused_alongside_a_user_global_helper(
 
 
 def test_an_untrusted_checkout_is_evicted_only_under_its_shard_lock(tmp_path: Path) -> None:
+    import apm_cli.cache.git_cache as git_cache_module
+
     origin, first, _second = _origin(tmp_path)
-    cache = GitCache(tmp_path / "cache")
-    checkout = cache.get_checkout(str(origin), None, locked_sha=first)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
     with (checkout / ".git" / "config").open("a", encoding="utf-8") as config:
         config.write("[core]\n\tfsmonitor = true\n")
-    seen: list[bool] = []
-    real_create = GitCache._create_checkout
+    present_when_locked: list[bool] = []
+    real_lock = git_cache_module.shard_lock
 
-    def create(self, *args, **kwargs):
-        seen.append(checkout.exists())  # the unlocked hit path left it for the locked re-probe
-        return real_create(self, *args, **kwargs)
+    def observed_lock(path):
+        if Path(path) == checkout:
+            present_when_locked.append(checkout.exists())
+        return real_lock(path)
 
-    with patch.object(GitCache, "_create_checkout", create):
+    with patch.object(git_cache_module, "shard_lock", observed_lock):
         rebuilt = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
 
-    assert seen == [True]
+    # The unlocked hit probe left the checkout for the locked re-probe to evict.
+    assert present_when_locked[:1] == [True]
     assert "fsmonitor" not in (rebuilt / ".git" / "config").read_text(encoding="utf-8")
 
 
@@ -394,3 +397,37 @@ def test_a_refused_config_never_prints_a_credential(
 
     assert "s3cret-token" not in caplog.text
     assert "Discarding cached git repository" in caplog.text
+
+
+def test_alternates_chained_through_another_cache_entry_are_refused(tmp_path: Path) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError, require_trusted_cached_repo
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    db_root = tmp_path / "cache" / "git" / "db_v1"
+    relay = db_root / "relay" / "objects"
+    (relay / "info").mkdir(parents=True)
+    (relay / "info" / "alternates").write_text(str(tmp_path / "elsewhere") + "\n", encoding="ascii")
+    (checkout / ".git" / "objects" / "info" / "alternates").write_text(
+        str(relay) + "\n", encoding="ascii"
+    )
+
+    with pytest.raises(UntrustedCachedRepoError, match="chained"):
+        require_trusted_cached_repo(
+            checkout, bare=False, origin_ok=lambda _url: True, alternates_root=db_root
+        )
+
+
+@_POSIX_ONLY
+def test_ref_lookup_never_reads_an_untrusted_bare(tmp_path: Path, server_url: str) -> None:
+    origin, first, _second = _origin(tmp_path)
+    url = f"{server_url}/o/r.git"
+    bare = _cached_bare(tmp_path / "cache", origin, first, url)
+    cache = GitCache(tmp_path / "cache")
+    assert cache.bare_ref_sha(url, "main") == first
+    marker = tmp_path / "marker"
+    with (bare / "config").open("a", encoding="utf-8") as config:
+        config.write(f"[core]\n\tfsmonitor = \"echo hit >> '{marker.as_posix()}'\"\n")
+
+    assert cache.bare_ref_sha(url, "main") is None
+    assert not marker.exists()

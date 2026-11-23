@@ -1040,6 +1040,41 @@ class GitCache:
         except (subprocess.TimeoutExpired, OSError):
             return False
 
+    def bare_ref_sha(self, url: str, ref: str) -> str | None:
+        """Resolve *ref* against the cached bare for *url* without network, or None."""
+        from ..utils.git_env import get_git_executable, git_subprocess_env
+
+        bare_dir = self._db_root / cache_shard_key(url)
+        if not (bare_dir.is_dir() and self._bare_trusted(bare_dir)):
+            return None
+        git_exe = get_git_executable()
+        subprocess_env = git_subprocess_env(None)
+        subprocess_env = cached_repo_env(subprocess_env)
+        # refs/heads, refs/tags, then the ref itself; --verify takes an exact match only.
+        for candidate in (f"refs/heads/{ref}", f"refs/tags/{ref}", ref):
+            try:
+                result = run_git_text(
+                    [
+                        git_exe,
+                        *_safe_git_args(),
+                        "--git-dir",
+                        str(bare_dir),
+                        "rev-parse",
+                        "--verify",
+                        candidate,
+                    ],
+                    capture_output=True,
+                    timeout=5,
+                    env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
+                )
+            except (subprocess.SubprocessError, OSError):
+                continue
+            sha = (result.stdout or "").strip().lower() if result.returncode == 0 else ""
+            if _SHA_RE.match(sha):
+                return sha
+        return None
+
     def _fetch_into_bare(
         self,
         bare_dir: Path,

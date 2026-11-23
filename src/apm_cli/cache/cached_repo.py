@@ -166,6 +166,10 @@ def _check_alternates(git_dir: Path, alternates_root: Path | None) -> None:
         target = (git_dir / "objects" / line.strip()).resolve()
         if target != root and root not in target.parents:
             raise UntrustedCachedRepoError("object alternates leave the cache")
+        # Git follows alternates recursively; APM's bares never have their own.
+        for chained in ("alternates", "http-alternates"):
+            if (target / "info" / chained).exists():
+                raise UntrustedCachedRepoError("object alternates are chained")
 
 
 def _check_hooks(git_dir: Path) -> None:
@@ -232,6 +236,15 @@ def cached_repo_is_trusted(
         _log.warning("[!] Discarding cached git repository %s: %s", repo.name, reason)
         return False
     return True
+
+
+def validate_cached_links(repo: Path, paths: list[str] | None, env: dict[str, str]) -> None:
+    """Validate the tracked links of a cached checkout, running Git inertly."""
+    from ..utils.git_sparse import validate_materialized_symlinks
+
+    validate_materialized_symlinks(
+        "git", repo, paths, env=cached_repo_env(env), extra_git_args=inert_git_args()
+    )
 
 
 def inert_git_args() -> list[str]:

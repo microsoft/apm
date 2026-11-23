@@ -39,6 +39,7 @@ _SITES: dict[str, tuple[str, bool]] = {
     _GIT_CACHE: ("_safe_git_args", True),
     _SNAPSHOT: ("inert_git_args", True),
     _LEGACY: ("inert_git_args", False),
+    _OWNER: ("inert_git_args", True),
 }
 _RUNNERS = frozenset(
     {
@@ -50,7 +51,9 @@ _RUNNERS = frozenset(
         "subprocess.check_output",
     }
 )
-_ARG_RUNNERS = frozenset({"apply_sparse_cone", "materialize_tracked_symlinks"})
+_ARG_RUNNERS = frozenset(
+    {"apply_sparse_cone", "materialize_tracked_symlinks", "validate_materialized_symlinks"}
+)
 _ENV_FENCE = "cached_repo_env"
 _REQUIRED: dict[str, tuple[str, ...]] = {
     _OWNER: (
@@ -176,36 +179,50 @@ def _check_site(path: str, source: str, helper: str, fence_env: bool) -> list[Vi
 
 
 # Entry points into a cached bare that must open with the owner's trust gate.
-_GATED = ("_bare_has_sha", "_fetch_into_bare_locked")
+_GATED = ("_bare_has_sha", "_fetch_into_bare_locked", "bare_ref_sha")
 _GATE = "self._bare_trusted"
+# Entry points that open a cached checkout, and the trust check each must call.
+_CHECKOUT_GATES = {
+    "get_checkout": "self._checkout_trusted",
+    "_read_only_checkout": "self._checkout_trusted",
+    "_create_checkout": "self._checkout_trusted_or_evicted",
+}
+
+
+def _is_preamble(node: ast.AST) -> bool:
+    """Imports, the docstring, and plain assignments that run no Git."""
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return True
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+        return True
+    return isinstance(node, ast.Assign) and not any(
+        isinstance(n, ast.Call) and _name(n.func) in _RUNNERS for n in ast.walk(node)
+    )
 
 
 def _opens_with_gate(function: ast.AST) -> bool:
-    body = [
-        node
-        for node in getattr(function, "body", [])
-        if not isinstance(node, (ast.Import, ast.ImportFrom))
-        and not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant))
-    ]
+    body = [node for node in getattr(function, "body", []) if not _is_preamble(node)]
     if not body or not isinstance(body[0], ast.If):
         return False
-    test = body[0].test
-    return (
-        isinstance(test, ast.UnaryOp)
-        and isinstance(test.op, ast.Not)
-        and _calls(test.operand, _GATE)
-        and isinstance(body[0].body[0], (ast.Return, ast.Raise))
+    gate = body[0]
+    return any(_calls(n, _GATE) for n in ast.walk(gate.test)) and isinstance(
+        gate.body[0], (ast.Return, ast.Raise)
     )
 
 
 def _check_gates(path: str, source: str) -> list[Violation]:
     tree = ast.parse(source, filename=path)
     functions = {f.name: f for f in _functions(tree)}
-    return [
-        violation(_RULE_ID, path, f"{name} must open with `if not {_GATE}(...)`")
+    findings = [
+        violation(_RULE_ID, path, f"{name} must open with a `{_GATE}(...)` check")
         for name in _GATED
         if name not in functions or not _opens_with_gate(functions[name])
     ]
+    for name, gate in _CHECKOUT_GATES.items():
+        function = functions.get(name)
+        if function is None or not any(_calls(n, gate) for n in ast.walk(function)):
+            findings.append(violation(_RULE_ID, path, f"{name} must call {gate}(...)"))
+    return findings
 
 
 def _check_cached_repo_git(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -241,6 +258,28 @@ def _check_cached_repo_git(provider: FactsProvider) -> tuple[Violation, ...]:
                 r"\b(?:get_git_db_path|get_git_checkouts_path|GIT_DB_BUCKET|GIT_CHECKOUTS_BUCKET)\b"
             ),
             "Only cache/git_cache.py may address the git cache buckets",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _RULE_ID,
+            _src_python(provider, exclude={_GIT_CACHE}),
+            re.compile(r"\._db_root\b"),
+            "Only cache/git_cache.py may open its bares (use GitCache.bare_ref_sha)",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _RULE_ID,
+            ("src/apm_cli/deps/github_downloader.py",),
+            re.compile(r"\bvalidate_materialized_symlinks\b"),
+            "Cached checkouts are link-checked through cached_repo.validate_cached_links",
             exempt=False,
         )
     )
