@@ -45,6 +45,7 @@ from typing import Any, Literal
 from apm_cli.install.journal_modes import (
     apply_entry_modes,
     apply_own_mode,
+    never_wider,
     recorded_mode,
     stage_private,
     verified_mode,
@@ -750,6 +751,7 @@ def _keep(store: Path) -> Path:
 
 
 _KEEP_CHANGED = "it changed after the interrupted install"
+_KEEP_WIDER = "its recorded mode is wider than it has now"
 
 
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
@@ -768,10 +770,12 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
             ours = _holds_apm_state(unit)
         except OSError:
             ours = False  # unreadable now: never destroy what cannot be inspected
-        if ours:
-            apply.append(unit)
-        else:
+        if not ours:
             kept.append((unit.rel, _KEEP_CHANGED))
+        elif unit.copy is not None and not never_wider(unit.path, unit.copy, unit.kind, unit.mode):
+            kept.append((unit.rel, _KEEP_WIDER))  # never widen beyond what is there (#5134)
+        else:
+            apply.append(unit)
     return apply, kept
 
 

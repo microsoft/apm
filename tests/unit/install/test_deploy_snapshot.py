@@ -970,12 +970,12 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
     hook = project / ".github" / "hooks" / "run.sh"
     hook.parent.mkdir(parents=True)
     hook.write_bytes(b"#!/bin/sh\necho prior\n")
-    hook.chmod(0o755)
+    hook.chmod(0o700)
     ledger = {".github/hooks/run.sh": compute_file_hash(hook)}
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(hook)
     hook.write_bytes(b"#!/bin/sh\necho killed\n")
-    hook.chmod(0o644)
+    hook.chmod(0o755)
     journal.after_write(hook)
 
     restored = replay_abandoned_journals(
@@ -984,7 +984,7 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
 
     assert (restored.restored, restored.kept) == (1, ())
     assert hook.read_bytes() == b"#!/bin/sh\necho prior\n"
-    assert hook.stat().st_mode & 0o777 == 0o755
+    assert hook.stat().st_mode & 0o777 == 0o700
     assert not (apm_home / "install-snapshots").exists()
 
 
@@ -1348,13 +1348,13 @@ def test_a_users_mode_change_after_the_kill_is_kept_whatever_the_copy_says(
 def test_a_read_only_directory_is_restored_with_its_recorded_mode(
     tmp_path: Path, apm_home: Path
 ) -> None:
-    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o555)
+    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o550)
 
     restored = _replay(apm_home, tmp_path / "project", lambda: ledger)
 
     assert (restored.restored, restored.kept) == (1, ())
     assert (skill / "SKILL.md").read_bytes() == b"prior\n"
-    assert skill.stat().st_mode & 0o7777 == 0o555
+    assert skill.stat().st_mode & 0o7777 == 0o550
     skill.chmod(0o755)  # let pytest clean up
 
 
@@ -1431,3 +1431,45 @@ def test_a_sticky_directory_is_kept_not_restored_without_its_sticky_bit(
     ]
     assert (skill / "SKILL.md").read_bytes() == b"killed\n"
     assert skill.stat().st_mode & 0o7777 == 0o1777
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_recorded_mode_wider_than_the_path_has_now_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The recorded mode is journal data: replay never widens a path beyond the mode it
+    has now, even for valid permission bits (#5134)."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    _rewrite_unit_mode(store, 0o666)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == ((".mcp.json", "its recorded mode is wider than it has now"),)
+    assert config.read_bytes() == b"killed\n"
+    assert config.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_path_that_is_now_a_link_is_refused_and_its_target_untouched(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(b"{}\n")
+    outside.chmod(0o600)
+    config.unlink()
+    config.symlink_to(outside)
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [path for path, _reason in kept.value.issues] == [".mcp.json"]
+    assert config.is_symlink()
+    assert outside.read_bytes() == b"{}\n"
+    assert outside.stat().st_mode & 0o7777 == 0o600

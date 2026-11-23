@@ -52,6 +52,40 @@ def verified_mode(recorded: Any, kind: str, copy: Path) -> int | dict[str, int] 
     return recorded if all(_valid(mode) for mode in recorded.values()) else None
 
 
+# A path that is gone is bounded by what a new file or directory gets.
+_NEW_FILE, _NEW_DIR = 0o644, 0o755
+
+
+def _ceiling(path: Path, directory: bool) -> int | None:
+    """The widest permission bits replay may give *path*; ``None``: it is now a link."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return _NEW_DIR if directory else _NEW_FILE
+    if stat.S_ISLNK(st.st_mode):
+        return None
+    return stat.S_IMODE(st.st_mode) & _PERMISSION_BITS
+
+
+def _within(bits: int, ceiling: int | None) -> bool:
+    return ceiling is not None and not bits & ~ceiling
+
+
+def never_wider(path: Path, copy: Path, kind: str, mode: int | dict[str, int]) -> bool:
+    """Whether restoring *mode* adds no permission bit the path lacks now (#5134).
+
+    The recorded mode is journal data; the path on disk is not. A restore may
+    narrow permissions back but never widen them beyond what is there now; a
+    path that is now a link is refused.
+    """
+    if isinstance(mode, int):
+        return _within(mode, _ceiling(path, kind == "dir"))
+    return all(
+        _within(bits, _ceiling(path / rel if rel else path, not rel or (copy / rel).is_dir()))
+        for rel, bits in mode.items()
+    )
+
+
 def _write_private(path: Path, data: bytes) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
     with os.fdopen(fd, "wb") as handle:
