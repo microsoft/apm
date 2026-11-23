@@ -158,13 +158,18 @@ def test_later_uninstall_and_prune_of_the_reanchored_package_keep_deletion_evide
     assert "_local/e" not in _rows(world)
     assert not (world.project / ".claude/skills/d-skill").exists()
 
-    # Prune: an unedited re-anchored package leaves with its proven files.
+    # Prune deletes only what it proves: the re-anchored package keeps its
+    # files, row and receipts (prune of a transitive local orphan: #4989).
     other = _local_world(tmp_path / "prune", apm_binary_path)
     other.apm("uninstall", "./vendor/e")
     _manifest(other, [], ["./vendor/a"])
-    other.apm("prune")
-    assert not (other.project / ".claude/skills/e-skill").exists()
-    assert "_local/e" not in _rows(other)
+    receipts = _receipts(other)
+    pruned = other.apm("prune")
+    assert "Removed _local/d" in pruned.stdout + pruned.stderr
+    assert not (other.project / ".claude/skills/d-skill").exists()
+    assert (other.project / ".claude/skills/e-skill/SKILL.md").is_file()
+    assert "_local/e" in _rows(other)
+    assert _receipts(other).keys() == receipts.keys()
 
 
 def test_a_forged_receipt_binding_refuses_the_reanchor(
@@ -235,8 +240,10 @@ def test_reanchoring_carries_the_receipt_hash_history(
     before = history()
     assert before, "the rewrite recorded no receipt history"
 
-    world.apm("uninstall", "./vendor/e")
+    result = world.apm("uninstall", "./vendor/e")
 
+    assert "./vendor/e stays installed because" in result.stdout + result.stderr
+    assert _rows(world)["_local/e"]["declaring_parent"] == "./vendor/d"
     assert history() == before
 
 
