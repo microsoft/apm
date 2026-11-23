@@ -47,6 +47,7 @@ from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
 from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.scenarios._deploy_diff import (
+    HOME_CACHES,
     comparable,
     diff,
     revoke_user_approval,
@@ -86,7 +87,8 @@ _ELAPSED = re.compile(r"\b\d+(?:\.\d+)?m?s\b")
 _PARALLEL = re.compile(r"^\s*\[>\] Resolving ")
 
 
-_POLICY_AGE = re.compile(r" \(cached, fetched \d+s ago\)")
+# CommandLogger.policy_resolved prints the age in s, m or h (command_logger.py).
+_POLICY_AGE = re.compile(r" \(cached, fetched \d+[smh] ago\)")
 
 
 BOTH = ("p-skill:git", "p-exec:git")
@@ -195,15 +197,38 @@ def _normalized(world: World, text: str) -> list[str]:
     return lines
 
 
+_RECEIPTS = "deployment-receipts"
+
+
 def _modes(world: World) -> dict[str, str]:
-    """``st_mode`` permission bits of every project file and directory (apm_modules included)."""
-    root = world.project
-    return {
-        path.relative_to(root).as_posix(): oct(path.lstat().st_mode & 0o7777)
-        for path in sorted(root.rglob("*"))
-        if not path.relative_to(root).as_posix().startswith((".git/", ".apm-local"))
-        and path.relative_to(root).as_posix() != ".git"
+    """Full permission bits of project, HOME and APM_HOME paths (apm_modules included).
+
+    Caches, logs and checkout identity are skipped; checkout-keyed receipt file names
+    are normalized, so each receipt directory compares as the sorted list of its modes.
+    """
+    modes: dict[str, str] = {}
+    receipts: dict[str, list[str]] = {}
+    roots = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
+    skips = {
+        "project": (".git", ".apm-local"),
+        "home": (*HOME_CACHES, ".apm/cache"),
+        "apm_home": ("cache", "logs"),
     }
+    for name, root in roots.items():
+        skip = skips[name]
+        for path in sorted(root.rglob("*")) if root.exists() else ():
+            rel = path.relative_to(root).as_posix()
+            if any(rel == s or rel.startswith(s + "/") for s in skip):
+                continue
+            mode = oct(path.lstat().st_mode & 0o7777)
+            parts = rel.split("/")
+            if _RECEIPTS in parts[:-1] and path.is_file():
+                receipts.setdefault(f"{name}:{path.parent.relative_to(root).as_posix()}", [])
+                receipts[f"{name}:{path.parent.relative_to(root).as_posix()}"].append(mode)
+            else:
+                modes[f"{name}:{rel}"] = mode
+    modes.update({key: ",".join(sorted(values)) for key, values in receipts.items()})
+    return modes
 
 
 @dataclass
@@ -242,8 +267,8 @@ class Twin:
                 self.full, getattr(full, stream)
             ), f"{label}: {stream} differs from the full pipeline{evidence}"
         problems = diff(
-            comparable(self.fast, exempt),
-            comparable(self.full, exempt),
+            comparable(self.fast, exempt, receipt_history=True),
+            comparable(self.full, exempt, receipt_history=True),
             self.worlds,
             ("fast", "full"),
         )

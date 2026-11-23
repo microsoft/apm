@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.lifecycle.scenarios._deploy_diff import CHANGES, converge, digest
+from tests.lifecycle.scenarios._deploy_diff import CHANGES, SKILL_PATH, digest, set_inputs
 from tests.lifecycle.scenarios._engine_parity import (
     BOTH,
     CHANGE_EXIT,
@@ -179,7 +179,13 @@ def test_cleanup_on_a_doubt_prunes_like_the_full_pipeline(twin: Twin) -> None:
 def test_install_after_a_change_matches_the_full_pipeline(twin: Twin, change: str) -> None:
     """Same history in both worlds, so nothing is exempt: an edited or symlinked path is compared."""
     spec = CHANGES[change]
-    twin.each(lambda w: converge(w, spec.start, run=twin.invoke))
+    twin.each(lambda w: set_inputs(w, spec.start))
+    twin.ok("install")  # every setup step is itself a parity step
+    if spec.start.approved:
+        twin.ok("approve", "--user", "p-exec")
+        twin.ok("install")
+    for world in twin.worlds:
+        assert (world.project / SKILL_PATH).is_file(), "the kit skill must deploy"
     twin.each(spec.apply)
     outside = {w.root: digest(w.root / "outside-skill", (), w) for w in twin.worlds}
     decision = twin.run("install")
@@ -207,3 +213,21 @@ def test_trust_change_after_a_noop_hit_declines(twin: Twin, trust: str) -> None:
             "the trust change touched apm.yml or the lock"
         )
     _assert_decision(twin.ok("install"), FULL)
+
+
+@NEEDS_NOOP
+def test_one_missing_deployed_file_after_a_noop_hit_is_restored(twin: Twin) -> None:
+    """Git-only: prove a no-op hit, then delete ONE hashed deployed file (manifest, lock
+    and apm_modules kept). The engine must not call that a no-op: it restores the bytes
+    (diff) or declines (full), byte-identical to the full pipeline either way.
+    """
+    _converge(twin, *BOTH)
+    _assert_decision(twin.ok("install"), NOOP)
+    missing = {w.root: _deployed(w)[0] for w in twin.worlds}
+    original = {root: path.read_bytes() for root, path in missing.items()}
+    for path in missing.values():
+        path.unlink()
+    decision = twin.ok("install")
+    for root, path in missing.items():
+        assert path.read_bytes() == original[root], f"{path.name} was not restored"
+    _assert_decision(decision, DIFF, FULL)

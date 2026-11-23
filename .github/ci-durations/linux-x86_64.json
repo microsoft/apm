@@ -3538,5 +3538,6 @@
 "tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_kill_mid_commit_then_install_equals_the_full_world[after-first-package-published]": 17.5,
 "tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_kill_mid_commit_then_install_equals_the_full_world[after-first-service-write]": 17.5,
 "tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_kill_mid_commit_then_install_equals_the_full_world[before-services-render]": 17.5,
-"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_output_failure_after_commit_never_runs_the_full_pipeline": 17.5
+"tests/lifecycle/scenarios/test_engine_parity_invariants.py::test_output_failure_after_commit_never_runs_the_full_pipeline": 17.5,
+"tests/lifecycle/scenarios/test_engine_parity.py::test_one_missing_deployed_file_after_a_noop_hit_is_restored": 17.5
 }

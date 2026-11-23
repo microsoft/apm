@@ -27,6 +27,7 @@ from tests.lifecycle.scenarios._engine_parity import (
     DECIDE_HITS,
     DECLINES,
     DIFF,
+    DIFF_ENGINE,
     FAST_ENV,
     FULL,
     KILL_POINTS,
@@ -144,6 +145,10 @@ def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) 
     finally:
         twin.fast.env.pop("APM_TEST_WRITE_FAULT_AT", None)
     _assert_decision(decision, FULL)
+    if not DIFF_ENGINE:
+        # A no-op engine without diff-apply may decline for its own reason: the fault
+        # hook had nothing to wrap, so this cell's decision is still missing.
+        raise MissingDecision(f"expected a diff decision, got {decision!r} (no diff engine)")
     assert "write failed" in decision, decision
 
 
