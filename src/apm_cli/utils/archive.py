@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import shutil
 import tarfile
 import uuid
@@ -85,6 +86,35 @@ def write_zip_archive(bundle_dir: Path, archive_path: Path) -> None:
 
 def _raise(error_type: type[_ErrorT], message: str) -> None:
     raise error_type(message)
+
+
+# Windows reserved device names, matched on the text before the first dot;
+# COM and LPT also take a superscript digit (U+00B9, U+00B2, U+00B3).
+_RESERVED_DEVICE_STEM = re.compile(
+    r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[0-9\u00b9\u00b2\u00b3])", re.IGNORECASE
+)
+
+
+def portable_name_problem(name: str) -> str | None:
+    """Why *name* would not be written as-is on every OS, or ``None``.
+
+    Windows trims a trailing dot or space, reads ``:`` as an alternate data
+    stream and maps reserved device names, so a segment with any of these
+    would not land at the path it names. The rule applies on every OS (as
+    git's ``core.protectNTFS``) so one archive extracts the same everywhere.
+    """
+    for segment in name.replace("\\", "/").split("/"):
+        if not segment:
+            continue
+        if not segment.strip("."):
+            return "a segment made only of dots"
+        if segment[-1] in ". ":
+            return "a segment ending in a dot or space"
+        if ":" in segment or any(ord(char) < 0x20 for char in segment):
+            return "a colon or control character"
+        if _RESERVED_DEVICE_STEM.fullmatch(segment.split(".", 1)[0].rstrip(" ")):
+            return "a reserved device name"
+    return None
 
 
 def _check_archive_member(member_path: str) -> None:
@@ -191,6 +221,9 @@ def _archive_member_target(
         validate_path_segments(member_name, context="zip member")
     except PathTraversalError:
         _raise(error_type, f"Refusing to extract path-traversal entry: {member_name}")
+    problem = portable_name_problem(member_name)
+    if problem is not None:
+        _raise(error_type, f"Refusing to extract entry with {problem}: {member_name!r}")
     target = dest_root / member_name
     try:
         ensure_path_within(target, dest_root)
