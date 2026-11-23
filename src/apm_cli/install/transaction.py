@@ -155,6 +155,7 @@ def replay_abandoned_deploys(apm_modules_dir: Path, logger: Any) -> None:
             lambda: _ledger_hashes(apm_dir),
             receipts=_receipts_directory(root),
             committed=lambda: _committed_lockfile(apm_dir),
+            workspace=apm_dir,
         )
     except JournalReplayError as exc:
         _report_kept_journal(exc, logger)
@@ -231,8 +232,13 @@ class InstallTransaction:
         validation: _ValidationOutcome | None,
         logger: InstallLogger,
         acquire_lock: bool = True,
+        recover_deploys: bool = True,
     ) -> None:
-        """Capture the manifest and create one resolution staging session."""
+        """Capture the manifest and create one resolution staging session.
+
+        *recover_deploys* is ``False`` for a lock-only run (``apm lock``),
+        which never changes deployed files, not even to replay a journal.
+        """
         self.manifest_path = manifest_path
         self.apm_modules_dir = apm_modules_dir
         self._validation = validation
@@ -247,7 +253,7 @@ class InstallTransaction:
         try:
             self._manifest_existed = manifest_path.exists()
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
-            if self._workspace_lock is not None:
+            if self._workspace_lock is not None and recover_deploys:
                 # Under the lifecycle lock, before this attempt changes anything.
                 self._replay_abandoned_deploys()
             self._resolution = ResolutionStagingSession(apm_modules_dir)
@@ -378,7 +384,9 @@ class InstallTransaction:
             store_parent = get_apm_home() / "install-snapshots"
             # The pipeline's write root; replay matches it to the workspace root.
             root = getattr(ctx, "project_root", None) or _deploy_root_of(self.apm_modules_dir)
-            self._deploy_journal = DeployJournal(store_parent, root=root)
+            self._deploy_journal = DeployJournal(
+                store_parent, root=root, workspace=self.apm_modules_dir.parent
+            )
             write_seam.listen(self._record_deploy_write, self._seal_deploy_write)
 
     def _mark_deploy_commit(self) -> None:
@@ -624,6 +632,8 @@ def transactional_pipeline(
                 apm_modules_dir=modules_dir,
                 validation=None,
                 logger=kwargs.get("logger"),
+                # apm lock never touches deployed files (#4863).
+                recover_deploys=not kwargs.get("lockfile_only", False),
             )
             kwargs["transaction"] = transaction
         try:

@@ -236,7 +236,7 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
     if not all(
         needle in transaction_text
         for needle in (
-            "self._deploy_journal = DeployJournal(store_parent, root=root)",
+            "self._deploy_journal = DeployJournal(",
             "self._restore_deploy_targets()",
             "self._remove_created_target_roots()",
             "self._undo_deploys()\n                finally:",

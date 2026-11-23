@@ -8,7 +8,6 @@ so the shared integrator stays under the source-length guardrail.
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -133,7 +132,7 @@ def _write_kiro_hook_docs(
                 rendered = json.dumps(doc, indent=2) + "\n"
 
                 if target_path.exists() and target_path.read_text(encoding="utf-8") == rendered:
-                    os.chmod(target_path, 0o600)
+                    write_seam.chmod(target_path, 0o600)
                     files_adopted += 1
                     target_paths.append(target_path)
                     continue
@@ -161,7 +160,7 @@ def _write_kiro_hook_docs(
                 atomic_write_text(target_path, rendered, new_file_mode=0o600)
                 integrator.note_rendered_write(target_path)
                 # Keep existing hook files private after updates too.
-                os.chmod(target_path, 0o600)
+                write_seam.chmod(target_path, 0o600)
                 files_integrated += 1
                 target_paths.append(target_path)
                 display_payloads.append(

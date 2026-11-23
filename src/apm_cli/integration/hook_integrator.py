@@ -2085,9 +2085,7 @@ class HookIntegrator(BaseIntegrator):
                 write_seam.unlink(json_path)  # a fresh deploy writes no file
                 stats["files_removed"] += 1
             elif modified:
-                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
-                    f.write("\n")
+                write_seam.write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if kept:
                 write_seam.atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")

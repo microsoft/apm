@@ -595,7 +595,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             if data is None:
                 return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
-            from .base import journal_config_write, journal_config_written
+            from .config_journal import journal_config_write, journal_config_written
 
             journal_config_write(path, json_config_text(path, data, default_trailing_newline=True))
             path.parent.mkdir(parents=True, exist_ok=True)

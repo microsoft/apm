@@ -590,6 +590,167 @@ def test_a_user_edit_to_a_json_config_killed_before_its_seal_is_kept(
     assert config.read_text(encoding="utf-8") == '{"mine": true}\n'
 
 
+def test_a_user_edit_to_hook_settings_killed_before_their_seal_is_kept(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The hook settings write names its bytes, so a user's later edit is kept (#4863)."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration import write_seam
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    settings = project / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    hooks = {"evt": [{"command": "x", "_apm_source": "pkg"}, {"command": "y"}]}
+    settings.write_text(json.dumps({"theme": "dark", "hooks": hooks}), encoding="utf-8")
+    # The ledger vouches for the prior bytes, so only the seal decides.
+    ledger = {".claude/settings.json": compute_file_hash(settings)}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def record(path: Path, contents: bool, expected: str | None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    # Killed after the settings write and before its post-write seal.
+    write_seam.listen(record)
+    try:
+        HookIntegrator._clean_apm_entries_from_json(settings, {"files_removed": 0})
+    finally:
+        write_seam.stop_listening(record)
+    settings.write_text('{"theme": "light"}\n', encoding="utf-8")
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == ((".claude/settings.json", "it changed after the interrupted install"),)
+    assert settings.read_text(encoding="utf-8") == '{"theme": "light"}\n'
+
+
+def test_a_journal_of_another_workspace_sharing_the_root_is_left_alone(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """User scope and a project at HOME share a deploy root, not a ledger."""
+    from apm_cli.install.deploy_snapshot import DeployJournal, replay_abandoned_journals
+
+    project = tmp_path / "home"
+    created = project / "a.md"
+    project.mkdir()
+    journal = DeployJournal(
+        apm_home / "install-snapshots", root=project, workspace=tmp_path / "home" / ".apm"
+    )
+    journal.record(created)
+    created.write_bytes(b"killed\n")
+    journal.after_write(created)
+
+    outcome = replay_abandoned_journals(
+        apm_home / "install-snapshots",
+        project,
+        dict,
+        receipts=_receipts(apm_home),
+        workspace=project,
+    )
+
+    assert outcome.restored == 0
+    assert created.read_bytes() == b"killed\n"
+    assert journal.store is not None and journal.store.is_dir()
+
+
+def test_a_lock_only_transaction_never_replays_a_journal(tmp_path: Path, apm_home: Path) -> None:
+    """``apm lock`` changes no deployed file, not even to replay (#4863)."""
+    from apm_cli.install.transaction import InstallTransaction
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    store = _killed_journal(apm_home, project, created)
+
+    transaction = InstallTransaction(
+        manifest_path=project / "apm.yml",
+        apm_modules_dir=project / "apm_modules",
+        validation=None,
+        logger=None,
+        recover_deploys=False,
+    )
+    transaction.rollback()
+
+    assert created.read_bytes() == b"killed\n"
+    assert store.is_dir()
+
+
+def test_a_malformed_seal_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    created = project / "d" / "a.md"
+    store = _killed_journal(apm_home, project, created)
+    with open(store / "journal.jsonl", "a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"sealed": 0, "sub": "", "state": {"dir": 1}}) + "\n")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(str(store), "journal manifest holds a malformed write event")]
+    assert created.read_bytes() == b"killed\n"
+
+
+def test_an_unreadable_copy_keeps_the_journal(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.install import deploy_snapshot
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    target = project / "a.md"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"prior\n")
+    ledger = {"a.md": compute_file_hash(target)}
+    _killed_journal(apm_home, project, target)
+
+    def unreadable(_path: Path) -> str:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(deploy_snapshot, "compute_file_hash", unreadable)
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert kept.value.issues == [("a.md", "journal copy unreadable: denied")]
+    assert not kept.value.applied
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_mode_set_through_the_seam_is_part_of_what_apm_wrote(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A chmod after a copy is sealed, so replay removes APM's executable (#4863)."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration import write_seam
+
+    project = tmp_path / "project"
+    source, deployed = tmp_path / "run.sh", project / "bin" / "run.sh"
+    source.write_bytes(b"#!/bin/sh\n")
+    project.mkdir()
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def record(path: Path, contents: bool, expected: str | None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        write_seam.mkdir(deployed.parent, parents=True, exist_ok=True)
+        write_seam.copy2(source, deployed)
+        write_seam.chmod(deployed, 0o700)
+    finally:
+        write_seam.stop_listening(record)
+
+    outcome = _replay(apm_home, project)
+
+    assert outcome.kept == ()
+    assert not deployed.exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
 def test_a_directory_mode_changed_after_the_kill_keeps_the_directory(
     tmp_path: Path, apm_home: Path
@@ -794,7 +955,7 @@ def test_a_rolled_back_install_restores_an_mcp_config_it_wrote(
     tmp_path: Path, apm_home: Path
 ) -> None:
     """#4594: an MCP config written before a later service failure is restored."""
-    from apm_cli.adapters.client.base import journal_config_write
+    from apm_cli.adapters.client.config_journal import journal_config_write
 
     project = tmp_path / "project"
     config = project / ".cursor" / "mcp.json"

@@ -97,7 +97,7 @@ _SEAM_CONTROL = frozenset(
 _JOURNAL_CONFIG = "journal_config_write"
 _DIRECT_RECORDERS = {
     ("src/apm_cli/integration/base_integrator.py", "write_text_if_changed"): _AFTER,
-    ("src/apm_cli/adapters/client/base.py", "journal_config_write"): None,
+    ("src/apm_cli/adapters/client/config_journal.py", "journal_config_write"): None,
     ("src/apm_cli/install/skill_path_migration.py", "execute_migration"): _AFTER,
     ("src/apm_cli/install/skill_path_migration.py", "_cleanup_empty_parents"): _AFTER,
     ("src/apm_cli/adapters/client/base.py", "_write_json_config"): "journal_config_written",

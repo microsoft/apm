@@ -1995,7 +1995,7 @@ class SkillIntegrator(BaseIntegrator):
             # other, and special bits never survive from the source package.
             # Runs for both fresh copies and idempotent re-installs so files
             # previously deployed by older APM versions are hardened in-place.
-            dest_file.chmod(stat.S_IRWXU)
+            write_seam.chmod(dest_file, stat.S_IRWXU)
 
         if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")

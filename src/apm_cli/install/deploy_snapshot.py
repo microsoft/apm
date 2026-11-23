@@ -104,11 +104,15 @@ def _remove(path: Path) -> None:
 class DeployJournal:
     """Prior state of every path one install touched, recorded on first touch."""
 
-    def __init__(self, store_parent: Path, *, root: Path | None = None) -> None:
+    def __init__(
+        self, store_parent: Path, *, root: Path | None = None, workspace: Path | None = None
+    ) -> None:
         self.store_parent = Path(os.path.abspath(store_parent))
         # With a deploy root every unit is also written to the store's
         # manifest, so the next install can replay a journal a kill abandoned.
         self.root = Path(os.path.abspath(root)) if root is not None else None
+        # The metadata workspace (lockfile directory) whose ledger vouches for it.
+        self.workspace = Path(os.path.abspath(workspace or root or store_parent))
         self.store: Path | None = None
         self._units: list[_Unit] = []
         self._recorded: dict[Path, int] = {}
@@ -128,7 +132,12 @@ class DeployJournal:
             self.store_parent.mkdir(parents=True, exist_ok=True)
             self.store = Path(tempfile.mkdtemp(prefix=_STORE_PREFIX, dir=self.store_parent))
             if self.root is not None:
-                header = {"format": _FORMAT, "version": _VERSION, "root": str(self.root)}
+                header = {
+                    "format": _FORMAT,
+                    "version": _VERSION,
+                    "root": str(self.root),
+                    "workspace": str(self.workspace),
+                }
                 self._append_line(header)
         return self.store
 
@@ -348,7 +357,7 @@ def _state(path: Path) -> dict[str, Any]:
         return {"link": os.readlink(path)}
     if path.is_file():
         return {"file": compute_file_hash(path), "mode": _mode(path)}
-    return {"other": True} if os.path.lexists(path) else {"absent": True}
+    return dict(_OTHER) if os.path.lexists(path) else dict(_ABSENT)
 
 
 def _entry(path: Path) -> str:
@@ -367,6 +376,7 @@ def _mode(path: Path) -> int:
 
 
 _ABSENT: dict[str, Any] = {"absent": True}
+_OTHER: dict[str, Any] = {"other": True}
 
 
 def lockfile_identity(text: str) -> str:
@@ -445,8 +455,8 @@ def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
     header = lines[0]
     if header.get("format") != _FORMAT or header.get("version") != _VERSION:
         raise ValueError("journal manifest has an unknown format or version")
-    if not isinstance(header.get("root"), str):
-        raise ValueError("journal manifest names no deploy root")
+    if not isinstance(header.get("root"), str) or not isinstance(header.get("workspace"), str):
+        raise ValueError("journal manifest names no deploy root or workspace")
     return header, lines[1:]
 
 
@@ -472,11 +482,33 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
             or not isinstance(sub, str)
             or (sub and PurePosixPath(sub).as_posix() != sub)
             or ".." in PurePosixPath(sub).parts
-            or not isinstance(state, dict | str | tuple)
+            or not (pending or _valid_state(state, entry=bool(sub)))
         ):
             raise ValueError("journal manifest holds a malformed write event")
         events.setdefault(index, {})[sub] = state
     return units, events, commit
+
+
+def _valid_state(state: Any, *, entry: bool) -> bool:
+    """Whether *state* has the shape :func:`_state` (or :func:`_entry`) records."""
+    if entry:
+        return isinstance(state, str)
+    if not isinstance(state, dict):
+        return False
+    if state in (_ABSENT, _OTHER):
+        return True
+    if set(state) == {"link"}:
+        return isinstance(state["link"], str)
+    if set(state) == {"file", "mode"}:
+        return isinstance(state["file"], str) and type(state["mode"]) is int
+    if set(state) == {"dir", "mode"}:
+        entries = state["dir"]
+        return (
+            isinstance(entries, dict)
+            and all(isinstance(k, str) and isinstance(v, str) for k, v in entries.items())
+            and type(state["mode"]) is int
+        )
+    return False
 
 
 def _pending(line: dict[str, Any]) -> tuple[str, str | None]:
@@ -710,7 +742,11 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
     apply: list[_Replay] = []
     kept: list[tuple[str, str]] = []
     for unit in units:
-        if _holds_apm_state(unit):
+        try:
+            ours = _holds_apm_state(unit)
+        except OSError:
+            ours = False  # unreadable now: never destroy what cannot be inspected
+        if ours:
             apply.append(unit)
         else:
             kept.append((unit.rel, _KEEP_CHANGED))
@@ -834,17 +870,22 @@ def _validated(
         except (TypeError, ValueError, AttributeError, KeyError):
             issues.append((str(store), "journal manifest holds a malformed unit"))
             continue
+        except OSError as exc:
+            issues.append((str(line.get("path", store)), f"journal copy unreadable: {exc}"))
+            continue
         units.append(replace(unit, events=events))
     return units, issues
 
 
-def _store_root(store: Path) -> str | None:
-    """The deploy root an abandoned store names, or ``None`` when its header is unreadable."""
+def _store_identity(store: Path) -> tuple[str, str] | None:
+    """``(deploy root, workspace)`` an abandoned store names, or ``None`` if unreadable."""
     with contextlib.suppress(OSError, ValueError, UnicodeDecodeError):
         with open(store / _MANIFEST, encoding="utf-8") as handle:
             header = json.loads(handle.readline())
-        if isinstance(header, dict) and isinstance(header.get("root"), str):
-            return header["root"]
+        if isinstance(header, dict):
+            root, workspace = header.get("root"), header.get("workspace")
+            if isinstance(root, str) and isinstance(workspace, str):
+                return os.path.realpath(root), os.path.realpath(workspace)
     return None
 
 
@@ -855,6 +896,7 @@ def replay_abandoned_journals(
     *,
     receipts: Path,
     committed: Callable[[], str | None] = lambda: None,
+    workspace: Path | None = None,
 ) -> ReplayOutcome:
     """Replay the journals a killed install left for *root*.
 
@@ -865,14 +907,15 @@ def replay_abandoned_journals(
     raises ``LedgerUnavailable`` when the lockfile exists but cannot be read.
     *committed* returns the :func:`lockfile_identity` of the lockfile on disk.
     *receipts* is the deployment receipts directory, the only APM-home
-    location a journal may restore. A journal for another deploy root is left
-    for that root's next install. A path holding data the killed install did
+    location a journal may restore. A journal for another deploy root, or for
+    another metadata *workspace* (lockfile directory, default *root*) sharing
+    it, is left for that workspace's next install. A path holding data the killed install did
     not write is kept and listed in the outcome, never removed or replaced.
     Raise ``JournalReplayError`` on the first journal that cannot be
     replayed, after keeping it.
     """
     root = Path(os.path.abspath(root))
-    real_root = os.path.realpath(root)
+    identity = (os.path.realpath(root), os.path.realpath(workspace or root))
     bases = _Bases(root, Path(os.path.abspath(receipts)))
     ledger, committed = functools.cache(ledger), functools.cache(committed)
     stores: list[Path] = []
@@ -882,8 +925,8 @@ def replay_abandoned_journals(
     for store in stores:
         if not store.is_dir() or store.is_symlink() or os.path.lexists(store / _RETAINED_MARKER):
             continue
-        named = _store_root(store)
-        if named is not None and os.path.realpath(named) != real_root:
+        named = _store_identity(store)
+        if named is not None and named != identity:
             continue
         outcome = _replay_store(store, bases, ledger, committed)
         restored += outcome.restored
