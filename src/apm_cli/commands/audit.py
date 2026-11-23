@@ -660,17 +660,17 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
 
 
 def _routable_discovery(discover):
-    """Run policy *discover*; a discovery that raises becomes a routable fetch failure.
+    """Run policy *discover*; a known discovery error becomes a routable result.
 
-    The policy-outcome owner then routes it against
-    ``policy.fetch_failure_default`` like any other fetch failure, so a
-    required policy that cannot be resolved fails closed with a named cause.
+    The policy-outcome owner then routes it like any other unusable policy
+    source, so a required policy that cannot be resolved fails closed with a
+    named cause. Any other exception propagates.
     """
-    from ..policy.outcome_routing import discovery_failure_result
+    from ..policy.outcome_routing import POLICY_DISCOVERY_ERRORS, discovery_failure_result
 
     try:
         return discover()
-    except Exception as exc:
+    except POLICY_DISCOVERY_ERRORS as exc:
         return discovery_failure_result(exc)
 
 

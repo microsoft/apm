@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import POLICY_FETCH_FAILURE_BLOCKED
 from apm_cli.install.errors import PolicyViolationError
+from apm_cli.policy.inheritance import PolicyInheritanceError
 
 if TYPE_CHECKING:  # pragma: no cover - type-checking only
     from apm_cli.policy.discovery import PolicyFetchResult
@@ -435,15 +436,28 @@ def discover_trust_policy(project_root: Path) -> PolicyFetchResult:
         return discovery_failure_result(exc)
 
 
-def discovery_failure_result(exc: BaseException) -> PolicyFetchResult:
-    """Return the fetch-failure result for a policy discovery that raised.
+# The errors a policy discovery raises for an unusable policy source; a
+# command that converts them with :func:`discovery_failure_result` lets any
+# other exception propagate instead of skipping enforcement.
+POLICY_DISCOVERY_ERRORS = (OSError, ValueError, RuntimeError, PolicyInheritanceError)
 
-    The result routes through :func:`classify_discovery_outcome` like any
-    other fetch failure, so ``policy.fetch_failure_default`` decides whether
-    it blocks.
+
+def discovery_failure_result(exc: BaseException) -> PolicyFetchResult:
+    """Return the routable result for a policy discovery that raised *exc*.
+
+    A rejected inheritance chain (cycle, cross-host ``extends``, excess depth)
+    is a trust assertion failure and routes as ``incomplete_chain``, which
+    always blocks. Any other error is a fetch failure, so
+    ``policy.fetch_failure_default`` decides whether it blocks.
     """
     from .discovery import PolicyFetchResult
 
+    if isinstance(exc, PolicyInheritanceError):
+        # Discovery redacts the refs in these messages.
+        return PolicyFetchResult(
+            outcome="incomplete_chain",
+            error=f"policy inheritance chain rejected: {exc}",
+        )
     # The exception text can carry transport detail; report its type only.
     return PolicyFetchResult(
         outcome="cache_miss_fetch_fail",

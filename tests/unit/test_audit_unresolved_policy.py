@@ -17,7 +17,7 @@ from click.testing import CliRunner
 
 from apm_cli.commands.audit import audit
 from apm_cli.models.apm_package import clear_apm_yml_cache
-from apm_cli.policy import PolicyFetchResult
+from apm_cli.policy import PolicyFetchResult, PolicyInheritanceError
 from apm_cli.policy.schema import ApmPolicy, AuditPolicy, SecurityPolicy
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-policy-outcome-routing")]
@@ -27,6 +27,11 @@ _BLOCK = "policy:\n  fetch_failure_default: block\n"
 _CAUSE = "Policy fetch failed: policy discovery failed (RuntimeError)"
 _UNRESOLVED = "Org policy could not be resolved; fail_on_drift could not be applied: "
 _RAISES = RuntimeError("transport detail")
+_CYCLE = PolicyInheritanceError("Cycle detected in policy extends chain: a -> b -> a")
+_CHAIN_CAUSE = (
+    "Policy fetch failed: policy inheritance chain rejected: "
+    "Cycle detected in policy extends chain: a -> b -> a"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +103,14 @@ class TestBareAudit:
         assert f"[!] {_UNRESOLVED}{_CAUSE}\n" in result.stderr
         assert "[x]" not in result.output
 
+    def test_rejected_chain_fails_closed_even_when_optional(self, tmp_path):
+        _manifest(tmp_path)
+
+        result, _ = _bare_audit({"side_effect": _CYCLE})
+
+        assert result.exit_code == 1, result.output
+        assert f"[x] {_UNRESOLVED}{_CHAIN_CAUSE}\n" in result.stderr
+
     def test_resolved_policy_without_fail_on_drift_is_unchanged(self, tmp_path):
         _manifest(tmp_path, _BLOCK)
 
@@ -139,3 +152,14 @@ class TestCiAudit:
         assert result.exit_code == 0, result.output
         assert f"[!] {_CAUSE}; enforcement skipped" in result.stderr
         assert "[x]" not in result.output
+
+    def test_rejected_chain_exits_one_even_when_optional(self, tmp_path):
+        _manifest(tmp_path)
+
+        with patch(_DISCOVER, side_effect=_CYCLE):
+            result = CliRunner().invoke(audit, ["--ci", "--no-drift"])
+
+        assert result.exit_code == 1, result.output
+        assert isinstance(result.exception, SystemExit)
+        assert f"[x] {_CHAIN_CAUSE}\n" in result.stderr
+        assert "enforcement skipped" not in result.stderr
