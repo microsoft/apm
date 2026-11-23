@@ -880,3 +880,69 @@ def test_record_files_left_by_a_removed_store_are_never_read(tmp_path, apm_home)
 
     assert config_file_origin(config) is None
     assert config.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_two_migrations_of_one_layout_1_store_keep_every_record(tmp_path, apm_home) -> None:
+    """Two writers that both read the layout 1 store migrate it once: the second joins the
+    first's index, so neither's record files are hidden under another generation."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    users, apms = _version_1_store(tmp_path, apm_home)
+    first_config = tmp_path / "first" / ".mcp.json"
+    second_config = tmp_path / "second" / ".mcp.json"
+    first, second = _Store.load(), _Store.load()  # both read layout 1
+    first.files[config_file_key(first_config)] = {"origin": "preexisting", "hash": "sha256:1"}
+    first.save()
+    second.files[config_file_key(second_config)] = {"origin": "preexisting", "hash": "sha256:2"}
+    second.save()
+
+    assert config_file_origin(first_config) is Origin.PREEXISTING
+    assert config_file_origin(second_config) is Origin.PREEXISTING
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(apms) is Origin.CREATED
+    held = [path.read_text(encoding="utf-8") for path in _store_files(apm_home)]
+    assert any(config_file_key(first_config) in text for text in held), held
+
+
+def test_an_unfinished_index_never_blocks_later_writes(tmp_path, apm_home) -> None:
+    """A kill while the index is created leaves no empty index: the marker is published
+    whole or not at all, so the next write is recorded."""
+    real_dumps = json.dumps
+
+    def killed(obj, *args, **kwargs):
+        if isinstance(obj, dict) and "layout" in obj:
+            raise KeyboardInterrupt  # the process dies while it writes the index
+        return real_dumps(obj, *args, **kwargs)
+
+    first = tmp_path / "first" / ".mcp.json"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(json, "dumps", killed)
+        with pytest.raises(KeyboardInterrupt):
+            _apm_writes(first, _WITH_ENTRY)
+
+    second = tmp_path / "second" / ".mcp.json"
+    _apm_writes(second, _WITH_ENTRY)
+
+    assert config_file_origin(second) is Origin.CREATED
+    assert second.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_a_record_file_of_another_generation_is_never_deleted(tmp_path, apm_home) -> None:
+    """A lookup that reads another generation's record file and then saves other records
+    leaves that file in place."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    old = tmp_path / "old" / ".mcp.json"
+    _apm_writes(old, _WITH_ENTRY)
+    old_file = _holding(apm_home, old)
+    marker = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    data = json.loads(marker.read_text(encoding="utf-8"))
+    marker.write_text(json.dumps({**data, "generation": "another"}), encoding="utf-8")
+
+    store = _Store.load()
+    store.lookup(old)  # reads the old generation's file, which proves nothing now
+    store.files[config_file_key(tmp_path / "new" / ".mcp.json")] = {"origin": "created"}
+    store.save()
+
+    assert old_file.is_file()
+    assert config_file_origin(old) is None
