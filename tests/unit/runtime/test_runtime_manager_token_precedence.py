@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.apm_cli.runtime.manager import RuntimeManager
+from apm_cli.runtime.manager import RuntimeManager
 
 pytestmark = pytest.mark.component
 
@@ -165,7 +165,10 @@ class TestRuntimeManagerErrorMessages:
     def test_runtime_availability_check(self):
         """Test runtime availability check methods."""
         # Test codex runtime availability
-        with patch("shutil.which") as mock_which, patch("pathlib.Path.exists") as mock_exists:
+        with (
+            patch("apm_cli.utils.git_env.trusted_executable") as mock_which,
+            patch("pathlib.Path.exists") as mock_exists,
+        ):
             # Mock that APM binary doesn't exist, use system PATH
             mock_exists.return_value = False
             mock_which.return_value = "/usr/local/bin/codex"
