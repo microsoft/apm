@@ -804,9 +804,13 @@ def _spy(ctx: Context, journey: Journey, launch: list[str], prof: Path) -> None:
         for index, (argv, cwd) in enumerate(journey.steps(ctx)):
             raw = prof.with_suffix(f".spy{attempt}.{index}.txt")
             started = time.perf_counter()
+            if os.name == "nt":  # py-spy cannot read CPython 3.12 here: sample in process
+                command = [part.replace("{RAW}", str(raw)) for part in launch]
+            else:
+                command = ["py-spy", "record", "--nonblocking", "--rate", str(rate),
+                           "--format", "raw", "--output", str(raw), "--", *launch]  # fmt: skip
             result = subprocess.run(
-                ["py-spy", "record", "--nonblocking", "--rate", str(rate), "--format", "raw",
-                 "--output", str(raw), "--", *launch, *argv],
+                [*command, *argv],
                 cwd=cwd, env=ctx.world.env, capture_output=True, text=True,
                 timeout=_COMMAND_TIMEOUT_S, check=False,
             )  # fmt: skip
@@ -833,8 +837,10 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
         cfg = (venv / "pyvenv.cfg").read_text(encoding="utf-8").splitlines()
         home = next(line.split("=", 1)[1].strip() for line in cfg if line.startswith("home"))
         site_dir = str(venv / "Lib" / "site-packages")
+        harness = str(Path(__file__).resolve().parents[2])
         entry = (
-            f"import site, sys; site.addsitedir({site_dir!r}); "
+            f"import site, sys; site.addsitedir({site_dir!r}); sys.path.append({harness!r}); "
+            "from tests.benchmarks.inproc_sampler import start; start(r'{RAW}'); "
             "from apm_cli.entrypoint import main; sys.argv[0] = 'apm'; main()"
         )
         launch = [str(Path(home) / "python.exe"), "-c", entry]
