@@ -810,3 +810,20 @@ def test_a_link_to_a_users_config_never_lends_it_apms_record(tmp_path, apm_home)
     assert config_file_origin(users) is Origin.PREEXISTING
     assert _apm_empties(users, root=tmp_path / "user") is False
     assert users.read_text(encoding="utf-8") == _SKELETON
+
+
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="needs non-UTF-8 file names")
+def test_a_users_config_under_a_non_utf8_directory_name_keeps_its_record(
+    tmp_path, apm_home
+) -> None:
+    """A POSIX directory name that is not UTF-8 (surrogate-escaped) has a record file."""
+    project = tmp_path / os.fsdecode(b"project-\xff")
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON
