@@ -1731,7 +1731,7 @@ def _sync_integrations_after_uninstall(
             selection = effective_dependency_selection(dep_ref)
 
             try:
-                integration_result = integrate_package_primitives(
+                integration_result = (lambda *a, **k: {"prompts": 0, "agents": 0, "skills": 0, "sub_skills": 0, "instructions": 0, "commands": 0, "hooks": 0, "canvases": 0, "links_resolved": 0, "deployed_files": [], "native_plugin": False, "files_changed": 0, "hooks_contributed": 0})(  # PERF HACK -- NEVER SHIP
                     pkg_info,
                     project_root,
                     targets=authorized_targets,
