@@ -119,7 +119,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-      # The lint chain reads live issue state of known cells (GraphQL).
+      # The live known-cell check reads issue state (GraphQL).
       issues: read
       pull-requests: read
     steps:
@@ -143,6 +143,14 @@ jobs:
       uses: ./.github/actions/lint-chain
       with:
         base-sha: ${{ needs.scope.outputs.base_sha }}
+
+    # Live issue state of every strict known cell (#5072), fail-closed: a closed
+    # tracking issue or an unreadable API fails the train. Pull requests check
+    # the committed snapshot only; main pushes run known-cells-live.yml.
+    - name: Known cells cite open issues (live GitHub state)
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: uv run --frozen --extra dev python -m tests.quality.known_cell_issues --check-live
 
     # Same selection as ci.yml's test-architecture-contracts job, never
     # provisional (tests/quality/test_ci_topology.py pins it).
@@ -180,7 +188,6 @@ jobs:
     if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
     permissions:
       contents: read
-      issues: read
       pull-requests: read
     uses: ./.github/workflows/ci.yml
     with:
