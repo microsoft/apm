@@ -88,7 +88,7 @@ targets or from directory names:
 | Value | Meaning |
 |---|---|
 | `claude, codex` | Every recorded deployment names a target. |
-| `claude, codex*` | Some deployments cannot be attributed to a target: legacy records, MCP servers (recorded for the whole scope, not per package), or MCP definitions that could not be read. |
+| `claude, codex*` | Some deployments cannot be attributed to a target: legacy records, MCP or LSP servers without package-owned deployment records, or MCP definitions that could not be read. |
 | `ambiguous` | Deployments are recorded, but none names a target (legacy records). |
 | `unknown` | Nothing can be attributed: an older lockfile with no recorded deployments, a package missing from the lockfile, or deployable content with no attributable record. An MCP-only package shows `unknown` unless a record names it as an owner. |
 | `-` | Nothing to deploy and nothing recorded. |

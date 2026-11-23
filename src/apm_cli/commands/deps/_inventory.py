@@ -30,18 +30,19 @@ if TYPE_CHECKING:
     from ...agent_plugins.ir import AgentPlugin
     from ...core.deployment_state import DeploymentRecord
 
-# Ledger service rows for MCP servers use this locator target (the runtime is
-# the client the server was written to).
-_MCP_SERVICE = "mcp"
+# Service locators store the client destination in the runtime field.
+_SERVICE_TARGETS = frozenset({"mcp", "lsp"})
 
 # Why a Targets cell is marked ``*``. These are the ``TargetsResult.notes`` values.
 NOTE_LEGACY = "legacy"
+NOTE_LSP_SCOPE = "unattributed LSP"
 NOTE_MCP_SCOPE = "unattributed MCP"
 NOTE_MCP_UNREADABLE = "unreadable MCP"
 
 # Legend wording per cause, in the order causes are listed.
 _CAUSE_TEXT = {
     NOTE_LEGACY: "legacy records",
+    NOTE_LSP_SCOPE: "LSP destinations lack package attribution",
     NOTE_MCP_SCOPE: "MCP servers recorded for the whole scope",
     NOTE_MCP_UNREADABLE: "MCP definitions couldn't be read",
 }
@@ -55,7 +56,12 @@ _INSPECTION_FAILURES = (OSError, ValueError, yaml.YAMLError)
 # Plugin MCP diagnostics that mean the whole MCP document was disabled (as
 # opposed to one invalid server being dropped): the count cannot be trusted.
 _MCP_DOCUMENT_UNREADABLE_CODES = frozenset(
-    {"mcp.location.ambiguous", "mcp.location.invalid", "mcp.document.invalid"}
+    {
+        "assets.package.invalid",
+        "mcp.location.ambiguous",
+        "mcp.location.invalid",
+        "mcp.document.invalid",
+    }
 )
 
 
@@ -95,6 +101,18 @@ class McpResult:
 
     count: int | None
     has_other_content: bool = False
+    has_lsp: bool = False
+
+
+def _service_destination(runtime: str | None) -> str | None:
+    from ...core.target_catalog import get_target_capability
+
+    if runtime is None:
+        return None
+    try:
+        return get_target_capability(runtime).name
+    except KeyError:
+        return None
 
 
 def package_targets(
@@ -102,6 +120,7 @@ def package_targets(
     *,
     mcp_count: int | None = 0,
     has_primitives: bool = False,
+    has_lsp: bool = False,
 ) -> TargetsResult:
     """Return the recorded deployment targets a package's own rows support.
 
@@ -116,7 +135,8 @@ def package_targets(
             a package that is not in the lockfile.
         mcp_count: MCP servers the package declares (``None`` if they could
             not be read, which keeps MCP deployments from being ruled out).
-        has_primitives: Whether the package ships any non-MCP primitive.
+        has_primitives: Whether the package ships deployable file content.
+        has_lsp: Whether the package declares LSP services.
 
     A record counts for every package in its ``owners``; the index applies that
     and the canonical scope test before this function sees the rows.
@@ -147,25 +167,28 @@ def package_targets(
 
     named: set[str] = set()
     unattributed = False
-    mcp_attributed = False
+    attributed_services: set[str] = set()
     for record in records:
         locator = record.locator
         if locator.target == UNATTRIBUTED_TARGET:
             unattributed = True
         elif locator.target in KNOWN_TARGETS:
             named.add(locator.target)
-        elif locator.target == _MCP_SERVICE and locator.runtime in KNOWN_TARGETS:
-            named.add(locator.runtime)
-            mcp_attributed = True
+        elif locator.target in _SERVICE_TARGETS:
+            destination = _service_destination(locator.runtime)
+            if destination is not None:
+                named.add(destination)
+                attributed_services.add(locator.target)
     targets = tuple(sorted(named))
-    mcp_unattributed = bool(mcp_count) and not mcp_attributed
+    mcp_unattributed = bool(mcp_count) and "mcp" not in attributed_services
     # With the MCP count unreadable, MCP deployments cannot be ruled out.
-    mcp_unreadable = mcp_count is None and not mcp_attributed
+    mcp_unreadable = mcp_count is None and "mcp" not in attributed_services
     notes = tuple(
         note
         for note, applies in (
             (NOTE_LEGACY, unattributed),
             (NOTE_MCP_SCOPE, mcp_unattributed),
+            (NOTE_LSP_SCOPE, has_lsp and "lsp" not in attributed_services),
             (NOTE_MCP_UNREADABLE, mcp_unreadable),
         )
         if applies
@@ -174,7 +197,7 @@ def package_targets(
         return TargetsResult(TargetEvidence.AMBIGUOUS)
     if notes and targets:
         return TargetsResult(TargetEvidence.PARTIAL, targets, notes)
-    if not targets and (mcp_unattributed or mcp_unreadable or has_primitives):
+    if not targets and (notes or has_primitives):
         # Something is (or may be) deployable but nothing is attributable.
         return TargetsResult(TargetEvidence.UNAVAILABLE)
     return TargetsResult(TargetEvidence.KNOWN, targets)
@@ -183,6 +206,8 @@ def package_targets(
 def _manifest_mcp_count(manifest_path: Path) -> McpResult:
     """Count the servers declared by an installed ``apm.yml``."""
     from ...integration.mcp_config_view import authored_mcp_declarations
+    from ...integration.skill_integrator import SkillIntegrator
+    from ...models.validation import detect_package_type
 
     manifest = load_manifest(manifest_path)
     if manifest is not None and not isinstance(manifest, dict):
@@ -196,9 +221,15 @@ def _manifest_mcp_count(manifest_path: Path) -> McpResult:
         # an inspection failure, and only the parser call is guarded this way.
         raise ValueError(f"invalid MCP declaration in {manifest_path}") from exc
 
+    root = manifest_path.parent
+    has_skills = False
+    if (root / "skills").is_dir():
+        package_type, _ = detect_package_type(root)
+        has_skills = bool(SkillIntegrator.skill_source_paths(root, package_type))
+
     dependencies = (manifest or {}).get("dependencies") or {}
     if not dependencies.get("lsp"):
-        return McpResult(count)
+        return McpResult(count, has_other_content=has_skills)
     try:
         package = APMPackage.from_mapping(
             manifest,
@@ -209,8 +240,10 @@ def _manifest_mcp_count(manifest_path: Path) -> McpResult:
         )
     except (ValueError, TypeError, AttributeError):
         # A declared service whose manifest cannot be interpreted is not known empty.
-        return McpResult(count, has_other_content=True)
-    return McpResult(count, has_other_content=bool(package.get_lsp_dependencies()))
+        return McpResult(count, has_other_content=has_skills, has_lsp=True)
+    return McpResult(
+        count, has_other_content=has_skills, has_lsp=bool(package.get_lsp_dependencies())
+    )
 
 
 def _plugin_mcp_count(plugin: AgentPlugin) -> McpResult:
@@ -227,8 +260,13 @@ def _unmanifested_mcp_count(package_dir: Path) -> McpResult:
     from ...models.validation import PackageType, detect_package_type
 
     package_type, _ = detect_package_type(package_dir)
+    if package_type is PackageType.SKILL_BUNDLE:
+        from ...integration.skill_integrator import SkillIntegrator
+
+        return McpResult(
+            0, has_other_content=bool(SkillIntegrator.skill_source_paths(package_dir, package_type))
+        )
     if package_type in {
-        PackageType.SKILL_BUNDLE,
         PackageType.CLAUDE_SKILL,
         PackageType.HOOK_PACKAGE,
     }:

@@ -530,6 +530,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
                     "recorded_targets": package_targets(
                         owned_records,
                         mcp_count=mcps.count,
+                        has_lsp=mcps.has_lsp,
                         has_primitives=mcps.has_other_content or any(primitives.values()),
                     ),
                     "mcps": mcps,

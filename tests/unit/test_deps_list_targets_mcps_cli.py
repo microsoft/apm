@@ -534,12 +534,13 @@ def test_malformed_mcp_fields_keep_package_version_and_unknown_count(cwd, bad_fi
     assert row.endswith(" ? unknown")
 
 
-@pytest.mark.parametrize("kind", ["native-skill", "lsp"])
+@pytest.mark.parametrize("kind", ["native-skill", "bundle-skill", "lsp"])
 def test_content_without_package_owned_rows_has_unknown_targets(cwd, kind):
     pkg = _installed(cwd, "skilly")
-    if kind == "native-skill":
-        _agent_plugin(pkg)
-        (pkg / "apm.yml").write_text("name: native.plugin\nversion: 1.0.0\n")
+    if kind != "lsp":
+        if kind == "native-skill":
+            _agent_plugin(pkg)
+            (pkg / "apm.yml").write_text("name: native.plugin\nversion: 1.0.0\n")
         skill = pkg / "skills" / "sample"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(
@@ -550,3 +551,15 @@ def test_content_without_package_owned_rows_has_unknown_targets(cwd, kind):
             manifest.write("dependencies:\n  lsp: [sample]\n")
     _write_project(cwd, [_dep(SKILLY)], [])
     assert _row_text(_list(cwd, plain=True).output, "_local/skilly").endswith(" 0 unknown")
+
+
+@pytest.mark.parametrize(("owners", "targets"), [(["."], "codex*"), ([SKILLY], "claude, codex")])
+def test_lsp_runtime_requires_package_ownership(cwd, owners, targets):
+    pkg = _installed(cwd, "skilly", skills=1)
+    with (pkg / "apm.yml").open("a") as manifest:
+        manifest.write("dependencies:\n  lsp: [sample]\n")
+    rows = _rows(("codex", ".agents/skills/s0"), ("lsp:claude", "sample", owners))
+    _write_project(cwd, [_dep(SKILLY)], rows)
+    output = _list(cwd, plain=True).output
+    assert _row_text(output, "_local/skilly").endswith(f" 0 {targets}")
+    assert ("LSP destinations lack package attribution" in _flat(output)) == (owners == ["."])

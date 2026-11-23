@@ -72,11 +72,11 @@ def _rows(*specs: tuple) -> Rows:
     for target, value, *rest in specs:
         owners = list(rest[0]) if rest else [SKILLY]
         scope = rest[1] if len(rest) > 1 else "project"
-        service = target.startswith("mcp:")
+        service = target.startswith(("mcp:", "lsp:"))
         rows.append(
             {
                 "kind": "uri" if service else "project-relative",
-                "target": "mcp" if service else target,
+                "target": target.partition(":")[0] if service else target,
                 "value": value,
                 "runtime": target[4:] if service else None,
                 "scope": scope,
@@ -287,6 +287,12 @@ CLAUDE_AND_LEGACY = _rows(("claude", CLAUDE_SKILL), ("legacy", SHARED))
 OWNED_BY_OTHER = _rows(("claude", ".claude/x", [OTHER]))
 
 TARGET_CASES = [
+    pytest.param(
+        _rows(("mcp:intellij", "a")),
+        {"mcp_count": 1},
+        TargetsResult(KNOWN, ("intellij",)),
+        id="a package-owned MCP-only target has no file profile",
+    ),
     pytest.param(
         _rows(("claude", CLAUDE_SKILL), ("codex", SHARED), ("codex", SHARED + "/SKILL.md")),
         {},
@@ -782,3 +788,9 @@ def test_the_legend_names_only_the_causes_present_in_the_listing(
 # ---------------------------------------------------------------------------
 # CLI integration
 # ---------------------------------------------------------------------------
+
+
+def test_plugin_root_inventory_failure_leaves_mcp_count_unknown(tmp_path, monkeypatch):
+    root = _agent_plugin(tmp_path / "pkg", {"demo": {"type": "stdio", "command": "demo"}})
+    monkeypatch.setattr("apm_cli.agent_plugins.assets.MAX_COMPONENT_ASSET_ENTRIES", 1)
+    assert format_mcps(package_mcp_count(root)) == "?"
