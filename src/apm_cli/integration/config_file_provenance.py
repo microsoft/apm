@@ -59,7 +59,9 @@ def config_file_key(path: str | os.PathLike[str]) -> str:
     apart (NFC and NFD, case) stay distinct keys; :meth:`_Store.lookup`
     matches them only when the file system says they are one file.
     """
-    return Path(os.path.abspath(path)).resolve(strict=False).as_posix()
+    # resolve() follows each link before applying a following "..", as the file
+    # system does; abspath() would collapse "link/.." lexically to the wrong file.
+    return Path(path).resolve(strict=False).as_posix()
 
 
 def installation_root(project_root: Path, user_scope: bool) -> Path:
@@ -212,7 +214,16 @@ def _holds_entries(data: bytes) -> bool:
         return True
     if not isinstance(parsed, dict):
         return True
-    return any(isinstance(value, (dict, list)) and value for value in parsed.values())
+    return any(isinstance(value, (dict, list)) and _has_leaf(value) for value in parsed.values())
+
+
+def _has_leaf(value: object) -> bool:
+    """Whether a nested value holds anything but empty containers (event scaffolding)."""
+    if isinstance(value, dict):
+        return any(_has_leaf(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_leaf(item) for item in value)
+    return True
 
 
 def _unrecorded_origin(manifest_root: Path, before: bytes) -> Origin:

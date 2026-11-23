@@ -431,3 +431,37 @@ def test_a_users_file_is_not_written_when_its_record_cannot_be_saved(tmp_path, a
     with pytest.raises(OSError, match="refusing to write"):
         _apm_writes(config, _WITH_ENTRY, manifest_root=project)
     assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_dotdot_after_a_linked_directory_names_the_file_the_write_reaches(
+    tmp_path, apm_home
+) -> None:
+    """(5) ``link/..`` follows the link first, as the file system does: the record goes to
+    the file the write reached, never to the user's file beside the link."""
+    project = tmp_path / "project"
+    (tmp_path / "other" / "child").mkdir(parents=True)
+    project.mkdir()
+    (project / "link").symlink_to(tmp_path / "other" / "child", target_is_directory=True)
+    users = project / ".mcp.json"
+    users.write_text(_WITH_ENTRY, encoding="utf-8")
+
+    _apm_writes(project / "link" / ".." / ".mcp.json", _WITH_ENTRY)
+
+    assert (tmp_path / "other" / ".mcp.json").is_file()
+    assert config_file_origin(tmp_path / "other" / ".mcp.json") is Origin.CREATED
+    assert config_file_origin(users) is None
+    assert users.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_empty_hook_event_scaffolding_with_a_lockfile_is_the_users(tmp_path, apm_home) -> None:
+    """An event list with no hooks holds nothing APM wrote: the user's skeleton."""
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    (project / "apm.lock.yaml").write_text("lockfile_version: '1'\n", encoding="utf-8")
+    settings = project / ".claude" / "settings.json"
+    settings.write_text('{"hooks": {"SessionStart": []}}\n', encoding="utf-8")
+    _apm_writes(settings, '{"hooks": {"SessionStart": [{"hooks": []}]}}\n', manifest_root=project)
+
+    assert config_file_origin(settings) is Origin.PREEXISTING
+    assert _apm_empties(settings, root=project) is False
+    assert settings.is_file()
