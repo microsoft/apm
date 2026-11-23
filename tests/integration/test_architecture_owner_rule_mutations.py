@@ -989,6 +989,25 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "from apm_cli.integration.write_seam import private_scratch\n",
             id="scratch-imported-directly",
         ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                    write_seam.copy2(src, dest)\n",
+            "                    shutil.copy2(src, dest, follow_symlinks=False)\n",
+            id="bundle-raw-copy",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                    write_seam.write_text_lf(dest, normalized_text)\n",
+            "                    from apm_cli.utils.atomic_io import write_text_lf\n\n"
+            "                    write_text_lf(dest, normalized_text)\n",
+            id="bundle-raw-helper",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "(journaled_local_bundle(_install_lb))(",
+            "(_install_lb)(",
+            id="bundle-entry-unjournaled",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
