@@ -422,6 +422,7 @@ class GitHubPackageDownloader:
                     locked_sha=locked_sha,
                     env=attempt_env,
                     sparse_paths=sparse_paths,
+                    label=dep_ref.get_unique_key(),
                 )
 
             checkout = self.auth_resolver.try_with_fallback(
@@ -446,6 +447,7 @@ class GitHubPackageDownloader:
                     remote_url=None if cache_remote == repository_url else cache_remote,
                 ),
                 sparse_paths=sparse_paths,
+                label=dep_ref.get_unique_key(),
             )
         resolver = getattr(self, "_tiered_resolver", None)
         if (
@@ -1426,7 +1428,11 @@ class GitHubPackageDownloader:
                     locked_sha=_resolved_sha_for_cache,
                     sparse_paths=[subdir_path],
                 )
-            except Exception:
+            except Exception as exc:
+                from ..cache.git_cache import raise_if_tampered
+
+                # A read-only reader reports a tampered cache instead of cloning past it.
+                raise_if_tampered(exc)
                 # Cache miss or failure -- fall through to normal clone path.
                 _persistent_checkout = None
 
@@ -1953,7 +1959,10 @@ class GitHubPackageDownloader:
                 if target_path.exists():
                     _rmtree(target_path)
                 raise
-            except Exception:
+            except Exception as exc:
+                from ..cache.git_cache import raise_if_tampered
+
+                raise_if_tampered(exc)
                 # Any cache failure -> fall back to network clone.
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)

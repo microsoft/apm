@@ -121,7 +121,7 @@ def _rebuilt(result: CommandResult) -> bool:
     """The warning that names the cache copy rebuilt from its commit."""
     return (
         re.search(
-            r"Cached copy of \S*test/pkg\S* @ [0-9a-f]{12} failed verification against its commit",
+            r"Cached copy of test/pkg \(\S+ @ [0-9a-f]{12}\) failed verification against its commit",
             _text(result),
         )
         is not None
