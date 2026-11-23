@@ -390,6 +390,32 @@ def test_zip_special_file_modes_are_refused(mode, tmp_path):
     assert not (tmp_path / "out" / "apm.yml").exists()
 
 
+def test_zip_name_with_a_nul_is_refused_before_any_write(tmp_path):
+    """#4988: zipfile cuts a name at NUL; the name the archive stores is what is judged."""
+    data = _build_zip_entries([("apm.yml", b"name: x\n", 0), ("a.mdX.sh", b"x", 0)])
+    data = data.replace(b"a.mdX.sh", b"a.md\x00.sh")
+    with pytest.raises(UnsafeTarballError, match="null byte"):
+        extract_zip(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
+
+def test_tar_name_with_a_nul_is_refused_before_any_write(tmp_path):
+    """#4988: a pax path carrying a NUL is refused for tar.gz as well."""
+
+    def add(tar):
+        for name, content, path in (("apm.yml", b"name: x\n", None), ("a.md", b"x", "a.md\x00.sh")):
+            info = tarfile.TarInfo(name=name)
+            info.size = len(content)
+            if path:
+                info.pax_headers = {"path": path}
+            tar.addfile(info, io.BytesIO(content))
+
+    data = _build_tar_with(add)
+    with pytest.raises(UnsafeTarballError, match="null byte"):
+        extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
+
 @pytest.mark.parametrize("fmt", ["tar.gz", "zip"])
 @pytest.mark.parametrize("unsafe", ["../escape.txt", "/abs.txt"], ids=["traversal", "absolute"])
 def test_unsafe_entry_after_valid_ones_leaves_nothing_written(fmt, unsafe, tmp_path):
