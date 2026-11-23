@@ -49,7 +49,8 @@ _READ_FLAGS = (
     | getattr(os, "O_NONBLOCK", 0)
     | getattr(os, "O_BINARY", 0)
 )
-_CONFIG_UNSAFE = re.compile("[\x00-\x08\x0a-\x1f\x7f\x85\u2028\u2029\ufeff]")
+_CONFIG_UNSAFE_EXTRA = frozenset("\x7f\x85\u2028\u2029\ufeff")
+_BLANK_EDGES = re.compile(r"[ \t]*(.*?)[ \t]*", re.DOTALL)
 _KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
 _ALLOWED_PROTOCOLS = "file:http:https:ssh"
 
@@ -153,9 +154,9 @@ def _config_entries(path: Path) -> Iterator[tuple[str, str | None, str, str]]:
     # differently here is refused rather than interpreted.
     for raw in text.split("\n"):
         raw = raw.removesuffix("\r")
-        if _CONFIG_UNSAFE.search(raw):
+        if any((ord(c) < 0x20 and c != "\t") or c in _CONFIG_UNSAFE_EXTRA for c in raw):
             raise UntrustedCachedRepoError("unsupported character in config")
-        line = raw.strip(" \t")
+        line = _BLANK_EDGES.fullmatch(raw).group(1)
         if not line or line[0] in "#;":
             continue
         if line.startswith("["):
