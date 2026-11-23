@@ -40,7 +40,7 @@ def parse_lockfile_text(yaml_str: str) -> object:
                 _parsed_texts.popitem(last=False)
     if "&" not in yaml_str and "*" not in yaml_str:
         # No anchor or alias: the tree shares no node, so a plain copy equals deepcopy.
-        return _copy_plain(parsed)
+        return yaml_io.copy_plain_tree(parsed)
     try:
         return copy.deepcopy(parsed)
     except RecursionError:
@@ -49,17 +49,6 @@ def parse_lockfile_text(yaml_str: str) -> object:
         with _parsed_texts_lock:
             _parsed_texts.pop(key, None)
         return yaml_io.load_machine_yaml_str(yaml_str)
-
-
-def _copy_plain(node: object) -> object:
-    """Copy a parsed YAML tree of dicts and lists; scalars are immutable."""
-    if isinstance(node, dict):
-        return {key: _copy_plain(value) for key, value in node.items()}
-    if isinstance(node, list):
-        return [_copy_plain(value) for value in node]
-    if node is None or isinstance(node, (str, int, float, bool)):
-        return node
-    return copy.deepcopy(node)
 
 
 def validate_lockfile_container(data: object) -> dict[str, Any]:
