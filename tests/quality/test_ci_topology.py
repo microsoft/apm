@@ -3706,14 +3706,30 @@ def _assert_known_cells_live_placement(workflows: Mapping[str, WorkflowNode], ch
     check = workflow_job(ledger, "check")
     assert check["permissions"] == {"contents": "read", "issues": "read", "pull-requests": "read"}
     assert all(key not in check for key in ("if", "continue-on-error")), check
-    _assert_live_known_cells_step(workflow_step(check, _LIVE_STEP))
+    assert check["outputs"] == {"cells": "${{ steps.live.outputs.cells }}"}, check.get("outputs")
+    live_step = workflow_step(check, _LIVE_STEP)
+    assert live_step.get("id") == "live" and "continue-on-error" not in live_step, live_step
+    assert live_step.get("env") == {"GH_TOKEN": "${{ github.token }}"}, live_step.get("env")
+    lines = [line.strip() for line in live_step["run"].strip().splitlines()]
+    assert any(line.startswith(_LIVE_KNOWN_CELLS + " ") for line in lines), lines
+    assert lines[-1] == 'exit "$status"', "the step keeps the check's exit status"
     signal = workflow_job(ledger, "signal")
     assert signal["needs"] == ["check"], signal.get("needs")
     assert signal["permissions"] == {"issues": "write"}, signal.get("permissions")
     assert signal["if"] == "always() && github.event_name != 'workflow_dispatch'", signal.get("if")
+    # Serialized across runs: two failures never open two issues.
+    assert signal.get("concurrency") == {
+        "group": "known-cells-live-signal",
+        "cancel-in-progress": False,
+    }
     step = workflow_step(signal, "Open, update or close the tracking issue")
-    assert step["env"] == {"RESULT": "${{ needs.check.result }}"}, step["env"]
-    assert "ledger-state red" in step["with"]["script"], "the issue names the classification"
+    assert step["env"] == {
+        "RESULT": "${{ needs.check.result }}",
+        "CELLS": "${{ needs.check.outputs.cells }}",
+    }, step["env"]
+    script = step["with"]["script"]
+    assert "ledger-state red" in script, "the issue names the classification"
+    assert "### Affected cells" in script and "recorded > context.runId" in script, script
 
 
 def _known_cells_workflows() -> dict[str, WorkflowNode]:
@@ -3728,7 +3744,16 @@ def test_live_known_cell_check_never_runs_on_pull_requests() -> None:
 
 @pytest.mark.parametrize(
     "mutation",
-    ["in-chain", "in-main-gate", "soft-train", "drop-train", "no-main-push", "no-signal"],
+    [
+        "in-chain",
+        "in-main-gate",
+        "soft-train",
+        "drop-train",
+        "no-main-push",
+        "unserialized-signal",
+        "masked-exit",
+        "no-signal",
+    ],
 )
 def test_live_known_cell_placement_drift_fails(mutation: str) -> None:
     workflows = _known_cells_workflows()
@@ -3746,6 +3771,11 @@ def test_live_known_cell_placement_drift_fails(mutation: str) -> None:
         steps.remove(train_live)
     elif mutation == "no-main-push":
         workflows[KNOWN_CELLS_LIVE_WORKFLOW]["on"].pop("push")
+    elif mutation == "unserialized-signal":
+        workflows[KNOWN_CELLS_LIVE_WORKFLOW]["jobs"]["signal"].pop("concurrency")
+    elif mutation == "masked-exit":
+        step = workflows[KNOWN_CELLS_LIVE_WORKFLOW]["jobs"]["check"]["steps"][-1]
+        step["run"] = step["run"].replace('exit "$status"', "exit 0")
     else:
         workflows[KNOWN_CELLS_LIVE_WORKFLOW]["jobs"]["signal"]["if"] = "always()"
     with pytest.raises((AssertionError, StopIteration)):

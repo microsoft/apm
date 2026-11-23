@@ -19,15 +19,13 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: known-cells-live-${{ github.run_id }}
-  cancel-in-progress: false
-
 jobs:
   check:
     name: Known cells cite open issues (live, ledger state)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      cells: ${{ steps.live.outputs.cells }}
     permissions:
       contents: read
       issues: read
@@ -45,10 +43,25 @@ jobs:
       - name: Install frozen development dependencies
         run: uv sync --frozen --extra dev
 
+      # The failing cells' [x] lines go to the signal job as a step output, so
+      # the tracking issue names each cell; the step keeps the check's exit status.
       - name: Known cells cite open issues (live GitHub state)
+        id: live
         env:
           GH_TOKEN: ${{ github.token }}
-        run: uv run --frozen --extra dev python -m tests.quality.known_cell_issues --check-live
+        run: |
+          set +e
+          uv run --frozen --extra dev python -m tests.quality.known_cell_issues --check-live > "$RUNNER_TEMP/live.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/live.txt"
+          delimiter="cells_$(date +%s%N)"
+          {
+            echo "cells<<$delimiter"
+            grep '^\[x\]' "$RUNNER_TEMP/live.txt" | head -n 50 || true
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+          exit "$status"
 
   signal:
     name: Known Cells Live Signal
@@ -56,6 +69,10 @@ jobs:
     if: always() && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # One signal at a time across runs, so two failures never open two issues.
+    concurrency:
+      group: known-cells-live-signal
+      cancel-in-progress: false
     permissions:
       issues: write
     steps:
@@ -63,10 +80,12 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           RESULT: ${{ needs.check.result }}
+          CELLS: ${{ needs.check.outputs.cells }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const MARKER = '<!-- apm-known-cells-live -->';
+            const RUN_MARKER = /<!-- apm-known-cells-live-run:(\d+) -->/;
             const LABEL = 'ci/known-cells-live';
             const { owner, repo } = context.repo;
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
@@ -84,9 +103,17 @@ jobs:
               owner, repo, state: 'open', labels: LABEL, per_page: 100,
             });
             const issue = open.find((item) => !item.pull_request && (item.body || '').includes(MARKER));
+            // A run older than the one the issue records is stale: it never edits the issue.
+            const recorded = Number(((issue && issue.body) || '').match(RUN_MARKER)?.[1] || 0);
+            if (issue && recorded > context.runId) {
+              core.info(`Run ${context.runId} is older than recorded run ${recorded}; no change.`);
+              return;
+            }
+            const cells = (process.env.CELLS || '').trim();
             if (failed) {
               const body = [
                 MARKER,
+                `<!-- apm-known-cells-live-run:${context.runId} -->`,
                 'A strict known cell cites an issue that is no longer open, or the live state could not be read.',
                 '',
                 'Classification: ledger-state red (a tracking issue changed state), not a code red. It does not fail the main push gate.',
@@ -96,6 +123,10 @@ jobs:
                 `- Head SHA: \`${context.sha}\``,
                 `- Trigger: ${context.eventName}`,
                 `- Result: ${process.env.RESULT}`,
+                '',
+                '### Affected cells',
+                '',
+                cells ? ['```', cells, '```'].join('\n') : 'No cell line was captured (the live state could not be read); see the run log.',
                 '',
                 'The run log names each cell. Rerun it; flip a cell that now passes to required (or re-key it to an open issue), then run `python -m tests.quality.known_cell_issues --write`.',
               ].join('\n');
