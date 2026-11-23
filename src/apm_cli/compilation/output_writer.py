@@ -58,12 +58,28 @@ class CompiledOutputLinkError(OSError):
     """Raised before mutation when a compiled output path crosses a symlink."""
 
 
+def _output_root(base_dir: Path, target: Path) -> Path | None:
+    """Return the ancestor of *target* that spells *base_dir*, if any.
+
+    The project may be spelled resolved or through a linked alias on either
+    side; only an output outside every spelling (an explicit ``--output``
+    elsewhere) has no root.
+    """
+    spellings = {base_dir.absolute(), base_dir.resolve()}
+    for ancestor in target.parents:
+        if ancestor in spellings:
+            return ancestor
+    resolved_root = base_dir.resolve()
+    for ancestor in target.parents:
+        if ancestor.resolve() == resolved_root:
+            return ancestor
+    return None
+
+
 def _reject_linked_parent(base_dir: Path, path: Path) -> None:
-    root = base_dir.absolute()
     target = path.absolute()
-    if not target.is_relative_to(root):
-        return
-    if has_symlink_component(root, target.parent):
+    root = _output_root(base_dir, target)
+    if root is not None and has_symlink_component(root, target.parent):
         # Lexical relative path: resolving would follow the link being reported.
         shown = target.relative_to(root).as_posix()
         raise CompiledOutputLinkError(
