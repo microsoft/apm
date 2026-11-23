@@ -82,7 +82,8 @@ _ELAPSED = re.compile(r"\b\d+(?:\.\d+)?m?s\b")
 _PARALLEL = re.compile(r"^\s*\[>\] Resolving ")
 
 
-_POLICY_AGE = re.compile(r" \(cached, fetched \d+s ago\)")
+# CommandLogger.policy_resolved prints the age in s, m or h (command_logger.py).
+_POLICY_AGE = re.compile(r" \(cached, fetched \d+[smh] ago\)")
 
 
 BOTH = ("p-skill:git", "p-exec:git")
