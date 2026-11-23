@@ -725,3 +725,22 @@ def test_a_final_symlink_a_survivor_shrink_retires_withholds_the_advice_and_name
 
     assert check.remediations == ()
     assert f"{files[1]} is a symbolic link" in _stderr(capsys, check)[2]
+
+
+def test_a_looping_final_symlink_falls_back_to_the_admin(tmp_path: Path, capsys) -> None:
+    """#5035: a link that points at itself cannot be proven handled; the audit still reports."""
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+    )
+    (root / deployed).parent.mkdir(parents=True)
+    (root / deployed).symlink_to(root / deployed)
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )

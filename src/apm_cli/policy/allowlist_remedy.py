@@ -425,8 +425,9 @@ def _final_symlinks(
             and (root / path).is_symlink()
             and not final_link_handled(path, root)
         ]
-    except (OSError, ValueError):
-        return None  # an unreadable claim proves nothing: the advice is admin-only
+    except (OSError, ValueError, RuntimeError):
+        # An unreadable or looping link proves nothing: the advice is admin-only.
+        return None
 
 
 def _deletions_have_evidence(

@@ -1561,7 +1561,7 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not BaseIntegrator.validate_deploy_path(
+            if not _stale_gate_passes(
                 stale_path,
                 project_root,
                 targets=targets,
@@ -1577,7 +1577,7 @@ def remove_stale_deployed_files(
                 continue
             stale_target = project_root / stale_path
 
-        if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
+        if _stale_target_absent(stale_target, allow_final_symlink=allow_final_symlink):
             # File already gone -- treat as cleaned (no-op success).
             absent_targets.append(stale_target)
             continue
@@ -1772,16 +1772,43 @@ def remove_synced_files(
     return result
 
 
-def final_link_handled(rel_path: str, project_root: Path) -> bool:
+def _stale_gate_passes(
+    stale_path: str, project_root: Path, *, targets, user_scope: bool, allow_final_symlink: bool
+) -> bool:
+    """Stale cleanup's path gate (traversal, allowed prefix, in-tree)."""
+    return BaseIntegrator.validate_deploy_path(
+        stale_path,
+        project_root,
+        targets=targets,
+        user_scope=user_scope,
+        allow_final_symlink=allow_final_symlink,
+    )
+
+
+def _stale_target_absent(stale_target: Path, *, allow_final_symlink: bool) -> bool:
+    """Whether stale cleanup counts a gated path as already gone."""
+    return not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink())
+
+
+def final_link_handled(
+    rel_path: str,
+    project_root: Path,
+    *,
+    targets=None,
+    user_scope: bool = False,
+    allow_final_symlink: bool = False,
+) -> bool:
     """Whether stale cleanup finishes a final-symlink claim instead of keeping it (#5035).
 
-    The read-only twin of :func:`remove_stale_deployed_files`' first gates: a
-    dangling link the strict path gate accepts counts as already gone. Any
-    other final link is rejected or kept, so the uninstall stops.
+    Read-only, through the same gate and absence decisions as
+    :func:`remove_stale_deployed_files`: a dangling link the path gate accepts
+    counts as already gone. Any other final link is rejected or kept, so the
+    uninstall stops. The defaults match uninstall's selected-owner cleanup.
     """
-    from .base_integrator import BaseIntegrator
-
-    return (
-        BaseIntegrator.validate_deploy_path(rel_path, project_root)
-        and not (project_root / rel_path).exists()
-    )
+    return _stale_gate_passes(
+        rel_path,
+        project_root,
+        targets=targets,
+        user_scope=user_scope,
+        allow_final_symlink=allow_final_symlink,
+    ) and _stale_target_absent(project_root / rel_path, allow_final_symlink=allow_final_symlink)
