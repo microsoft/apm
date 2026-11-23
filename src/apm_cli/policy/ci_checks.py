@@ -26,7 +26,7 @@ from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from typing import Any
 
     from ..deps.lockfile import LockFile
@@ -845,18 +845,27 @@ def _edited_native_mcp_entries(
     targets: Sequence[TargetProfile],
     *,
     user_scope: bool,
+    plugin_roots: Callable[[], Mapping[str, str]] | None = None,
 ) -> tuple[CheckResult, ...]:
     """Report recorded native MCP entries edited since APM wrote them (#4757).
 
     Empty when none was edited, so audit output is unchanged for every other project.
+    *plugin_roots* is read only when a recorded declaration uses ``${CLAUDE_PLUGIN_ROOT}``.
     """
+    from ..deps.plugin_root_render import contains_plugin_root
     from ..install.mcp.native_entry import edited_recorded_native_mcp_entries
 
+    roots = (
+        plugin_roots()
+        if plugin_roots is not None and contains_plugin_root(lock.mcp_configs or {})
+        else None
+    )
     edited = edited_recorded_native_mcp_entries(
         lock,
         [target.name for target in targets],
         project_root=project_root,
         user_scope=user_scope,
+        plugin_roots=roots,
     )
     if not edited:
         return ()
@@ -1862,7 +1871,23 @@ def run_baseline_checks(
         or any(
             _run(check)
             for check in _edited_native_mcp_entries(
-                project_root, lock, resolved_targets, user_scope=user_scope
+                project_root,
+                lock,
+                resolved_targets,
+                user_scope=user_scope,
+                # The scratch replay failed: config-consistency reports it.
+                plugin_roots=None
+                if prepared_replay_error is not None
+                else lambda: (
+                    audit_mcp_view(
+                        manifest,
+                        lock,
+                        modules_root=(
+                            prepared_replay.modules_root if prepared_replay is not None else None
+                        ),
+                        no_policy=no_policy,
+                    )[0].plugin_roots
+                ),
             )
         )
         # 7d: MCP entries kept without a lockfile because they could not be proven (#4737)

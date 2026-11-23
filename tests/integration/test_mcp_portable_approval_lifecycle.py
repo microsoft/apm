@@ -8,6 +8,7 @@ Real ``apm`` binary, local path fixtures, no network. Each scenario fails on
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -104,6 +105,49 @@ def test_two_clones_reproduce_an_approved_transitive_server(
     assert _comparable_lock(second) == _comparable_lock(first)
     second.ok("install", "--frozen")
     assert _audit(second)["passed"]
+
+
+def test_audit_accepts_a_frozen_rewrite_in_a_moved_clone_and_names_an_edit(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4757: --frozen in a moved clone renders ${CLAUDE_PLUGIN_ROOT} at the new package
+    root but keeps the lock's fingerprint; audit --ci binds the same root, so it passes,
+    and still names a hand edit of that entry with its file."""
+    first = Chain(tmp_path / "world", apm_binary_path, dirs=(".codex",))
+    server = {
+        "name": "root-srv",
+        "registry": False,
+        "transport": "stdio",
+        "command": "${CLAUDE_PLUGIN_ROOT}/bin/srv",
+    }
+    _write(
+        first.project / "pkgs" / "srv" / "apm.yml",
+        {"name": "srv", "version": "1.0.0", "dependencies": {"mcp": [server]}},
+    )
+    first.write_manifest([], apm=["./pkgs/srv"], targets=["codex"])
+    first.ok("install")
+    first.ok("approve", "srv")
+    first.ok("install")
+    assert "root-srv" in first.codex_servers()
+
+    second = Chain(tmp_path / "clone", apm_binary_path)
+    shutil.rmtree(second.project)
+    shutil.copytree(first.project, second.project)
+    config = second.project / ".codex" / "config.toml"
+    second.ok("install", "--frozen")
+    rewritten = config.read_text(encoding="utf-8")
+    assert "/clone/" in rewritten and "/world/" not in rewritten, rewritten
+    audit = second.run("audit", "--ci")
+    assert audit.returncode == 0, _text(audit)
+    assert "native-mcp-drift" not in _text(audit)
+
+    config.write_text(
+        re.sub(r'command = "[^"]*"', 'command = "/usr/bin/personal"', rewritten),
+        encoding="utf-8",
+    )
+    audit = second.run("audit", "--ci")
+    assert audit.returncode == 1, _text(audit)
+    assert re.search(r"native-mcp-drift.*'root-srv' in \S*config\.toml", _text(audit))
 
 
 def test_frozen_applies_the_executables_gate_like_install(

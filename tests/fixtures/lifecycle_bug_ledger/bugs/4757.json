@@ -10,6 +10,7 @@
   ],
   "regression_tests": [
     "tests/lifecycle/scenarios/test_ownership_siblings.py::test_audit_reports_a_hand_edited_recorded_mcp_entry",
-    "tests/unit/install/test_mcp_ownership.py::test_a_hand_edited_recorded_user_claude_entry_is_reported"
+    "tests/unit/install/test_mcp_ownership.py::test_a_hand_edited_recorded_user_claude_entry_is_reported",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_audit_accepts_a_frozen_rewrite_in_a_moved_clone_and_names_an_edit"
   ]
 }

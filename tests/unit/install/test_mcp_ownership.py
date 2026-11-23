@@ -784,3 +784,52 @@ def test_an_edited_registry_entry_is_not_compared(tmp_path, monkeypatch) -> None
 
     assert _edited_entries(lock, tmp_path) == []
     assert path.read_bytes() == before
+
+
+def _moved_codex_entry(tmp_path, native_command: str):
+    """A ``${CLAUDE_PLUGIN_ROOT}`` Codex server recorded at an old clone, now in a moved one."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+
+    project = tmp_path / "project"
+    (project / ".codex").mkdir(parents=True)
+    root = (project / "apm_modules" / "o" / "pkg").as_posix()
+    stored = {
+        "name": "srv",
+        "registry": False,
+        "transport": "stdio",
+        "command": "${CLAUDE_PLUGIN_ROOT}/bin/srv",
+    }
+    client = CodexClientAdapter(project_root=project)
+    recorded = {"command": f"{tmp_path.as_posix()}/old/apm_modules/o/pkg/bin/srv", "args": []}
+    client.update_config({"srv": {"command": native_command, "args": []}})
+    lock = LockFile()
+    lock.mcp_servers = ["srv"]
+    lock.mcp_configs = {"srv": stored}
+    hashes = {"codex": {"srv": mcp_native_hash(client.managed_server_config(recorded))}}
+    DeploymentLedgerCodec.replace_mcp_target_servers(lock, {"codex": ["srv"]}, native_hashes=hashes)
+    return lock, project, root, Path(client.get_config_path())
+
+
+@pytest.mark.parametrize(
+    ("command", "reported"),
+    [("{root}/bin/srv", False), ("/usr/bin/personal", True)],
+    ids=["frozen-rewrite-after-move", "hand-edit"],
+)
+def test_a_frozen_rewrite_after_a_project_move_is_not_a_hand_edit(
+    tmp_path, command, reported
+) -> None:
+    """--frozen renders ${CLAUDE_PLUGIN_ROOT} at the moved package root but keeps the old
+    fingerprint; audit binds the same root, so only a real edit is reported."""
+    from apm_cli.install.mcp.native_entry import edited_recorded_native_mcp_entries
+
+    root = (tmp_path / "project" / "apm_modules" / "o" / "pkg").as_posix()
+    lock, project, root, path = _moved_codex_entry(tmp_path, command.format(root=root))
+    before = path.read_bytes()
+
+    edited = edited_recorded_native_mcp_entries(
+        lock, ["codex"], project_root=project, user_scope=False, plugin_roots={"srv": root}
+    )
+
+    assert [name for name, _, _ in edited] == (["srv"] if reported else [])
+    assert path.read_bytes() == before
