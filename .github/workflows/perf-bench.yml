@@ -173,6 +173,7 @@ jobs:
           out/shard-${{ matrix.shard }}/runs/**/*.md
           out/shard-${{ matrix.shard }}/profile/*.md
           out/shard-${{ matrix.shard }}/profile/profiles/*.txt
+          out/shard-${{ matrix.shard }}/profile/profiles/*.prof
         if-no-files-found: warn
 
   report:
