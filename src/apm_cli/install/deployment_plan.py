@@ -424,12 +424,15 @@ def carry_kept_loose_into_replay(
     live = {target.name: target for target in live_targets}
     hashed = getattr(lock_dep, "deployed_file_hashes", None) or {}
     kept = plan.kept_loose_values(lock_dep.deployed_files, user_scope=user_scope, live_targets=live)
+    # Only the parked harnesses selected these claims, so only they frame them (#5162).
+    harnesses = plan.claude_native.harnesses if plan.claude_native is not None else frozenset()
+    framing = [target for name, target in live.items() if name in harnesses]
     for value in kept:
         if value not in hashed:
             continue  # only bytes the lock binds by hash stand in for the replay
         try:
             live_root, replay_root, relative = _replay_frame(
-                value, live.values(), deploy_root, scratch_root
+                value, framing, deploy_root, scratch_root
             )
             validate_path_segments(relative, context="kept lock claim", reject_empty=True)
             live_file = ensure_path_within(live_root / relative, live_root)
@@ -452,8 +455,8 @@ def _replay_frame(
     from apm_cli.install.audit_target_roots import external_replay_root
 
     if Path(value).is_absolute():
-        # Nested roots (CLAUDE_CONFIG_DIR inside HERMES_HOME): the deepest
-        # enclosing root is the claim's own harness, whatever the target order.
+        # Among the harnesses that selected the claim, the deepest enclosing
+        # root frames it, whatever the target order.
         frames = []
         for target in live_targets:
             root = target.managed_deploy_root

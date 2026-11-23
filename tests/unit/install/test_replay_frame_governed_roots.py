@@ -92,3 +92,29 @@ def test_a_tampered_converged_skill_beside_legacy_opencode_claims_is_drift(
 
     findings = diff_scratch_against_project(scratch, project, lock, [legacy])
     assert [(f.path, f.kind) for f in findings] == [(".agents/skills/b/SKILL.md", "modified")]
+
+
+@pytest.mark.parametrize("order", ["hermes-first", "claude-first"])
+def test_a_kept_claim_never_replays_in_a_non_harness_root_nested_inside_its_own(
+    tmp_path: Path, order: str
+) -> None:
+    # CLAUDE_CONFIG_DIR=/p and HERMES_HOME=/p/skills: the deeper root is Hermes',
+    # but only the parked harness (Claude) selected the claim, so Claude frames it.
+    claude_root = tmp_path.resolve() / "p"
+    skill = claude_root / "skills" / "demo" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("kept", encoding="ascii")
+    claude = replace(KNOWN_TARGETS["claude"], root_dir=str(claude_root))
+    hermes = replace(KNOWN_TARGETS["hermes"], root_dir=str(claude_root / "skills"))
+    live = [hermes, claude] if order == "hermes-first" else [claude, hermes]
+    value = skill.as_posix()
+    lock_dep = SimpleNamespace(deployed_files=[value], deployed_file_hashes={value: "sha256:a"})
+    scratch = tmp_path.resolve() / "scratch"
+
+    carry_kept_loose_into_replay(
+        {"deployment_plan": _parked_plan()}, lock_dep, tmp_path / "home", scratch, True, live
+    )
+
+    replayed = scratch / ".apm-audit-targets/claude/skills/demo/SKILL.md"
+    assert replayed.read_text(encoding="ascii") == "kept"
+    assert not (scratch / ".apm-audit-targets/hermes").exists()
