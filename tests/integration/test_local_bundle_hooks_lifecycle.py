@@ -1001,3 +1001,79 @@ def test_bundle_hook_retirement_keeps_a_script_it_cannot_delete(
     assert diagnostics.error_count == 1
     assert (consumer / script).is_file()
     assert script in _claims(world, consumer)
+
+
+def _copilot_bundle_consumer(world: MarketplacePackWorld, tmp_path: Path, name: str):
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer(name, targets=("copilot",))
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    (hook_name,) = _copilot_hook_files(consumer)
+    return consumer, f".github/hooks/{hook_name}"
+
+
+def test_bundle_hook_retirement_reports_a_sidecar_it_cannot_rewrite(
+    tmp_path: Path, apm_binary_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#4679 review: a failed sidecar write still reconciles deleted hooks and fails closed."""
+    from apm_cli.install.local_bundle_hook_trust import retire_bundle_hooks
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, hook = _copilot_bundle_consumer(world, tmp_path, "sidecar-write-consumer")
+    scripts = [c for c in _claims(world, consumer) if c.endswith("/x.sh")]
+    assert scripts
+
+    real_write, real_unlink = Path.write_text, Path.unlink
+
+    def guarded(real):
+        def call(self: Path, *args, **kwargs):
+            if self.name == "apm-hooks.json":
+                raise PermissionError(13, "Permission denied", str(self))
+            return real(self, *args, **kwargs)
+
+        return call
+
+    monkeypatch.setattr(Path, "write_text", guarded(real_write))
+    monkeypatch.setattr(Path, "unlink", guarded(real_unlink))
+    retired = retire_bundle_hooks(
+        consumer, [KNOWN_TARGETS["copilot"]], "hookpkg", lock_dir=consumer, reason="revoked"
+    )
+    assert ".github/apm-hooks.json" in retired.failed_paths, retired
+    assert not (consumer / hook).exists()
+    claims = _claims(world, consumer)
+    assert hook not in claims
+    assert all(c in claims and (consumer / c).is_file() for c in scripts), claims
+
+
+def test_bundle_hook_retirement_fails_closed_on_a_kept_hook_config(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4679 review: a symlinked per-file hook is a failed retirement, never announced as done."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.local_bundle_hook_trust import (
+        BundleHookRetirementIncomplete,
+        retire_unadmitted_bundle_hooks,
+    )
+    from apm_cli.install.local_bundle_hooks import _retire_bundle_hooks
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, hook = _copilot_bundle_consumer(world, tmp_path, "kept-config-consumer")
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_bytes((consumer / hook).read_bytes())
+    (consumer / hook).unlink()
+    (consumer / hook).symlink_to(elsewhere)
+    targets = [KNOWN_TARGETS["copilot"]]
+
+    with pytest.raises(BundleHookRetirementIncomplete, match=re.escape(hook)):
+        retire_unadmitted_bundle_hooks(consumer, targets, dict, lock_dir=consumer)
+    diagnostics = DiagnosticCollector()
+    retired = _retire_bundle_hooks(
+        consumer, targets, "hookpkg", scope=InstallScope.PROJECT, diagnostics=diagnostics
+    )
+    assert retired is False
+    assert diagnostics.error_count == 1
+    assert (consumer / hook).is_symlink()
+    assert hook in _claims(world, consumer)

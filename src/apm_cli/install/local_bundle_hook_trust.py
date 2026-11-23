@@ -281,11 +281,15 @@ def _hooks_prefixes(targets: Any) -> tuple[str, ...]:
     )
 
 
-def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHooks) -> set[str]:
-    """Remove one bundle's per-file hook files; return the values still on disk.
+def _retire_per_file(
+    project_root: Path, targets: Any, item: UnadmittedBundleHooks
+) -> tuple[set[str], set[str]]:
+    """Remove one bundle's per-file hook files; return ``(kept, unwritten_sidecars)``.
 
     A file that cannot be removed (a symlink, an unsafe path) keeps its
-    approval record, so it stays owned and visible instead of orphaned.
+    approval record, so it stays owned and visible instead of orphaned. A
+    sidecar that cannot be rewritten keeps its record and is reported, so the
+    deleted files' lock rows are still reconciled.
     """
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
     from apm_cli.integration.hook_ownership import (
@@ -304,6 +308,7 @@ def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHoo
         literal = Path(value) if Path(value).is_absolute() else Path(project_root) / value
         if literal.is_symlink() or literal.exists():
             kept.add(value)
+    unwritten: set[str] = set()
     for target in _per_file_targets(targets):
         sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
         if not sidecar.is_file():
@@ -312,10 +317,13 @@ def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHoo
         if item.slug not in records:
             continue
         key, files = records[item.slug]
-        write_per_file_bundle_record(
-            sidecar, item.slug, key, [value for value in files if value in kept]
-        )
-    return kept
+        try:
+            write_per_file_bundle_record(
+                sidecar, item.slug, key, [value for value in files if value in kept]
+            )
+        except OSError:
+            unwritten.add(_record_value(sidecar, Path(project_root)))
+    return kept, unwritten
 
 
 def _drop_lock_rows(lock_dir: Path, paths: Collection[str]) -> None:
@@ -516,8 +524,10 @@ def retire_bundle_hooks(
     announces the retirement; ``None`` retires silently (the new bundle ships
     no hooks). The result is truthy when anything was deployed and names the
     merged configs that could not be rewritten; then nothing else is removed,
-    so the bundle's scripts, records and lock rows stay for a retry. A script
-    that cannot be deleted is named too and keeps its lock row.
+    so the bundle's scripts, records and lock rows stay for a retry. A hook
+    config or script that cannot be deleted, or a sidecar that cannot be
+    rewritten, is named too; then the scripts and retained claims stay and no
+    retirement is announced.
     """
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
@@ -540,10 +550,10 @@ def retire_bundle_hooks(
     # Hook configs register executables and always go; an edited script is kept.
     configs = tuple(sorted(state.hook_files)) if state else ()
     item = UnadmittedBundleHooks(slug, reason or "", configs)
-    kept = _retire_per_file(project_root, targets, item)
+    kept, unwritten = _retire_per_file(project_root, targets, item)
     kept = {_relative_value(value, project_root) for value in kept}
     undeleted: set[str] = set()
-    if kept:
+    if kept or unwritten:
         # A retained hook config still points at the scripts: they and every
         # retained claim stay until the config itself can be removed.
         rows -= scripts
@@ -554,7 +564,8 @@ def retire_bundle_hooks(
     rows -= {value for value in rows if _relative_value(value, project_root) in kept}
     if rows and lock_dir is not None:
         _drop_lock_rows(lock_dir, rows)
-    if reason is not None and not undeleted:
+    failed_paths = tuple(sorted(kept | unwritten | undeleted))
+    if reason is not None and not failed_paths:
         message = (
             f"Retired hooks from local bundle '{slug}' ({reason}). "
             f"To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
@@ -563,7 +574,7 @@ def retire_bundle_hooks(
             diagnostics.warn(message=message, package=slug)
         elif logger is not None:
             logger.warning(message)
-    return BundleHookRetirement(True, tuple(sorted(undeleted)))
+    return BundleHookRetirement(True, failed_paths)
 
 
 def local_bundle_paths(lock_dir: Path | None) -> frozenset[str]:

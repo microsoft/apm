@@ -370,7 +370,7 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS)",
         "if None in keys:",
         "HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)",
-        "kept = _retire_per_file(project_root, targets, item)",
+        "kept, unwritten = _retire_per_file(project_root, targets, item)",
         "_drop_lock_rows(lock_dir, rows)",
         "            retired = retire_bundle_hooks(",
         # The scope re-check retires bundle canvas through the same pass.
