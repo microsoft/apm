@@ -224,7 +224,9 @@ class AgentIntegrator(BaseIntegrator):
         agents_dir = self._agents_dir(target, mapping, project_root)
         name = getattr(getattr(package_info, "package", None), "name", "")
         files = self.find_agent_files(package_info.install_path, source_plan, None, name)
-        return {agents_dir / self.get_target_filename_for_target(f, name, target): f for f in files}
+        return self.unique_destinations(
+            (agents_dir / self.get_target_filename_for_target(f, name, target), f) for f in files
+        )
 
     def get_target_filename_for_target(
         self,

@@ -4,7 +4,7 @@ import errno
 import os
 import re
 import stat
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -504,6 +504,15 @@ class BaseIntegrator:
         if incoming == disk:
             return None
         return edit_kind(expected, incoming)
+
+    @staticmethod
+    def unique_destinations(pairs: Iterable[tuple[Path, Path]]) -> dict[Path, Path] | None:
+        """``{destination: source}``, or ``None`` when two sources share a destination."""
+        planned: dict[Path, Path] = {}
+        for destination, source in pairs:
+            if planned.setdefault(destination, source) != source:
+                return None
+        return planned
 
     def admitted_source_listing(
         self, source: Path, ignore: Callable[[str, list[str]], list[str]]
