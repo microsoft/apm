@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.2] - 2026-11-23
+
+### Highlights
+
+- `apm install` keeps and names edited hook files, hook scripts, canvas extension files, LSP server entries and local `.apm/` outputs instead of overwriting them. (#4678, #4892)
+- `apm audit` and `apm approve` stop with a named cause on an unresolved required org policy or a key another trust layer denies. (#4920, #4934)
+- Upgrade notes: kept edits can now fail `apm install`, and plain `apm audit` can fail when a required org policy cannot be resolved. (#4678, #4920)
+
+### Breaking changes and upgrade notes
+
+- `apm install` keeps edited hook files, hook scripts, canvas extensions and LSP entries, exiting 1 when one blocks new content; move it aside and rerun. (closes #4626, #4678)
+- Plain `apm audit` exits 1 on drift, naming the cause, when a required org policy cannot be resolved; restore access to the org policy. (#4920)
+
+### Fixed
+
+- A plain `apm install` keeps an edited output of the project's own `.apm/` primitives and exits 0, as it already does for dependency outputs. (closes #4873, #4892)
+- `apm install --frozen` names the locked package it could not re-download, and why, instead of a misleading MCP-declarations error. (#4912)
+- `apm uninstall` refuses, before changing anything, to remove a local dependency another installed package still needs, and names that package. (#4890)
+- `apm approve` refuses a local bundle key another trust layer still denies before writing, leaving `apm.yml` and the user store unchanged. (#4934)
+
 ## [0.38.1] - 2026-11-23
 
 ### Highlights
