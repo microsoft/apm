@@ -19,7 +19,6 @@ from apm_cli.core.lifecycle_scripts import (
     ScriptEntry,
     _entries_from_lifecycle_map,
     _get_policy_scripts_dir,
-    _note_unapplied_ceiling,
     build_runner_from_context,
     discover_scripts,
     event_for_dependencies,
@@ -334,6 +333,44 @@ class TestLifecycleScriptRunner:
             runner.fire("post-install", self._make_event())
         assert call_count == 2
 
+    def test_unapplied_ceiling_notice_waits_for_a_firing_event(self) -> None:
+        """An install with only a pre-compile script fires post-install and must
+        not claim the ceiling was skipped for scripts that never ran (#4913)."""
+        script = ScriptEntry(script_type="command", event="pre-compile", bash="gen")
+        logger = MagicMock()
+        cause = "policy unavailable: outcome=malformed; fetch_failure_default=warn"
+        runner = LifecycleScriptRunner(
+            scripts=[script], logger=logger, unapplied_ceiling_cause=cause
+        )
+        with patch("apm_cli.core.script_executors.execute_script") as mock_exec:
+            runner.fire("post-install", self._make_event())
+            assert logger.warning.call_args_list == []
+            runner.fire("pre-compile", self._make_event("pre-compile"))
+            runner.fire("pre-compile", self._make_event("pre-compile"))
+        assert mock_exec.call_count == 2
+        assert [c.args for c in logger.warning.call_args_list] == [
+            (f"Org policy not applied to lifecycle scripts ({cause}).",)
+        ]
+
+    def test_unapplied_ceiling_notice_prints_once_per_logger(self) -> None:
+        """update builds a runner, then its install pipeline builds another;
+        their discovery outcomes may differ (#4913)."""
+        script = ScriptEntry(script_type="command", event="post-install", bash="echo hi")
+        logger = MagicMock()
+        causes = [
+            "policy unavailable: outcome=malformed; fetch_failure_default=warn",
+            "policy unavailable: outcome=cache_miss_fetch_fail; fetch_failure_default=warn",
+        ]
+        with patch("apm_cli.core.script_executors.execute_script"):
+            for cause in causes:
+                runner = LifecycleScriptRunner(
+                    scripts=[script], logger=logger, unapplied_ceiling_cause=cause
+                )
+                runner.fire("post-install", self._make_event())
+        assert [c.args for c in logger.warning.call_args_list] == [
+            (f"Org policy not applied to lifecycle scripts ({causes[0]}).",)
+        ]
+
     def test_scripts_for_event_filters(self) -> None:
         s1 = ScriptEntry(script_type="command", event="post-install", bash="echo a")
         s2 = ScriptEntry(script_type="http", event="pre-install", url="https://x.com")
@@ -421,16 +458,6 @@ class TestBuildRunnerFromContext:
         ):
             runner = build_runner_from_context(project_root=str(tmp_path))
         assert (runner._scripts == []) is suppressed
-
-    def test_unapplied_ceiling_notice_prints_once_per_logger(self) -> None:
-        """update builds a runner, then its install pipeline builds another (#4913)."""
-        logger = MagicMock()
-        cause = "policy unavailable: outcome=malformed; fetch_failure_default=warn"
-        _note_unapplied_ceiling(logger, cause)
-        _note_unapplied_ceiling(logger, cause)
-        assert [c.args for c in logger.warning.call_args_list] == [
-            (f"Org policy not applied to lifecycle scripts ({cause}).",)
-        ]
 
     def test_untrusted_project_scripts_are_skipped(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)

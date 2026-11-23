@@ -528,6 +528,7 @@ class LifecycleScriptRunner:
         project_root: str | None = None,
         skipped_project_scripts: int = 0,
         skipped_project_file: str | None = None,
+        unapplied_ceiling_cause: str | None = None,
     ) -> None:
         self._scripts = scripts or []
         self._logger = logger
@@ -536,6 +537,8 @@ class LifecycleScriptRunner:
         self._skipped_project_scripts = skipped_project_scripts
         self._skipped_project_file = skipped_project_file
         self._skip_notice_emitted = False
+        # Why the org ceiling was not applied to these scripts (#4913).
+        self._unapplied_ceiling_cause = unapplied_ceiling_cause
 
     def _emit_skip_notice(self) -> None:
         """Warn once that untrusted project scripts were skipped."""
@@ -572,6 +575,9 @@ class LifecycleScriptRunner:
         matching = [s for s in self._scripts if s.event == event_name]
         if not matching:
             return []
+        if self._unapplied_ceiling_cause is not None:
+            _note_unapplied_ceiling(self._logger, self._unapplied_ceiling_cause)
+            self._unapplied_ceiling_cause = None
         # Scripts run outside APM, so they must observe the committed lockfile.
         from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes
 
@@ -649,18 +655,22 @@ def _unapplied_ceiling_cause(fetch_result, fetch_failure_default: str) -> str | 
 
 
 def _note_unapplied_ceiling(logger: CommandLogger | None, cause: str) -> None:
-    """Print the unapplied-ceiling ``[!]`` notice once per command logger (#4913)."""
+    """Print the unapplied-ceiling ``[!]`` notice once per command logger (#4913).
+
+    One command may build several runners whose discovery outcomes differ,
+    so the logger carries a flag, not the cause.
+    """
     message = f"Org policy not applied to lifecycle scripts ({cause})."
     if logger is None:
         from apm_cli.utils.console import _rich_warning
 
         _rich_warning(message, symbol="warning")
         return
-    if getattr(logger, _UNAPPLIED_CEILING_NOTED, None) == cause:
+    if getattr(logger, _UNAPPLIED_CEILING_NOTED, False) is True:
         return
     logger.warning(message)
     with contextlib.suppress(AttributeError):
-        setattr(logger, _UNAPPLIED_CEILING_NOTED, cause)
+        setattr(logger, _UNAPPLIED_CEILING_NOTED, True)
 
 
 def build_runner_from_context(
@@ -690,7 +700,8 @@ def build_runner_from_context(
       suppresses every script, failing closed with a "could not be
       enforced" notice; nothing raises into the command. When org policy
       is unavailable under fetch_failure_default=warn the scripts still
-      run, with a [!] notice that the org ceiling was not applied.
+      run, and the first event that fires scripts prints a [!] notice
+      that the org ceiling was not applied.
     - Project-source scripts (apm.yml lifecycle:) are dropped unless
       their exact lifecycle: subtree has been explicitly trusted via
       apm lifecycle trust (see apm_cli.core.script_trust). Policy and
@@ -793,9 +804,6 @@ def build_runner_from_context(
             continue
         kept.append(script)
 
-    if kept and unapplied_cause is not None:
-        _note_unapplied_ceiling(logger, unapplied_cause)
-
     return LifecycleScriptRunner(
         scripts=kept,
         logger=logger,
@@ -803,4 +811,5 @@ def build_runner_from_context(
         project_root=project_root,
         skipped_project_scripts=skipped,
         skipped_project_file=str(project_yml) if skipped else None,
+        unapplied_ceiling_cause=unapplied_cause,
     )
