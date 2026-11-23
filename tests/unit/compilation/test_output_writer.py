@@ -5,6 +5,7 @@ its ``BUILD_ID_PLACEHOLDER`` resolved before reaching disk, and the writer
 asserts this invariant defensively so future code paths cannot bypass it.
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -107,3 +108,36 @@ def test_atomic_write_no_partial_file_on_failure(tmp_path: Path, monkeypatch):
 
     # Pre-existing file must remain untouched
     assert target.read_text(encoding="utf-8") == "PRE-EXISTING\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_refuses_output_path_that_is_a_symlink(tmp_path: Path):
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside content\n", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    link = project / "AGENTS.md"
+    link.symlink_to(outside)
+
+    with pytest.raises(OSError, match="Refusing deployment through a symlinked destination"):
+        CompiledOutputWriter().write(link, f"# A\n{BUILD_ID_PLACEHOLDER}\n")
+
+    assert link.is_symlink()
+    assert outside.read_text(encoding="utf-8") == "outside content\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_refuses_whole_batch_when_one_output_crosses_a_linked_directory(tmp_path: Path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".github").symlink_to(outside, target_is_directory=True)
+    regular = project / "AGENTS.md"
+    linked = project / ".github" / "copilot-instructions.md"
+
+    with pytest.raises(OSError, match="Refusing deployment through a symlinked path component"):
+        CompiledOutputWriter(base_dir=project).write_many({regular: "# A\n", linked: "# B\n"})
+
+    assert not regular.exists()
+    assert list(outside.iterdir()) == []
