@@ -14,6 +14,7 @@ from apm_cli.utils.path_security import (
     has_symlink_component,
     validate_path_segments,
 )
+from apm_cli.utils.paths import SpellingAliasIndex
 
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
 from .plan_admission import _is_transitive
@@ -107,11 +108,18 @@ def parked_kept_values_after_writes(ctx: InstallContext) -> frozenset[str]:
     """Parked kept values no package wrote in this install (#5108).
 
     A path another package wrote takes that writer's claim and new hash, so
-    the parked package's previous claim on it is not kept.
+    the parked package's previous claim on it is not kept. A spelling the
+    volume proves is the same entry (case or Unicode normalization, #5150)
+    counts as written; a case-sensitive volume keeps both claims.
     """
     kept = getattr(ctx, "parked_native_kept_values", frozenset())
     written = {path for paths in ctx.package_deployed_files.values() for path in paths}
-    return frozenset(kept - written)
+    remaining = kept - written
+    if not remaining:
+        return frozenset()
+    spellings = SpellingAliasIndex(written)
+    root = Path(ctx.project_root)
+    return frozenset(value for value in remaining if spellings.alias(value, root) is None)
 
 
 def keep_loose_for_parked_native(
