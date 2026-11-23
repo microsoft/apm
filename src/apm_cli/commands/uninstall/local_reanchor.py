@@ -820,14 +820,17 @@ def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bo
 
     for token in _PATH_TOKEN.findall(data.decode("utf-8", "replace")):
         path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
-        if "/" not in path or "://" in path:
+        # A binary asset can hold a NUL, which no filesystem path accepts.
+        if "/" not in path or "://" in path or "\x00" in path:
             continue
         # Sentence punctuation after a link ("see _local/./e.") is not part of it.
         while path.endswith((".", ":")) and not path.endswith(".."):
             path = path[:-1]
         for base in (member.parent, project_root):
-            candidate = os.path.normpath(os.path.join(base, path))
-            if under(candidate) or under(os.path.realpath(candidate)):
+            joined = os.path.join(base, path)
+            # Lexical folding and symlink resolution are separate views: folding
+            # ``..`` first would skip a symlinked apm_modules root.
+            if under(os.path.normpath(joined)) or under(os.path.realpath(joined)):
                 return True
     return False
 

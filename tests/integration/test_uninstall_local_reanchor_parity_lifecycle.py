@@ -381,7 +381,7 @@ def _project_skill_world(
     _skill_package(vendor / "e", "e", ("../f",))
     _skill_package(vendor / "d", "d", ("../e",))
     own = world.project / ".apm/skills/proj-skill/SKILL.md"
-    own.parent.mkdir(parents=True)
+    own.parent.mkdir(parents=True, exist_ok=True)
     own.write_text(
         f"---\nname: proj-skill\ndescription: Project skill\n---\n{body}\n", encoding="utf-8"
     )
@@ -492,6 +492,46 @@ def test_a_link_through_a_symlinked_apm_modules_root_refuses(
     assert (store / "_local/e").is_dir(), sorted(p.name for p in store.rglob("*"))
 
     _assert_refused_unchanged(world)
+
+
+def test_a_dot_dot_link_through_a_symlinked_apm_modules_root_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """apm_modules -> ../store: ``apm_modules/../store/_local/./e`` resolves to e's copy."""
+
+    def link_modules(project: Path) -> None:
+        (project.parent / "store").mkdir()
+        (project / "apm_modules").symlink_to(Path("..") / "store", target_is_directory=True)
+
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](../../../apm_modules/../store/_local/./e).",
+        before_install=link_modules,
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "apm_modules/../store/_local/./e)" in deployed, deployed
+    assert (world.project.parent / "store/_local/e").is_dir()
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_binary_asset_with_a_nul_path_token_does_not_stop_the_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A deployed binary asset holding ``\\x00/x`` is no link: the re-anchor proceeds."""
+
+    def blob(project: Path) -> None:
+        asset = project / ".apm/skills/proj-skill/blob.bin"
+        asset.parent.mkdir(parents=True)
+        asset.write_bytes(b"data \x00/x more\n")
+
+    world = _project_skill_world(tmp_path, apm_binary_path, "No links.", before_install=blob)
+    assert (world.project / ".claude/skills/proj-skill/blob.bin").is_file()
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
 
 
 def test_an_untracked_user_link_into_the_copy_is_never_read_or_written(
