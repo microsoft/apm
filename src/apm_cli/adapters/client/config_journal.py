@@ -12,20 +12,19 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def journal_config_write(config_path: Path, text: str) -> None:
+def journal_config_write(config_path: Path, text: str, *, lf: bool = False) -> None:
     """Record an MCP config file before APM writes it (#4594).
 
     The install transaction journals it at the deploy write seam, so a failed
-    install restores the file. Outside an install this records nothing.
+    install restores the file. Outside an install this records nothing. *lf*
+    says the writer turns CRLF into LF (a normalizing ``atomic_write_text``).
     """
     from ...integration.write_seam import record_before_mkdir, record_before_write
-    from ...utils.content_hash import content_hash_of_bytes
+    from ...utils.content_hash import text_write_hash
 
     record_before_mkdir(config_path.parent)
     # *text* is what APM is about to write: replay keeps any other bytes (#4863).
-    record_before_write(
-        config_path, follow=True, expected=content_hash_of_bytes(text.encode("utf-8"))
-    )
+    record_before_write(config_path, follow=True, expected=text_write_hash(text, lf=lf))
 
 
 def journal_config_written(config_path: Path) -> None:

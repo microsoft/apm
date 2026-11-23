@@ -216,7 +216,7 @@ class CodexClientAdapter(MCPClientAdapter):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         from .config_journal import journal_config_write, journal_config_written
 
-        journal_config_write(config_path, serialized)
+        journal_config_write(config_path, serialized, lf=True)
         config_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(config_path, serialized, new_file_mode=0o600)
         journal_config_written(config_path)

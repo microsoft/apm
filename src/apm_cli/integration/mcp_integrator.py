@@ -16,7 +16,6 @@ import copy
 import json
 import logging
 import re
-import shutil
 import warnings
 from collections.abc import Callable, MutableMapping
 from pathlib import Path
@@ -128,7 +127,9 @@ def _is_vscode_available(project_root: Path | str | None = None) -> bool:
             explicit project context is provided. Falls back to CWD when unset.
     """
     root = Path(project_root) if project_root is not None else Path.cwd()
-    return shutil.which("code") is not None or (root / ".vscode").is_dir()
+    from apm_cli.utils.git_env import trusted_executable
+
+    return trusted_executable("code") is not None or (root / ".vscode").is_dir()
 
 
 def _write_cleaned_json_config(

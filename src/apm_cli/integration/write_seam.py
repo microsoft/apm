@@ -144,14 +144,15 @@ def mkdir(path: Path, *, parents: bool = False, exist_ok: bool = False, mode: in
 
 def write_text_lf(path: Path, data: str) -> None:
     """:func:`apm_cli.utils.atomic_io.write_text_lf` through the seam."""
-    record_before_write(path, expected=_text_hash(data))
+    record_before_write(path, expected=_text_hash(data, lf=True))
     atomic_io.write_text_lf(path, data)
     record_after_write(path)
 
 
 def atomic_write_text(path: Path, data: str, **kwargs: Any) -> None:
     """:func:`apm_cli.utils.atomic_io.atomic_write_text` through the seam."""
-    record_before_write(path, expected=_text_hash(data, kwargs.get("encoding", "utf-8")))
+    lf = kwargs.get("normalize_line_endings", True)
+    record_before_write(path, expected=_text_hash(data, lf=lf))
     atomic_io.atomic_write_text(path, data, **kwargs)
     record_after_write(path)
 
@@ -160,7 +161,8 @@ def write_text(
     path: Path, data: str, *, encoding: str = "utf-8", newline: str | None = None
 ) -> None:
     """``Path.write_text`` through the seam (``newline=""`` keeps *data*'s line endings)."""
-    record_before_write(path, follow=True, expected=_text_hash(data, encoding))
+    expected = _text_hash(data, encoding=encoding, newline=newline)
+    record_before_write(path, follow=True, expected=expected)
     path.write_text(data, encoding=encoding, newline=newline)
     record_after_write(path, follow=True)
 
@@ -238,21 +240,20 @@ def rmtree(path: Path, **kwargs: Any) -> None:
     record_after_write(path)
 
 
-def _text_hash(data: str, encoding: str = "utf-8") -> str:
-    """The content hash a text write of *data* in *encoding* leaves."""
-    from apm_cli.utils.content_hash import content_hash_of_bytes
+def _text_hash(data: str, **kwargs: Any) -> str:
+    from apm_cli.utils.content_hash import text_write_hash
 
-    return content_hash_of_bytes(data.encode(encoding))
+    return text_write_hash(data, **kwargs)
 
 
 def _file_hash(source: Path) -> str:
     """What a copy or move of *source* leaves: its content hash, a directory, or nothing."""
-    from apm_cli.utils.content_hash import compute_file_hash
+    from apm_cli.utils.content_hash import compute_exact_file_hash
 
     if os.path.isdir(source) and not os.path.islink(source):
         return _DIR
     try:
-        return compute_file_hash(source) if os.path.isfile(source) else _ABSENT
+        return compute_exact_file_hash(source) if os.path.isfile(source) else _ABSENT
     except OSError:
         return _ABSENT
 

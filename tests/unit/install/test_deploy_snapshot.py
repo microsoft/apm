@@ -627,6 +627,112 @@ def test_a_user_edit_to_hook_settings_killed_before_their_seal_is_kept(
     assert settings.read_text(encoding="utf-8") == '{"theme": "light"}\n'
 
 
+@pytest.mark.parametrize("sealed", [True, False], ids=["after-its-seal", "before-its-seal"])
+def test_a_line_ending_only_edit_after_the_kill_is_kept(
+    tmp_path: Path, apm_home: Path, sealed: bool
+) -> None:
+    """Seals and expected hashes are byte-exact: CRLF over APM's LF is a user's edit."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    written = project / "a.md"
+    project.mkdir()
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def record(path: Path, contents: bool, expected: str | None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write if sealed else None)
+    try:
+        write_seam.write_text_lf(written, "one\ntwo\n")
+    finally:
+        write_seam.stop_listening(record)
+    written.write_bytes(b"one\r\ntwo\r\n")
+
+    outcome = _replay(apm_home, project)
+
+    assert outcome.kept == (("a.md", "it changed after the interrupted install"),)
+    assert written.read_bytes() == b"one\r\ntwo\r\n"
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        lambda p: write_seam.write_text(p, "a\nb\r\n"),
+        lambda p: write_seam.write_text(p, "a\nb\r\n", newline=""),
+        lambda p: write_seam.write_text(p, "a\nb\n", newline="\r\n"),
+        lambda p: write_seam.write_text_lf(p, "a\r\nb\n"),
+        lambda p: write_seam.atomic_write_text(p, "a\r\nb\n"),
+        lambda p: write_seam.atomic_write_text(p, "a\r\nb\n", normalize_line_endings=False),
+        lambda p: write_seam.write_json_config(p, {"a": 1}, default_trailing_newline=True),
+    ],
+    ids=["text", "text-as-is", "text-crlf", "text-lf", "atomic", "atomic-as-is", "json"],
+)
+def test_each_seam_writer_expects_the_exact_bytes_it_leaves(tmp_path: Path, write) -> None:
+    """On every platform, a write's expected hash is the hash of the bytes on disk."""
+    from apm_cli.utils.content_hash import exact_hash_of_bytes
+
+    target = tmp_path / "f.txt"
+    seen: list[str | None] = []
+
+    def record(path: Path, contents: bool, expected: str | None) -> None:
+        seen.append(expected)
+
+    write_seam.listen(record)
+    try:
+        write(target)
+    finally:
+        write_seam.stop_listening(record)
+
+    assert seen == [exact_hash_of_bytes(target.read_bytes())]
+
+
+def test_a_kill_before_a_repeated_write_starts_restores_the_sealed_bytes(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A pending write keeps the last seal: APM's earlier bytes are still APM's."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    project.mkdir()
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def record(path: Path, contents: bool, expected: str | None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        write_seam.write_text_lf(created, "first\n")
+    finally:
+        write_seam.stop_listening(record)
+    # The repeated write is journaled, then the kill lands before any byte changes.
+    journal.record(created, expected="sha256:" + "0" * 64)
+
+    outcome = _replay(apm_home, project)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert not created.exists()
+
+
+def test_a_deeply_nested_journal_header_is_kept_and_named(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    store = _killed_journal(apm_home, project, created)
+    lines = (store / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    nested = "[" * 100000 + "]" * 100000
+    (store / "journal.jsonl").write_text("\n".join([nested, *lines[1:]]) + "\n", encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(str(store), "journal manifest is nested too deeply")]
+    assert kept.value.store.name.startswith("retained-")
+    assert created.read_bytes() == b"killed\n"
+
+
 def test_a_journal_of_another_workspace_sharing_the_root_is_left_alone(
     tmp_path: Path, apm_home: Path
 ) -> None:

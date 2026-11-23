@@ -181,7 +181,15 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
             "dependencies": {
                 "deny": [
                     f"**/{name}"
-                    for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed", "p-bmix")
+                    for name in (
+                        "p-skill",
+                        "p-exec",
+                        "p-lsp",
+                        "p-canvas",
+                        "p-mixed",
+                        "p-bmix",
+                        "p-mixgit",
+                    )
                 ]
             },
             "mcp": {"deny": ["**"]},

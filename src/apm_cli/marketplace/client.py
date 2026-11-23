@@ -362,7 +362,6 @@ def _fetch_url_direct(
     credential: "CatalogCredential",
     etag: str = "",
     last_modified: str = "",
-    expected_digest: str = "",
 ) -> FetchResult | None:
     """Fetch a remote marketplace.json URL over HTTPS.
 
@@ -431,10 +430,6 @@ def _fetch_url_direct(
                 close()
 
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-    if expected_digest and digest != expected_digest:
-        raise MarketplaceFetchError(
-            url, f"digest mismatch: expected {expected_digest}, got {digest}"
-        )
 
     try:
         data = json.loads(raw.decode("utf-8"))
