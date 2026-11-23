@@ -465,12 +465,21 @@ def roll_back(plan: LocalReanchorPlan) -> list[str]:
         try:
             atomic_write_text(path, text, normalize_line_endings=False)
         except OSError as exc:
-            backup = path.with_name(f"{path.name}.apm-reanchor-backup")
-            try:
-                atomic_write_text(backup, text, normalize_line_endings=False)
+            kept = ""
+            # Never overwrite an earlier backup: each failed rollback keeps its own.
+            for attempt in range(100):
+                suffix = "" if attempt == 0 else f".{attempt}"
+                backup = path.with_name(f"{path.name}.apm-reanchor-backup{suffix}")
+                if backup.exists() or backup.is_symlink():
+                    continue
+                try:
+                    atomic_write_text(backup, text, normalize_line_endings=False, create_only=True)
+                except FileExistsError:
+                    continue
+                except OSError:
+                    break
                 kept = f"; its earlier content is kept in {backup}"
-            except OSError:
-                kept = ""
+                break
             failures.append(f"{path} ({exc}{kept})")
     return failures
 
@@ -657,6 +666,10 @@ def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
     for key in plan.renames:
         if survivor_ships_hooks(lockfile, key, modules_dir):
             return f"{key} ships hooks"
+    # LSP provenance names the owning package by its lock key, which would go stale.
+    owners = {f"package:{key}" for key in plan.renames}
+    if owners & set((getattr(lockfile, "lsp_config_provenance", None) or {}).values()):
+        return "it supplies a language server"
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
         if len(record.owners) > 1 and any(owner in plan.renames for owner in record.owners):
             return f"it shares {DeploymentLedgerCodec.legacy_value(record.locator)} with another package"

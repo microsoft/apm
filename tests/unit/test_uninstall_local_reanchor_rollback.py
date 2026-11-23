@@ -198,3 +198,31 @@ def test_an_unreadable_committed_lock_rolls_the_reanchor_back(
     assert lock.read_bytes() == b"lockfile_version: '4'\n"
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert "were restored" in message, message
+
+
+def test_a_repeated_failed_rollback_keeps_the_earlier_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, _lock, repair = _planned(tmp_path)
+    earlier = tmp_path / "apm.yml.apm-reanchor-backup"
+    earlier.write_bytes(b"earlier recovery content\n")
+    real = __import__("apm_cli.integration.write_seam", fromlist=["x"]).atomic_write_text
+
+    def refuse_manifest(path, *args, **kwargs):
+        if Path(path).name == "apm.yml":
+            raise PermissionError(13, "Permission denied", str(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr("apm_cli.integration.write_seam.atomic_write_text", refuse_manifest)
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _refuse_reanchor_refresh(repair, {"local:vendor/f"}, logger)
+
+    assert exc.value.code == 1
+    assert earlier.read_bytes() == b"earlier recovery content\n"
+    fresh = tmp_path / "apm.yml.apm-reanchor-backup.1"
+    assert "./vendor/e" in fresh.read_text(encoding="utf-8")
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert str(fresh) in message, message
+    assert manifest.read_text(encoding="utf-8") == "name: proj\n"
