@@ -1,8 +1,9 @@
 """Name the executable kinds a gate retirement removes (#4567).
 
 Uninstall and update reuse install's gate labels when they retire a kind, and
-count bin/ only where install deploys it: a skill's top-level ``bin/`` below a
-target skills root.
+count bin/ and canvas only where install deploys them: a skill's top-level
+``bin/`` below a target skills root, and a canvas below a target extensions
+root (#4816).
 """
 
 from __future__ import annotations
@@ -64,6 +65,28 @@ def _root_parts(root: str) -> tuple[str, ...]:
     return PurePosixPath(posixpath.normpath(root.replace("\\", "/"))).parts
 
 
+def _canvas_roots() -> tuple[tuple[str, ...], ...]:
+    """Every static canvas extensions root a target deploys to, both scopes (#4816)."""
+    from ..integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+    roots = set()
+    for profile in KNOWN_TARGETS.values():
+        if profile.user_root_resolver is not None:
+            continue
+        for scoped in (profile, scoped_profile_or_none(profile, user_scope=True)):
+            if scoped is None or not scoped.supports("canvas"):
+                continue
+            mapping = scoped.primitives["canvas"]
+            roots.add(posixpath.join(mapping.deploy_root or scoped.root_dir, mapping.subdir))
+    return tuple(_root_parts(root) for root in roots)
+
+
+def _deployed_canvas_file(path: str, canvas_roots) -> bool:
+    """True for ``<extensions root>/<canvas>/...``, the only place a canvas deploys."""
+    parts = PurePosixPath(path).parts
+    return any(parts[: len(root)] == root and len(parts) > len(root) + 1 for root in canvas_roots)
+
+
 def _deployed_bin_file(path: str, skill_roots) -> bool:
     """True for ``<skills root>/<skill>/bin/...``, the only place bin/ deploys."""
     parts = PurePosixPath(path).parts
@@ -81,13 +104,19 @@ def rebuild_retired_kinds(deployed, withheld, deployed_files) -> tuple[str, ...]
     bin/ counts only when *deployed_files* records a file under a skill's
     top-level ``bin/`` directory below a target skills root (the only bin/ the
     install plan withholds), since bin/ deploys only in some scopes and targets.
+    A canvas counts only when *deployed_files* records a file below a target
+    extensions root, since only some targets map canvas (#4816).
     """
-    skill_roots = _skill_roots()
-    bin_deployed = any(_deployed_bin_file(path, skill_roots) for path in deployed_files or ())
+    files = tuple(deployed_files or ())
+    skill_roots, canvas_roots = _skill_roots(), _canvas_roots()
+    evidence = {
+        EXEC_TYPE_BIN: any(_deployed_bin_file(path, skill_roots) for path in files),
+        EXEC_TYPE_CANVAS: any(_deployed_canvas_file(path, canvas_roots) for path in files),
+    }
     return tuple(
         kind
         for kind in deployed
-        if kind in withheld and kind != EXEC_TYPE_MCP and (kind != EXEC_TYPE_BIN or bin_deployed)
+        if kind in withheld and kind != EXEC_TYPE_MCP and evidence.get(kind, True)
     )
 
 
