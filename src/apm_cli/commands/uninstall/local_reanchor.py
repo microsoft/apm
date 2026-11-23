@@ -25,6 +25,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
@@ -519,7 +520,7 @@ def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> L
 
 
 def roll_back(plan: LocalReanchorPlan) -> list[str]:
-    """Restore apm.yml and apm.lock.yaml to the snapshot; return what could not be restored.
+    """Restore apm.yml, apm.lock.yaml and the receipts to the snapshot; return what was not.
 
     Every path is attempted. One that cannot be restored keeps its snapshot
     beside it (``<name>.apm-reanchor-backup``) and is named in the result, so
@@ -529,6 +530,11 @@ def roll_back(plan: LocalReanchorPlan) -> list[str]:
 
     failures: list[str] = []
     for path, text in plan.snapshot:
+        # A file still holding its snapshot is not rewritten: a read-only
+        # receipt directory must not fail a rollback that changed nothing.
+        with contextlib.suppress(OSError):
+            if path.is_file() and path.read_bytes() == text.encode("utf-8"):
+                continue
         try:
             atomic_write_text(path, text, normalize_line_endings=False)
         except OSError as exc:
@@ -715,7 +721,14 @@ def _plan_reanchor_or_exit(
             "declaration in apm.yml."
         )
         sys.exit(1)
-    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+    if not plan.renames:
+        return plan
+    from ...core.deployment_ledger import materialization_evidence_paths
+
+    # The receipts go back with the lock: an interrupt after their rename never
+    # leaves lock and receipts naming different owners (#5077).
+    receipts, _identity = materialization_evidence_paths(project_root, InstallScope.PROJECT)
+    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root), receipts))
 
 
 def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
@@ -805,6 +818,10 @@ def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
 
 # A path-like token: anything between whitespace, brackets, quotes and separators.
 _PATH_TOKEN = re.compile(r"[^\s()<>\[\]\"'`|,;*]+")
+# A whole Markdown link destination: ``<...>`` may hold spaces; a bare one may
+# hold punctuation such as commas and balanced parentheses, so neither is split
+# like prose. One level of nesting keeps the match linear.
+_MARKDOWN_DESTINATION = re.compile(r"\]\(\s*(?:<([^<>\n]+)>|((?:[^\s()<>]|\([^\s()<>]*\))+))")
 
 
 def _moving_dirs(moves) -> tuple[str, ...]:
@@ -825,7 +842,8 @@ def _moving_dirs(moves) -> tuple[str, ...]:
 def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bool:
     """Whether a path token in *data* names a moving copy once normalized (#5133).
 
-    Each token resolves against the file's directory and the project root:
+    Whole Markdown link destinations are checked first, then prose tokens. Each
+    token resolves against the file's directory and the project root:
     ``.`` and ``..`` segments are folded, and the result is compared both as
     written and through symlinks, so ``_local/./e`` or a link through a
     symlinked apm_modules root counts as the copy itself.
@@ -835,8 +853,15 @@ def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bo
         candidate = spelling_key(candidate)
         return any(candidate == d or candidate.startswith(d + "/") for d in dirs)
 
-    for token in _PATH_TOKEN.findall(data.decode("utf-8", "replace")):
+    text = data.decode("utf-8", "replace")
+    destinations = [bracketed or bare for bracketed, bare in _MARKDOWN_DESTINATION.findall(text)]
+    seen: set[str] = set()
+    for token in (*destinations, *_PATH_TOKEN.findall(text)):
         path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
+        # A bare destination is also a prose token: resolve each spelling once.
+        if path in seen:
+            continue
+        seen.add(path)
         # A binary asset can hold a NUL, which no filesystem path accepts.
         if "/" not in path or "://" in path or "\x00" in path:
             continue

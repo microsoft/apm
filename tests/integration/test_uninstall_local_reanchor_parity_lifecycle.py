@@ -555,6 +555,63 @@ def test_an_nfd_variant_link_into_the_moving_copy_refuses(
     _assert_refused_unchanged(world, nfc)
 
 
+def test_an_angle_bracket_link_with_a_space_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``](<... my dir/../...>)`` keeps its space: the whole destination is matched."""
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](<../../../apm_modules/my dir/../_local/./e>).",
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "my dir/../_local/./e>" in deployed, deployed
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_link_through_a_symlinked_root_with_a_comma_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """apm_modules -> ../store,archive: the comma is part of the link destination."""
+
+    def link_modules(project: Path) -> None:
+        (project.parent / "store,archive").mkdir()
+        (project / "apm_modules").symlink_to(Path("..") / "store,archive", target_is_directory=True)
+
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](../../../apm_modules/../store,archive/_local/./e).",
+        before_install=link_modules,
+    )
+    assert (world.project.parent / "store,archive/_local/e").is_dir()
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_link_through_a_symlinked_root_with_parentheses_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """apm_modules -> ../store(archive): balanced parentheses stay in the destination."""
+
+    def link_modules(project: Path) -> None:
+        (project.parent / "store(archive)").mkdir()
+        (project / "apm_modules").symlink_to(
+            Path("..") / "store(archive)", target_is_directory=True
+        )
+
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](../../../apm_modules/../store(archive)/_local/./e).",
+        before_install=link_modules,
+    )
+    assert (world.project.parent / "store(archive)/_local/e").is_dir()
+
+    _assert_refused_unchanged(world)
+
+
 def test_a_binary_asset_with_a_nul_path_token_does_not_stop_the_reanchor(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

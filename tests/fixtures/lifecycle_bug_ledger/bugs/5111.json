@@ -1,0 +1,16 @@
+{
+  "issue": 5111,
+  "fixed_in": "Unreleased",
+  "summary": "Replaying an interrupted install's deploy journal copied a journal copy's permission bits onto the restored file (copystat, and copytree for a directory), although the copy is authenticated by its content hash only; the journal unit line now records the mode at first touch, replay stages bytes with private permissions and applies the recorded mode only when it is valid permission bits and the identity and content checks pass, and a unit without a verifiable mode is kept and reported.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_deploy_snapshot.py::test_replay_never_takes_a_journal_copys_mode",
+    "tests/unit/install/test_deploy_snapshot.py::test_replay_never_takes_the_modes_inside_a_journal_copy_directory",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_unit_without_a_verifiable_mode_is_kept_and_reported"
+  ]
+}

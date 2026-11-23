@@ -60,18 +60,17 @@ _EXECUTABLE_GATES = frozenset({"keeps_edited_output", "_keeps_edited_bundle"})
 # replace an executable output; any other write in the same function is gated.
 _UNGATED_EXECUTABLE_WRITES = {
     "src/apm_cli/integration/hook_integrator.py": {
-        # Merged hook entries in a shared settings file and its sidecar.
+        # Merged hook entries in a shared settings file (the sidecar is
+        # written by hook_ownership.write_hook_sidecar, #5009).
         "HookIntegrator._integrate_merged_hooks": frozenset(
-            {("atomic_write_text", "sidecar_path"), ("write_text_if_changed", "json_path")}
+            {("write_text_if_changed", "json_path")}
         ),
-        # Removing APM entries from a shared settings file and its sidecar.
+        # Removing APM entries from a shared settings file.
         "HookIntegrator._clean_apm_source_from_json": frozenset(
-            {("atomic_write_text", "json_path"), ("atomic_write_text", "sidecar_path")}
+            {("atomic_write_text", "json_path")}
         ),
         # Same cleanup; the JSON is written whole through the seam with its hash (#4863).
-        "HookIntegrator._clean_apm_entries_from_json": frozenset(
-            {("write_text", "json_path"), ("atomic_write_text", "sidecar_path")}
-        ),
+        "HookIntegrator._clean_apm_entries_from_json": frozenset({("write_text", "json_path")}),
     },
 }
 _CANVAS_GATE = (
