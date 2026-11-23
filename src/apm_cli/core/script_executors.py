@@ -1846,8 +1846,14 @@ def _build_script_env(script: ScriptEntry) -> dict[str, str]:
     convenience, NOT a security boundary: a command script can read any
     file it has permission to.
     """
+    from apm_cli.utils.git_env import user_script_environment
+
     allowed = frozenset(script.allowed_env_vars or ())
-    env = {k: v for k, v in os.environ.items() if not _is_denylisted(k, allowed)}
+    env = {
+        k: v
+        for k, v in user_script_environment(dict(os.environ)).items()
+        if not _is_denylisted(k, allowed)
+    }
     if script.env:
         # script.env values are merged last and may reintroduce credential-named
         # variables deliberately set by the script author. This is intentional

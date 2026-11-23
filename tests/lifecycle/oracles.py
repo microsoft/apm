@@ -630,6 +630,17 @@ def _i4_keep_gap(surface: str, after: Observation, output: str) -> str | None:
     return None
 
 
+def compile_home_record(deploy_root: Path) -> str:
+    """The one APM-home file a compile of *deploy_root* may write (#4805).
+
+    Compile records which routed instructions each Claude AGENTS.md it wrote
+    carries, outside the repository, one file per output root keyed by its
+    path (core/agents_md_compile_record.py).
+    """
+    key = hashlib.sha256(deploy_root.resolve().as_posix().encode("utf-8")).hexdigest()[:32]
+    return f".apm/compiled-agents-md/{key}.json"
+
+
 def _i5_write_set(
     before: Observation, after: Observation, result, model, op: Operation
 ) -> list[Violation] | None:
@@ -640,11 +651,17 @@ def _i5_write_set(
     for root_id, snapshot in before.artifacts.snapshots:
         observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
         allowed = op.allowed.get(root_id, ())
+        dry_run = op.read_only or "DRYRUN" in op.modifiers
+        # Exact files: each admits itself and its ancestor directories, never a descendant.
+        exact: tuple[str, ...] = ()
+        if root_id == "home" and op.name == "compile" and not dry_run:
+            exact = (compile_home_record(after.deploy_root),)
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {
             path
             for path in observed
             if any(_within(path, a) or a.startswith(path + "/") for a in allowed)
+            or any(path == e or e.startswith(path + "/") for e in exact)
         }
         for prefix in op.forbidden.get(root_id, ()):
             hit = sorted(path for path in observed if _within(path, prefix))

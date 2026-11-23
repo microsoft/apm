@@ -662,18 +662,22 @@ def write_per_file_bundle_record(
         write_seam.unlink(sidecar_path)
 
 
-def hook_file_emptied(
+def remove_emptied_hook_file(
     json_path: Path, data: dict, defaults: dict[str, Any], root: Path | None
 ) -> bool:
+    """Offer a cleaned hook file to the provenance owner; return whether it was deleted (#4867)."""
+    from apm_cli.integration.config_file_provenance import delete_emptied_config
+
+    return delete_emptied_config(json_path, root=root, empty=hook_file_emptied(data, defaults))
+
+
+def hook_file_emptied(data: dict, defaults: dict[str, Any]) -> bool:
     """Whether a cleaned hook file holds only its target's injected defaults (#4852).
 
-    Such a file is deleted, as a fresh deploy never writes it. Without a
-    containment *root* (project or home), or when any component below it is a
-    symlink, the file is never deleted; the cleanup rewrites it in place.
-    A default matches only with the same type (``true`` is not ``1``).
+    The content fact only: whether the file then goes is decided by
+    :func:`~apm_cli.integration.config_file_provenance.delete_emptied_config`
+    (#4867). A default matches only with the same type (``true`` is not ``1``).
     """
-    if root is None or has_symlink_component(root, json_path):
-        return False
     return all(
         key in defaults and type(defaults[key]) is type(value) and defaults[key] == value
         for key, value in data.items()

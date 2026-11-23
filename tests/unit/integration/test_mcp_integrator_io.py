@@ -38,7 +38,7 @@ class TestIsVscodeAvailable:
         if has_vscode_dir:
             (tmp_path / ".vscode").mkdir()
         with (
-            patch("shutil.which", return_value=code_path),
+            patch("apm_cli.utils.git_env.trusted_executable", return_value=code_path),
             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
         ):
             assert _is_vscode_available() is expected
@@ -46,7 +46,9 @@ class TestIsVscodeAvailable:
     def test_code_on_path_takes_precedence_over_missing_dir(self, tmp_path):
         missing_root = tmp_path / "no-such-project"
         with (
-            patch("shutil.which", return_value="/usr/bin/code") as which,
+            patch(
+                "apm_cli.utils.git_env.trusted_executable", return_value="/usr/bin/code"
+            ) as which,
             patch.object(Path, "is_dir", autospec=True, return_value=False) as is_dir,
         ):
             assert _is_vscode_available(missing_root) is True
@@ -125,15 +127,15 @@ class TestUpdateLockfile:
 
         lock_path = tmp_path / "apm.lock.yaml"
         self._write_minimal_lockfile(lock_path)
-        real_load_yaml_str = yaml_io.load_yaml_str
+        real_load = yaml_io.load_machine_yaml_str
         load_calls = 0
 
-        def counting_load_yaml_str(text):
+        def counting_load(text):
             nonlocal load_calls
             load_calls += 1
-            return real_load_yaml_str(text)
+            return real_load(text)
 
-        monkeypatch.setattr(yaml_io, "load_yaml_str", counting_load_yaml_str)
+        monkeypatch.setattr(yaml_io, "load_machine_yaml_str", counting_load)
 
         MCPIntegrator.update_lockfile({"server-a"}, lock_path=lock_path)
 
@@ -348,7 +350,7 @@ class TestInstallProjectRootDetection:
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.runtime.manager.RuntimeManager")
-    @patch("shutil.which", return_value=None)
+    @patch("apm_cli.utils.git_env.trusted_executable", return_value=None)
     def test_install_uses_explicit_project_root_for_workspace_runtime_detection(
         self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
     ):
@@ -387,7 +389,7 @@ class TestInstallProjectRootDetection:
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.runtime.manager.RuntimeManager")
-    @patch("shutil.which", return_value=None)
+    @patch("apm_cli.utils.git_env.trusted_executable", return_value=None)
     def test_declared_targets_override_local_runtime_detection(
         self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
     ):
@@ -454,7 +456,7 @@ class TestInstallProjectRootDetection:
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.runtime.manager.RuntimeManager")
-    @patch("shutil.which", return_value=None)
+    @patch("apm_cli.utils.git_env.trusted_executable", return_value=None)
     def test_exclude_applies_to_declared_targets(
         self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
     ):

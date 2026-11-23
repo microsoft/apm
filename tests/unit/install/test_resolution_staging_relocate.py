@@ -1,5 +1,6 @@
 """Direct regression tests for resolution-staging path relocations."""
 
+import os
 import re
 from pathlib import Path
 
@@ -342,3 +343,90 @@ def test_nested_copies_stage_in_either_order_and_roll_back(
     assert staging.rollback() == []
     assert (parent / "apm.yml").read_text(encoding="utf-8") == "name: repo\n"
     assert (child / "apm.yml").read_text(encoding="utf-8") == "name: tool\n"
+
+
+def test_a_no_clobber_publish_never_replaces_an_existing_destination(tmp_path: Path) -> None:
+    """``clobber=False`` fails on anything at the destination and leaves it as it was."""
+    modules = tmp_path / "apm_modules"
+    destination = modules / "o" / "p"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("user\n", encoding="utf-8")
+    session = ResolutionStagingSession(modules)
+    replacement = session.prepare_replacement(destination)
+    replacement.mkdir(parents=True)
+    (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        session.publish_replacement(replacement, clobber=False)
+
+    assert destination.read_text(encoding="utf-8") == "user\n"
+    assert session.rollback() == []
+    assert destination.read_text(encoding="utf-8") == "user\n"
+
+
+def test_a_no_clobber_publish_never_replaces_an_empty_directory(tmp_path: Path) -> None:
+    """A plain POSIX rename replaces an empty directory; the no-replace publish must not."""
+    modules = tmp_path / "apm_modules"
+    destination = modules / "o" / "p"
+    session = ResolutionStagingSession(modules)
+    replacement = session.prepare_replacement(destination)
+    replacement.mkdir(parents=True)
+    (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
+    destination.mkdir(parents=True)  # appeared after planning, e.g. another writer
+
+    with pytest.raises(OSError):
+        session.publish_replacement(replacement, clobber=False)
+
+    assert destination.is_dir() and not any(destination.iterdir())
+
+
+def test_rollback_keeps_a_directory_that_replaced_a_published_package(tmp_path: Path) -> None:
+    """Rollback removes a published package only while it is still that directory."""
+    modules = tmp_path / "apm_modules"
+    destination = modules / "o" / "p"
+    session = ResolutionStagingSession(modules)
+    replacement = session.prepare_replacement(destination)
+    replacement.mkdir(parents=True)
+    (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
+    session.publish_replacement(replacement, clobber=False)
+    # Move ours aside (removing it could let the new directory reuse its inode).
+    destination.rename(tmp_path / "ours")
+    destination.mkdir()
+    (destination / "user.md").write_text("user\n", encoding="utf-8")
+
+    issues = session.rollback()
+
+    assert [path for path, _reason in issues] == [destination]
+    assert (destination / "user.md").read_text(encoding="utf-8") == "user\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory identity")
+def test_a_destination_substituted_right_after_publish_is_never_taken_for_ours(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The publish records the staged copy's identity, not whatever sits there after."""
+    modules = tmp_path / "apm_modules"
+    destination = modules / "o" / "p"
+    session = ResolutionStagingSession(modules)
+    replacement = session.prepare_replacement(destination)
+    replacement.mkdir(parents=True)
+    (replacement / "apm.yml").write_text("name: p\n", encoding="utf-8")
+    real_lstat = os.lstat
+    swapped: list[bool] = []
+
+    def racing_lstat(path, *args, **kwargs):
+        if Path(path) == destination and not swapped:
+            # Another writer replaces the published directory before it is inspected.
+            swapped.append(True)
+            destination.rename(tmp_path / "ours")
+            destination.mkdir()
+            (destination / "user.md").write_text("user\n", encoding="utf-8")
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr("os.lstat", racing_lstat)
+    session.publish_replacement(replacement, clobber=False)
+    issues = session.rollback()
+    monkeypatch.undo()
+
+    assert (destination / "user.md").read_text(encoding="utf-8") == "user\n"
+    assert [path for path, _reason in issues] == [destination]

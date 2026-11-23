@@ -24,6 +24,15 @@ given:
 - apm install p-skill
 when:
 - apm install --mcp io.github.lifecycle/p-registry
+- run: apm install --mcp p-inline --dry-run -- apm-lifecycle-inert-server --stdio
+  cells:
+  - T5|OP=mcp-install|SRC=inline-mcp|DRYRUN=on
+  - pair|SRC=inline-mcp|DRYRUN=on
+  unchanged:
+  - .agents/skills
+  - .github/hooks
+  - .github/lsp.json
+  - .github/extensions
 - run: apm install --mcp p-inline -- apm-lifecycle-inert-server --stdio
   cells:
   - T3|OP=mcp-install|SRC=inline-mcp|PRIM=mcp

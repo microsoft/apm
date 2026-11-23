@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -232,3 +233,291 @@ def test_install_without_trusted_git_fails_without_changing_project(tmp_path: Pa
     assert manifest.read_bytes() == original_manifest
     assert not (project / "apm.lock.yaml").exists()
     assert not any(path.is_file() for path in (project / ".github").rglob("*"))
+
+
+def _plant_project_binary(directory: Path, name: str) -> Path:
+    """Place a stand-in for helper *name* in *directory*; return its marker path.
+
+    On Windows the ``.exe`` copy answers any arguments like a successful tool
+    and the ``.cmd`` variant writes the marker; on POSIX a script writes it.
+    """
+    marker = directory / "stand-in-ran"
+    if sys.platform == "win32":
+        system32 = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32"
+        shutil.copyfile(system32 / "hostname.exe", directory / f"{name}.exe")
+        script = '@echo off\r\necho stand-in>"%~dp0stand-in-ran"\r\n'
+        (directory / f"{name}.cmd").write_bytes(script.encode("ascii"))
+    else:
+        stand_in = directory / name
+        # An absolute marker path needs no PATH lookup, so a run is always detected.
+        stand_in.write_text(f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
+        stand_in.chmod(0o755)
+    return marker
+
+
+def _search_cwd_first(monkeypatch: pytest.MonkeyPatch, *rest: str) -> None:
+    """Put the working directory first on PATH (Windows searches it implicitly too)."""
+    monkeypatch.setenv("PATH", os.pathsep.join([".", *rest]))
+
+
+def _system_dirs() -> list[str]:
+    """PATH entries that hold no az or scanner install."""
+    if sys.platform == "win32":
+        return [str(Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32")]
+    return []
+
+
+@pytest.fixture
+def _fresh_helper_caches():
+    """Drop cached helper paths so each cell resolves from its own cwd."""
+    from apm_cli.core import azure_cli
+    from apm_cli.utils import git_env
+
+    git_env._git_executable = None
+    azure_cli._provider_singleton = None
+    yield
+    git_env._git_executable = None
+    azure_cli._provider_singleton = None
+
+
+def _committed_repository(project: Path) -> Path:
+    """Create a real repository with one committed ``f.md``; return the real git."""
+    git = shutil.which("git")
+    assert git is not None
+    project.mkdir()
+    (project / "f.md").write_text("tracked\n", encoding="utf-8")
+    identity = (
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+    )
+    for args in (("init", "-q"), ("add", "f.md"), (*identity, "commit", "-q", "-m", "f")):
+        subprocess.run((git, *args), cwd=project, check=True, capture_output=True)
+    return Path(git).resolve()
+
+
+def test_lock_evidence_ignores_a_project_local_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _fresh_helper_caches
+) -> None:
+    """Legacy lock evidence asks the real git, not a binary in the checkout."""
+    from apm_cli.core.legacy_lock_evidence import git_permits_legacy_adoption
+
+    project = tmp_path / "project"
+    git = _committed_repository(project)
+    (project / "g.md").write_text("untracked\n", encoding="utf-8")
+    marker = _plant_project_binary(project, "git")
+    _search_cwd_first(monkeypatch, str(git.parent), *_system_dirs())
+    monkeypatch.chdir(project)
+
+    assert git_permits_legacy_adoption(project / "f.md") is True
+    assert git_permits_legacy_adoption(project / "g.md") is True
+    assert not marker.exists()
+
+
+def test_audit_tracked_files_ignore_a_project_local_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _fresh_helper_caches
+) -> None:
+    """The audit replay lists tracked files through the real git."""
+    from apm_cli.install.audit_replay import _git_tracked_files
+
+    project = tmp_path / "project"
+    git = _committed_repository(project)
+    marker = _plant_project_binary(project, "git")
+    _search_cwd_first(monkeypatch, str(git.parent), *_system_dirs())
+    monkeypatch.chdir(project)
+
+    assert _git_tracked_files(project) == frozenset({"f.md"})
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the POSIX leg runs the CLI form")
+def test_ci_audit_never_runs_a_project_local_git(tmp_path: Path) -> None:
+    """``apm audit --ci`` in a checkout that ships its own git uses the real one."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    project = isolated.work_root / "consumer"
+    git = _committed_repository(project)
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    (project / "apm.lock.yaml").write_text("lockfile_version: '1'\ndependencies: []\n")
+    marker = _plant_project_binary(project, "git")
+    environment = _source_environment(isolated.subprocess_env())
+    environment["PATH"] = os.pathsep.join([".", str(git.parent), "/usr/bin", "/bin"])
+
+    result = subprocess.run(
+        (*_CLI, "audit", "--ci", "--no-policy"),
+        cwd=project,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    # The audit must run to completion, so the probe it protects was reached.
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not marker.exists(), result.stdout + result.stderr
+
+
+def test_azure_cli_lookup_ignores_a_project_local_az(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _fresh_helper_caches
+) -> None:
+    """Without an installed az, a project-local one is never selected or run."""
+    from apm_cli.core.azure_cli import AzureCliBearerProvider
+
+    project = tmp_path / "project"
+    project.mkdir()
+    marker = _plant_project_binary(project, "az")
+    _search_cwd_first(monkeypatch, *_system_dirs())
+    monkeypatch.chdir(project)
+
+    command = AzureCliBearerProvider()._az_command
+    assert command is None or not Path(command).resolve().is_relative_to(project.resolve())
+    assert not marker.exists()
+
+
+def test_external_scanner_ignores_a_project_local_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _fresh_helper_caches
+) -> None:
+    """A scanner binary in the checkout neither counts as installed nor runs."""
+    from apm_cli.security.external.base import ExternalScanError
+    from apm_cli.security.external.skillspector import SkillSpectorAdapter
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    marker = _plant_project_binary(project, "skillspector")
+    _search_cwd_first(monkeypatch, *_system_dirs())
+    monkeypatch.chdir(project)
+
+    adapter = SkillSpectorAdapter()
+    assert adapter.is_available()[0] is False
+    with pytest.raises(ExternalScanError, match="not found"):
+        adapter.scan([project])
+    assert not marker.exists()
+
+
+def test_helper_owner_skips_the_working_directory_in_every_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'.', an empty entry and the project path itself never supply a helper."""
+    from apm_cli.utils.git_env import trusted_executable
+
+    project = tmp_path / "project"
+    git = _committed_repository(project)
+    _plant_project_binary(project, "git")
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", str(project), str(git.parent)]))
+    monkeypatch.chdir(project)
+
+    assert Path(trusted_executable("git") or "").resolve() == git
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="a Windows process setting")
+def test_cli_start_disables_the_implicit_working_directory_search(tmp_path: Path) -> None:
+    """Every child of the CLI inherits NoDefaultCurrentDirectoryInExePath."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    environment = _source_environment(isolated.subprocess_env())
+    environment.pop("NoDefaultCurrentDirectoryInExePath", None)
+    probe = (
+        "import os, sys\n"
+        "sys.argv = ['apm', '--version']\n"
+        "from apm_cli.cli import main\n"
+        "try:\n    main()\nexcept SystemExit:\n    pass\n"
+        "print('SETTING=' + os.environ.get('NoDefaultCurrentDirectoryInExePath', ''))\n"
+    )
+    result = subprocess.run(
+        (sys.executable, "-c", probe),
+        cwd=isolated.work_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=90,
+        check=False,
+    )
+    assert "SETTING=1" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("user_value", [None, "0"], ids=["unset", "user-set"])
+def test_user_scripts_keep_the_users_working_directory_search(
+    tmp_path: Path, user_value: str | None
+) -> None:
+    """APM's helpers skip the working directory; scripts the user wrote get their own setting."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    environment = _source_environment(isolated.subprocess_env())
+    for key in [key for key in environment if key.upper() == "NODEFAULTCURRENTDIRECTORYINEXEPATH"]:
+        del environment[key]
+    if user_value is not None:
+        environment["NoDefaultCurrentDirectoryInExePath"] = user_value
+    probe = (
+        "import json, os, sys\n"
+        "from apm_cli.utils.git_env import disable_implicit_cwd_search\n"
+        "from apm_cli.core.lifecycle_scripts import ScriptEntry\n"
+        "from apm_cli.core.script_executors import _build_script_env\n"
+        "platform, sys.platform = sys.platform, 'win32'\n"
+        "disable_implicit_cwd_search()\n"
+        "sys.platform = platform\n"
+        "name = 'NoDefaultCurrentDirectoryInExePath'\n"
+        "script = _build_script_env(ScriptEntry(script_type='command', event='post-install',"
+        " command='x'))\n"
+        "print(json.dumps({'apm': os.environ.get(name), 'script': [v for k, v in script.items()"
+        " if k.upper() == name.upper()]}))\n"
+    )
+    result = subprocess.run(
+        (sys.executable, "-c", probe),
+        cwd=isolated.work_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=90,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    evidence = json.loads(result.stdout)
+    assert evidence["apm"] == "1"
+    assert evidence["script"] == ([] if user_value is None else [user_value])
+
+
+def test_runtime_launch_refuses_a_project_local_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With only a project-local runtime on PATH, ``apm run`` refuses and runs nothing."""
+    from apm_cli.core.script_runner import ScriptRunner
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    marker = _plant_project_binary(project, "codex")
+    _search_cwd_first(monkeypatch, *_system_dirs())
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.chdir(project)
+
+    with pytest.raises(RuntimeError, match="apm runtime setup codex"):
+        ScriptRunner()._execute_runtime_command("codex exec", "prompt", dict(os.environ))
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+def test_runtime_listing_never_follows_a_link_out_of_the_runtime_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A managed-runtime link into a checkout is neither reported nor version-probed."""
+    from apm_cli.runtime.manager import RuntimeManager
+
+    project = tmp_path / "project"
+    project.mkdir()
+    marker = _plant_project_binary(project, "codex")
+    runtimes = tmp_path / "runtimes"
+    runtimes.mkdir()
+    (runtimes / "codex").symlink_to(project / "codex")
+    _search_cwd_first(monkeypatch, *_system_dirs())
+    monkeypatch.chdir(tmp_path)
+    manager = RuntimeManager()
+    manager.runtime_dir = runtimes
+
+    listed = manager.list_runtimes()["codex"]
+
+    assert listed["path"] is None or not Path(listed["path"]).resolve().is_relative_to(project)
+    assert manager.is_runtime_available("codex") is False
+    assert not marker.exists()

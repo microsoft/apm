@@ -9,6 +9,7 @@ Text and SARIF output render it.
 
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -394,6 +395,23 @@ def test_a_checkout_outside_apm_modules_falls_back_to_the_admin(tmp_path: Path, 
     outside = tmp_path / "elsewhere"
     checkout.rename(outside)
     checkout.symlink_to(outside, target_is_directory=True)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_chain_deeper_than_the_recursion_limit_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    chain = [f"contoso/c{n}" for n in range(1200)]
+    locked = [_locked(chain[0])]
+    locked += [_locked(key, parent=parent) for parent, key in pairwise(chain)]
+    locked.append(_locked("acme/leaf", parent=chain[-1]))
+    root = _project(tmp_path, [chain[0]], locked)
 
     check = _allowlist(root)
 
