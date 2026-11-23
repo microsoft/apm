@@ -627,6 +627,10 @@ class LifecycleScriptRunner:
 # Attribute a command logger carries once it printed the suppression notice.
 _SUPPRESSION_NOTED = "_apm_lifecycle_suppression_noted"
 
+# Attribute a command logger carries once it printed the unresolved-policy
+# (fetch_failure_default=warn) notice, so it fires once per command (#4913).
+_UNRESOLVED_POLICY_NOTED = "_apm_lifecycle_unresolved_policy_noted"
+
 
 def build_runner_from_context(
     *,
@@ -650,8 +654,14 @@ def build_runner_from_context(
       untrusted clones.
     - Org executables.deny_all (org policy kill-switch): when set,
       suppresses all lifecycle scripts as a one-directional safety
-      ceiling. Best-effort: any discovery error is silently ignored so
-      the install flow is never blocked.
+      ceiling. A discovery error or a blocking outcome (for example
+      fetch_failure_default=block, a hash mismatch, or an inheritance
+      chain error) also fails CLOSED and suppresses scripts with an
+      "org policy could not be enforced" notice -- it never raises into
+      the command. Under fetch_failure_default=warn an unavailable
+      policy does NOT suppress scripts (the warn posture is unchanged),
+      but a one-time notice is still printed so the operator knows the
+      org ceiling was not applied (#4913).
     - Project-source scripts (apm.yml lifecycle:) are dropped unless
       their exact lifecycle: subtree has been explicitly trusted via
       apm lifecycle trust (see apm_cli.core.script_trust). Policy and
@@ -700,11 +710,21 @@ def build_runner_from_context(
     # suppresses scripts, as does a policy that cannot be resolved at all
     # (for example an inheritance chain error). Errors never raise into the
     # command.
+    #
+    # Under fetch_failure_default=warn an unavailable policy does NOT
+    # suppress scripts (the warn posture is unchanged), but the operator
+    # must still be told org policy could not be enforced before lifecycle
+    # scripts run -- otherwise the scripts fire with no notice at all
+    # (#4913). The notice is emitted once per command logger.
     suppressed_reason = None
+    unresolved_warn = False
     try:
         from apm_cli.install.errors import PolicyViolationError
         from apm_cli.policy.discovery import discover_policy_with_chain
-        from apm_cli.policy.outcome_routing import route_discovery_outcome
+        from apm_cli.policy.outcome_routing import (
+            classify_discovery_outcome,
+            route_discovery_outcome,
+        )
         from apm_cli.policy.project_config import read_project_fetch_failure_default
 
         # Discovery joins paths onto the root, so a str root would raise
@@ -715,14 +735,28 @@ def build_runner_from_context(
         if resolved is not None and resolved.executables.deny_all:
             suppressed_reason = "org policy (executables.deny_all)"
         elif fetch_result is not None:
+            fetch_failure_default = read_project_fetch_failure_default(root)
             try:
                 route_discovery_outcome(
                     fetch_result,
                     logger=None,
-                    fetch_failure_default=read_project_fetch_failure_default(root),
+                    fetch_failure_default=fetch_failure_default,
                 )
             except PolicyViolationError:
                 suppressed_reason = "org policy could not be enforced"
+            else:
+                # No block: under warn an unresolved policy leaves scripts
+                # running, so surface a one-time notice (#4913). A resolved
+                # policy or a clean "no policy" outcome (absent /
+                # no_git_remote with no assertion) is not unresolved.
+                route = classify_discovery_outcome(
+                    fetch_result, fetch_failure_default=fetch_failure_default
+                )
+                unresolved_warn = (
+                    fetch_failure_default != "block"
+                    and route.unresolved
+                    and route.policy is None
+                )
     except Exception:
         _logger.debug("Lifecycle org-policy check failed", exc_info=True)
         suppressed_reason = "org policy could not be enforced"
@@ -739,6 +773,19 @@ def build_runner_from_context(
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
+
+    if unresolved_warn and logger is not None:
+        # Scripts run, but the operator must know org policy was not applied
+        # before they do. One notice per command logger (#4333, #4913).
+        if getattr(logger, _UNRESOLVED_POLICY_NOTED, None) is not True:
+            emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
+            if emit is not None:
+                emit(
+                    "org policy not applied to lifecycle scripts "
+                    "(policy unavailable; fetch_failure_default=warn)"
+                )
+            with contextlib.suppress(AttributeError):
+                setattr(logger, _UNRESOLVED_POLICY_NOTED, True)
 
     project_trusted = is_fingerprint_trusted(project_yml, project_fp)
 
