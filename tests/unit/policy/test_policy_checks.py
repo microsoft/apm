@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import textwrap  # noqa: F401
+from pathlib import Path
 
 import pytest
 
@@ -890,3 +891,29 @@ def test_transitive_eligibility_reads_mcp_allow_alone_on_both_paths(
     assert admission.refuses_transitive("srv") is refused
     assert verdicts["mcp-trust-transitive"] is not refused
     assert verdicts["mcp-denylist"] is ("srv" not in deny)
+
+
+class _UnreadablePath(type(Path())):
+    """A claim the symlink probe cannot stat (for example ENAMETOOLONG)."""
+
+    def is_symlink(self):
+        raise OSError(36, "File name too long")
+
+
+def test_an_unreadable_recorded_path_makes_the_proof_fail_not_the_audit(tmp_path: Path) -> None:
+    """The symlink probe never aborts the audit: an unreadable claim proves nothing."""
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.policy.allowlist_remedy import _final_symlinks
+
+    deployed = ".github/instructions/evil.instructions.md"
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])
+    )
+    project = SimpleNamespace(
+        project_root=_UnreadablePath(tmp_path), lock=lock, modules_dir=tmp_path / "apm_modules"
+    )
+
+    assert _final_symlinks(set(lock.dependencies), [], project) is None

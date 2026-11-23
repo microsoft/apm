@@ -58,9 +58,14 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
         stage_record,
         staged_file,
     )
+    from apm_cli.policy.outcome_routing import effective_policy_fingerprint
     from apm_cli.version import get_version
 
     plain_mode = plain_file_mode()
+    fetch = getattr(ctx, "policy_fetch", None)
+    policy = effective_policy_fingerprint(
+        fetch, disabled=fetch is None and bool(getattr(ctx, "no_policy", False))
+    )
     bodies = _package_bodies()
     previous = getattr(ctx, "existing_lockfile", None)
     version = get_version()
@@ -99,6 +104,9 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
                 # first render of these exact files recorded under this key.
                 body = _recorded_body(dep, ctx, version, files)
             record = {"v": 1, "files": files, "ascii_only": ascii_only, "body": body}
+            if policy is not None:
+                # The effective policy this install gated with (#4940 drift replay binding).
+                record["policy"] = policy
             stage_record(key, record)
 
 

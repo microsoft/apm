@@ -24,14 +24,16 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
 from apm_cli.utils.content_hash import compute_file_hash
-from tests.integration._mcp_chain_kit import Chain
+from tests.integration._mcp_chain_kit import Chain, stdio_server
 from tests.lifecycle import driver
 from tests.utils.apm_lifecycle_runner import CommandResult
 
@@ -651,3 +653,87 @@ def test_a_kill_after_two_writers_changed_one_shared_config_is_restored(
     assert _tree_state(chain.project) == before, _evidence(result)
     assert _stores(chain) == [], _evidence(result)
     assert _text(result).isascii(), _evidence(result)
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+def test_a_mode_change_on_an_mcp_config_directory_apm_created_is_kept(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5086: the native MCP config directory is journaled with its mode, so replay keeps it."""
+    chain = Chain(tmp_path / "mcp-dir", apm_binary_path)
+    chain.write_manifest([stdio_server("replay-srv", "hi")], apm=["./pkg"])
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    settings = ".kiro/settings"
+    config = f"{settings}/mcp.json"
+    _kill_mid_refusal(chain, "path+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_PATH=config)
+    config_dir = chain.project / settings
+    assert (chain.project / config).is_file(), _tree_state(chain.project)
+    _abandoned(chain)
+    os.chmod(config_dir, 0o700)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert f"Kept {settings}: it changed after the interrupted install" in _text(result), _evidence(
+        result
+    )
+    assert config_dir.is_dir(), _evidence(result)
+    assert _mode(config_dir) == 0o700, _evidence(result)
+    assert (config_dir / "mcp.json").is_file(), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+
+
+def _packed_bundle(chain: Chain, version: str) -> Path:
+    """Pack a local plugin bundle whose skill and agent change with *version*."""
+    producer = chain.isolated.work_root / "producer"
+    skill = producer / ".apm" / "skills" / "bundled-skill"
+    agents = producer / ".apm" / "agents"
+    skill.mkdir(parents=True, exist_ok=True)
+    agents.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "name": "bundled",
+        "version": version,
+        "description": "journal replay bundle fixture",
+        "targets": ["claude"],
+        "dependencies": {"apm": []},
+    }
+    (producer / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        f"---\nname: bundled-skill\ndescription: fixture skill\n---\n# skill {version}\n",
+        encoding="utf-8",
+    )
+    (agents / "bundled-agent.agent.md").write_text(
+        f'---\ndescription: "bundled agent"\n---\n# agent {version}\n', encoding="utf-8"
+    )
+    out = chain.isolated.work_root / f"out-{version}"
+    for args in (("install", "--no-policy"), ("pack", "-o", str(out))):
+        result = chain.runner.run(args, cwd=producer, env=chain.env, scenario_id=" ".join(args))
+        assert result.returncode == 0, _evidence(result)
+    return out / f"bundled-{version}"
+
+
+def test_a_local_bundle_install_killed_mid_deploy_is_replayed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A local bundle install journals its deploy writes like any install (#5046)."""
+    chain = Chain(tmp_path / "bundle", apm_binary_path, dirs=(".claude",))
+    v1, v2 = _packed_bundle(chain, "1.0.0"), _packed_bundle(chain, "2.0.0")
+    chain.ok("install", str(v1))
+    before = _tree_state(chain.project)
+    assert "apm.lock.yaml" in before, before
+
+    _kill_mid_refusal(chain, "deploy+kill", str(v2), "--force", APM_TEST_DEPLOY_KILL_AFTER="1")
+    _abandoned(chain)
+    assert _tree_state(chain.project) != before, "the killed install deployed nothing"
+
+    result = chain.run("install", str(v1))
+
+    assert result.returncode == 0, _evidence(result)
+    assert "left by an interrupted install" in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    _assert_lock_matches_disk(chain.project)

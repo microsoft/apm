@@ -185,6 +185,18 @@ IDENTITY = (".apm-local", ".apm/deployment-receipts")
 _IDENTITY_KEY = re.compile(r"install(ation)?_?id|receipt|generated_at")
 
 
+def rooted(text: str, marker: str) -> str:
+    """Replace every spelling of the world root *marker* with ``<ROOT>``.
+
+    Windows writes the same root as ``C:\\x``, ``C:/x`` or JSON-escaped ``C:\\\\x``;
+    on POSIX all three spellings are the same string.
+    """
+    forms = {marker, marker.replace("\\", "/"), marker.replace("\\", "\\\\")}
+    for form in sorted(forms, key=len, reverse=True):
+        text = text.replace(form, "<ROOT>")
+    return text
+
+
 def digest(root: Path, skip: tuple[str, ...], world: World) -> dict[str, str]:
     """``rel path -> [x-]sha256`` of every file under *root*, symlinks by target."""
     marker = str(world.root)
@@ -194,9 +206,13 @@ def digest(root: Path, skip: tuple[str, ...], world: World) -> dict[str, str]:
         if any(rel == s or rel.startswith(s + "/") for s in skip):
             continue
         if path.is_symlink():
-            files[rel] = "link:" + str(path.readlink()).replace(marker, "<ROOT>")
+            files[rel] = "link:" + rooted(str(path.readlink()), marker)
         elif path.is_file():
-            data = path.read_bytes().replace(marker.encode(), b"<ROOT>")
+            raw = path.read_bytes()
+            try:
+                data = rooted(raw.decode("utf-8"), marker).encode("utf-8")
+            except UnicodeDecodeError:
+                data = raw.replace(marker.encode(), b"<ROOT>")
             mode = "x" if path.stat().st_mode & 0o111 else "-"
             files[rel] = mode + hashlib.sha256(data).hexdigest()
     return files
@@ -211,7 +227,7 @@ def without_identity(node: object, marker: str) -> object:
         }
     if isinstance(node, list):
         return [without_identity(v, marker) for v in node]
-    return node.replace(marker, "<ROOT>") if isinstance(node, str) else node
+    return rooted(node, marker) if isinstance(node, str) else node
 
 
 def _yaml(path: Path) -> object:
@@ -228,7 +244,7 @@ def _text(path: Path, marker: str) -> str | None:
     if not path.is_file():
         return None
     # Decode bytes: read_text would translate CRLF and hide a line-ending change.
-    return _IDENTITY_LINE.sub("", path.read_bytes().decode("utf-8").replace(marker, "<ROOT>"))
+    return _IDENTITY_LINE.sub("", rooted(path.read_bytes().decode("utf-8"), marker))
 
 
 def receipts(world: World, *, history: bool = True) -> list[object]:
@@ -302,7 +318,7 @@ def _shown(world: World, root_id: str, rel: str) -> str:
     path = (world.project if root_id == "project" else world.home) / rel
     if not path.is_file() or path.stat().st_size > 2000:
         return "<absent>" if not path.exists() else "<large>"
-    return path.read_text(encoding="utf-8", errors="replace").replace(str(world.root), "<ROOT>")
+    return rooted(path.read_text(encoding="utf-8", errors="replace"), str(world.root))
 
 
 def diff(
