@@ -111,9 +111,12 @@ def _canonical_key(key: str) -> bool:
     """Whether *key* is an absolute POSIX-spelled path with no ``.``/``..``/empty parts."""
     if not Path(key).is_absolute() or "\\" in key:
         return False
-    drive, _, rest = key.partition(":/") if PureWindowsPath(key).drive else ("", "", key)
-    parts = (rest if drive else key.lstrip("/")).split("/")
-    return all(part not in ("", ".", "..") for part in parts)
+    # The parsed Windows anchor ("C:", "//server/share") is stripped, so a UNC key is
+    # checked below its share like any drive-letter key.
+    rest = key[len(PureWindowsPath(key).drive) :]
+    if not rest.startswith("/"):
+        return False
+    return all(part not in ("", ".", "..") for part in rest[1:].split("/"))
 
 
 class _UnreadableStore(ValueError):
