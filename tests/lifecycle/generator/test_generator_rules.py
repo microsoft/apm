@@ -681,7 +681,7 @@ def _u_bin_ops(cell) -> bool:
     return (
         set(cell) == {"OP", "PRIM", "GATE"}
         and cell["PRIM"] == "bin"
-        and cell["OP"] in ("audit", "pack", "marketplace", "bundle-install")
+        and cell["OP"] in ("pack", "marketplace", "bundle-install")
         and cell["GATE"] != "denied-dependency"
     )
 
@@ -689,8 +689,8 @@ def _u_bin_ops(cell) -> bool:
 def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
     """Tripwire: U-BIN-OPS lapses the moment a premise changes in the source.
 
-    audit, pack and every marketplace subcommand must keep no user-scope
-    form, and plugin_bin_deployable must keep requiring a marketplace plugin at
+    pack and every marketplace subcommand must keep no user-scope form (audit is
+    not exempt: its drift replay fingerprints a whole native plugin's bin/), and plugin_bin_deployable must keep requiring a marketplace plugin at
     user scope (the U-BIN pin hashes that predicate); the closed-world pin of the
     bin/ writer (security/u_bin.py) keeps a local bundle from ever writing bin/.
     """
@@ -700,7 +700,7 @@ def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
     from tests.lifecycle.security import u_bin
 
     subcommands = ("package", "add", "list", "browse", "update", "remove", "audit", "check")
-    commands = [("audit",), ("pack",)]
+    commands = [("pack",)]
     commands += [("marketplace", name) for name in subcommands]
     for words in commands:
         result = CliRunner().invoke(cli, [*words, "--help"])

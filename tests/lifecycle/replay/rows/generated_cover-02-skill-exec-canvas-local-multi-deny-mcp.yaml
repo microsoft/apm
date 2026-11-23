@@ -163,6 +163,7 @@ when:
   - pair|OP=lock|TGT=multi-unchanged
 - run: apm audit
   cells:
+  - T1|OP=audit|PRIM=bin|GATE=denied-executable
   - T1|OP=audit|PRIM=canvas|GATE=denied-executable
   - T1|OP=audit|PRIM=hook|GATE=denied-executable
   - T1|OP=audit|PRIM=mcp|GATE=denied-executable
