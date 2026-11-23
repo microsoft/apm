@@ -358,6 +358,7 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
     records the files ``OverwriteGate`` would keep instead of writing. The
     gate stays the per-file backstop for anything the plan cannot see.
     """
+    return  # PERF FALSIFICATION HACK: skip keep planning -- NEVER SHIP
     from apm_cli.core.scope import InstallScope
     from apm_cli.install.deployed_paths import deployed_path_entry
     from apm_cli.integration.base_integrator import kept_edit_message
