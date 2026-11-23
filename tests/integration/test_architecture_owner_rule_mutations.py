@@ -4845,6 +4845,23 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="The lock evidence module launches git through a global declaration past an enclosing rebinding.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        launch = subprocess.run\n\n"
+            "        def _middle():\n"
+            "            def _inner():\n"
+            "                nonlocal launch\n"
+            '                return launch(["git"])\n\n'
+            "            return _inner\n\n"
+            "        _middle()\n"
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git through a nonlocal declaration two functions deep.",
+    ),
+    MutationCase(
         guard_id="install-deployment-gate-retirement",
         rule_id="install-deployment-gate-retirement",
         path="src/apm_cli/commands/uninstall/engine.py",
