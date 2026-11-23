@@ -36,6 +36,12 @@ from apm_cli.install.errors import PolicyViolationError
 # reuses each answer, except outcomes a retry in the same command may change.
 RETRY_OUTCOMES = frozenset({"cached_stale", "cache_miss_fetch_fail", "incomplete_chain"})
 
+
+def keep_policy_answer(result: PolicyFetchResult) -> bool:
+    """Reuse a policy answer within one command unless a retry there may change it."""
+    return result.outcome not in RETRY_OUTCOMES
+
+
 if TYPE_CHECKING:  # pragma: no cover - type-checking only
     from apm_cli.policy.discovery import PolicyFetchResult
     from apm_cli.policy.schema import ApmPolicy

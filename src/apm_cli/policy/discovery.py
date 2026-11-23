@@ -46,6 +46,7 @@ from ._remote import (  # noqa: F401  -- re-exported for callers/tests
     _remote_url_parts,
 )
 from .explicit_source import compose_explicit_policy
+from .outcome_routing import keep_policy_answer
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
     _DEFAULT_HASH_ALGORITHM,
@@ -250,14 +251,7 @@ def policy_disabled_by_env() -> bool:
     return os.environ.get("APM_POLICY_DISABLE", "").strip() == "1"
 
 
-def _keep_policy_answer(result: PolicyFetchResult) -> bool:
-    """Reuse an answer within one command unless a retry there may change it."""
-    from .outcome_routing import RETRY_OUTCOMES
-
-    return result.outcome not in RETRY_OUTCOMES
-
-
-@memoized_per_invocation("policy-chain", keep=_keep_policy_answer)
+@memoized_per_invocation("policy-chain", keep=keep_policy_answer)
 def discover_policy_with_chain(
     project_root: Path,
     *,
