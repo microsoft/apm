@@ -965,3 +965,31 @@ def test_run_replay_reads_only_the_route_keys_of_a_versionless_root(
     else:
         run_replay(config, CheckLogger(verbose=False))
     assert lockfile_path.read_bytes() == lock_bytes
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "name: proj\nname: again\ndependencies:\n  apm:\n    - path: ./pkg\n      native: false\n",
+        "name: proj\ndependencies:\n  apm:\n    - path: pkg-not-local\n      native: false\n",
+    ],
+    ids=["duplicate-key", "bad-native-entry"],
+)
+def test_run_replay_fails_closed_when_the_route_cannot_be_read(
+    monkeypatch, tmp_path, manifest: str
+):
+    """A root whose route choices cannot be read never replays them as automatic (#4995)."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.drift import ReplayConfig, run_replay
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "apm.yml").write_text(manifest, encoding="utf-8")
+    lockfile_path = project_root / "apm.lock.yaml"
+    LockFile().write(lockfile_path)
+    lock_bytes = lockfile_path.read_bytes()
+    config = ReplayConfig(project_root=project_root, lockfile_path=lockfile_path)
+
+    with pytest.raises(ValueError):
+        run_replay(config, CheckLogger(verbose=False))
+    assert lockfile_path.read_bytes() == lock_bytes

@@ -155,10 +155,12 @@ def _route_entries(data: dict) -> list[dict]:
 def load_route_manifest(manifest_path: Path) -> Any:
     """Read only the native route choices of the manifest at *manifest_path* (#4995).
 
-    A replay needs nothing else, so other manifest problems keep their usual
-    handling (``None``: the route stays automatic). An invalid ``native`` or
-    ``native_plugins`` value raises ``ValueError`` naming the field: the
-    replay fails closed rather than activate a plugin the manifest opts out.
+    A replay needs nothing else, so required-field checks such as ``version``
+    do not apply here. Everything a route depends on fails closed and raises:
+    an unreadable or invalid manifest (duplicate keys, anchors), an invalid
+    ``native`` or ``native_plugins`` value, or an object entry carrying
+    ``native`` that does not parse. Only a missing file or a root that is not
+    a mapping yields ``None`` (the route stays automatic).
     """
     from apm_cli.models.dependency.manifest_host import manifest_host_scope_for
     from apm_cli.models.dependency.object_fields import parse_native_route
@@ -169,13 +171,10 @@ def load_route_manifest(manifest_path: Path) -> Any:
     if not path.is_file():
         return None
     refuse_route_boolean_spellings(path)
-    try:
-        data = load_manifest(path)
-        scope = manifest_host_scope_for(data)
-    except (OSError, ValueError, _yaml_error()):
-        return None
+    data = load_manifest(path)
     if not isinstance(data, dict):
         return None
+    scope = manifest_host_scope_for(data)
     native_plugins = data.get("native_plugins")
     if "native_plugins" in data and not isinstance(native_plugins, bool):
         raise ValueError(f"Invalid {path.name}: 'native_plugins' must be true or false")
@@ -183,16 +182,7 @@ def load_route_manifest(manifest_path: Path) -> Any:
     with scope:
         for entry in _route_entries(data):
             native = parse_native_route(entry)
-            try:
-                declared = DependencyReference.parse_from_dict(entry)
-            except (ValueError, TypeError):
-                continue
+            declared = DependencyReference.parse_from_dict(entry)
             declared.native = native
             declarations.append(declared)
     return _RouteView(native_plugins, declarations)
-
-
-def _yaml_error() -> type[Exception]:
-    import yaml
-
-    return yaml.YAMLError
