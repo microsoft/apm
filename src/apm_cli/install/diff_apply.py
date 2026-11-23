@@ -428,7 +428,7 @@ def _commit(
     """
     from apm_cli.deps.lockfile import get_lockfile_path
     from apm_cli.install.fast_output import held_output, quiet
-    from apm_cli.install.transaction import journaled_apply
+    from apm_cli.install.transaction import ApplyRestoreIncomplete, journaled_apply
 
     try:
         with held_output() as held, journaled_apply() as journal:
@@ -450,7 +450,7 @@ def _commit(
                 session.record(written, targets, owner)
             session.flush()
             render()
-    except Decline:
+    except (Decline, ApplyRestoreIncomplete):
         raise
     except Exception as exc:  # an interrupt still restores, then propagates
         raise Decline(f"write failed ({type(exc).__name__})") from exc

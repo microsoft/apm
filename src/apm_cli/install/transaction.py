@@ -23,13 +23,25 @@ if TYPE_CHECKING:
     from apm_cli.install.deploy_snapshot import DeployJournal
 
 
+class ApplyRestoreIncomplete(Exception):
+    """A failed fast apply could not put every path back; the full run must not start."""
+
+    def __init__(self, issues: list[tuple[Path, str]]) -> None:
+        self.issues = issues
+        super().__init__(
+            "Some deployed files could not be restored. Close programs using them, "
+            "then copy them back from the retained pre-install copies before retrying."
+        )
+
+
 @contextlib.contextmanager
 def journaled_apply() -> Iterator[DeployJournal]:
     """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
 
     The caller records each path it creates; every path written at the
     integrator write seam inside the block is recorded too. If the block
-    raises, every recorded path is restored before the exception propagates.
+    raises, every recorded path is restored before the exception propagates;
+    a restore that leaves any path behind raises :class:`ApplyRestoreIncomplete`.
     """
     from apm_cli.core.scope import get_apm_home
     from apm_cli.install.deploy_snapshot import DeployJournal
@@ -43,9 +55,10 @@ def journaled_apply() -> Iterator[DeployJournal]:
     write_seam.listen(seam)
     try:
         yield journal
-    except BaseException:
+    except BaseException as exc:
         write_seam.stop_listening(seam)
-        journal.restore()
+        if issues := journal.restore():
+            raise ApplyRestoreIncomplete(issues) from exc
         raise
     write_seam.stop_listening(seam)
     journal.discard()

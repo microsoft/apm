@@ -190,6 +190,27 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     assert "rendered before the failure" not in capsys.readouterr().out, "fallback prints once"
 
 
+def test_an_incomplete_restore_stops_instead_of_falling_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.install.transaction import ApplyRestoreIncomplete
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    stuck = project / "locked.md"
+    monkeypatch.setattr(DeployJournal, "restore", lambda self: [(stuck, "in use")])
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+
+    def render() -> None:
+        raise OSError("disk full")
+
+    with pytest.raises(ApplyRestoreIncomplete) as caught:
+        diff_apply._commit(project, None, [], [], [], session, False, render)
+    assert caught.value.issues == [(stuck, "in use")]
+
+
 def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
     target = tmp_path / "x.md"
     target.write_text("user\n", encoding="utf-8")

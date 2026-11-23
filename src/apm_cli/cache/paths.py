@@ -77,6 +77,7 @@ def get_cache_root(*, no_cache: bool = False, ensure: bool = True) -> Path:
         ValueError: If the resolved path is invalid (contains NUL bytes,
             is empty after expansion).
     """
+    ensure = ensure and cache_writes_allowed()
     # Escape hatch: APM_NO_CACHE or explicit no_cache flag
     if no_cache or os.environ.get("APM_NO_CACHE", "").strip() in ("1", "true", "yes"):
         return _get_temp_cache_root()

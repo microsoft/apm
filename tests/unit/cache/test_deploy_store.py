@@ -81,6 +81,18 @@ def test_a_read_only_decision_rejects_a_tampered_entry_without_touching_the_stor
     assert good_entry.stat().st_mtime == 1
 
 
+def test_a_read_only_decision_never_creates_the_cache_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.cache.paths import get_cache_root, read_only_caches
+
+    root = tmp_path / "absent-cache"
+    monkeypatch.setenv("APM_CACHE_DIR", str(root))
+    with read_only_caches():
+        assert get_cache_root() == root.resolve() or get_cache_root() == root
+    assert not root.exists()
+
+
 def test_bytes_that_do_not_hash_to_the_key_are_never_stored(tmp_path: Path) -> None:
     store, root = _store(tmp_path)
     key = hashlib.sha256(b"something else").hexdigest()

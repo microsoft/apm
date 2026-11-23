@@ -78,6 +78,7 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
         from apm_cli.install import diff_apply
         from apm_cli.install.locking import lifecycle_operation
         from apm_cli.install.service import InstallService
+        from apm_cli.install.transaction import ApplyRestoreIncomplete
 
         current = click.get_current_context()
         root, argv = Path.cwd(), list(raw)
@@ -86,9 +87,19 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
         decide = _decide_only()
         # Deciding only reads: no lifecycle lock (it writes lock state) and no cache upkeep.
         with read_only_caches() if decide else lifecycle_operation():
-            done = diff_apply.try_apply(
-                options, argv, root, frozen_disposition=disposition, decide_only=decide
-            )
+            try:
+                done = diff_apply.try_apply(
+                    options, argv, root, frozen_disposition=disposition, decide_only=decide
+                )
+            except ApplyRestoreIncomplete as exc:
+                # The tree is not the pre-run tree: report it, never run the pipeline on it.
+                from apm_cli.core.command_logger import InstallLogger
+
+                logger = InstallLogger(verbose=False, dry_run=False, partial=False)
+                logger.error(str(exc))
+                for path, reason in exc.issues:
+                    logger.error(f"Deploy restore path {path}: {reason}")
+                current.exit(1)
         if decide:
             current.exit(DECIDE_EXIT)
         if done:
