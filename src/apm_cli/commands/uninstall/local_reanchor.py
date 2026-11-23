@@ -129,7 +129,7 @@ def _respelled_descendants(
             continue
         copy = row.to_dependency_ref().get_install_path(modules_dir)
         _require_copy(copy, key, label, modules_dir)
-        _require_fresh_copy(row, real_dir, copy, key, label)
+        _require_fresh_copy(row, real_dir, copy, key, label, modules_dir)
         respelled[key] = (via[1], nearest[0], real_dir, declared)
     return respelled
 
