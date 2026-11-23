@@ -206,13 +206,15 @@ file and why, then offers two remedies:
   marks at least one file `--trust-lockfile would delete it`.
 
 The refusal marks each file `--trust-lockfile would delete it` or
-`kept even with --trust-lockfile`. With `--trust-lockfile`, uninstall deletes
-a file only when no receipt exists for it, its locked version cannot be
-rendered, and its bytes equal the one hash `apm.lock.yaml` records for it. It
-prints each deleted path. An edited file, a file a render or receipt disagrees
-with, a file the lockfile records no single hash for, an unreadable or
-symlinked file, and every file when receipt state cannot be read (including a
-receipt store no installation marker binds) are kept and named. In a skill
+`kept even with --trust-lockfile`. `--trust-lockfile` adds one lockfile-only
+path: a file with no receipt whose locked version cannot be rendered is deleted
+when its bytes equal the one hash `apm.lock.yaml` records for it. It prints each
+such deleted path. The flag never deletes on the lockfile hash alone an edited
+file, a file a render or receipt disagrees with, a file the lockfile records no
+single hash for, an unreadable or symlinked file, or any file when receipt state
+cannot be read (including a receipt store no installation marker binds); those
+are kept and named. Receipt- or render-backed deletion still applies as without
+the flag, so the flag is not a preservation guarantee. In a skill
 directory, each eligible file is deleted and only the kept files stay. Kept
 files do not fail the command, and the package leaves `apm.yml` and
 `apm.lock.yaml`; a file that could not be deleted still fails it.
