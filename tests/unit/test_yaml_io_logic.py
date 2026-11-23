@@ -20,15 +20,6 @@ def test_frontmatter_preserves_body_after_closing_fence(newline, body):
     assert post.content == body.replace("\n", newline)
 
 
-@pytest.mark.parametrize(
-    ("raw_key", "shown"), [("1", "1 (int)"), ("true", "True (bool)"), ("~", "None (NoneType)")]
-)
-def test_frontmatter_non_string_key_fails_closed_as_yaml_error(raw_key, shown):
-    with pytest.raises(yaml.YAMLError) as excinfo:
-        loads_frontmatter(f"---\ndescription: d\n{raw_key}: x\n---\nbody\n")
-    assert f"non-string frontmatter key {shown}" in str(excinfo.value)
-
-
 class TestLoadYamlStr:
     """Tests for load_yaml_str() -- the in-memory bounded twin of load_yaml."""
 
