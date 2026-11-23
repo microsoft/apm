@@ -225,12 +225,16 @@ def test_a_previewed_install_of_a_non_tip_commit_leaves_no_reachability_state(
     tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = _project(tmp_path, origin.m1)
-    cache = tmp_path / "cache"
+    home = tmp_path / "home"
+    home.mkdir()
+    cache = home / ".cache" / "apm"
+    for name in ("APM_CACHE_DIR", "XDG_CACHE_HOME", "APM_NO_CACHE"):
+        monkeypatch.delenv(name, raising=False)
 
     def _dry_run(project: Path) -> object:
         monkeypatch.chdir(project)
         with (
-            patch.dict(os.environ, {**origin.env(), "APM_CACHE_DIR": str(cache)}, clear=False),
+            patch.dict(os.environ, {**origin.env(), "HOME": str(home)}, clear=False),
             patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
             patch(f"{_DOWNLOADER}._resolve_dep_token", return_value=None),
             patch(f"{_DOWNLOADER}._resolve_dep_auth_ctx", return_value=None),
@@ -247,7 +251,8 @@ def test_a_previewed_install_of_a_non_tip_commit_leaves_no_reachability_state(
     result = _dry_run(project)
 
     assert result.exit_code == 0, result.output
-    assert not (cache / "reachability").exists()
+    # Not even an empty default cache root is created by the preview.
+    assert not cache.exists()
     assert not (project / "apm.lock.yaml").exists()
 
 

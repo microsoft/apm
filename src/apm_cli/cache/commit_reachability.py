@@ -179,7 +179,7 @@ def _origin(downloader, dep_ref) -> tuple[Path, str]:
 
     cache = getattr(downloader, "persistent_git_cache", None)
     root = getattr(cache, "_cache_root", None)
-    root = Path(root if isinstance(root, (str, Path)) else get_cache_root())
+    root = Path(root if isinstance(root, (str, Path)) else get_cache_root(ensure=False))
     return root, downloader._persistent_cache_remote(dep_ref, dep_ref.to_github_url())
 
 
