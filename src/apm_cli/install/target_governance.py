@@ -97,6 +97,21 @@ def target_retired(
     return name not in {profile.name for profile in (*active_targets, *declared_targets)}
 
 
+def retired_native_harnesses(
+    active_targets: Iterable[TargetProfile], declared_targets: Iterable[TargetProfile] | None
+) -> frozenset[str]:
+    """Native-plugin harnesses contraction retires, whose enable entries APM drops (#4874)."""
+    from apm_cli.native_plugins.scopes import HARNESSES
+
+    active = tuple(active_targets)
+    declared = None if declared_targets is None else tuple(declared_targets)
+    return frozenset(
+        name
+        for name in HARNESSES
+        if target_retired(name, active_targets=active, declared_targets=declared)
+    )
+
+
 def retired_native_plugins(
     lockfile: Any, active_targets: Iterable[TargetProfile], declared_targets: Any
 ) -> dict[str, tuple[str, str]]:

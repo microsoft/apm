@@ -1,0 +1,16 @@
+{
+  "issue": 4874,
+  "fixed_in": "Unreleased",
+  "summary": "A project-scope install after narrowing targets left the dropped harness's enabledPlugins entry for a whole native plugin set to true, so that harness kept loading it; contraction now retires the dropped harness's APM entry and keeps the user's own entries.",
+  "failure_modes": [
+    "cleanup",
+    "routing"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry"
+  ]
+}
