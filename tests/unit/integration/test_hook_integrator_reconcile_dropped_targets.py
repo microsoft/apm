@@ -77,8 +77,8 @@ class TestReconcileDroppedTargetsNormalCleanup:
         assert stats["errors"] == 0
         assert stats["files_removed"] >= 1
         assert not (codex_dir / "apm-hooks.json").exists()
-        native_data = json.loads((codex_dir / "hooks.json").read_text(encoding="utf-8"))
-        assert native_data.get("hooks", {}) == {}, "package-owned entry must be stripped"
+        # Only the package's entry was in it: the emptied file goes (#4852).
+        assert not (codex_dir / "hooks.json").exists(), "package-owned entry must be stripped"
 
     def test_unknown_target_name_is_silently_skipped(self, tmp_path: Path) -> None:
         """A name not in _MERGE_HOOK_TARGETS (e.g. copilot) is a no-op here --
@@ -299,5 +299,4 @@ class TestReconcileDroppedTargetsMalformedNative:
         stats = HookIntegrator().reconcile_dropped_targets(tmp_path, ["codex"])
 
         assert stats == {"files_removed": 1, "errors": 0}
-        data = json.loads(native.read_text(encoding="utf-8"))
-        assert data.get("hooks", {}) == {}
+        assert not native.exists()

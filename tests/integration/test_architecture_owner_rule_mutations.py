@@ -1739,10 +1739,35 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "if trusted is not None:",
             id="receipt-binding-without-bytes",
         ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "        kept = self.keeps_unproven_file(",
+            "        kept = self.keeps_nothing(",
+            id="adopt-adapter-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "            if not self.keeps_edited_output(",
+            "            if not self.keeps_nothing(",
+            id="hook-file-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "        # An edited copied script is kept like any managed file (#4626).\n"
+            "        if integrator.keeps_edited_output(",
+            "        if integrator.keeps_nothing(",
+            id="hook-script-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "        if self._keeps_edited_bundle(planned",
+            "        if self._keeps_nothing(planned",
+            id="canvas-bundle-not-left-whole",
+        ),
     ],
 )
 def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:
-    """No write path replaces a managed file without receipt or render evidence (#4360)."""
+    """No write path replaces a managed file without receipt or render evidence (#4360, #4626)."""
     rule_id = "install-deployment-overwrite-evidence"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
