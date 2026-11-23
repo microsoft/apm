@@ -19,6 +19,7 @@ import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.integration._install_audit_replay_kit import ReplayWorld, lock_bytes
+from tests.lifecycle.known import KnownFailure
 
 pytestmark = [
     pytest.mark.integration,
@@ -445,3 +446,148 @@ def test_a_reanchor_with_a_recorded_path_outside_the_project_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "../private.txt" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+# -- Open follow-ups, pinned as strict known cells (#5097, #5102) -------------------
+#
+# Each cell is red until its fix lands; the fix PR flips it to required.
+
+_LINK = "apm_modules/_local/e/docs/ref.md"
+_MANIFEST = {
+    "name": "proj",
+    "version": "1.0.0",
+    "targets": ["claude"],
+    "dependencies": {"apm": ["./vendor/e"]},
+    "devDependencies": {"apm": ["./vendor/d"]},
+}
+_COMPILED_LINK = KnownFailure(
+    "#5097",
+    "a compiled AGENTS.md is no recorded claim: its link into the moving copy dangles",
+    r"dangles after the re-anchor",
+)
+_LEDGER_ONLY_LINK = KnownFailure(
+    "#5097",
+    "a canonical ledger-only claim is outside the scanned view: its link dangles",
+    r"dangles after the re-anchor",
+)
+_STALE_EXCLUDED = KnownFailure(
+    "#5102",
+    "the re-anchor moves a copy whose hash-excluded files went stale",
+    r"the next install rewrote the re-anchored copy",
+)
+
+
+def _docs_world(tmp_path: Path, apm_binary_path: Path, extra=None) -> ReplayWorld:
+    """e -> f direct, dev d -> e; e ships docs/ref.md; *extra* edits the tree first."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ("../f",)), ("d", ("../e",))):
+        _skill_package(vendor / name, name, deps)
+    (vendor / "e/docs").mkdir()
+    (vendor / "e/docs/ref.md").write_text("# Ref\n", encoding="utf-8")
+    if extra is not None:
+        extra(world.project)
+    dump_yaml(_MANIFEST, world.project / "apm.yml")
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    return world
+
+
+def _assert_link_resolves(world: ReplayWorld, where: str) -> None:
+    """The uninstall may keep the copy or refuse, but the link must still resolve.
+
+    The file that names the link keeps its bytes: dropping the reference is no fix.
+    """
+    referencing = world.project / where
+    kept = referencing.read_bytes()
+    result = world.apm("uninstall", "./vendor/e", expect=None)
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode in (0, 1) and "Traceback" not in output, output
+    assert referencing.is_file() and referencing.read_bytes() == kept, (
+        f"the uninstall rewrote or removed {where}, which names {_LINK}\n{output}"
+    )
+    assert (world.project / _LINK).is_file(), (
+        f"{where} names {_LINK}, which dangles after the re-anchor\n{output}"
+    )
+
+
+@_COMPILED_LINK.mark()
+def test_a_compiled_agents_md_link_into_the_moving_copy_keeps_resolving(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5097 F1: the project's always-on instruction links e's docs in its copy; compile
+    writes the link into AGENTS.md, which is no recorded claim the re-anchor scans."""
+
+    def instruction(project: Path) -> None:
+        rules = project / ".apm/instructions/proj.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text(
+            f'---\napplyTo: "**"\ndescription: Project rules\n---\nSee [ref]({_LINK}).\n',
+            encoding="utf-8",
+        )
+
+    world = _docs_world(tmp_path, apm_binary_path, instruction)
+    world.apm("compile")
+    agents = (world.project / "AGENTS.md").read_text(encoding="utf-8")
+    assert f"]({_LINK})" in agents, agents
+    assert (world.project / _LINK).is_file()
+
+    _assert_link_resolves(world, "AGENTS.md")
+
+
+@_LEDGER_ONLY_LINK.mark()
+def test_a_ledger_only_claim_linking_into_the_moving_copy_keeps_resolving(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5097 F2: the project skill's claim lives only in the canonical ``deployments`` rows."""
+    import yaml
+
+    def own_skill(project: Path) -> None:
+        own = project / ".apm/skills/proj-skill/SKILL.md"
+        own.parent.mkdir(parents=True)
+        own.write_text(
+            "---\nname: proj-skill\ndescription: Project skill\n---\n"
+            f"See [ref](../../../{_LINK}).\n",
+            encoding="utf-8",
+        )
+
+    world = _docs_world(tmp_path, apm_binary_path, own_skill)
+    skill = ".claude/skills/proj-skill"
+    assert _LINK in (world.project / skill / "SKILL.md").read_text(encoding="utf-8")
+    lock_path = world.project / "apm.lock.yaml"
+    lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    rows = [row["value"] for row in lock.get("deployments") or ()]
+    assert any(value.startswith(skill) for value in rows), rows
+    legacy = lock.get("local_deployed_files") or []
+    lock["local_deployed_files"] = [path for path in legacy if not path.startswith(skill)]
+    assert lock["local_deployed_files"] != legacy, legacy
+    dump_yaml(lock, lock_path)
+
+    _assert_link_resolves(world, skill + "/SKILL.md")
+
+
+@_STALE_EXCLUDED.mark()
+def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5102: e's .git/HEAD (hash-excluded) changes after install; e re-anchors."""
+
+    def git_head(project: Path) -> None:
+        head = project / "vendor/e/.git/HEAD"
+        head.parent.mkdir(parents=True)
+        head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+    world = _docs_world(tmp_path, apm_binary_path, git_head)
+    (world.project / "vendor/e/.git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+
+    world.apm("uninstall", "./vendor/e")
+    lock, modules = lock_bytes(world.project), _modules(world.project)
+    installed = world.apm("install", "--no-frozen")
+
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    after = _modules(world.project)
+    changed = sorted(
+        key for key in modules.keys() | after.keys() if modules.get(key) != after.get(key)
+    )
+    assert lock_bytes(world.project) == lock, "the next install rewrote the lockfile"
+    assert not changed, f"the next install rewrote the re-anchored copy: {changed}"

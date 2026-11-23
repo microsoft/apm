@@ -25,6 +25,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -315,14 +316,12 @@ def _require_fresh_copy(
     Install recopies a changed local source, so keeping the old copy would not
     leave apm_modules as a fresh install does. An unreadable source refuses too.
     """
-    from ...install.phases.local_content import compute_local_package_hash
+    from ...install.phases.local_content import local_source_matches_copy
 
-    framed = row.content_hash_framed
     try:
         fresh = (
             source is not None
-            and compute_local_package_hash(source, framed=framed)
-            == compute_local_package_hash(copy, framed=framed)
+            and local_source_matches_copy(row, source, copy)
             and _unhashed_files_match(source, copy)
         )
     except (OSError, ValueError, TypeError):
@@ -568,7 +567,7 @@ def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> L
 
 
 def roll_back(plan: LocalReanchorPlan) -> list[str]:
-    """Restore apm.yml and apm.lock.yaml to the snapshot; return what could not be restored.
+    """Restore apm.yml, apm.lock.yaml and the receipts to the snapshot; return what was not.
 
     Every path is attempted. One that cannot be restored keeps its snapshot
     beside it (``<name>.apm-reanchor-backup``) and is named in the result, so
@@ -578,6 +577,11 @@ def roll_back(plan: LocalReanchorPlan) -> list[str]:
 
     failures: list[str] = []
     for path, text in plan.snapshot:
+        # A file still holding its snapshot is not rewritten: a read-only
+        # receipt directory must not fail a rollback that changed nothing.
+        with contextlib.suppress(OSError):
+            if path.is_file() and path.read_bytes() == text.encode("utf-8"):
+                continue
         try:
             atomic_write_text(path, text, normalize_line_endings=False)
         except OSError as exc:
@@ -606,7 +610,7 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
     Uninstall re-copies those before it rebuilds survivors, which a re-anchor
     rollback could not undo, so the re-anchor refuses them first (read-only).
     """
-    from ...install.phases.local_content import compute_local_package_hash
+    from ...install.phases.local_content import local_source_matches_copy
 
     stale = []
     for key, row in sorted(lockfile.dependencies.items()):
@@ -615,10 +619,8 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
         try:
             ref = row.to_dependency_ref()
             copy = ref.get_install_path(modules_dir)
-            framed = row.content_hash_framed
-            if copy.is_dir() and compute_local_package_hash(
-                (source_root / ref.local_path).resolve(), framed=framed
-            ) != compute_local_package_hash(copy, framed=framed):
+            source = (source_root / ref.local_path).resolve()
+            if copy.is_dir() and not local_source_matches_copy(row, source, copy):
                 stale.append(key)
         except (OSError, ValueError, TypeError):
             stale.append(key)
@@ -766,7 +768,14 @@ def _plan_reanchor_or_exit(
             "declaration in apm.yml."
         )
         sys.exit(1)
-    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+    if not plan.renames:
+        return plan
+    from ...core.deployment_ledger import materialization_evidence_paths
+
+    # The receipts go back with the lock: an interrupt after their rename never
+    # leaves lock and receipts naming different owners (#5077).
+    receipts, _identity = materialization_evidence_paths(project_root, InstallScope.PROJECT)
+    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root), receipts))
 
 
 def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
