@@ -27,7 +27,9 @@ _log = logging.getLogger(__name__)
 
 _BOOL = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0", ""})
 _REFSPEC = re.compile(r"\+?refs/[A-Za-z0-9_./*-]+:refs/[A-Za-z0-9_./*-]+")
-_BRANCH_MERGE = re.compile(r"refs/heads/[^\x00-\x20\x7f~^:?*\[\\]+")
+# Git's branch-name syntax (git check-ref-format): no colon, so never a URL or a
+# refspec; no "..", "//" or "@{", so never a path or a revision expression.
+_BRANCH_MERGE = re.compile(r"refs/heads/(?!.*(?:\.\.|//|@\{))[^\x00-\x20\x7f~^:?*\[\\]+")
 _APM_VALUE = re.compile(r"[a-z0-9-]+")
 _SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"([^"\\\n]*)")?\]')
 _KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
