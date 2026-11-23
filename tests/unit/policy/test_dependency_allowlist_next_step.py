@@ -194,6 +194,20 @@ def test_sarif_carries_the_next_step_and_other_checks_are_unchanged(tmp_path: Pa
     assert stderr[3:6] == ["[x] lockfile-exists: m", "    - d", "[x] 2 of 2 check(s) failed"]
 
 
+def test_sarif_and_text_emit_the_next_step_once_per_check(tmp_path: Path, capsys) -> None:
+    root = _several(tmp_path, ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"])
+    check = _allowlist(root)
+
+    sarif = CIAuditResult(checks=[check]).to_sarif()["runs"][0]["results"]
+    texts = [r["message"]["text"] for r in sarif]
+    stderr = _stderr(capsys, check)
+
+    assert len(texts) == len(check.details) == 3
+    assert sum(check.next_step in text for text in texts) == 1
+    assert texts[-1].endswith(f". {check.next_step}")
+    assert sum(check.next_step in line for line in stderr) == 1
+
+
 def test_an_edited_deployed_file_uninstall_would_refuse_falls_back_to_the_admin(
     tmp_path: Path, capsys
 ) -> None:
