@@ -37,16 +37,15 @@ def _hook_package(root: Path, name: str, matcher: str) -> None:
 
 
 def _manifest(world: ReplayWorld, names: list[str], targets: tuple[str, ...] = ("claude",)) -> None:
-    dump_yaml(
-        {
-            "name": "proj",
-            "version": "1.0.0",
-            "targets": list(targets),
-            "dependencies": {"apm": [f"./vendor/{name}" for name in names]},
-            "executables": {"allow": {f"./vendor/{name}": {"hooks": True} for name in names}},
-        },
-        world.project / "apm.yml",
-    )
+    manifest = {
+        "name": "proj",
+        "version": "1.0.0",
+        "dependencies": {"apm": [f"./vendor/{name}" for name in names]},
+        "executables": {"allow": {f"./vendor/{name}": {"hooks": True} for name in names}},
+    }
+    if targets:
+        manifest["targets"] = list(targets)
+    dump_yaml(manifest, world.project / "apm.yml")
 
 
 def _entries(world: ReplayWorld) -> dict[str, list[str]]:
@@ -132,6 +131,44 @@ def test_install_retires_the_hooks_in_a_declared_target_it_skips(
     assert "echo h" not in (world.project / ".gemini" / "settings.json").read_text("utf-8")
 
 
+def test_install_retires_the_hooks_in_a_flag_only_target_it_skips(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Without targets: in apm.yml, a runtime chosen only by --target earlier is still cleaned."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    _hook_package(world.project / "vendor" / "h", "h", "Bash")
+    for root in (".claude", ".gemini"):
+        (world.project / root).mkdir()
+    _manifest(world, ["h"], ())
+    world.apm("install", "--target", "claude,gemini")
+    gemini = world.project / ".gemini" / "apm-hooks.json"
+    assert "_local/h" in gemini.read_text(encoding="utf-8")
+
+    _manifest(world, [], ())
+    world.apm("install", "--target", "claude")
+
+    assert "_local/h" not in gemini.read_text(encoding="utf-8")
+
+
+def test_install_survives_a_malformed_hook_event(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A null event in a config the sidecar still records never aborts install."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    _hook_package(world.project / "vendor" / "h", "h", "Bash")
+    (world.project / ".claude").mkdir()
+    _manifest(world, ["h"])
+    world.apm("install")
+    settings = world.project / ".claude" / "settings.json"
+    settings.write_text(json.dumps({"hooks": {"PreToolUse": None}}) + "\n", encoding="utf-8")
+
+    _manifest(world, [])
+    result = world.apm("install", expect=None)
+
+    text = result.stdout + result.stderr
+    assert result.returncode == 0, text
+    assert "Traceback" not in text, text
+    assert json.loads(settings.read_text(encoding="utf-8")) == {"hooks": {"PreToolUse": None}}
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
 def test_install_never_rewrites_a_linked_hook_config(tmp_path: Path, apm_binary_path: Path) -> None:
     """A .claude directory replaced by a symlink is not followed; the row stays for a retry."""
@@ -155,8 +192,9 @@ def test_install_never_rewrites_a_linked_hook_config(tmp_path: Path, apm_binary_
 @pytest.mark.skipif(
     sys.platform == "win32" or os.geteuid() == 0, reason="needs an unwritable directory"
 )
+@pytest.mark.parametrize("command", [("install",), ("install", "--update")])
 def test_install_retries_a_hook_config_it_could_not_rewrite(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
 ) -> None:
     """A failed rewrite keeps the lock row; the next install retires the entry."""
     world = ReplayWorld.create(tmp_path, apm_binary_path)
@@ -168,7 +206,7 @@ def test_install_retries_a_hook_config_it_could_not_rewrite(
     _manifest(world, [])
     claude.chmod(0o555)
     try:
-        world.apm("install", expect=None)
+        world.apm(*command, expect=None)
     finally:
         claude.chmod(0o755)
     assert "_local/h" in (world.project / "apm.lock.yaml").read_text(encoding="utf-8")
