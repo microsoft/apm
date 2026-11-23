@@ -279,9 +279,50 @@ def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> L
     )
 
 
-def roll_back(plan: LocalReanchorPlan) -> None:
-    """Restore apm.yml and apm.lock.yaml to the snapshot; receipts were never moved."""
+def roll_back(plan: LocalReanchorPlan) -> list[str]:
+    """Restore apm.yml and apm.lock.yaml to the snapshot; return what could not be restored.
+
+    Every path is attempted. One that cannot be restored keeps its snapshot
+    beside it (``<name>.apm-reanchor-backup``) and is named in the result, so
+    a failed rollback is never silent.
+    """
     from ...integration.write_seam import atomic_write_text
 
+    failures: list[str] = []
     for path, text in plan.snapshot:
-        atomic_write_text(path, text, normalize_line_endings=False)
+        try:
+            atomic_write_text(path, text, normalize_line_endings=False)
+        except OSError as exc:
+            backup = path.with_name(f"{path.name}.apm-reanchor-backup")
+            try:
+                atomic_write_text(backup, text, normalize_line_endings=False)
+                kept = f"; its earlier content is kept in {backup}"
+            except OSError:
+                kept = ""
+            failures.append(f"{path} ({exc}{kept})")
+    return failures
+
+
+def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> list[str]:
+    """Direct local packages whose source no longer matches their materialized copy.
+
+    Uninstall re-copies those before it rebuilds survivors, which a re-anchor
+    rollback could not undo, so the re-anchor refuses them first (read-only).
+    """
+    from ...install.phases.local_content import compute_local_package_hash
+
+    stale = []
+    for key, row in sorted(lockfile.dependencies.items()):
+        if row.source != "local" or row.depth != 1 or not row.local_path:
+            continue
+        try:
+            ref = row.to_dependency_ref()
+            copy = ref.get_install_path(modules_dir)
+            framed = row.content_hash_framed
+            if copy.is_dir() and compute_local_package_hash(
+                (source_root / ref.local_path).resolve(), framed=framed
+            ) != compute_local_package_hash(copy, framed=framed):
+                stale.append(key)
+        except (OSError, ValueError, TypeError):
+            stale.append(key)
+    return stale

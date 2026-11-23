@@ -116,7 +116,14 @@ _NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
 
 
 def _split_still_needed_packages(
-    lockfile, packages_to_remove: list, modules_dir, apm_yml_path, logger, *, user_scope=False
+    lockfile,
+    packages_to_remove: list,
+    modules_dir,
+    apm_yml_path,
+    logger,
+    *,
+    user_scope=False,
+    dry_run=False,
 ) -> tuple[list, list, _StillNeededRepair]:
     """Split removals into full removals and declarations a survivor still needs.
 
@@ -126,7 +133,9 @@ def _split_still_needed_packages(
     (#4749). Returns ``(removed, still_needed, repair)``.
     """
     if lockfile and packages_to_remove and not modules_dir.exists():
-        _refuse_unverifiable_local_survivors(lockfile, packages_to_remove, apm_yml_path, logger)
+        _refuse_unverifiable_local_survivors(
+            lockfile, packages_to_remove, apm_yml_path, logger, dry_run=dry_run
+        )
     if not lockfile or not packages_to_remove or not modules_dir.exists():
         return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
     decision = _uninstall_orphan_decision(
@@ -163,7 +172,9 @@ def _split_still_needed_packages(
     return removed, still_needed, repair
 
 
-def _refuse_unverifiable_local_survivors(lockfile, packages: list, apm_yml_path, logger) -> None:
+def _refuse_unverifiable_local_survivors(
+    lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False
+) -> None:
     """Refuse a local removal a surviving local package still reaches while apm_modules/ is gone.
 
     Without the installed graph the still-needed split cannot run, and dropping
@@ -190,6 +201,13 @@ def _refuse_unverifiable_local_survivors(lockfile, packages: list, apm_yml_path,
 
     if not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local)):
         return
+    if dry_run:
+        # A preview writes nothing; the real uninstall refuses.
+        logger.warning(
+            f"Dry run: {_dependency_public_label(next(iter(local.values())))} cannot be "
+            "confirmed unused while apm_modules/ is missing; the uninstall itself would refuse."
+        )
+        return
     logger.error(
         f"{_dependency_public_label(next(iter(local.values())))} was not removed: apm_modules/ "
         "is missing, so APM cannot confirm whether another local package still needs it; "
@@ -212,7 +230,12 @@ def _plan_reanchor_or_exit(
     from ...core.deployment_reanchor import reanchor_receipt_problems
     from ...core.scope import InstallScope
     from ...deps.lockfile import get_lockfile_path
-    from .local_reanchor import LocalReanchorRefused, plan_local_reanchor, snapshot_for_rollback
+    from .local_reanchor import (
+        LocalReanchorRefused,
+        plan_local_reanchor,
+        refreshed_local_sources,
+        snapshot_for_rollback,
+    )
 
     project_root = apm_yml_path.parent
     labels = {_removed_lock_key(package, lockfile): package for package in still_needed}
@@ -229,6 +252,14 @@ def _plan_reanchor_or_exit(
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but the remaining packages select "
                 f"fewer skills or targets of {shrunk[0]}, which would remove deployed files"
+            )
+        if plan.renames and (
+            changed := refreshed_local_sources(lockfile, project_root / "apm_modules", project_root)
+        ):
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but the source of {changed[0]} "
+                "changed since it was installed, and refreshing its copy cannot be undone; "
+                "reinstall first"
             )
         if plan.renames and _native_owned(lockfile):
             raise LocalReanchorRefused(
@@ -274,15 +305,12 @@ def _refuse_reanchor_refresh(repair, refreshed_keys, logger) -> None:
     plan = repair.reanchor
     if not plan or not plan.renames or not refreshed_keys:
         return
-    from .local_reanchor import roll_back
-
-    roll_back(plan)
-    logger.error(
+    _roll_back_and_exit(
+        plan,
+        logger,
         "A remaining package must be redeployed, which removes its deployed files, so the "
-        "still-needed local package was not re-anchored; apm.yml and apm.lock.yaml were "
-        "restored and every file is kept."
+        "still-needed local package was not re-anchored",
     )
-    sys.exit(1)
 
 
 def _cleanup_state_unless_reanchor_refreshes(lockfile, removed_keys, refreshed, repair, logger):
@@ -293,23 +321,31 @@ def _cleanup_state_unless_reanchor_refreshes(lockfile, removed_keys, refreshed, 
     return _collect_deployed_cleanup_state(lockfile, removed_keys | refreshed)
 
 
+def _roll_back_and_exit(plan, logger, reason: str):
+    """Roll a re-anchor back, report the outcome (never silently partial) and exit 1."""
+    from ...core.remediation import RESYNC_DEPLOYED
+    from .local_reanchor import roll_back
+
+    if failures := roll_back(plan):
+        logger.error(
+            f"{reason}; these could not be restored: {', '.join(failures)}. Every deployed "
+            f"file is kept. {RESYNC_DEPLOYED.sentence()}"
+        )
+    else:
+        logger.error(f"{reason}; apm.yml and apm.lock.yaml were restored and every file is kept.")
+    sys.exit(1)
+
+
 def _abort_unsaved_reanchor(repair, logger) -> None:
     """A re-anchor whose lock was not saved restores apm.yml and exits nonzero (#4889)."""
     plan = repair.reanchor
     if not plan or not plan.renames:
         return
-    from .local_reanchor import roll_back
-
-    try:
-        roll_back(plan)
-    except OSError as exc:
-        logger.error(f"apm.yml could not be restored after the lockfile was not saved ({exc}).")
-        sys.exit(1)
-    logger.error(
-        "The lockfile was not saved, so the re-anchored package was not kept under its new "
-        "parent; apm.yml and apm.lock.yaml were restored and every file is kept."
+    _roll_back_and_exit(
+        plan,
+        logger,
+        "The lockfile was not saved, so the re-anchored package was not kept under its new parent",
     )
-    sys.exit(1)
 
 
 def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logger) -> None:
@@ -318,9 +354,7 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
     if not plan or not plan.renames:
         return
     from ...core.deployment_reanchor import rename_receipt_owners
-    from ...core.remediation import RESYNC_DEPLOYED
     from ...deps.lockfile import LockFile
-    from .local_reanchor import roll_back
 
     committed = LockFile.read(lockfile_path)
     renamed = {new for old, new in plan.renames.items() if old != new}
@@ -330,20 +364,11 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
         rename_receipt_owners(deploy_root, scope, committed, plan.renames)
     except (OSError, ValueError) as exc:
         # One transaction: without its receipts the re-anchor does not stand.
-        try:
-            roll_back(plan)
-        except OSError as restore_exc:
-            logger.error(
-                f"Deployment receipts were not moved to the re-anchored package ({exc}), "
-                f"and apm.yml and apm.lock.yaml could not be restored ({restore_exc}); "
-                f"every file is kept. {RESYNC_DEPLOYED.sentence()}"
-            )
-            sys.exit(1)
-        logger.error(
-            f"Deployment receipts could not be moved to the re-anchored package ({exc}); "
-            "apm.yml and apm.lock.yaml were restored and every file is kept."
+        _roll_back_and_exit(
+            plan,
+            logger,
+            f"Deployment receipts could not be moved to the re-anchored package ({exc})",
         )
-        sys.exit(1)
 
 
 def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
@@ -385,7 +410,7 @@ def _refuse_still_needed_local(still_needed: list, parents, lockfile, logger) ->
 
 
 def _split_removals(
-    packages_to_remove: list, lockfile, paths: tuple, logger, *, user_scope: bool
+    packages_to_remove: list, lockfile, paths: tuple, logger, *, user_scope: bool, dry_run=False
 ) -> tuple[list, list, list, _StillNeededRepair]:
     """Split the selection into full, selected-profile and declaration-only removals."""
     removed, retained = _split_selected_profile_packages(
@@ -393,7 +418,7 @@ def _split_removals(
     )
     modules_dir, apm_yml_path = paths
     removed, still_needed, repairs = _split_still_needed_packages(
-        lockfile, removed, modules_dir, apm_yml_path, logger, user_scope=user_scope
+        lockfile, removed, modules_dir, apm_yml_path, logger, user_scope=user_scope, dry_run=dry_run
     )
     return removed, retained, still_needed, repairs
 
@@ -1410,6 +1435,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             (modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
+            dry_run=dry_run,
         )
 
         # Fire scripts only after every requested identifier has selected one
@@ -1464,6 +1490,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             (modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
+            dry_run=dry_run,
         )
         surviving_deps = _surviving_declarations(
             current_deps, [*packages_to_remove, *still_needed_packages]
