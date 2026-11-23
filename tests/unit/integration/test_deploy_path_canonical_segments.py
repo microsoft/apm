@@ -69,3 +69,50 @@ def test_no_recorded_path_in_the_lockfile_corpus_has_a_dot_segment() -> None:
         if "." in path.replace("\\", "/").split("/")
     ]
     assert dotted == []
+
+
+_HOOK = ".github/hooks/pkg-apm.json"
+_DOTTED = ".github/hooks/./pkg-apm.json"
+
+
+def _sync_dotted_hook(root: Path, *, consent: bool) -> tuple[Path, dict]:
+    from apm_cli.integration.cleanup import DeploymentEvidence
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    path = root / _HOOK
+    path.parent.mkdir(parents=True)
+    path.write_text('{"hooks": {}}\n', encoding="utf-8")
+    evidence = DeploymentEvidence(
+        deploy_root=root, receipts={}, render=lambda _owner: None, kept=()
+    )
+    if consent:
+        evidence.consent_to_lockfile_hashes()
+    stats = HookIntegrator().sync_integration(
+        None,
+        root,
+        managed_files={_DOTTED},
+        # The recorded hash matches: only the spelling decides the outcome.
+        managed_file_hashes={_DOTTED: compute_file_hash(path)},
+        evidence=evidence,
+    )
+    return path, stats
+
+
+def test_a_dot_segment_claim_without_consent_is_refused_and_nothing_is_removed(
+    tmp_path: Path,
+) -> None:
+    path, stats = _sync_dotted_hook(tmp_path, consent=False)
+
+    assert path.exists()
+    assert stats["files_removed"] == 0
+    assert _DOTTED in stats["unsafe_paths"]
+
+
+def test_a_dot_segment_claim_consent_keeps_is_kept_not_removed(tmp_path: Path) -> None:
+    path, stats = _sync_dotted_hook(tmp_path, consent=True)
+
+    assert path.exists()
+    assert stats["files_removed"] == 0
+    assert stats["errors"] == 0
+    assert _DOTTED not in stats["unsafe_paths"]
