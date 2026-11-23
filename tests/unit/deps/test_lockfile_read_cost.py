@@ -381,3 +381,24 @@ class TestRecordedParseAdmission:
         assert parse_key(text) not in _parsed_texts
         with pytest.raises(yaml.YAMLError, match="character budget"):
             parse_lockfile_text(text)
+
+
+@pytest.mark.parametrize("where", ["value", "key"])
+@pytest.mark.parametrize("brk", ["\x85", "\u2028", "\u2029"], ids=["nel", "ls", "ps"])
+def test_a_text_with_a_yaml_line_break_reads_like_a_fresh_parse(where, brk):
+    from apm_cli.deps.lockfile_container import parse_lockfile_text, remember_lockfile_text
+
+    odd = f"a{brk}b-{uuid.uuid4().hex}"
+    document = (
+        {"lockfile_version": "1", "x": odd}
+        if where == "value"
+        else {
+            "lockfile_version": "1",
+            odd: "v",
+        }
+    )
+    text = yaml_io.yaml_to_str(document)
+
+    remember_lockfile_text(text, document)
+
+    assert parse_lockfile_text(text) == yaml_io.load_machine_yaml_str(text)
