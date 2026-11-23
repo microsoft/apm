@@ -1443,7 +1443,8 @@ def test_an_unpinned_entry_reads_back_with_platform_line_endings(tmp_path: Path)
     policy, _warnings = load_policy(_LEAF)
     _write_cache(_REF, policy, tmp_path)
     document = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.yml"
-    document.write_bytes(document.read_bytes().replace(b"\n", b"\r\n"))
+    lf_text = document.read_bytes().replace(b"\r\n", b"\n")  # Windows wrote CRLF already
+    document.write_bytes(lf_text.replace(b"\n", b"\r\n"))
 
     entry = _read_cache_entry(_REF, tmp_path)
 

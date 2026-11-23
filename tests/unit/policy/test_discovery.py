@@ -1171,7 +1171,7 @@ class TestAutoDiscover(unittest.TestCase):
 
     # --- GitLab namespace ancestry walk (#2753) ---
 
-    def _walk(self, side_effect, namespaces=None, **kwargs):
+    def _walk(self, side_effect, namespaces=None, prepare=None, no_cache=True, **kwargs):
         """Run _auto_discover over a nested GitLab ancestry with a fake fetch."""
         levels = namespaces or ["acme/dept-a/team-x", "acme/dept-a", "acme"]
         with (
@@ -1185,7 +1185,9 @@ class TestAutoDiscover(unittest.TestCase):
             ) as fetch,
             tempfile.TemporaryDirectory() as tmpdir,
         ):
-            result = _auto_discover(Path(tmpdir), no_cache=True, **kwargs)
+            if prepare is not None:
+                prepare(Path(tmpdir))
+            result = _auto_discover(Path(tmpdir), no_cache=no_cache, **kwargs)
         return result, fetch
 
     @staticmethod
@@ -1291,26 +1293,20 @@ class TestAutoDiscover(unittest.TestCase):
         """A pinned project resolves every namespace from the source, never the cache."""
         levels = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
         ancestry_ref = "gitlab.com/acme/dept-a/team-x/apm-policy#ancestry"
-        with (
-            patch(
-                "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
-                return_value=("acme", "gitlab.com", None),
-            ),
-            patch("apm_cli.policy._gitlab._gitlab_namespace_descending", return_value=levels),
-            patch(
-                "apm_cli.policy._gitlab._fetch_from_gitlab_repo",
-                side_effect=[self._found(level) for level in levels],
-            ) as fetch,
-            tempfile.TemporaryDirectory() as tmpdir,
-        ):
-            root = Path(tmpdir)
+
+        def poison(root):
             # Cache entries that say less than the namespaces do.
-            _write_cache(ancestry_ref, ApmPolicy(), root)
-            for level in levels:
-                _write_cache(f"gitlab.com/{level}/apm-policy", ApmPolicy(), root)
-            result = _auto_discover(root, no_cache=False, expected_hash="sha256:" + "a" * 64)
-            cached = _get_cache_dir(root) / f"{_cache_key(ancestry_ref)}.yml"
-            self.assertTrue(cached.exists())
+            refs = [ancestry_ref] + [f"gitlab.com/{level}/apm-policy" for level in levels]
+            for ref in refs:
+                _write_cache(ref, ApmPolicy(), root)
+                self.assertTrue((_get_cache_dir(root) / f"{_cache_key(ref)}.yml").exists())
+
+        result, fetch = self._walk(
+            [self._found(level) for level in levels],
+            prepare=poison,
+            no_cache=False,
+            expected_hash="sha256:" + "a" * 64,
+        )
 
         self.assertEqual(result.source, "org:gitlab.com/acme/dept-a/team-x/apm-policy")
         self.assertEqual([c.kwargs["no_cache"] for c in fetch.call_args_list], [True] * 3)
