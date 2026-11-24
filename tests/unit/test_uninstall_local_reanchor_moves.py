@@ -621,12 +621,13 @@ def test_a_fresh_swap_rolled_back_after_the_save_restores_the_original_copy(
     modules = tmp_path / "apm_modules"
     current = _package(modules, "e")
     (current / ".git").mkdir()
-    (current / ".git/HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    # Bytes, not text: write_text would add CR on Windows and change the HEADs compared.
+    (current / ".git/HEAD").write_bytes(b"ref: refs/heads/main\n")
     source = tmp_path / "vendor/e"
     source.mkdir(parents=True)
     (source / "apm.yml").write_bytes((current / "apm.yml").read_bytes())
     (source / ".git").mkdir()
-    (source / ".git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+    (source / ".git/HEAD").write_bytes(b"ref: refs/heads/other\n")
     manifest, lock = tmp_path / "apm.yml", tmp_path / "apm.lock.yaml"
     manifest.write_text("name: proj\n", encoding="utf-8")
     lock.write_text("lockfile_version: '4'\n", encoding="utf-8")
