@@ -385,10 +385,10 @@
     },
     "install-cold-auth": {
       "fs.files_written": {
-        "budget": 1212,
-        "measured": 1154,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1353,
+        "measured": 1289,
+        "reason": "#5366 lever 2a+C in-process checkout writes (worktree + index from the pack); max of CI Lifecycle Smoke 3 (1289) and Integration 13 (1287) at e019fe2f",
+        "pr": "#5366"
       },
       "fs.hash_objects": {
         "budget": 1979,
