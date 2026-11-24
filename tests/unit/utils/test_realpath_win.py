@@ -371,7 +371,7 @@ def test_release_under_another_spelling_releases_everything(project: Path) -> No
     with _held_scope(project) as package:
         resolve_path(package / "sub" / "b.txt")
         assert held_count() >= 3
-        release_held("\\\\?\\" + str(package))
+        realpath_win.release_held("\\\\?\\" + str(package))
         assert held_count() == 0
         robust_rmtree(package)
         assert not package.exists()
