@@ -33,12 +33,14 @@ Error contract:
       so it surfaces as a loud traceback rather than a silent skip.
 """
 
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 
 from ..security.gate import BLOCK_POLICY, ScanVerdict, SecurityGate
 from ..utils.atomic_io import atomic_write_text, umask_file_mode
 from ..utils.path_security import has_symlink_component, symlinked_deploy_refusal
+from ..utils.paths import portable_relpath
 from .build_id import stabilize_build_id
 from .constants import BUILD_ID_PLACEHOLDER
 
@@ -56,6 +58,35 @@ class CompiledOutputPolicyError(RuntimeError):
 
 class CompiledOutputLinkError(OSError):
     """Raised before mutation when a compiled output path crosses a symlink."""
+
+
+class CompiledOutputSpecialFileError(OSError):
+    """Raised before any read when a compiled output path is not a regular file (#5187)."""
+
+
+def refuse_unsafe_output(path: Path, base_dir: Path, *, managed: bool) -> None:
+    """Refuse an output that is a FIFO, socket, device or directory before reading it.
+
+    A managed-section output must also not be a symlink. Reading a FIFO would block.
+    """
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        return
+    if stat.S_ISLNK(mode):
+        if managed:
+            from .managed_section import ManagedSectionError
+
+            raise ManagedSectionError(
+                f"{path} is a symlink. Managed-section output must be a regular file."
+            )
+        return
+    if not stat.S_ISREG(mode):
+        shown = portable_relpath(path, base_dir)
+        raise CompiledOutputSpecialFileError(
+            f"Refusing to compile: {shown} is not a regular file "
+            "(a FIFO, socket, device or directory), so it was not read."
+        )
 
 
 def _output_root(base_dir: Path, target: Path) -> Path | None:
