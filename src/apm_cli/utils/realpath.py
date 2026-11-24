@@ -79,7 +79,7 @@ def _missing_realpath(text: str, depth: int) -> str | None:
 
 _WIN_FAST = sys.platform == "win32"
 # PERF PROTOTYPE: compute Path.resolve() too and fail loudly on any difference.
-_WIN_DIFFERENTIAL = False
+_WIN_DIFFERENTIAL = True
 _WIN_PREFIX = "\\\\?\\"
 _WIN_RESERVED = frozenset(
     ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
@@ -227,8 +227,9 @@ def _hold(directory: str) -> tuple[str, int] | None:
     return final[len(_WIN_PREFIX) :], handle
 
 
-def _holdable(component: str) -> bool:
-    lowered = component.lower()
+def _holdable(path: str) -> bool:
+    """A7: nothing at or below a component APM stages, renames or deletes is held."""
+    lowered = path.lower()
     return not any(marker in lowered for marker in _NEVER_HOLD)
 
 
@@ -287,7 +288,7 @@ def _held_realpath(text: str) -> str | None:
             return None  # R2 case/long-name drift, R1 reparse point
         resolved = f"{resolved.rstrip(chr(92))}\\{name}"
         current = path
-        if attributes & _DIRECTORY and _holdable(part):
+        if attributes & _DIRECTORY and _holdable(path):
             held = _hold(path)
             if held is None:
                 return None
