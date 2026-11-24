@@ -166,9 +166,9 @@ class DeployStore:
             # PERF PROTOTYPE (stat-cut): one lstat proves an existing directory;
             # only a missing one is created and then proven.
             if not self._real_dir(directory):
-                if os.path.lexists(directory):
-                    return None
-                directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+                # W3d S6: no exist_ok; an existing entry is proven below like any other.
+                with contextlib.suppress(FileExistsError):
+                    directory.mkdir(mode=0o700, parents=True)
                 if not self._real_dir(directory):
                     return None
         try:
