@@ -30,7 +30,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-RECORD_VERSION = 2
+RECORD_VERSION = 3
+# A record's provenance (W3d A5): "proven" when the engine proved the recorded run a
+# no-op; "attested" when a successful full install committed the state it keys, or
+# when a run replayed an attested record. Provenance never upgrades.
+PROVEN, ATTESTED = "proven", "attested"
 RECORDS_DIR = "verdicts"
 KEY_FILE = "verdict.key"
 # Argv the record serves; anything else runs the CLI as usual.
@@ -196,7 +200,13 @@ _USER_SURFACES = (
     ".hermes/config.yaml",
 )
 
-_VERIFIED_NOOP: list[bool] = []
+_VERIFIED_NOOP: list[str] = []
+# A full install that committed a convergence-clean state, and the target line it
+# announced (W3d A1, A2): written as an attested record, never as replayable output.
+_ATTESTED_INSTALL: list[str] = []
+# recording()'s entry state, which an attested check inside the CLI keys (O3).
+_RUN_ENTRY: list[Any] = []
+_RUN_TARGETS: list[str] = []
 # Same values as install/noop_diff.disabled() (APM_INSTALL_FAST_PATH kill switch).
 _KILL_VALUES = frozenset({"0", "false", "no", "off"})
 # O1: the summary's elapsed seconds are templated; any other clock-dependent
@@ -316,10 +326,28 @@ def _note_proven_lock() -> None:
         _PROVEN_LOCK.append(None)
 
 
-def note_verified_noop() -> None:
-    """The install engine proved this run a no-op (under its lifecycle lock)."""
-    _VERIFIED_NOOP.append(True)
+def note_verified_noop(provenance: str = PROVEN) -> None:
+    """The install engine proved this run a no-op (under its lifecycle lock), or
+    matched an attested record (*provenance* ``attested``)."""
+    _VERIFIED_NOOP.append(provenance)
     _note_proven_lock()
+
+
+def note_run_targets(line: str) -> None:
+    """The target line the full install announced (W3d A1)."""
+    if _ACTIVE:
+        _RUN_TARGETS[:] = [line]
+
+
+def note_attested_install() -> None:
+    """A successful, convergence-clean full install committed its state (W3d A2).
+
+    The caller holds the lifecycle lock; the record is written after the CLI
+    returns, under the lock again, only over the lock bytes noted here (A6).
+    """
+    if _ACTIVE and _RUN_TARGETS:
+        _ATTESTED_INSTALL[:] = list(_RUN_TARGETS)
+        _note_proven_lock()
 
 
 def _served(argv: list[str]) -> bool:
@@ -492,6 +520,7 @@ def _inputs(
         raise ValueError("root .apm sources")  # not verdict inputs: never recorded, never a hit
     digest.put("version", str(RECORD_VERSION).encode())
     digest.put("build", str(getattr(sys.modules.get("apm_cli"), "__version__", "")).encode())
+    digest.put("build-id", _build_identity())
     digest.put("argv", "\x00".join(argv).encode())
     digest.put("root", os.path.realpath(root).encode("utf-8", "surrogateescape"))
     digest.put("platform", f"{sys.platform}|{os.sep}|{sys.version_info[:2]}".encode())
@@ -573,6 +602,14 @@ def _policy_identity(root: Path) -> Any:
         return _extract_org_host_port_from_git_remote(root)
 
 
+def _build_identity() -> bytes:
+    """The running build (W3d A3): the executable itself, so a rebuilt binary at the
+    same version never replays the old build's record."""
+    path = os.path.realpath(sys.executable)
+    info = os.stat(path)
+    return f"{path}|{info.st_size}|{info.st_mtime_ns}".encode("utf-8", "surrogateescape")
+
+
 def _names(value: Any) -> bool:
     """A record's name list: a list of strings (an empty list is a list)."""
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
@@ -580,7 +617,7 @@ def _names(value: Any) -> bool:
 
 def _body(digest: _Digest, record: dict) -> None:
     """The replayed bytes and their validity window are authenticated too (W3d R1)."""
-    for field in ("stdout", "stderr", "exit", "issued_at", "expires_at"):
+    for field in ("stdout", "stderr", "exit", "issued_at", "expires_at", "kind", "provenance"):
         digest.put(f"body:{field}", repr(record.get(field)).encode("utf-8", "surrogateescape"))
 
 
@@ -672,8 +709,12 @@ class _Miss(Exception):
     """The record does not prove this run; the message (if any) is the trace reason."""
 
 
-def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
-    """The record and its stdout, only when it proves this run; raises _Miss otherwise."""
+def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> tuple[dict, str]:
+    """The record and its stdout, only when it proves this run; raises _Miss otherwise.
+
+    *attested* selects an attested record (no output, W3d A5), which only the
+    install engine's fast path consumes; a replay never reads one.
+    """
     raw = _read_nofollow(_record_path(root))
     if raw is None or not _location_trusted(root):
         raise _Miss("")
@@ -684,6 +725,8 @@ def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
     lock_text = _read_nofollow(root / "apm.lock.yaml")
     run_env, surfaces = record.get("run_env"), record.get("surfaces")
     git_system, notice = record.get("git_system"), record.get("notice")
+    if (record.get("kind") == ATTESTED) is not attested:
+        raise _Miss("")  # an attested record has no output: only the engine consumes it
     if (
         lock_text is None
         or record.get("v") != RECORD_VERSION
@@ -751,6 +794,30 @@ def replay(argv: list[str]) -> bool:
         lock.release()
 
 
+def attested_state(argv: list[str], root: Path) -> bool:
+    """Whether an attested record proves this run's state (the engine's lock held).
+
+    The same HMAC over every live input and the same no-follow re-hash of every
+    deployed file and package copy as a replay (W3d A7), keyed at this run's
+    entry state; any doubt is False and the engine proves the run itself.
+    """
+    global _ENTRY_ENV, _ENTRY_PRESENTATION
+    if not _served(argv) or not _hits_allowed() or not _RUN_ENTRY:
+        return False
+    try:
+        if not os.path.lexists(_record_path(root)):
+            return False
+        _ENTRY_ENV, _ENTRY_PRESENTATION = _RUN_ENTRY[0]
+        _verified_stdout(argv, root, attested=True)
+    except Exception as exc:
+        _trace(f"attested miss ({exc or type(exc).__name__})")
+        return False
+    finally:
+        _ENTRY_ENV, _ENTRY_PRESENTATION = None, None
+    _trace("attested hit")
+    return True
+
+
 def _print_hit(started: float, stdout_text: str, stderr_text: str) -> bool:
     elapsed = f"{time.perf_counter() - started:.1f}"
     sys.stdout.write(stdout_text.replace(_ELAPSED, elapsed))
@@ -797,10 +864,18 @@ def recording(argv: list[str]) -> Iterator[None]:
     if not _served(argv) or not _hits_allowed():
         yield
         return
-    for state in (_VERIFIED_NOOP, _UNKNOWN, _PROVEN_LOCK):
+    for state in (
+        _VERIFIED_NOOP,
+        _UNKNOWN,
+        _PROVEN_LOCK,
+        _ATTESTED_INSTALL,
+        _RUN_ENTRY,
+        _RUN_TARGETS,
+    ):
         state.clear()
     _ENV_READS.clear()
     entry = (_env_snapshot(), _presentation())
+    _RUN_ENTRY.append(entry)
     _ENTRY_FILES[:] = [_entry_bytes("apm.yml"), _entry_bytes("apm.lock.yaml")]
     from apm_cli.install.verdict_inputs import entry_stamp
 
@@ -823,11 +898,15 @@ def recording(argv: list[str]) -> Iterator[None]:
             _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
         elif code == 0 and _VERIFIED_NOOP:
             _record_locked(argv, entry, out, err)
+        elif code == 0 and _ATTESTED_INSTALL:
+            _record_locked(argv, entry, out, err, attested=True)
         else:
             _trace("no record (not a verified no-op)")
 
 
-def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
+def _record_locked(
+    argv: list[str], entry: Any, out: _Tee, err: _Tee, *, attested: bool = False
+) -> None:
     """Record under the lifecycle lock, only over the state the run proved.
 
     The CLI released its lock when it returned: the record is written only while
@@ -849,19 +928,22 @@ def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
             current is None
             or not _PROVEN_LOCK
             or _PROVEN_LOCK[-1] != current
-            or lock_at_entry != current
+            # A full install writes the lock it attests; a no-op held it unchanged.
+            or (lock_at_entry != current and not attested)
             or _entry_bytes("apm.yml") != manifest_at_entry
         ):
             _trace("no record (apm.yml or the lock changed while the run proved its verdict)")
             return
-        _record_after(argv, entry, out, err)
+        _record_after(argv, entry, out, err, attested=attested)
     except OSError as exc:
         _trace(f"no record ({type(exc).__name__})")
     finally:
         lock.release()
 
 
-def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
+def _record_after(
+    argv: list[str], entry: Any, out: _Tee, err: _Tee, *, attested: bool = False
+) -> None:
     """Record a verified no-op's output, when every input it rests on is provable."""
     from apm_cli.core.lifecycle_scripts import discover_scripts
 
@@ -872,13 +954,38 @@ def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
     lock = _committed_lock()
     if lock is None:
         return
+    if attested and not _targets_settled(_ATTESTED_INSTALL[0]):
+        # The run created a root that widens the target set (W3d A1): a proof
+        # would deploy there, so this state is not a planner fixed point.
+        _trace("no record (the target set changed during the install)")
+        return
     deployed = frozenset(
         rel
         for key, dep in lock.dependencies.items()
         if key != "."
         for rel in getattr(dep, "deployed_file_hashes", None) or {}
     )
-    _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts), deployed)
+    if attested:
+        _write_at_entry(entry, argv, "", "", deployed, kind=ATTESTED, provenance=ATTESTED)
+        return
+    provenance = ATTESTED if ATTESTED in _VERIFIED_NOOP else PROVEN
+    out_text, err_text = "".join(out.parts), "".join(err.parts)
+    _write_at_entry(entry, argv, out_text, err_text, deployed, provenance=provenance)
+
+
+def _targets_settled(announced: str) -> bool:
+    """The target line a fresh resolution announces now equals the run's (A1)."""
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.core.target_detection import format_provenance, resolve_targets
+    from apm_cli.models.apm_package import APMPackage, package_target_declaration
+
+    root = Path.cwd()
+    try:
+        manifest = APMPackage.from_apm_yml(manifest_file(root))
+        restriction = package_target_declaration(manifest).restriction()
+        return format_provenance(resolve_targets(root, yaml_targets=restriction)) == announced
+    except Exception:
+        return False
 
 
 def _committed_lock() -> Any:
@@ -909,17 +1016,28 @@ def _write_at_entry(
     out: str,
     err: str,
     deployed: frozenset[str],
+    *,
+    kind: str = "output",
+    provenance: str = PROVEN,
 ) -> None:
     """Write the record keyed by the run's entry state (what a hit will see)."""
     global _ENTRY_ENV, _ENTRY_PRESENTATION
     _ENTRY_ENV, _ENTRY_PRESENTATION = entry
     try:
-        _write(argv, out, err, deployed)
+        _write(argv, out, err, deployed, kind=kind, provenance=provenance)
     finally:
         _ENTRY_ENV, _ENTRY_PRESENTATION = None, None
 
 
-def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozenset[str]) -> None:
+def _write(
+    argv: list[str],
+    stdout_text: str,
+    stderr_text: str,
+    deployed: frozenset[str],
+    *,
+    kind: str = "output",
+    provenance: str = PROVEN,
+) -> None:
     root = Path.cwd()
     try:
         if not _location_trusted(root):
@@ -929,17 +1047,18 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
         if lock_text is None:
             _trace("no record (no lockfile)")
             return
-        stdout_text, stamps = _ELAPSED_RE.subn(rf"\g<1>{_ELAPSED}\g<2>", stdout_text)
         from apm_cli.install import verdict_policy
 
-        templated = verdict_policy._template_ages(stdout_text)
-        if templated is None:
-            _trace("no record (a policy age without one cache entry)")
-            return
-        stdout_text = templated
-        if stamps != 1 or _CLOCK_RE.search(stdout_text) or _CLOCK_RE.search(stderr_text):
-            _trace("no record (clock-dependent output)")
-            return  # O1: only the elapsed seconds may depend on the clock
+        if kind != ATTESTED:
+            stdout_text, stamps = _ELAPSED_RE.subn(rf"\g<1>{_ELAPSED}\g<2>", stdout_text)
+            templated = verdict_policy._template_ages(stdout_text)
+            if templated is None:
+                _trace("no record (a policy age without one cache entry)")
+                return
+            stdout_text = templated
+            if stamps != 1 or _CLOCK_RE.search(stdout_text) or _CLOCK_RE.search(stderr_text):
+                _trace("no record (clock-dependent output)")
+                return  # O1: only the elapsed seconds may depend on the clock
         if verdict_policy._discovery_unproven(root, _policy_identity(root)):
             _trace("no record (discovery would fetch a policy candidate)")
             return
@@ -978,6 +1097,8 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
             "surfaces": surfaces,
             "git_system": git_system,
             "notice": notice,
+            "kind": kind,
+            "provenance": provenance,
         }
         _body(digest, record)
         record["mac"] = digest.hexdigest()
@@ -994,7 +1115,7 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
-        _trace("recorded")
+        _trace("recorded" if kind != ATTESTED else "attested")
     except (OSError, ValueError, TypeError) as exc:
         _trace(f"no record ({type(exc).__name__})")
         return

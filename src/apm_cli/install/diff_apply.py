@@ -763,6 +763,11 @@ def try_apply(
         deploy = DeployStore.open_default()
         if deploy is None:
             raise Decline("no deploy store")
+        if _attested_noop(project_root, argv, lock, fetch, targets, session):
+            _render_attested(
+                project_root, lock, fetch, targets, session, started, frozen_disposition
+            )
+            return True
         packages = _plan_packages(project_root, lock)
         receipts = session.receipt_hashes()
         _refuse_orphans(project_root, lock, receipts)
@@ -825,6 +830,54 @@ def try_apply(
         # An applied diff holds its service output, so only a no-op is recorded (#4977).
         verdict_record.note_verified_noop()
     return True
+
+
+def _attested_noop(
+    project_root: Path, argv: list[str] | None, lock: Any, fetch: Any, targets: Any, session: Any
+) -> bool:
+    """An attested record proves this state (W3d attested-record ruling).
+
+    A successful full install attested the state it committed; the record's
+    HMAC over every live input and the no-follow re-hash of every deployed file
+    and package copy hold (A7), so planning and staging would find nothing.
+    The gates that re-judge every run still run: scripts, executables, policy.
+    """
+    from apm_cli.install import verdict_record
+
+    if not verdict_record.attested_state(list(argv or []), project_root):
+        return False
+    _refuse_lifecycle_scripts(project_root)
+    _refuse_unsilent_executables(lock)
+    from apm_cli.install import noop_diff
+    from apm_cli.install.fast_output import quiet
+
+    with quiet():
+        if not noop_diff._policy_checks_pass(project_root, fetch):
+            raise Decline("policy checks")
+    return True
+
+
+def _render_attested(
+    project_root: Path,
+    lock: Any,
+    fetch: Any,
+    targets: Any,
+    session: Any,
+    started: float,
+    frozen_disposition: Any,
+) -> None:
+    """Print the no-op through the proven no-op's own path: an empty diff, journaled."""
+
+    def render() -> None:
+        _render(project_root, lock, [], [], [], started, frozen_disposition)
+
+    held = _commit(project_root, fetch, [], [], targets, session, False, render)
+    held.release()
+    _trace("no-op (attested record)")
+    from apm_cli.install import verdict_record
+
+    # Provenance never upgrades (W3d A5): this run's output record stays attested.
+    verdict_record.note_verified_noop(verdict_record.ATTESTED)
 
 
 def _render(
