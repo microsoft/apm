@@ -66,9 +66,10 @@ class LocalReanchorPlan:
     snapshot: tuple[tuple[Path, str], ...] = ()
     # (current, re-anchored) install directory of each re-keyed root (#4999).
     moves: tuple[tuple[Path, Path], ...] = ()
-    # (current install directory, its dependency reference, framed hash) of each
-    # moving copy whose hash-excluded files went stale: re-materialized (#5102).
-    fresh: tuple[tuple[Path, Any, bool], ...] = ()
+    # (current install directory, its dependency reference, framed hash, recorded
+    # content_hash) of each moving copy whose hash-excluded files went stale:
+    # re-materialized (#5102) and verified once against that hash (#5193).
+    fresh: tuple[tuple[Path, Any, bool, str | None], ...] = ()
     # Lock key -> install's breadth-first visit rank, for request order (#4999).
     visit_order: dict[str, int] = field(default_factory=dict)
     # Re-identified key -> the child keys it wins as nearest parent (#5091).
@@ -437,7 +438,7 @@ def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> t
         if stale:
             # A descendant's local_path is relative to its parent: stage from the source itself.
             sourced = replace(ref, local_path=os.path.abspath(source))
-            fresh.append((current, sourced, row.content_hash_framed))
+            fresh.append((current, sourced, row.content_hash_framed, row.content_hash))
     return tuple(fresh)
 
 
@@ -534,32 +535,69 @@ def _unhashed_files_match(source: Path, copy: Path) -> bool:
     """Whether the files the package hash skips (.git/, __pycache__/) match the copy.
 
     Install copies them through the local copier, so a change there alone still
-    makes a fresh install rewrite apm_modules (#4999).
+    makes a fresh install rewrite apm_modules (#4999). Only those subtrees are
+    compared, read in place: nothing is staged to decide (#5193).
     """
     import filecmp
-    import tempfile
-
-    from ...config import get_apm_temp_dir
-    from ...install.phases.local_content import _copy_tree_dereferencing_validated
 
     if not source.is_dir():
         return True
+    names = _unhashed_source_files(source)
+    copied = {
+        path.relative_to(copy).as_posix()
+        for path in copy.rglob("*")
+        if path.is_file() and _UNHASHED & set(path.relative_to(copy).parts)
+    }
+    # filecmp streams each pair in bounded chunks: no tree is held in memory.
+    return set(names) == copied and all(
+        filecmp.cmp(names[name], copy / name, shallow=False) for name in sorted(names)
+    )
 
-    def unhashed(root: Path) -> set[str]:
-        return {
-            path.relative_to(root).as_posix()
-            for path in root.rglob("*")
-            if path.is_file() and {".git", "__pycache__"} & set(path.relative_to(root).parts)
-        }
 
-    with tempfile.TemporaryDirectory(prefix="apm-reanchor-", dir=get_apm_temp_dir()) as stage:
-        image = Path(stage) / "package"
-        _copy_tree_dereferencing_validated(source, image, source)
-        names = unhashed(image)
-        # filecmp streams each pair in bounded chunks: no tree is held in memory.
-        return names == unhashed(copy) and all(
-            filecmp.cmp(image / name, copy / name, shallow=False) for name in sorted(names)
-        )
+_UNHASHED = frozenset({".git", "__pycache__"})
+
+
+def _unhashed_source_files(source: Path) -> dict[str, Path]:
+    """The hash-excluded files the local copier writes from *source*, by relative path.
+
+    The walk follows the copier (``_copy_tree_dereferencing_validated``): an
+    in-package link is read through, while a link out of the package, a broken
+    link, a link cycle, an unreadable directory or a special file refuses as
+    the copy would (#5193).
+    """
+    from ...utils.path_security import PathTraversalError, ensure_path_within
+
+    found: dict[str, Path] = {}
+
+    def walk(directory: Path, relative: tuple[str, ...], visited: frozenset[Path]) -> None:
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError as exc:
+            raise PathTraversalError(f"Cannot read package directory '{directory}': {exc}") from exc
+        for entry in entries:
+            parts = (*relative, entry.name)
+            target = entry
+            if entry.is_symlink():
+                try:
+                    target = entry.resolve(strict=True)
+                except OSError as exc:
+                    raise PathTraversalError(f"Symlink '{entry}' is unresolvable: {exc}") from exc
+                ensure_path_within(target, source)
+                if target.is_dir():
+                    if target in visited:
+                        raise PathTraversalError(f"Circular symlink detected: '{entry}'")
+                    walk(target, parts, visited | {target})
+                    continue
+            elif entry.is_dir():
+                walk(entry, parts, visited)
+                continue
+            if not stat.S_ISREG(target.stat().st_mode):
+                raise OSError(f"{entry} is not a regular file")
+            if _UNHASHED & set(parts):
+                found["/".join(parts)] = target
+
+    walk(source, (), frozenset())
+    return found
 
 
 def move_materializations(
@@ -1443,7 +1481,7 @@ def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
     and the fresh one takes its re-anchored path. A copy that cannot be staged
     and verified keeps the plain move (the next install rebuilds it, as today).
     """
-    fresh = {current: (ref, framed) for current, ref, framed in plan.fresh}
+    fresh = {current: (ref, framed, recorded) for current, ref, framed, recorded in plan.fresh}
     moves = []
     for current, target in plan.moves:
         stage = current.with_name(f"{_FRESH}{current.name}")
@@ -1465,9 +1503,13 @@ def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
     return tuple(moves)
 
 
-def _stage_fresh_copy(stage: Path, current: Path, ref, framed: bool, modules_dir: Path) -> bool:
-    """Write install's image of *ref* to *stage*; whether it hashes as *current* does.
+def _stage_fresh_copy(
+    stage: Path, current: Path, ref, framed: bool, recorded: str | None, modules_dir: Path
+) -> bool:
+    """Write install's image of *ref* to *stage* once; whether it hashes as the lock records.
 
+    The staged image is hashed once against the row's recorded ``content_hash``
+    (*recorded*), or the current copy when the row records none (#5193).
     Install drops a stale ``.apm-pin`` from an unmarkable (local) copy, which
     the hash does not see, so the staged image gets the same cleanup first.
     """
@@ -1484,9 +1526,8 @@ def _stage_fresh_copy(stage: Path, current: Path, ref, framed: bool, modules_dir
         _remove_marker(stage, modules_dir)
         if os.path.lexists(stage / MARKER_FILENAME):
             return False
-        return compute_local_package_hash(stage, framed=framed) == compute_local_package_hash(
-            current, framed=framed
-        )
+        expected = recorded or compute_local_package_hash(current, framed=framed)
+        return compute_local_package_hash(stage, framed=framed) == expected
     except (LocalPackageError, PathTraversalError, OSError, ValueError, TypeError):
         return False
 

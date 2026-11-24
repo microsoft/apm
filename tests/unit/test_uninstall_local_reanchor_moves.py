@@ -552,7 +552,7 @@ def test_a_dangling_link_at_a_staging_path_keeps_the_plain_move(
     target = modules / "_local" / "h1" / "e"
     outside = tmp_path / "outside"
     (current.parent / f"{prefix}e").symlink_to(outside, target_is_directory=True)
-    plan = SimpleNamespace(moves=((current, target),), fresh=((current, None, True),))
+    plan = SimpleNamespace(moves=((current, target),), fresh=((current, None, True, None),))
     staged: list[Path] = []
 
     assert _fresh_copy_moves(plan, modules, staged) == ((current, target),)
@@ -587,7 +587,7 @@ def test_a_staged_copy_that_cannot_be_removed_is_reported_and_nothing_commits(
     target = modules / "_local" / "h1" / "e"
     missing = DependencyReference.parse("./vendor/missing")
     plan = LocalReanchorPlan(
-        renames={"old": "new"}, moves=((current, target),), fresh=((current, missing, True),)
+        renames={"old": "new"}, moves=((current, target),), fresh=((current, missing, True, None),)
     )
     errors: list[str] = []
     logger = SimpleNamespace(error=errors.append, progress=errors.append)
@@ -635,7 +635,7 @@ def test_a_fresh_swap_rolled_back_after_the_save_restores_the_original_copy(
         LocalReanchorPlan(
             renames={"./vendor/e": "local:vendor/e"},
             moves=((current, modules / "_local" / "h1" / "e"),),
-            fresh=((current, DependencyReference.parse("./vendor/e"), True),),
+            fresh=((current, DependencyReference.parse("./vendor/e"), True, None),),
         ),
         (manifest, lock),
     )
