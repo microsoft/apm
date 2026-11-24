@@ -54,6 +54,7 @@ _BAD_CHARS = frozenset('<>"|?*:/') | frozenset(chr(c) for c in range(32))
 _SHORT_NAME = re.compile(r"~[0-9]")
 _VOLATILE_MARKERS = ("staging", ".inc.", ".tmp", "backup", "migration", "refresh")
 _MAX_PATH = 260
+_MAX_MISSING_DEPTH = 32
 
 _FILE_ATTRIBUTE_DIRECTORY = 0x10
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
@@ -103,9 +104,57 @@ def _form_b(text: str) -> str | None:
 
     try:
         final = nt._getfinalpathname(text)
-    except (OSError, ValueError):
-        return None  # missing leaf, delete-pending, access errors: Path.resolve decides
+    except OSError as exc:
+        if getattr(exc, "winerror", None) in _ERROR_NOT_FOUND:
+            return _form_b_missing(text)
+        return None  # delete-pending, access errors: Path.resolve decides
+    except ValueError:
+        return None
     return _strip_prefix(final)
+
+
+def _form_b_missing(text: str) -> str | None:
+    """``ntpath.realpath`` of a path whose tail does not exist: final ancestor + tail.
+
+    CPython's non-strict walk splits off names it cannot open and joins them
+    to the first ancestor ``_getfinalpathname`` resolves; the strip check then
+    fails with the same error as the first call, so the prefix goes. It also
+    follows a name that exists but cannot be opened (a dangling link): each
+    split-off name must be absent under ``lstat`` here, else ``None``.
+    """
+    import nt  # type: ignore[import-not-found]
+
+    tail: list[str] = []
+    current = text
+    for _ in range(_MAX_MISSING_DEPTH):
+        try:
+            os.lstat(current)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) not in _ERROR_NOT_FOUND:
+                return None
+        else:
+            return None  # it exists but could not be opened: Path.resolve decides
+        parent, _, name = current.rpartition("\\")
+        if len(parent) < 2 or not name:
+            return None
+        if len(parent) == 2:
+            parent += "\\"  # "C:" -> the drive root
+        tail.append(name)
+        try:
+            final = nt._getfinalpathname(parent)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) not in _ERROR_NOT_FOUND or len(parent) == 3:
+                return None
+            current = parent
+            continue
+        except ValueError:
+            return None
+        base = _strip_prefix(final)
+        if base is None:
+            return None
+        joined = "\\".join([base.rstrip("\\"), *reversed(tail)])
+        return joined if plain_win32(joined) else None
+    return None
 
 
 # --------------------------------------------------------------------------
