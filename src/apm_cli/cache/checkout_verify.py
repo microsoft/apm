@@ -357,6 +357,20 @@ class _Attributes:
         return state
 
 
+class _FoldedAttributes(_Attributes):
+    """``core.ignorecase`` matching: every pattern compiled case-insensitively (W3d U3)."""
+
+    def _load(self, directory: str) -> None:
+        fresh = directory not in self._rules
+        super()._load(directory)
+        rules = self._rules.get(directory)
+        if fresh and rules is not None:
+            self._rules[directory] = [
+                (anchored, re.compile(regex.pattern, re.IGNORECASE), attrs)
+                for anchored, regex, attrs in rules
+            ]
+
+
 def _accepted(attributes: _Attributes, attribute_path: str, blob: bytes) -> tuple[bytes, ...]:
     """The byte strings a pinned checkout may write for *blob* at *attribute_path*."""
     state = attributes.state(attribute_path)
