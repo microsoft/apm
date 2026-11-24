@@ -607,6 +607,59 @@ def _trust(child_env: Mapping[str, str], values: Mapping[str, str]) -> tuple[str
         raise _Refuse(str(reason)) from None
 
 
+_MANAGED_INTENT = "APM_GIT_MANAGED_AUTH_INTENT"
+_MANAGED_PREFIX = "Authorization: Basic "
+
+
+def _split_managed_auth(env: Mapping[str, str]) -> tuple[str | None, dict[str, str]]:
+    """``(APM's github-basic header, env without it)``; ``(None, env)`` when APM manages no auth.
+
+    W3d A': only the one header AuthResolver writes for github-basic is
+    consumed (``x-access-token:<token>``, Basic). Any other extraHeader stays in
+    the env and sends the fetch to git. The header is returned to the caller's
+    frame only: it never reaches the gate, a memo, a log or an exception.
+    """
+    import base64
+    import binascii
+
+    stripped = dict(env)
+    if stripped.pop(_MANAGED_INTENT, None) != "1":
+        return None, dict(env)
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT") or "0")
+    except ValueError:
+        raise _Refuse("managed auth env is malformed") from None
+    entries = []
+    for index in range(count):
+        key = env.get(f"GIT_CONFIG_KEY_{index}")
+        value = env.get(f"GIT_CONFIG_VALUE_{index}")
+        if key is None or value is None:
+            raise _Refuse("managed auth env is malformed")
+        entries.append((key, value))
+        stripped.pop(f"GIT_CONFIG_KEY_{index}", None)
+        stripped.pop(f"GIT_CONFIG_VALUE_{index}", None)
+    # set_git_authorization_header appends the managed header last.
+    if not entries or entries[-1][0].lower() != "http.extraheader":
+        raise _Refuse("managed auth header is not APM's")
+    header = entries[-1][1]
+    if not header.startswith(_MANAGED_PREFIX) or "\r" in header or "\n" in header:
+        raise _Refuse("managed auth header is not github-basic")
+    try:
+        decoded = base64.b64decode(header[len(_MANAGED_PREFIX) :], validate=True)
+    except (binascii.Error, ValueError):
+        raise _Refuse("managed auth header is not github-basic") from None
+    if not decoded.startswith(b"x-access-token:") or len(decoded) <= len(b"x-access-token:"):
+        raise _Refuse("managed auth header is not github-basic")
+    kept = entries[:-1]
+    stripped.pop("GIT_CONFIG_COUNT", None)
+    if kept:
+        stripped["GIT_CONFIG_COUNT"] = str(len(kept))
+        for index, (key, value) in enumerate(kept):
+            stripped[f"GIT_CONFIG_KEY_{index}"] = key
+            stripped[f"GIT_CONFIG_VALUE_{index}"] = value
+    return header, stripped
+
+
 def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str, str]]:
     """``(upload-pack URL, proxy, trust)`` when git's request is provably anonymous and equal."""
     from ..deps import anonymous_ref_listing as anon
@@ -842,20 +895,30 @@ def _session(trust: tuple[str, str]):
         return _os_session
 
 
-def _post(upload_url: str, proxy: str | None, trust: tuple[str, str], body: bytes) -> bytes:
+def _post(
+    upload_url: str,
+    proxy: str | None,
+    trust: tuple[str, str],
+    body: bytes,
+    authorization: str | None = None,
+) -> bytes:
     from ..utils.http_credentials import origin_bounded_request
 
     deadline = time.monotonic() + _DEADLINE_SECONDS
+    headers = {
+        "Content-Type": "application/x-git-upload-pack-request",
+        "Accept": "application/x-git-upload-pack-result",
+        "Git-Protocol": "version=2",
+    }
+    if authorization is not None:
+        # Per request only (never session.headers), exact origin, no redirect hop.
+        headers["Authorization"] = authorization[len("Authorization: ") :]
     with origin_bounded_request(
         _session(trust),
         "POST",
         upload_url,
         base_url=upload_url,
-        headers={
-            "Content-Type": "application/x-git-upload-pack-request",
-            "Accept": "application/x-git-upload-pack-result",
-            "Git-Protocol": "version=2",
-        },
+        headers=headers,
         data=body,
         max_hops=0,
         ambient_credentials=False,
@@ -898,6 +961,7 @@ def _admitted_post(
     proxy: str | None,
     trust: tuple[str, str],
     body: bytes,
+    authorization: str | None = None,
     *,
     post: Callable[..., bytes] | None = None,
 ) -> bytes:
@@ -919,12 +983,12 @@ def _admitted_post(
             if _rate_limited():
                 raise _Refuse("rate limited earlier in this command")
             if not settled.get("ok"):
-                answer = send(upload_url, proxy, trust, body)
+                answer = send(upload_url, proxy, trust, body, authorization)
                 settled["ok"] = True
                 return answer
     if _rate_limited():  # another download tripped it while this one was gated or queued
         raise _Refuse("rate limited earlier in this command")
-    return send(upload_url, proxy, trust, body)
+    return send(upload_url, proxy, trust, body, authorization)
 
 
 def _note(url: str, outcome: str) -> None:
@@ -996,8 +1060,10 @@ def fetch_worktree(
         _log.debug("in-process fetch skipped: rate limited earlier in this command")
         return None
     try:
-        upload_url, proxy, trust = _gate(url, env if env is not None else os.environ)
-        body = _admitted_post(upload_url, proxy, trust, _request_body(sha))
+        authorization, env = _split_managed_auth(env if env is not None else os.environ)
+        upload_url, proxy, trust = _gate(url, env)
+        body = _admitted_post(upload_url, proxy, trust, _request_body(sha), authorization)
+        del authorization
         objects = parse_pack(_pack_from_response(body))
         files, reached = _plan(objects, sha)
         root = str(staged)
