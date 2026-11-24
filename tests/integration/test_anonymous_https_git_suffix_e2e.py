@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
-from unittest.mock import MagicMock
 from urllib.parse import urlparse
 
 import pytest
@@ -63,13 +63,13 @@ def _write_manifest(project: Path) -> Path:
     return apm_yml
 
 
-def _resolved_main() -> ResolvedReference:
+def _resolved_main(commit: str) -> ResolvedReference:
     """Return a deterministic branch resolution with no network access."""
     return ResolvedReference(
         original_ref="main",
         ref_name="main",
         ref_type=GitReferenceType.BRANCH,
-        resolved_commit="a" * 40,
+        resolved_commit=commit,
     )
 
 
@@ -105,42 +105,41 @@ def test_generic_anonymous_https_clone_url_keeps_git_suffix_end_to_end(
     package = APMPackage.from_apm_yml(apm_yml)
     dep_ref = package.get_apm_dependencies()[0]
     captured: dict[str, object] = {}
+    # The package the origin serves, at the commit admission resolves "main" to.
+    served = tmp_path / "served"
+    skill_dir = served / ".apm" / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (served / "apm.yml").write_text(
+        "name: cloned-gitbucket-package\nversion: '1.0.0'\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
+    git("init", "-q", "-b", "main", "--template=", str(served))
+    git("-C", str(served), "add", "-A")
+    git("-C", str(served), "commit", "-q", "-m", "served")
+    commit = git("-C", str(served), "rev-parse", "HEAD").strip()
+    fetch_by_commit = importlib.import_module("apm_cli.deps.bare_cache").fetch_commit_worktree
 
-    def fake_clone_from(
-        url: str,
-        target: Path,
-        *,
-        env: dict[str, str] | None = None,
-        progress: object | None = None,
-        **kwargs: object,
-    ) -> _FakeRepo:
-        """Capture the clone URL and materialise a valid package."""
-        captured["url"] = url
-        captured["env"] = env or {}
-        captured["kwargs"] = kwargs
-        target.mkdir(parents=True, exist_ok=True)
-        skill_dir = target / ".apm" / "skills" / "demo"
-        skill_dir.mkdir(parents=True)
-        (target / "apm.yml").write_text(
-            "name: cloned-gitbucket-package\nversion: '1.0.0'\n",
-            encoding="utf-8",
-        )
-        (skill_dir / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
-        # A real clone leaves a checkout whose links resolve from Git objects (#3457).
-        git("init", "-q", "-b", "main", "--template=", str(target))
-        git("-C", str(target), "add", "-A")
-        git("-C", str(target), "commit", "-q", "-m", "fake clone")
-        return _FakeRepo()
+    def capture_fetch(execute_transport_plan, repo_url_base, target, *, dep_ref, sha, **kw):
+        """Run the real transport plan; the origin's fetch is served locally."""
+
+        def plan(base, path, *, dep_ref, clone_action, **plan_kw):
+            def serve(url: str, env: dict[str, str], dest: Path) -> None:
+                captured["url"] = url
+                captured["env"] = dict(env)
+                captured["sha"] = sha
+                clone_action(served.as_uri(), {}, dest)
+
+            execute_transport_plan(base, path, dep_ref=dep_ref, clone_action=serve, **plan_kw)
+
+        fetch_by_commit(plan, repo_url_base, target, dep_ref=dep_ref, sha=sha, **kw)
 
     monkeypatch.setattr(
         GitHubPackageDownloader,
         "resolve_git_reference",
-        lambda self, repo_ref: _resolved_main(),
+        lambda self, repo_ref: _resolved_main(commit),
     )
-
-    repo_cls = MagicMock()
-    repo_cls.clone_from.side_effect = fake_clone_from
-    monkeypatch.setattr("apm_cli.deps.github_downloader.Repo", repo_cls)
+    monkeypatch.setattr("apm_cli.deps.github_downloader.fetch_commit_worktree", capture_fetch)
     downloader = GitHubPackageDownloader()
     result = downloader.download_package(
         dep_ref,
@@ -155,5 +154,16 @@ def test_generic_anonymous_https_clone_url_keeps_git_suffix_end_to_end(
     assert parsed.username is None
     assert parsed.password is None
     assert parsed.path == "/owner/repo.git"
-    assert captured["kwargs"] == {"depth": 1, "branch": "main"}
+    # Fetched by the admitted commit, anonymously: no credential reaches Git.
+    assert captured["sha"] == commit
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "GIT_HTTP_EXTRAHEADER" not in env
+    entries = [
+        (env[f"GIT_CONFIG_KEY_{index}"], env.get(f"GIT_CONFIG_VALUE_{index}", ""))
+        for index in range(int(env.get("GIT_CONFIG_COUNT", "0")))
+    ]
+    # An empty extraheader only resets inherited headers; none may carry a value.
+    assert all(not value for key, value in entries if "extraheader" in key.lower())
+    assert not [value for _key, value in entries if "authorization" in value.lower()]
     assert result.package.name == "cloned-gitbucket-package"
