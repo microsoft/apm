@@ -19,6 +19,8 @@ from typing import Any
 
 from .local_bundle_hook_trust import REASON_NOT_GRANTED, REASON_UNRECORDED
 
+_REASON_CHANGED = "content differs from what its approval admitted"
+
 
 @dataclass
 class _Holding:
@@ -274,7 +276,12 @@ def _unadmitted(
         # Name the bundle whose recorded bytes are on disk, the deployer.
         deployer = [slug for slug in owners if records[slug].hashes.get(row) == current]
         slug = (refusing or deployer or owners or [None])[0]
-        reason = REASON_NOT_GRANTED if owners else REASON_UNRECORDED
+        if not owners:
+            reason = REASON_UNRECORDED
+        elif not refusing and not deployer and any(owner in granted for owner in owners):
+            reason = _REASON_CHANGED  # still approved, but not these bytes
+        else:
+            reason = REASON_NOT_GRANTED
         holdings.setdefault((slug, reason), _Holding(slug, reason)).files.add(row)
     return list(holdings.values())
 
@@ -398,15 +405,17 @@ def retire_unadmitted_bundle_markdown(
             if holding.slug:
                 _forget(root, scanned, holding.slug, removed, scope)
         retired.extend(sorted(removed))
-        if logger is not None:
-            message = (
+        if logger is None:
+            continue
+        if removed:
+            logger.warning(
                 f"Retired {len(removed)} Markdown file(s) with frontmatter hooks from {label} "
                 f"({holding.reason}). To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
             )
-            if kept:
-                message += (
-                    " Kept, as they are edited, unreadable or have no recorded hash; review "
-                    f"and remove them by hand: {', '.join(sorted(kept))}."
-                )
-            logger.warning(message)
+        if kept:
+            logger.warning(
+                f"Kept {len(kept)} Markdown file(s) with frontmatter hooks from {label} "
+                f"({holding.reason}) that are edited, unreadable or have no recorded hash; "
+                f"review and remove them by hand: {', '.join(sorted(kept))}."
+            )
     return retired
