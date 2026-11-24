@@ -795,6 +795,39 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     assert not [key for key in modules if ".apm-reanchor-" in key], sorted(modules)
 
 
+@pytest.mark.parametrize(
+    ("output", "link"),
+    [("dist/AGENTS.md", f"../{_LINK}"), ("CONTEXT.md", _LINK)],
+    ids=["pruned-dir", "custom-name"],
+)
+def test_a_compile_output_option_link_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path, output: str, link: str
+) -> None:
+    """#5235: compile records an output written with --output, and the scan reads it,
+    even in a directory compile's placement prunes or under a custom file name."""
+    from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    def instruction(project: Path) -> None:
+        rules = project / ".apm/instructions/proj.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text(
+            '---\napplyTo: "**"\ndescription: Project rules\n---\nProject body.\n',
+            encoding="utf-8",
+        )
+
+    world = _docs_world(tmp_path, apm_binary_path, instruction)
+    world.apm("compile", "--single-agents", "--output", output)
+    (world.project / output).write_text(_marked(AGENTS_MD_GENERATED_MARKER, link), "utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    flat = " ".join((refused.stdout + refused.stderr).split())
+    assert f"{output} links into its apm_modules copy" in flat, flat
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
 # -- Which compiled outputs the moving-copy check reads (#5097) ------------------
 
 
