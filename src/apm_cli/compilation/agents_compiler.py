@@ -49,7 +49,7 @@ from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .managed_section import ManagedSectionError
-from .output_writer import refuse_unsafe_output
+from .output_writer import output_error_message, refuse_unsafe_output
 from .root_context_protection import (
     _build_expected_rule_filenames,
     _get_deployed_instruction_filenames,
@@ -836,6 +836,9 @@ class AgentsCompiler:
         # Write output file (constitution injection handled externally in CLI)
         output_file = self.base_dir / config.output_path
         output_path = str(output_file)
+        refuse_unsafe_output(
+            output_file, self.base_dir, managed=config.agents_md_mode == "managed_section"
+        )
         write_blocked = (
             config.agents_md_mode != "managed_section"
             and self._hand_authored_root_context_blocks_write(output_file)
@@ -1522,9 +1525,10 @@ class AgentsCompiler:
         # write vs unchanged). Reading the file here is safe in dry-run mode
         # because we never mutate it.
         try:
+            refuse_unsafe_output(output_path, self.base_dir, managed=False)
             existing = output_path.read_text(encoding="utf-8") if output_path.exists() else None
         except OSError as exc:
-            message = f"Failed to read {output_path}: {exc}"
+            message = output_error_message("Failed to read", output_path, exc)
             self.errors.append(message)
             result.errors.append(message)
             result.success = False
@@ -1649,6 +1653,7 @@ class AgentsCompiler:
             return result
 
         try:
+            refuse_unsafe_output(output_path, self.base_dir, managed=False)
             existing = output_path.read_text(encoding="utf-8")
             if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
                 result.stats.setdefault("copilot_root_instructions_removed", 0)
@@ -1677,7 +1682,7 @@ class AgentsCompiler:
             result.stats["copilot_root_instructions_removed"] = 1
             return result
         except (OSError, PathTraversalError) as exc:
-            message = f"Failed to remove stale {output_path}: {exc}"
+            message = output_error_message("Failed to remove stale", output_path, exc)
             self.errors.append(message)
             result.errors.append(message)
             result.success = False

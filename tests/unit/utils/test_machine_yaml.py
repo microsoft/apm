@@ -188,3 +188,62 @@ def test_a_lockfile_the_owner_refuses_keeps_its_old_identity(text: str) -> None:
 
     canonical = json.dumps(yaml_io.load_yaml_str(text), sort_keys=True, default=str)
     assert lockfile_identity(text) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize("path", _LOCKFILES, ids=lambda p: str(p.relative_to(ROOT)))
+def test_every_lockfile_fixture_emits_the_same_bytes_from_libyaml(path: Path) -> None:
+    data = yaml_io.load_yaml_str(path.read_text(encoding="utf-8"))
+    assert yaml_io.machine_yaml_to_str(data) == yaml_io.yaml_to_str(data)
+
+
+def _random_emit_tree(rng: random.Random, depth: int = 0) -> object:
+    words = [
+        "sha256:" + "0f" * 32,
+        "https://github.com/" + "o" * 40 + "/r.git#" + "a" * 40,
+        "-x:" + "y" * 100,
+        "'q" + "z" * 80,
+        "a",
+        "b c",
+        "\u00e9t\u00e9",
+        "\u4e2d\u6587",
+        "x" * 90,
+        "line\nbreak",
+        " lead",
+        "trail ",
+    ]
+    if depth >= 4 or rng.random() < 0.4:
+        if rng.random() < 0.5:
+            return _random_tree(rng, 4)
+        return " ".join(rng.choice(words) for _ in range(rng.randrange(1, 30)))
+    if rng.random() < 0.5:
+        return [_random_emit_tree(rng, depth + 1) for _ in range(rng.randrange(4))]
+    return {
+        rng.choice(["k", "key " * rng.randrange(1, 40), "\u00fc", "p" * rng.randrange(100, 140)])
+        + str(i): _random_emit_tree(rng, depth + 1)
+        for i in range(rng.randrange(4))
+    }
+
+
+@pytest.mark.parametrize("seed", range(300))
+def test_a_fuzzed_document_emits_the_same_bytes_from_libyaml(seed: int) -> None:
+    data = {"root": _random_emit_tree(random.Random(seed))}  # noqa: S311 -- seeded test data
+    assert yaml_io.machine_yaml_to_str(data) == yaml_io.yaml_to_str(data)
+
+
+def test_a_typical_lockfile_takes_the_libyaml_emitter() -> None:
+    texts = [path.read_text(encoding="utf-8") for path in _LOCKFILES]
+    agnostic = [yaml_io._emitter_agnostic(yaml_io.load_yaml_str(text)) for text in texts]
+    assert sum(agnostic) >= len(agnostic) // 2
+
+
+@pytest.mark.parametrize("length", range(118, 132))
+def test_a_long_key_emits_the_same_bytes(length: int) -> None:
+    key = "deployed/" + "k" * (length - 9)
+    for data in ({key: "v"}, {"root": {key: "x" * 90}}, {"rows": [{key: 1}]}):
+        assert yaml_io.machine_yaml_to_str(data) == yaml_io.yaml_to_str(data)
+
+
+def test_a_long_tab_quoted_value_keeps_the_python_emitter() -> None:
+    data = {"mcp": {"args": ["\t" + "}} b] " * 30]}}
+    assert yaml_io._emitter_agnostic(data) is False
+    assert yaml_io.machine_yaml_to_str(data) == yaml_io.yaml_to_str(data)

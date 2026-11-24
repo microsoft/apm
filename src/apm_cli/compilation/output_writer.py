@@ -80,15 +80,28 @@ def refuse_unsafe_output(path: Path, base_dir: Path, *, managed: bool) -> None:
             raise ManagedSectionError(
                 f"{path} is a symlink. Managed-section output must be a regular file."
             )
-        return
+        try:
+            # A link is read through: what it names must be a regular file too (#5187).
+            mode = path.stat().st_mode
+        except OSError:
+            return
     if not stat.S_ISREG(mode):
         from ..utils.diagnostics import printable_ascii_text
 
-        shown = printable_ascii_text(portable_relpath(path, base_dir))
+        # Named as spelled: a link's own name, never the file it points to.
+        parent = portable_relpath(path.parent, base_dir)
+        shown = printable_ascii_text(path.name if parent == "." else f"{parent}/{path.name}")
         raise CompiledOutputSpecialFileError(
             f"Refusing to compile: {shown} is not a regular file "
             "(a FIFO, socket, device or directory), so it was not read."
         )
+
+
+def output_error_message(action: str, path: Path, exc: Exception) -> str:
+    """Return a special-file refusal as is; wrap any other failure with *action* and *path*."""
+    if isinstance(exc, CompiledOutputSpecialFileError):
+        return str(exc)
+    return f"{action} {path}: {exc}"
 
 
 def _output_root(base_dir: Path, target: Path) -> Path | None:
@@ -183,6 +196,11 @@ class CompiledOutputWriter:
                 new_file_mode=umask_file_mode(path),
                 normalize_line_endings=not preserve,
             )
+        if self._base_dir is not None and prepared:
+            from ..core.agents_md_compile_record import record_compiled_outputs
+
+            # The re-anchor scan reads every written output, wherever --output put it (#5235).
+            record_compiled_outputs(self._base_dir, prepared)
         return verdict
 
     def write(
