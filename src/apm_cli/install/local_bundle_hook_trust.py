@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
-from apm_cli.install.hook_script_refs import runs_script, script_refs
+from apm_cli.install.hook_script_refs import hook_commands, runs_script, script_refs
 
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
@@ -546,39 +546,6 @@ def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str
     return tails
 
 
-def _hook_commands(document: Any) -> list[str]:
-    """Commands a per-file hook document runs, read from handler positions only (#5136).
-
-    The shared hook grammar locates the handlers, so metadata that merely names
-    a script (``env.command``) runs nothing. A shape the grammar does not
-    recognize (a Kiro action list, a malformed entry) is scanned whole, as
-    before, so it still fails closed.
-    """
-    from apm_cli.hook_contract import HookContractError, parse_hook_source
-
-    try:
-        commands = [declared.command for declared in parse_hook_source(document).commands]
-    except HookContractError:
-        commands = list(_every_command_field(document))
-    # Raw text: the matcher reads backslash escapes; only the tail match normalizes (#5106).
-    return commands
-
-
-def _every_command_field(node: Any) -> Iterator[str]:
-    """Every hook command field anywhere in a document the grammar cannot read."""
-    from apm_cli.hook_contract import HOOK_COMMAND_KEYS
-
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key in HOOK_COMMAND_KEYS and isinstance(value, str):
-                yield value
-            else:
-                yield from _every_command_field(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _every_command_field(item)
-
-
 def _per_file_configs_running(
     project_root: Path, targets: Any, owned: Collection[str], scripts: Collection[str]
 ) -> set[str]:
@@ -609,7 +576,7 @@ def _per_file_configs_running(
             except (OSError, ValueError, TypeError):
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
-            texts = list(_hook_commands(document))
+            texts = list(hook_commands(document))
             if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
                 runs_script(text, refs, (project_root, target_root), project_root) for text in texts
             ):
