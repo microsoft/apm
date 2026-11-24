@@ -1449,6 +1449,7 @@ class TestRunBaselineChecks:
             "local-bundle-hooks",
             "hook-approval-pins",
             "exec-status-current",
+            "claude-instructions-compiled",
             "includes-consent",
         ]
 

@@ -695,6 +695,15 @@ def compile_home_record(deploy_root: Path) -> str:
     return f".apm/compiled-agents-md/{key}.json"
 
 
+def compile_outputs_record(deploy_root: Path) -> str:
+    """The APM-home list of every output a compile of *deploy_root* wrote (#5235).
+
+    The uninstall re-anchor scan reads it, so an output written with --output
+    outside compile's default placement is still checked.
+    """
+    return compile_home_record(deploy_root).replace("compiled-agents-md", "compiled-outputs", 1)
+
+
 def _exact_write(
     path: str, exact: Collection[str], existed: Collection[str], kinds: Mapping[str, str]
 ) -> bool:
@@ -724,7 +733,7 @@ def _i5_write_set(
         if root_id == "home" and op.name == "compile" and renders:
             # --root DIR writes (and keys its record by) DIR, resolved from the project.
             output = after.deploy_root / op.output_root if op.output_root else after.deploy_root
-            exact = (compile_home_record(output),)
+            exact = (compile_home_record(output), compile_outputs_record(output))
         existed = {entry.relative_path for entry in snapshot.entries}
         kinds = {entry.relative_path: entry.kind for entry in later.entries}
         # An allowed prefix admits its subtree and its exact ancestor directories.

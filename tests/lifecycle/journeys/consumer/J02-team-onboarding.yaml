@@ -22,10 +22,15 @@ steps:
     docs:
       page: quickstart.mdx
       commands: [apm install --frozen]
-      output: ["[i] Deployed files verified against apm.lock.yaml."]
+      output:
+        - "[!] Claude Code does not load 1 instruction(s) routed to AGENTS.md yet. Run 'apm compile' to write the AGENTS.md Claude Code loads them from. See https://microsoft.github.io/apm/consumer/update-and-refresh/#claude-plus-copilot-projects-that-never-compile. Use --verbose to list them."
+        - "..."
+        - "[i] Deployed files verified against apm.lock.yaml."
     files: [apm_modules/]
     key_lines: ["[*] Installed 2 APM dependencies", "[i] Deployed files verified against apm.lock.yaml."]
     forbidden_lines: ["[!]", Skipped inactive experimental resolver]
+    # The clone never compiles; install counts the routed instruction (#5344).
+    forbid_except: ["Claude Code does not load"]
   - n: 3
     run: [apm audit]
     exit: 0

@@ -677,6 +677,7 @@ install-deployment-install-lockfile-preflight
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
+install-deployment-local-reparent-rule
 install-deployment-lock-parent-placement
 install-deployment-locked-content-verdict
 install-deployment-locked-copy-validity
