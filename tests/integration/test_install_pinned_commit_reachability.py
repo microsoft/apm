@@ -709,6 +709,7 @@ def dumb_http(origin: _Origin, tmp_path: Path):
     from tests.integration.test_marketplace_generic_https_credential_lifecycle import (
         _write_tls_certificate,
     )
+    from tests.utils.local_git_http_server import _stdlib_server_tls
 
     (tmp_path / "tls").mkdir()
     leaf, key = _write_tls_certificate(tmp_path / "tls")
@@ -719,10 +720,11 @@ def dumb_http(origin: _Origin, tmp_path: Path):
     handler = functools.partial(SimpleHTTPRequestHandler, directory=str(served))
     handler.log_message = lambda *_args: None
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.load_cert_chain(certfile=leaf, keyfile=key)
-    server.socket = context.wrap_socket(server.socket, server_side=True)
+    with _stdlib_server_tls():  # a truststore-injected ssl cannot serve TLS
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=leaf, keyfile=key)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

@@ -1034,3 +1034,35 @@ def test_listings_of_one_origin_in_an_install_attempt_probe_clone_config_once_pe
     )
     assert admit_fetch_ref(after, _ref("main"), "main") == origin.m2
     assert len(spawned) == 2, "a closed attempt kept its probe"
+
+
+def test_a_tip_a_mirror_listed_is_not_trusted_for_the_origin_once_the_rewrite_is_gone(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: a mirror-listed tip is recorded for the mirror, so the origin is checked."""
+    from apm_cli.cache.commit_reachability import (
+        CommitNotReachableError,
+        admit_fetch_ref,
+        admit_pinned_commit,
+    )
+
+    remote = "https://origin.invalid/acme/repo.git"
+    mirror = tmp_path / "mirror.gitconfig"
+    mirror.write_text(f'[url "{origin.url}"]\n\tinsteadOf = {remote}\n', encoding="ascii")
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{remote}"]\n\tpath = {mirror.as_posix()}\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    downloader = _CloneFailsDownloader(tmp_path / "cache", [remote], predicted=remote)
+    assert admit_fetch_ref(downloader, _ref("main"), "main") == origin.m2
+    config.write_text("[core]\n\tbare = false\n", encoding="ascii")
+    contacted = len(downloader.contacted)
+
+    with pytest.raises(CommitNotReachableError):
+        admit_pinned_commit(downloader, _ref(origin.m2), origin.m2)
+
+    assert len(downloader.contacted) > contacted, "the origin was never checked"
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
+    assert marker.name == origin.m2

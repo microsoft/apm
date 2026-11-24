@@ -700,13 +700,18 @@ class _NoSuchRef(CommitNotReachableError):
 
 
 def _listed_tip(downloader, dep_ref, ref: str) -> tuple[str, str]:
-    """Resolve *ref* to an exact origin branch or tag over the dependency's transport."""
+    """Resolve *ref* to an exact origin branch or tag over the dependency's transport.
+
+    The tip is recorded under the environment that listed it, so a verdict a
+    remote-activated mirror gave is keyed by that mirror, never the origin.
+    """
     found: list[tuple[str, str, dict]] = []
-    _at_origin(
-        downloader,
-        dep_ref,
-        lambda url, env: found.append((_exact_tip(url, ref, env), url, env)),
-    )
+
+    def _list(url: str, env) -> None:
+        listing = _probed_listing_env(url, env)
+        found.append((_exact_tip(url, ref, listing, probed=True), url, listing))
+
+    _at_origin(downloader, dep_ref, _list)
     sha, url, env = found[0]
     _record_observed_tip(downloader, dep_ref, sha, url, env)
     return sha, sha
@@ -747,22 +752,34 @@ def _listing_env(url: str, env) -> dict[str, str]:
     return stage.listing_env(digest.hexdigest(), _probe)
 
 
-def _branch_and_tag_records(url: str, env) -> list[tuple[str, str]]:
-    """The origin's ``(commit, name)`` branch and tag records, from ``git ls-remote``."""
+def _probed_listing_env(url: str, env) -> dict[str, str]:
+    """:func:`_listing_env`, unverified (never refused) when the probe fails."""
+    try:
+        return _listing_env(url, env)
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        raise _Unverified(f"git ls-remote failed for {_sanitize_origin(url)}", exc) from exc
+
+
+def _branch_and_tag_records(url: str, env, *, probed: bool = False) -> list[tuple[str, str]]:
+    """The origin's ``(commit, name)`` branch and tag records, from ``git ls-remote``.
+
+    *env* is already the listing env when *probed*.
+    """
     from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args
 
     where = _sanitize_origin(url)
+    listing_env = env if probed else _probed_listing_env(url, env)
     try:
         listing = git_remote_refs(
             url,
             "refs/heads/*",
             "refs/tags/*",
-            env=_listing_env(url, env),
+            env=listing_env,
             timeout=60,
             git_args=_safe_git_args(),
         )
-    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+    except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
     if listing.returncode != 0:
         raise _Unverified(f"git ls-remote failed for {where}", _git_failure(listing, url))
@@ -773,7 +790,7 @@ def _branch_and_tag_records(url: str, env) -> list[tuple[str, str]]:
     return records
 
 
-def _exact_tip(url: str, ref: str, env) -> str:
+def _exact_tip(url: str, ref: str, env, *, probed: bool = False) -> str:
     """Resolve *ref* to an exact origin branch or tag with ``git ls-remote``."""
     from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
 
@@ -782,7 +799,7 @@ def _exact_tip(url: str, ref: str, env) -> str:
         refuse_non_branch_ref(ref, where)
     except RuntimeError as exc:
         raise CommitNotReachableError(str(exc)) from exc
-    records = _branch_and_tag_records(url, env)
+    records = _branch_and_tag_records(url, env, probed=probed)
     wanted = {ref} if ref.startswith("refs/") else {f"refs/heads/{ref}", f"refs/tags/{ref}"}
     try:
         return exact_branch_or_tag_sha(records, ref, where)
