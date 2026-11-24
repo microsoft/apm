@@ -272,6 +272,8 @@ def _names_git_dir(name: str) -> bool:
     """Whether *name* is ``.git`` on any host: NTFS short names and trailing dots/spaces, HFS+ ignorables."""
     if _GIT_DIR_ALIAS.fullmatch(name) is not None:
         return True
+    if name.isascii():  # every HFS+ ignorable is non-ASCII
+        return False
     folded = name.translate(_HFS_IGNORABLE)
     return folded != name and _GIT_DIR_ALIAS.fullmatch(folded) is not None
 
@@ -681,6 +683,8 @@ def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str
 
 def inprocess_verified(repo: Path, sha: str | None = None, *, use: str) -> bool:
     """Whether this read is the first *use* of a directory this process wrote and verified."""
+    if not _INPROCESS:  # nothing fetched in-process this run: skip the path resolve
+        return False
     key = _key(repo, sha or Path(repo).parent.name)
     with _MANIFEST_LOCK:
         entry = _INPROCESS.get(key)
