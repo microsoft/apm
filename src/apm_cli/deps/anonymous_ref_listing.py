@@ -554,7 +554,8 @@ def list_refs_authenticated(url: str, *, include_heads: bool, env: Mapping[str, 
 
     try:
         authorization, stripped = _split_managed_auth(env)
-    except _Refuse:
+    except _Refuse as reason:
+        _log.debug("authenticated ref listing falls back to git: %s", reason)
         return None
     if authorization is None:
         return None
