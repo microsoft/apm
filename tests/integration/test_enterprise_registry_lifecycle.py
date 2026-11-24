@@ -587,10 +587,12 @@ def test_company_catalog_selection_drives_update_not_newest_registry_version(
         assert _state(project) == before
         world.catalog_outage = False
 
+        manifest = (project / "apm.yml").read_bytes()
         world.egress_step(proxy, employee, project, *update, step="update", allowed=both)
         _assert_selected(project, published["2.1.0"], world.registry)
         assert _downloaded(proxy, world.registry) == {"2.1.0"}
-        assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == [CATALOG_DECLARATION]
+        # Catalog-following update leaves apm.yml byte-for-byte unchanged.
+        assert (project / "apm.yml").read_bytes() == manifest
         updated = _state(project)
         world.egress_step(proxy, employee, project, *(*INSTALL, "--frozen"), step="frozen-2")
         assert _state(project) == updated
