@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -116,15 +117,27 @@ def _missing_config(claude: Path) -> None:
     (claude / "settings.json").unlink()
 
 
-@pytest.mark.parametrize("damage", [_link_sidecar, _missing_config], ids=["linked", "no-config"])
+def _fifo(name: str) -> Callable[[Path], None]:
+    def damage(claude: Path) -> None:
+        (claude / name).unlink()
+        os.mkfifo(claude / name)
+
+    return damage
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [_link_sidecar, _missing_config, _fifo("apm-hooks.json"), _fifo("settings.json")],
+    ids=["linked", "no-config", "fifo-sidecar", "fifo-config"],
+)
 def test_a_pair_that_is_not_two_regular_files_stays_unmanaged(
     tmp_path: Path, damage: Callable[[Path], None]
 ) -> None:
     claude = _deploy(tmp_path, _owned(_BUNDLE))
     try:
         damage(claude)
-    except OSError:
-        pytest.skip("symlinks are unavailable")
+    except (AttributeError, OSError):
+        pytest.skip("symlinks or named pipes are unavailable")
     assert verified_apm_hook_files(tmp_path, _lock()) == frozenset()
 
 

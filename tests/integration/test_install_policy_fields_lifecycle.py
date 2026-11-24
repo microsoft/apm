@@ -15,7 +15,9 @@ A control without the offending input installs.
 
 from __future__ import annotations
 
+import os
 import re
+import stat
 import subprocess
 from pathlib import Path
 
@@ -692,10 +694,35 @@ def _truncate_sidecar(claude: Path) -> None:
     sidecar.write_bytes(sidecar.read_bytes()[:-3])
 
 
+def _link_sidecar(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    real = claude.parent / "apm-hooks.real.json"
+    sidecar.replace(real)
+    sidecar.symlink_to(real)
+
+
+def _fifo_sidecar(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    sidecar.unlink()
+    os.mkfifo(sidecar)
+
+
+def _fingerprint(path: Path) -> object:
+    """Bytes of a regular file; the file type of anything else (a FIFO is never read)."""
+    mode = path.lstat().st_mode
+    return path.read_bytes() if stat.S_ISREG(mode) else stat.S_IFMT(mode)
+
+
 @pytest.mark.parametrize(
     "tamper",
-    [_edit_sidecar_entry, _drop_settings_hooks, _truncate_sidecar],
-    ids=["sidecar-entry-edited", "settings-hooks-removed", "sidecar-unparsable"],
+    [_edit_sidecar_entry, _drop_settings_hooks, _truncate_sidecar, _link_sidecar, _fifo_sidecar],
+    ids=[
+        "sidecar-entry-edited",
+        "settings-hooks-removed",
+        "sidecar-unparsable",
+        "sidecar-symlinked",
+        "sidecar-fifo",
+    ],
 )
 def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_verify(
     lifecycle_world: World,  # noqa: F811
@@ -707,8 +734,11 @@ def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_v
     _seed(world)
     _approved_hook_bundle_install(world, "claude")
     claude = world.project / ".claude"
-    tamper(claude)
-    before = {name: (claude / name).read_bytes() for name in ("apm-hooks.json", "settings.json")}
+    try:
+        tamper(claude)
+    except (AttributeError, OSError):
+        pytest.skip("symlinks or named pipes are unavailable")
+    before = {name: _fingerprint(claude / name) for name in ("apm-hooks.json", "settings.json")}
 
     audit = _apm(world, "audit", "--ci")
     text = _text(audit)
@@ -717,7 +747,7 @@ def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_v
     assert "2 unmanaged file(s) in governance directories" in text, _evidence(audit)
     assert ".claude/apm-hooks.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
     assert ".claude/settings.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
-    assert {name: (claude / name).read_bytes() for name in before} == before
+    assert {name: _fingerprint(claude / name) for name in before} == before
 
 
 def test_unmanaged_files_deny_still_flags_a_user_file_beside_verified_hook_files(

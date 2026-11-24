@@ -1281,7 +1281,7 @@ def _check_unmanaged_files(
                 # File-symlink guard: never follow a link out of the workspace.
                 if file_path.is_symlink() and _symlink_escapes_workspace(file_path, project_root):
                     continue
-                if not file_path.is_file():
+                if file_path.is_dir():  # a FIFO or other special file is counted
                     continue
                 files_scanned += 1
                 if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
