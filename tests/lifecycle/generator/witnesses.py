@@ -191,6 +191,10 @@ GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "pack": ("pack", ()),
     "install": ("install", ()),
     "install-frozen": ("install", ("FROZEN",)),
+    "install-update": ("install", ("UPDATE",)),
+    "install-force": ("install", ("FORCE",)),
+    "install-dry-run": ("install", ("DRYRUN",)),
+    "install-select": ("install", ("SELECT",)),
     "update": ("update", ()),
     "lock": ("lock", ()),
     "audit": ("audit", ()),
@@ -270,6 +274,7 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines._gate_plugin_bin import (
         KNOWN_PLUGIN,
+        bin_context,
         deploys_bin,
         plugin_bin_cells,
     )
@@ -328,7 +333,8 @@ def machine_cells() -> list[MachineCell]:
                 cells.append(MachineCell(key, witness, "T-1", source, tracking))
     for key in sorted(filter(deploys_bin, plugin_bin_cells())):
         # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
-        assignment = {"PRIM": "bin", "SCOPE": "project"}
+        # A context re-install also proves its modifier and context (#4095 lane T-1c).
+        assignment = {"PRIM": "bin", "SCOPE": "project", **(bin_context(key) or {})}
         cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):

@@ -22,7 +22,10 @@ plugin) and ``denied-dependency`` (org policy denies the plugin). Every
 deploying install passes ``--trust-bin`` so the gate alone decides bin/.
 Each prune that retires the plugin must remove every file of its root and
 its ``enabledPlugins`` keys and drop its lockfile record; every step runs
-I1-I9. ``plugin_bin_cells`` labels the same script statically.
+I1-I9. At ``allowed`` the deployed plugin is re-installed with each modifier
+(``--frozen``, ``--update``, ``--force``, ``--dry-run``, ``--target``); each keeps
+bin/ byte-identical, so it proves PRIM=bin with that modifier (``bin_context``).
+``plugin_bin_cells`` labels the same script statically.
 """
 
 from __future__ import annotations
@@ -186,6 +189,9 @@ class GatePluginBin(StepRunner):
         if op == "install":
             state.declared = True
             state.deployed = state.allows()
+        elif op in CONTEXT_INSTALLS:
+            # A re-install of the converged plugin keeps exactly what it had.
+            assert state.declared and state.deployed == state.allows(), (op, state)
         if op == "uninstall":
             state.declared = state.revoked = state.deployed = False
         if op == "approve" and not state.denied_by_policy:
@@ -256,7 +262,8 @@ class GatePluginBin(StepRunner):
             matches = (*says, _RETIRED)
         elif op != "install":
             # A catalog command leaves every project byte alone; approve leaves the root.
-            unchanged["project"] = ("*",) if op == "marketplace" else (ROOT, *SETTINGS)
+            whole = op in ("marketplace", "install-dry-run")
+            unchanged["project"] = ("*",) if whole else (ROOT, *SETTINGS)
         if not retires and step.after.deployed:
             present["project"] = [BIN_PATH]
         evidence = Evidence(
@@ -358,6 +365,8 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("install", *install)
     machine.run("audit-ci", "audit", "--ci")
     machine.run("prune", "prune")
+    for op, (flags, _factors) in CONTEXT_INSTALLS.items():
+        machine.run(op, *install, *flags)
     # revoked-after-deploy: a deny over the deployed root; prune retires it.
     machine.run("deny", "deny", PLUGIN)
     machine.run("audit-ci", "audit", "--ci", exits=AUDIT_GATED, says=(_STALE_DECISION,))
@@ -380,6 +389,35 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("uninstall", "uninstall", machine.spec())
 
 
+# Re-installs of the deployed, approved plugin that differ only by a modifier: each keeps
+# bin/ byte-identical (the dry run writes nothing at all), so each proves PRIM=bin with
+# that modifier on an online, single-unchanged-target project whose bin/ is clean.
+CONTEXT_INSTALLS: Mapping[str, tuple[tuple[str, ...], Mapping[str, str]]] = {
+    "install-frozen": (("--frozen",), {"FROZEN": "on"}),
+    "install-update": (("--update",), {"UPDATE": "on"}),
+    "install-force": (("--force",), {"FORCE": "on"}),
+    "install-dry-run": (("--dry-run",), {"DRYRUN": "on"}),
+    "install-select": (("--target", "claude"), {"SELECT": "on"}),
+}
+_CONTEXT = {"DEPLOYED": "clean", "NET": "online", "TGT": "single-unchanged"}
+
+
+def bin_context(cell: str) -> Mapping[str, str] | None:
+    """The factor context a step of this spine proves for PRIM=bin at project scope.
+
+    A deploying install (gate off or allowed) proves bin/ deployed; a context
+    re-install of the deployed plugin also proves its modifier. Any other step,
+    or one under another gate level, proves no bin context (``None``).
+    """
+    parts = cell.split("|")
+    op, gate = parts[1], parts[3]
+    if op == "install" and gate in ("none", "allowed"):
+        return {}
+    if op in CONTEXT_INSTALLS and gate == "allowed":
+        return {**_CONTEXT, **CONTEXT_INSTALLS[op][1]}
+    return None
+
+
 def plugin_bin_cells() -> frozenset[str]:
     """Every machine id the plugin bin spine credits (labels only, no CLI)."""
     machine = GatePluginBin(None)
@@ -388,6 +426,5 @@ def plugin_bin_cells() -> frozenset[str]:
 
 
 def deploys_bin(cell: str) -> bool:
-    """Whether the step behind *cell* deploys the plugin's bin/ at project scope."""
-    parts = cell.split("|")
-    return parts[1] == "install" and parts[3] in ("none", "allowed")
+    """Whether the step behind *cell* deploys (or keeps) the plugin's bin/ at project scope."""
+    return bin_context(cell) is not None

@@ -4253,6 +4253,11 @@
   },
   "T1|OP=install|PRIM=bin|GATE=allowed": {
    "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project",
     "G1|install|bin|allowed|project"
    ],
    "family": "T1",
@@ -19736,11 +19741,19 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_plugin_bin_deploys_under_home_once_trusted"
   },
   "pair|PRIM=bin|DEPLOYED=clean": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|DEPLOYED=edited": {
    "family": "pair",
@@ -19767,25 +19780,37 @@
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin"
   },
   "pair|PRIM=bin|DRYRUN=on": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|FORCE=on": {
+   "credited_by": [
+    "G1|install-force|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|GATE=allowed": {
    "credited_by": [
@@ -19910,11 +19935,19 @@
    "strength": "e2e"
   },
   "pair|PRIM=bin|NET=online": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|NOPOLICY=on": {
    "family": "pair",
@@ -19925,6 +19958,11 @@
   },
   "pair|PRIM=bin|SCOPE=project": {
    "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project",
     "G1|install|bin|allowed|project",
     "G1|install|bin|none|project"
    ],
@@ -19944,11 +19982,15 @@
    "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|SELECT=on": {
+   "credited_by": [
+    "G1|install-select|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|TGT=multi-narrowed": {
    "family": "pair",
@@ -19982,11 +20024,19 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-narrowed]"
   },
   "pair|PRIM=bin|TGT=single-unchanged": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|TGT=single-widened": {
    "family": "pair",
@@ -19997,11 +20047,15 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-widened]"
   },
   "pair|PRIM=bin|UPDATE=on": {
+   "credited_by": [
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=canvas|DEPLOYED=absent": {
    "family": "pair",
