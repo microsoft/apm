@@ -323,6 +323,8 @@ def approve_cmd(
         selected, missing = _select_packages(manifest, packages)
         # Refuse a still-denied package before any approval path writes (#4923).
         _refuse_still_denied(manifest, user_scope, deny, selected, logger=logger)
+        # The org dependency denylist blocks the package itself: approving cannot lift it (#5236).
+        _refuse_policy_denied_dependencies(manifest, selected, logger=logger)
         if bundle_keys:
             _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
             if not packages:
@@ -1341,6 +1343,52 @@ def _refuse_still_denied(
         _rich_error(
             f"{_identity(decl)} is still denied ({layer}); the approval has no effect "
             f"until that deny is lifted: {_lift_deny_hint(layer, _identity(decl), user_scope=global_install)}"
+        )
+    _rich_info("Nothing written.", symbol="info")
+    sys.exit(1)
+
+
+def _refuse_policy_denied_dependencies(
+    manifest: Path, declarations: list[ExecutableDeclaration], *, logger: CommandLogger
+) -> None:
+    """Exit 1 before any write when org policy blocks a selected package (#5236).
+
+    A dependency the deny list matches, or one outside a configured allow list,
+    is named with that check. The same dependency check install, compile and audit apply
+    (:func:`~apm_cli.install.exec_gate.policy_denied_dependencies`), under the
+    same enforcement: ``block`` refuses, ``warn`` and ``off`` approve as before.
+    """
+    if not declarations:
+        return
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..install.exec_gate import policy_denied_dependencies
+
+    lockfile = LockFile.read(get_lockfile_path(manifest.parent))
+    if lockfile is None:
+        return
+    policy = _load_org_policy(manifest.parent, logger=logger)
+    if getattr(policy, "enforcement", "block") != "block":
+        return
+    apm_modules = manifest.parent / "apm_modules"
+    selected = {Path(decl.install_path): decl for decl in declarations if decl.install_path}
+    subjects = {}
+    for locked in lockfile.get_package_dependencies():
+        try:
+            ref = locked.to_dependency_ref()
+            path = ref.get_install_path(apm_modules)
+        except (OSError, ValueError):
+            continue
+        if path in selected:
+            subjects[_identity(selected[path])] = ref
+    denied = policy_denied_dependencies(subjects.items(), policy)
+    if not denied:
+        return
+    for identity, reason in sorted(denied.items()):
+        detail = reason.removeprefix("org policy: ")
+        check = "dependency-denylist" if "denied by pattern" in detail else "dependency-allowlist"
+        _rich_error(
+            f"{identity} is denied by org policy ({check}: {detail}); "
+            "approving cannot lift it: ask its owner to change apm-policy.yml"
         )
     _rich_info("Nothing written.", symbol="info")
     sys.exit(1)

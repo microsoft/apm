@@ -221,7 +221,10 @@ first-approval prompt (`Nothing written.`), so a script never commits an
 approval that was not recorded. It also exits 1, writing nothing, when the
 org policy outcome blocks, exactly as `apm install` would (for example an
 unreachable policy under `policy.fetch_failure_default: block`); run
-`apm policy status --no-cache` to diagnose. The first pinned approval in a project also
+`apm policy status --no-cache` to diagnose. When a blocking org policy denies
+the package itself (its dependency deny list or allow list), approve names the
+package and the check, says approving cannot lift it, and exits 1 writing
+nothing. The first pinned approval in a project also
 prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,

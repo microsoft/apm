@@ -1259,3 +1259,49 @@ def test_user_bundle_approve_retires_legacy_approvals_on_save(
     assert allow == {"acme/old": {"hooks": True}, _BUNDLE_KEY: {"hooks": True}}
     assert not legacy.exists()
     assert manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("deny", "enforcement", "refused"),
+    [
+        (("evil/*",), "block", True),
+        (("other/*",), "block", False),
+        (("evil/*",), "warn", False),
+    ],
+    ids=["denylisted-block", "not-denylisted-control", "denylisted-warn"],
+)
+def test_approve_refuses_a_package_the_org_dependency_denylist_blocks(
+    deny: tuple[str, ...], enforcement: str, refused: bool
+) -> None:
+    """#5236: a blocking dependency deny refuses approval and writes nothing; others approve."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.policy.schema import DependencyPolicy
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_manifest(".")
+        _create_pkg_with_hooks(Path("apm_modules/evil"), "repo")
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="evil/repo", version="1.0", name="repo"))
+        lockfile.write(Path("apm.lock.yaml"))
+        before = Path("apm.yml").read_bytes()
+        policy = ApmPolicy(enforcement=enforcement, dependencies=DependencyPolicy(deny=deny))
+
+        with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
+            result = runner.invoke(approve_cmd, ["repo"])
+
+        flat = " ".join(result.output.split())
+        if refused:
+            assert result.exit_code == 1, result.output
+            assert (
+                "evil/repo is denied by org policy (dependency-denylist: denied by pattern: "
+                "evil/*); approving cannot lift it"
+            ) in flat
+            assert "Run 'apm install'" not in flat
+            assert Path("apm.yml").read_bytes() == before
+        else:
+            assert result.exit_code == 0, result.output
+            assert "denied by org policy" not in flat
+            assert (
+                "evil/repo" in yaml.safe_load(Path("apm.yml").read_text())["executables"]["allow"]
+            )
