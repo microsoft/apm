@@ -1135,6 +1135,52 @@ def test_an_nfd_descendant_spelling_is_refused(tmp_path: Path, apm_binary_path: 
     assert (tree_digest(world.project), _modules(world.project)) == before
 
 
+def _folds_normalization(path: Path) -> bool:
+    probe = path / "caf\u00e9-probe"
+    probe.mkdir()
+    try:
+        return (path / "cafe\u0301-probe").exists()
+    finally:
+        probe.rmdir()
+
+
+def test_an_nfd_spelling_of_the_same_source_directory_reanchors(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5222: where the volume folds Unicode normalization, ../<NFD> and ../<NFC> name one
+    source directory with no link, so the re-anchor takes the fresh spelling."""
+    if not _folds_normalization(tmp_path):
+        pytest.skip("needs a normalization-insensitive volume; the seam cell covers the proof")
+    world = _respelled_world(
+        tmp_path, apm_binary_path, lambda vendor: None, spellings=("caf\u00e9", "cafe\u0301")
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+
+
+def test_two_directories_that_differ_only_by_normalization_stay_distinct(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5222: where NFC and NFD are two directories, they stay two packages."""
+    nfc, nfd = "caf\u00e9", "cafe\u0301"
+    if _folds_normalization(tmp_path):
+        pytest.skip("needs a normalization-sensitive volume")
+    world = _respelled_world(
+        tmp_path,
+        apm_binary_path,
+        lambda vendor: _skill_package(vendor / nfd, "g"),
+        spellings=(nfc, nfd),
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    copies = {key.rsplit("/", 2)[-2] for key in _modules(world.project) if key.endswith("/apm.yml")}
+    assert {nfc, nfd} <= copies, sorted(copies)
+    _assert_no_frozen_rewrites_nothing(world)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 def test_an_aliased_respelled_descendant_with_stale_excluded_files_refuses(
     tmp_path: Path, apm_binary_path: Path
