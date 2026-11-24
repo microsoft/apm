@@ -1,5 +1,7 @@
 """Tests for apm_cli.utils.yaml_io -- cross-platform UTF-8 YAML I/O (pure logic cases)."""
 
+import re
+
 import pytest
 import yaml
 
@@ -124,3 +126,32 @@ def test_an_unrelated_frontmatter_type_error_is_re_raised(monkeypatch):
     monkeypatch.setattr(frontmatter, "loads", broken)
     with pytest.raises(TypeError, match="unrelated"):
         loads_frontmatter("---\nname: a\n---\nbody\n")
+
+
+@pytest.mark.parametrize(
+    ("key", "label"),
+    [
+        ("1: x", "1"),
+        ("? 0x" + "f" * 5000 + "\n: x", "<int>"),
+        ("? !!binary G1szMW1yZWQ=\n: x", re.escape("b'\\x1b[31mred'")),
+    ],
+    ids=["int", "int-too-large-to-render", "binary-esc"],
+)
+def test_a_non_string_frontmatter_key_is_a_named_yaml_error(key: str, label: str) -> None:
+    """Every caller gets the loader's own YAMLError, never a bare TypeError (#5028)."""
+    with pytest.raises(yaml.YAMLError, match=rf"^non-string frontmatter key\(s\): {label}$"):
+        loads_frontmatter(f"---\n{key}\ndescription: d\n---\nbody\n")
+
+
+def test_an_unrelated_type_error_is_not_masked_as_a_frontmatter_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a non-string key becomes the named YAMLError; any other TypeError surfaces (#5028)."""
+    import frontmatter
+
+    def broken(*_args, **_kwargs):
+        raise TypeError("handler bug")
+
+    monkeypatch.setattr(frontmatter, "loads", broken)
+    with pytest.raises(TypeError, match=r"^handler bug$"):
+        loads_frontmatter("---\ndescription: d\n---\nbody\n")

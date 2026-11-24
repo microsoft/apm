@@ -688,17 +688,21 @@ def per_file_bundle_records(
 def per_file_bundle_hook_keys(
     sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS
 ) -> dict[str, tuple[str | None, list[str]]]:
-    """Return ``slug -> (approval_key, files)`` for the *kind* records of a sidecar."""
+    """Return ``slug -> (approval_key, files)`` for the *kind* records of a sidecar.
+
+    Raises:
+        TypeError: A bundle's record lists its files as anything but a list of
+            paths: a corrupted record is never read as "no files" (#5144).
+    """
     files_key = _RECORD_KINDS[kind][1]
     found: dict[str, tuple[str | None, list[str]]] = {}
     for record in per_file_bundle_records(sidecar_path, kind):
         parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
         files = record.get(files_key)
         if parsed is not None:
-            found[parsed[0]] = (
-                parsed[1],
-                [str(item) for item in files] if isinstance(files, list) else [],
-            )
+            if not isinstance(files, list) or not all(isinstance(item, str) for item in files):
+                raise TypeError(f"local-bundle {kind} record {files_key} must be a list of paths")
+            found[parsed[0]] = (parsed[1], list(files))
     return found
 
 
