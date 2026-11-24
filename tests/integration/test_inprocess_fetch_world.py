@@ -32,6 +32,9 @@ pytestmark = [
 ]
 
 _ENGAGED = "In-process fetch: "
+_NOT_YET_ON_WINDOWS = pytest.mark.skipif(
+    os.name == "nt", reason="B1 engages on Windows in the W4 follow-up"
+)
 # A per-install identifier that differs on every run by design.
 _PER_RUN = {".apm-local/installation"}
 
@@ -89,6 +92,7 @@ def _global_attributes(env: dict[str, str]) -> Path:
     return Path(xdg) / "git" / "attributes" if xdg else Path(home) / ".config/git/attributes"
 
 
+@_NOT_YET_ON_WINDOWS
 def test_in_process_and_git_installs_are_byte_identical(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -120,6 +124,7 @@ def test_in_process_and_git_installs_are_byte_identical(
         assert fast_receipts and fast_receipts == git_receipts
 
 
+@_NOT_YET_ON_WINDOWS
 def test_every_package_is_fetched_in_process_under_a_realistic_user_config(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -151,6 +156,7 @@ def _fetches(world) -> list:
     return [request for request in world.services.proxy.observations if _in_process_fetch(request)]
 
 
+@_NOT_YET_ON_WINDOWS
 def test_a_rate_limit_mid_install_sends_the_rest_to_git_with_the_same_lockfile(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -186,6 +192,7 @@ def test_a_rate_limit_mid_install_sends_the_rest_to_git_with_the_same_lockfile(
         assert _tree(project) == _tree(reference)
 
 
+@_NOT_YET_ON_WINDOWS
 def test_an_authenticated_attempt_never_uses_the_in_process_fetch(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
