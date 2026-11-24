@@ -203,6 +203,7 @@
         "src/apm_cli/claude_plugins/admission.py",
         "src/apm_cli/claude_plugins/registrar.py",
         "src/apm_cli/native_plugins/carry.py",
+        "src/apm_cli/native_plugins/claude_marketplaces.py",
         "src/apm_cli/native_plugins/layout.py",
         "src/apm_cli/native_plugins/record.py",
         "src/apm_cli/native_plugins/scopes.py",
