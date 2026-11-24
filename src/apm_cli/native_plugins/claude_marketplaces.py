@@ -12,8 +12,10 @@ the installing checkout's absolute path, per machine.
 The registry is user-level state, so APM only writes an entry it owns for this
 checkout: it adds the entry when none exists under the name, keeps an entry
 that already names this checkout as is, and keeps any other entry (another
-clone or worktree, or Claude's own) byte for byte with a warning. Every other
-entry is untouched. APM records each entry it wrote in a receipt under
+clone or worktree, or Claude's own) unchanged with a warning. A write keeps
+every other entry's content; the file itself is re-serialized. APM registers
+only the name derived from this checkout's own project identity, never one a
+committed lock or catalog supplies. APM records each entry it wrote in a receipt under
 ``$APM_HOME``, so it removes only an entry it wrote that still names the same
 root. A linked registry location, an unreadable registry or receipt, or an
 unusable ``CLAUDE_CONFIG_DIR`` is left alone with a warning, never failing the
@@ -96,17 +98,22 @@ def _read(path: Path) -> tuple[bytes | None, dict[str, Any]]:
     return raw, data
 
 
-def _stage(path: Path, data: dict[str, Any]) -> Path:
-    """Write *data* to a temporary file beside *path*, ready to replace it."""
+def _stage(path: Path, data: dict[str, Any], mode: int | None = None) -> Path:
+    """Write *data* to a temporary file beside *path*, ready to replace it.
+
+    *mode* fixes the published file's permissions; by default the existing
+    file's mode is kept, or the umask applies to a new file.
+    """
     import tempfile
 
     from apm_cli.utils.atomic_io import umask_file_mode
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        mode = stat.S_IMODE(path.stat().st_mode)
-    except FileNotFoundError:
-        mode = umask_file_mode(path)
+    if mode is None:
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except FileNotFoundError:
+            mode = umask_file_mode(path)
     descriptor, name = tempfile.mkstemp(prefix=".apm-", suffix=".tmp", dir=path.parent)
     staged = Path(name)
     try:
@@ -129,7 +136,13 @@ def _refuse_linked(path: Path, root: Path) -> None:
         raise _Skip(f"{_text(path)} is, or is reached through, a symbolic link")
 
 
-def _merge(path: Path, change: Callable[[dict[str, Any]], bool], *, root: Path) -> bool:
+def _merge(
+    path: Path,
+    change: Callable[[dict[str, Any]], bool],
+    *,
+    root: Path,
+    mode: int | None = None,
+) -> bool:
     """Apply *change* to the document at *path*; return whether APM published it.
 
     *change* edits the object in place and returns whether it changed. The
@@ -143,7 +156,7 @@ def _merge(path: Path, change: Callable[[dict[str, Any]], bool], *, root: Path) 
             return False
         if path.exists() and not os.access(path, os.W_OK):
             raise _Skip(f"{_text(path)} is read-only")
-        staged = _stage(path, data)
+        staged = _stage(path, data, mode)
         try:
             # Checked again after staging: a directory linked meanwhile is never published to.
             _refuse_linked(path, root)
@@ -193,7 +206,8 @@ def _record(key: str, record: dict[str, str] | None) -> None:
         entries[key] = record
         return True
 
-    _merge(path, change, root=path.parent)
+    # The receipt names the user's checkouts and profiles: readable by the owner only.
+    _merge(path, change, root=path.parent, mode=0o600)
     if record is None and path.exists() and not _owned():
         path.unlink()
 
@@ -219,33 +233,54 @@ def claude_trusts(checkout: Path) -> bool:
     path = _claude_trust_file()
     if user_config_crosses_link(path, path.parent):
         return False
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        if not stat.S_ISREG(path.lstat().st_mode):
-            return False
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        # Non-blocking, then judged on the opened file: a FIFO or device never blocks a read.
+        descriptor = os.open(path, flags)
         with os.fdopen(descriptor, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return False
             data = json.loads(handle.read().decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return False
     projects = data.get("projects") if isinstance(data, dict) else None
-    entry = projects.get(str(checkout)) if isinstance(projects, dict) else None
-    return isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True
+    if not isinstance(projects, dict):
+        return False
+    # Claude Code keys projects by the checkout path; on Windows with forward slashes.
+    for key in dict.fromkeys((str(checkout), checkout.as_posix())):
+        entry = projects.get(key)
+        if isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True:
+            return True
+    return False
 
 
 def register_project_marketplace(name: str, root: Path, logger: Any = None) -> None:
     """List project marketplace *name* in Claude's registry at absolute *root*.
 
     Only adds an entry: one already under *name* (this checkout's, another
-    clone's or worktree's, or Claude's own) is kept byte for byte, with a
-    warning when it names another root. The receipt is recorded before the
+    clone's or worktree's, or Claude's own) is kept unchanged, with a warning
+    when it names another root. *name* must be the one derived from this
+    checkout's own project identity. The receipt is recorded before the
     entry is published and undone if publishing fails, so APM never leaves an
     entry it wrote without a record of it.
     """
     location = str(Path(root).absolute())
     if not _PROJECT_MARKETPLACE.match(name):
         raise _Skip(f"'{_text(name)}' is not an APM project marketplace name")
-    # The entry makes Claude Code load the plugins, so only a trusted folder gets one.
     checkout = Path(location).parents[1]
+    # The committed lock or catalog chooses the declared name; register only our own.
+    from apm_cli.native_plugins.scopes import project_marketplace_name
+
+    derived = project_marketplace_name(checkout, None, None)
+    if name != derived:
+        _warn(
+            logger,
+            f"APM did not list marketplace '{_text(name)}' for Claude Code: this "
+            f"checkout's own marketplace name is '{_text(derived)}'. Claude Code lists "
+            "the project's marketplace itself after its first session here.",
+        )
+        return
+    # The entry makes Claude Code load the plugins, so only a trusted folder gets one.
     if not claude_trusts(checkout):
         from apm_cli.core.remediation import CLAUDE_MARKETPLACE_TRUST
 

@@ -10,7 +10,11 @@ names the same root.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,7 +26,15 @@ pytestmark = [
     pytest.mark.promise("P-OWN-claude-native-plugin-registration"),
 ]
 
-_NAME = "apm-p-0000abcd"
+# The name derived from the test checkout's own identity (apm.yml name "repo").
+_NAME = "apm-p-" + hashlib.sha256(b"apm.yml:repo").hexdigest()[:8]
+
+
+def _checkout(path: Path) -> Path:
+    """A checkout whose project identity is its apm.yml name ``repo``."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "apm.yml").write_text("name: repo\nversion: 1.0.0\n", encoding="utf-8")
+    return path
 
 
 class _Logger:
@@ -44,7 +56,7 @@ def _trust(config_dir: Path, *checkouts: Path) -> None:
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("APM_HOME", str(tmp_path / "apm"))
-    root = tmp_path / "repo" / ".agents" / "plugins"
+    root = _checkout(tmp_path / "repo") / ".agents" / "plugins"
     root.mkdir(parents=True)
     _trust(tmp_path / "claude", tmp_path / "repo")
     return root
@@ -166,7 +178,7 @@ def test_uninstall_without_a_receipt_keeps_the_entry(env: Path, tmp_path: Path) 
 def test_a_unicode_root_with_spaces_is_recorded_verbatim(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("APM_HOME", str(tmp_path / "apm"))
-    root = tmp_path / "my r\u00e9po" / ".agents" / "plugins"
+    root = _checkout(tmp_path / "my r\u00e9po") / ".agents" / "plugins"
     root.mkdir(parents=True)
     _trust(tmp_path / "claude", tmp_path / "my r\u00e9po")
 
@@ -448,3 +460,49 @@ def test_a_conflicting_entry_added_mid_merge_is_named(
     assert json.loads(registry.read_text("utf-8")) == theirs
     assert not _receipt(tmp_path).exists()
     assert len(warnings) == 1 and "only overwrites an entry it owns" in warnings[0]
+
+
+def test_only_the_name_derived_from_this_checkout_is_registered(env: Path, tmp_path: Path) -> None:
+    """A name a committed lock or catalog supplies for another identity writes no entry."""
+    other = "apm-p-" + hashlib.sha256(b"apm.yml:someone-else").hexdigest()[:8]
+
+    warnings = _sync(env, name=other)
+
+    assert not _registry(tmp_path).exists()
+    assert not _receipt(tmp_path).exists()
+    assert len(warnings) == 1 and f"own marketplace name is '{_NAME}'" in warnings[0]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_a_fifo_claude_config_counts_as_untrusted_without_blocking(
+    env: Path, tmp_path: Path
+) -> None:
+    config = tmp_path / "claude" / ".claude.json"
+    config.unlink()
+    os.mkfifo(config)
+
+    warnings = _sync(env)
+
+    assert not _registry(tmp_path).exists()
+    assert len(warnings) == 1 and _HINT in warnings[0]
+
+
+@pytest.mark.windows_compat
+def test_a_forward_slash_trust_key_is_trusted(env: Path, tmp_path: Path) -> None:
+    """Claude Code keys projects with forward slashes on Windows."""
+    checkout = tmp_path / "repo"
+    _seed(
+        tmp_path / "claude" / ".claude.json",
+        json.dumps({"projects": {checkout.as_posix(): {"hasTrustDialogAccepted": True}}}),
+    )
+
+    assert _sync(env) == []
+
+    assert _NAME in json.loads(_registry(tmp_path).read_text("utf-8"))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
+def test_the_receipt_is_readable_by_its_owner_only(env: Path, tmp_path: Path) -> None:
+    assert _sync(env) == []
+
+    assert stat.S_IMODE(_receipt(tmp_path).stat().st_mode) == 0o600

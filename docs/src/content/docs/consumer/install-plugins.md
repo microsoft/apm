@@ -169,7 +169,10 @@ first session on a machine (CI, `claude -p`, claude-code-action, a fresh clone)
 starts a plugin's MCP server but not its skills or hooks. The write adds one
 entry and changes no other; `apm uninstall` removes only the entry APM wrote.
 
-APM lists the marketplace only for a folder Claude Code already trusts: its
+APM lists only the marketplace name derived from this checkout's project
+identity (its `origin` remote, else the `apm.yml` name); for any other name a
+committed lock or catalog records, it leaves the listing to Claude Code's own
+first session. APM lists the marketplace only for a folder Claude Code already trusts: its
 user config (`~/.claude.json`, or `.claude.json` under `CLAUDE_CONFIG_DIR`)
 must record `hasTrustDialogAccepted: true` for the checkout's exact absolute
 path. Otherwise APM writes nothing and asks you to open the folder in Claude,

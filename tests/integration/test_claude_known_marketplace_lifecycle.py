@@ -467,3 +467,24 @@ def test_a_malformed_claude_config_counts_as_untrusted(
     assert not world.known.exists()
     assert world.claude_json.read_text("utf-8") == "{not json"
     assert _TRUST_HINT in _text(result), _evidence(result)
+
+
+def test_a_lock_recording_another_identitys_name_writes_no_entry(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Only the name derived from this checkout's own identity is registered."""
+    world = _World(tmp_path, apm_binary_path, trusted=False)
+    world.ok("install", "--no-policy")
+    recorded = world.marketplace()
+    manifest = world.project / "apm.yml"
+    manifest.write_text(
+        manifest.read_text("utf-8").replace("name: consumer", "name: renamed"), encoding="utf-8"
+    )
+    world.trust(world.project)
+
+    result = world.ok("install", "--no-policy")
+
+    assert world.marketplace() == recorded != world.name()
+    assert not world.known.exists()
+    assert not world.receipt.exists()
+    assert f"own marketplace name is '{world.name()}'" in _text(result), _evidence(result)
