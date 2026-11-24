@@ -42,6 +42,7 @@ jobs:
           mkdir -p out
           echo "APM_ABS=$GITHUB_WORKSPACE/$APM" >> "$GITHUB_ENV"
           cd harness
+          [ "${SKIP_PROBE:-}" = 1 ] && exit 0
           uv run --frozen python scripts/perf/boot_probe.py "$GITHUB_WORKSPACE/$PY" "$GITHUB_WORKSPACE/$APM" "$GITHUB_WORKSPACE/out/boot-${{ matrix.os }}.json" 21
       - name: Install-cold t50 plain (CPU) then with importtime
         shell: bash
@@ -52,6 +53,17 @@ jobs:
           APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/importtime" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 0 --runs 2 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/itime" --work "$GITHUB_WORKSPACE/work"
           uv run --frozen python scripts/perf/importtime_report.py "$GITHUB_WORKSPACE/out" > "$GITHUB_WORKSPACE/out/importtime-report-${{ matrix.os }}.md"
           cat "$GITHUB_WORKSPACE/out/importtime-report-${{ matrix.os }}.md"
+      - name: A/A world check (rtt 0/30 x counts off/on), install-cold t50
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd harness
+          for rtt in 0 30; do
+            for counts in off on; do
+              extra=""; [ "$counts" = on ] && extra="--counts"
+              uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt $rtt --rtt-journeys install-cold --runs 3 $extra --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/aa-rtt$rtt-counts$counts" --work "$GITHUB_WORKSPACE/work-aa"
+            done
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
