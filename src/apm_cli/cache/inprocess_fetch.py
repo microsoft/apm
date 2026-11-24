@@ -1166,7 +1166,7 @@ def _caps_get(
         max_hops=0,
         ambient_credentials=False,
         proxies={"https": proxy} if proxy else {},
-        verify=trust[1] if trust[0] == "file" else True,
+        verify=_requests_verify(trust[1]),
         timeout=_TIMEOUT,
     ) as response:
         _admit(response.status_code, response.headers)

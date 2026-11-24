@@ -368,6 +368,30 @@ def test_the_caps_get_sends_the_managed_header_only_per_request(monkeypatch, cre
     assert "Authorization" not in sent["session"].headers
 
 
+@pytest.mark.parametrize("ca", ["os", "file"])
+def test_the_caps_get_and_the_post_share_one_verify_owner(monkeypatch, ca) -> None:
+    """#5376 x #5377: an OS-store (schannel) trust verifies the caps GET as it does the POST."""
+    import certifi
+
+    from apm_cli.deps.anonymous_ref_listing import OS_TRUST
+
+    trust = ("file", OS_TRUST if ca == "os" else certifi.where())
+    seen: list = []
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        seen.append(kwargs["verify"])
+        yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+    upload = "https://github.com/o/r/git-upload-pack"
+    for send in (fetch._caps_get, fetch._post):
+        with pytest.raises(fetch._Refuse, match="auth challenge"):
+            send(upload, None, trust, b"0000")
+
+    assert seen == [fetch._requests_verify(trust[1])] * 2
+
+
 def test_a_sparse_fetch_sends_the_managed_header_on_every_request(monkeypatch, tmp_path) -> None:
     """The gate sees the env without the header; the caps GET and the pack POSTs carry it."""
     import certifi
