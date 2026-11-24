@@ -263,6 +263,14 @@ def test_incremental_merged_config_installs_in_any_order_pass_audit(
         added = runner.run(("install", *trust, *extra), cwd=project, env=env)
         assert added.returncode == 0, added.stdout + added.stderr
     before = _project_bytes(project)
+    # Content oracle: one deployed config holds all three merged servers.
+    names = [f"srv-{n}" if kind == "mcp" else f"{n}-server" for n in _PACKAGES]
+    configs = {
+        path: body
+        for path, body in before.items()
+        if path not in {"apm.yml", "apm.lock.yaml"} and all(n.encode() in body for n in names)
+    }
+    assert configs, f"no deployed config names all of {names}: {sorted(before)}"
     audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
     assert audit.returncode == 0, audit.stdout[-1200:]
     rerun = runner.run(("install", *trust), cwd=project, env=env)

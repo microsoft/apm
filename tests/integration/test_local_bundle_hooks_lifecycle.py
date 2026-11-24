@@ -1767,7 +1767,7 @@ def test_uninstall_bundle_keeps_a_script_a_user_handler_runs_in_any_spelling(
     consumer, _hook = _copilot_bundle_consumer(world, tmp_path, f"{spelling}-consumer")
     script = _user_hook_naming_the_script(consumer, _handler_doc(spelling))
 
-    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=1)
     text = output(result)
 
     assert (consumer / script).is_file(), text
@@ -1792,7 +1792,7 @@ def test_uninstall_bundle_with_an_unreadable_user_hook_naming_the_script_fails_c
     (script,) = [c for c in _claims_of(consumer) if c.endswith("/x.sh")]
     write(consumer / ".github" / "hooks" / "user.json", raw.replace("SCRIPT", script))
 
-    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=1)
     text = output(result)
 
     assert "Traceback" not in text, text
