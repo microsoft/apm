@@ -49,12 +49,14 @@ _DEPLOYED = {
 }
 
 
-def _bundle(world: MarketplacePackWorld, tmp_path: Path, hooked: str | None) -> tuple[Path, str]:
+def _bundle(
+    world: MarketplacePackWorld, tmp_path: Path, hooked: str | None, name: str = "fmpkg"
+) -> tuple[Path, str]:
     """Pack a command and a skill; give *hooked*'s packed file frontmatter hooks."""
-    producer = world.isolated.work_root / "fmpkg"
+    producer = world.isolated.work_root / name
     write(
         producer / "apm.yml",
-        "name: fmpkg\nversion: 1.0.0\ndescription: f\nlicense: MIT\ntargets: [claude]\n"
+        f"name: {name}\nversion: 1.0.0\ndescription: f\nlicense: MIT\ntargets: [claude]\n"
         "dependencies:\n  apm: []\n",
     )
     write(producer / ".apm" / "prompts" / "run.prompt.md", _COMMAND.format(hooks=""))
@@ -63,7 +65,7 @@ def _bundle(world: MarketplacePackWorld, tmp_path: Path, hooked: str | None) -> 
     (producer / ".claude").mkdir()
     world.apm(producer, "install", "--no-policy")
     world.apm(producer, "pack", "-o", str(tmp_path / "out"))
-    bundle = tmp_path / "out" / "fmpkg-1.0.0"
+    bundle = tmp_path / "out" / f"{name}-1.0.0"
     if hooked is not None:
         text = {
             "command": _COMMAND.format(hooks=_HOOKS),
@@ -352,3 +354,33 @@ def test_fresh_clone_without_apm_modules_keeps_or_retires_by_the_committed_recor
     assert hooked.exists() is not withdrawn, text
     assert ("Retired 1 Markdown file(s) with frontmatter hooks" in text) is withdrawn, text
     assert (consumer / _DEPLOYED["skill"]).is_file()
+
+
+@pytest.mark.parametrize("withdrawal", ["revoked", "denied"])
+def test_a_shared_hooked_file_follows_the_other_grant_unless_denied(
+    tmp_path: Path, apm_binary_path: Path, withdrawal: str
+) -> None:
+    """#5254: a revoked bundle keeps a path another granted bundle records; a deny wins."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    first, first_key = _bundle(world, tmp_path, "command")
+    second, second_key = _bundle(world, tmp_path, "command", name="otherpkg")
+    consumer = _consumer(world, "shared-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {first_key: {"hooks": True}, second_key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(first), "--no-policy")
+    world.apm(consumer, "install", str(second), "--no-policy")
+    hooked = consumer / _DEPLOYED["command"]
+    assert hooked.is_file()
+
+    manifest = load_yaml(consumer / "apm.yml")
+    del manifest["executables"]["allow"][first_key]
+    if withdrawal == "denied":
+        manifest["executables"]["deny"] = {first_key: {"hooks": True}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    text = output(world.apm(consumer, "install", "--no-policy"))
+
+    assert hooked.exists() is (withdrawal == "revoked"), text
+    assert ("Retired 1 Markdown file(s) with frontmatter hooks" in text) is (
+        withdrawal == "denied"
+    ), text

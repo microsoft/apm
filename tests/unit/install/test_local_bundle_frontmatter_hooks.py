@@ -176,9 +176,9 @@ def test_a_path_another_granted_bundle_records_is_never_retired(tmp_path: Path) 
     for rel in (shared, own):
         (project / rel).parent.mkdir(parents=True, exist_ok=True)
         (project / rel).write_bytes(b"---\nhooks: {}\n---\nRun.\n")
-    _claude_record(project, "revoked", "revoked@1:sha256:aa", [shared, own])
-    _claude_record(project, "granted", "granted@1:sha256:bb", [shared])
-    allow = {"granted@1:sha256:bb": {"hooks": True}}
+    _claude_record(project, "revoked", "revoked#1@sha256:aa", [shared, own])
+    _claude_record(project, "granted", "granted#1@sha256:bb", [shared])
+    allow = {"granted#1@sha256:bb": {"hooks": True}}
 
     _assert_unadmitted(
         project,
@@ -214,3 +214,14 @@ def test_a_file_without_an_exact_lock_hash_is_kept(tmp_path: Path) -> None:
 def _assert_partition(root: Path, removed, kept, want_removed, want_kept) -> None:
     assert (set(removed), set(kept)) == (want_removed, want_kept)
     assert {p.name for p in root.iterdir()} == want_kept
+
+
+def test_a_record_borrowing_another_bundles_granted_key_grants_nothing(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    row = ".claude/commands/run.md"
+    (project / row).parent.mkdir(parents=True)
+    (project / row).write_bytes(b"---\nhooks: {}\n---\nRun.\n")
+    _claude_record(project, "revoked", "granted#1@sha256:bb", [row])
+    allow = {"granted#1@sha256:bb": {"hooks": True}}
+
+    _assert_unadmitted(project, allow, [row], {(None, "no approval record"): [row]})
