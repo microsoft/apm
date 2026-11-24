@@ -834,7 +834,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         from .phases import download as _download_phase
 
         ctx.tui.start_phase("download", total=len(ctx.deps_to_install) or 1)
-        _run_phase("download", _download_phase, ctx)
+        pass  # RESEARCH: download/materialize deleted
 
         # --------------------------------------------------------------
         # Phase 5: Sequential integration loop + root primitives
