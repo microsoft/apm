@@ -192,6 +192,8 @@ def _check_config(path: Path, *, origin_ok: OriginCheck, worktree: bool) -> None
 
 
 def _check_alternates(git_dir: Path, alternates_root: Path | None) -> None:
+    from apm_cli.utils.realpath import resolve_path
+
     objects = git_dir / "objects" / "info"
     if (objects / "http-alternates").exists():
         raise UntrustedCachedRepoError("http-alternates present")
@@ -200,14 +202,14 @@ def _check_alternates(git_dir: Path, alternates_root: Path | None) -> None:
         return
     if alternates_root is None:
         raise UntrustedCachedRepoError("object alternates present")
-    root = alternates_root.resolve()
+    root = resolve_path(alternates_root)
     # Git reads each entry up to the newline exactly as written (no trimming).
     for line in _regular_text(alternates).split("\n"):
         if not line or line.startswith("#"):
             continue
         if line.startswith('"'):
             raise UntrustedCachedRepoError("quoted object alternate")
-        target = (git_dir / "objects" / line).resolve()
+        target = resolve_path(git_dir / "objects" / line)
         if target != root and root not in target.parents:
             raise UntrustedCachedRepoError("object alternates leave the cache")
         # Git follows alternates recursively; APM's bares never have their own.

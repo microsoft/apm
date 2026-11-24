@@ -67,6 +67,7 @@ from apm_cli.integration.hook_native_formats import (
 )
 from apm_cli.integration.hook_ownership import (
     LocalBundleMarkers,
+    canonical_hook_order,
     dependency_hook_source_marker,
     dependency_hook_sources,
     drop_dependency_owned_entries,
@@ -1500,6 +1501,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_adopted += copy_result.files_adopted
 
         drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)
+        canonical_hook_order(json_config[container])
         # Shared configs are cleaned by ownership, never file-level deletion.
         write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)
 
@@ -2055,6 +2057,8 @@ class HookIntegrator(BaseIntegrator):
         empty event arrays and the *container* key itself.  *container*
         defaults to ``"hooks"``; Antigravity passes ``"apm"`` (its reserved
         hook-name container) so sibling user hook-names are left intact.
+        The cleaned file replaces *json_path* atomically, so a linked config
+        path becomes a regular file and the link's target is not written.
         """
         if not json_path.exists():
             return
@@ -2084,7 +2088,7 @@ class HookIntegrator(BaseIntegrator):
                 stats["files_removed"] += 1
             elif modified:
                 with provenance.recorded_config_write(json_path):
-                    write_seam.write_text(json_path, json.dumps(data, indent=2) + "\n")
+                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if kept:
                 write_hook_sidecar(sidecar_path, kept)

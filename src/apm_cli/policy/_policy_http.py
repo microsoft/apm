@@ -55,6 +55,9 @@ def policy_get(
     egress-route owner, which keeps this governance channel direct in
     registry-only mode.
     """
+    from ..core.policy_fetch_ledger import note_fetch_attempt
+
+    note_fetch_attempt("http")
     route = route_for(EgressSurface.POLICY_FETCH)
     if route is not EgressRoute.DIRECT:
         raise requests.RequestException(f"policy fetch route is {route.value}")

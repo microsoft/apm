@@ -6,15 +6,12 @@ APM is invoked from within a git repository's hook or worktree).
 
 Preserved variables (user-controlled config for proxy/auth):
 - GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS, SSH_ASKPASS
-- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT
-- GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
+- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT, GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
 
 Git state variables stripped after external-process sanitization:
-- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE
-- GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
-- GIT_COMMON_DIR, GIT_NAMESPACE, GIT_INDEX_VERSION
-- GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
-- GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
+- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR
+- GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_INDEX_VERSION, GIT_CEILING_DIRECTORIES
+- GIT_DISCOVERY_ACROSS_FILESYSTEM, GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
 - GIT_IMPLICIT_WORK_TREE, GIT_NO_REPLACE_OBJECTS, GIT_PREFIX
 """
 
@@ -32,6 +29,7 @@ from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.utils import git_config_once as _config_once
 from apm_cli.utils.path_security import filesystem_containment
 from apm_cli.utils.subprocess_env import external_process_env
 
@@ -629,12 +627,19 @@ def clear_git_auth_env(
     env: dict[str, str],
     *,
     remove_helpers: bool = False,
+    keep_url_rewrites: bool = False,
 ) -> None:
-    """Remove inherited Git authorization channels while retaining other config."""
+    """Remove inherited Git authorization channels while retaining other config; with
+    *keep_url_rewrites* only GIT_CONFIG_PARAMETERS ``url.*`` rewrites stay (#5246)."""
+    from apm_cli.utils.git_config_parameters import url_rewrites_only
+
     env.pop(_MANAGED_GIT_AUTH_INTENT_ENV, None)
     env.pop("GIT_TOKEN", None)
     env.pop("GIT_HTTP_EXTRAHEADER", None)
-    env.pop("GIT_CONFIG_PARAMETERS", None)
+    parameters = env.pop("GIT_CONFIG_PARAMETERS", None)
+    rewrites = url_rewrites_only(parameters) if keep_url_rewrites else None
+    if rewrites:
+        env["GIT_CONFIG_PARAMETERS"] = rewrites
     try:
         count = int(env.pop("GIT_CONFIG_COUNT", "0"))
     except ValueError:
@@ -894,6 +899,7 @@ def _has_applicable_http_authorization(
     return any(_is_credential_bearing_http_header(value) for value in active)
 
 
+@_config_once.urlmatch_first
 def _urlmatched_header_group(
     remote_url: str,
     headers: Sequence[GitConfigEntry],
@@ -1247,14 +1253,16 @@ def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
     """Return the URL git contacts for *remote_url* after ``insteadOf`` rewrites.
 
     Identification only (for example keying a cached verdict to the server
-    contacted); it never authorizes a contact. Use
-    :func:`validate_git_url_rewrite_safety` before contacting a remote.
+    contacted); it never authorizes a contact (see validate_git_url_rewrite_safety).
     """
+    return resolve_git_url_rewrite(remote_url, git_url_rewrites(env)) or remote_url
+
+
+def git_url_rewrites(env: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """The ``insteadOf`` rewrites git applies under *env*; independent of the URL."""
     child = git_subprocess_env(env)
-    # Merge the parent process config exactly as git_network_env does.
-    _append_parent_git_config(child)
-    snapshot = _read_effective_git_config(child)
-    return resolve_git_url_rewrite(remote_url, snapshot.rewrites) or remote_url
+    _append_parent_git_config(child)  # the parent config merge git_network_env does
+    return tuple(_read_effective_git_config(child).rewrites)
 
 
 def _append_git_url_rewrites(
@@ -1583,6 +1591,7 @@ def git_network_env(
     return env
 
 
+@_config_once.config_once_first
 def git_clone_env(
     remote_url: str,
     overrides: dict[str, object] | None,

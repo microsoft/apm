@@ -10,6 +10,7 @@ owner: native_plugins/claude_marketplaces.py _merge
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -20,19 +21,46 @@ pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-claude-native-pl
 
 
 def _racing(monkeypatch: pytest.MonkeyPatch, path: Path, edits: list[dict]) -> None:
-    """Another writer replaces *path* right after each of APM's first reads of it."""
-    original = Path.read_bytes
-    calls = {"n": 0}
+    """Another writer replaces *path* right after each of APM's odd reads of it closes.
 
-    def read_bytes(target: Path) -> bytes:
-        raw = original(target)
-        if target == path:
+    The edit runs once APM's read handle is closed, so it is portable: Windows
+    refuses to replace a file another handle holds open.
+    """
+    real_open, real_fdopen = os.open, os.fdopen
+    calls = {"n": 0}
+    watched: set[int] = set()
+
+    def open_(target, flags, *args, **kwargs):
+        descriptor = real_open(target, flags, *args, **kwargs)
+        if Path(os.fspath(target)) == path and not flags & os.O_CREAT:
             calls["n"] += 1
             if calls["n"] % 2 == 1 and edits:
-                target.write_text(json.dumps(edits.pop(0)), encoding="utf-8")
-        return raw
+                watched.add(descriptor)
+        return descriptor
 
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    class _EditAfterClose:
+        def __init__(self, handle) -> None:
+            self._handle = handle
+
+        def __enter__(self):
+            return self
+
+        def read(self, *args):
+            return self._handle.read(*args)
+
+        def __exit__(self, *exc) -> None:
+            self._handle.close()
+            path.write_text(json.dumps(edits.pop(0)), encoding="utf-8")
+
+    def fdopen(descriptor, *args, **kwargs):
+        handle = real_fdopen(descriptor, *args, **kwargs)
+        if descriptor in watched:
+            watched.discard(descriptor)
+            return _EditAfterClose(handle)
+        return handle
+
+    monkeypatch.setattr(os, "open", open_)
+    monkeypatch.setattr(os, "fdopen", fdopen)
 
 
 def _add_apm(data: dict) -> bool:

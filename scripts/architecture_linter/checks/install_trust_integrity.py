@@ -409,7 +409,13 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
     ),
 }
 # The approval record is read and written only in hook_ownership.py.
-_MARKER_TOKENS = ('"local-bundle::', "LOCAL_BUNDLE_HOOK_SOURCE_PREFIX")
+_MARKER_TOKENS = (
+    '"local-bundle::',
+    "LOCAL_BUNDLE_HOOK_SOURCE_PREFIX",
+    # The bundle Markdown hook record (#5254): its key and file are written only there.
+    '"local-bundle-markdown-hooks"',
+    '"apm-bundle-markdown-hooks.json"',
+)
 
 
 def check_local_bundle_hook_trust(provider: FactsProvider) -> tuple[Violation, ...]:
