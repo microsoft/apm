@@ -159,18 +159,14 @@ def test_a_lockfile_identity_is_unchanged_by_the_owner_parse(path: Path) -> None
     assert lockfile_identity(text) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def test_identifying_one_lockfile_twice_parses_it_once(monkeypatch) -> None:
+def test_identifying_one_lockfile_twice_parses_it_once() -> None:
     """The commit mark and the settle identify the same text: one memoized parse."""
     from apm_cli.install.deploy_snapshot import lockfile_identity
 
-    parses: list[str] = []
-    load = yaml_io.load_machine_yaml_str
-
-    def counted(text: str):
-        parses.append(text)
-        return load(text)
-
-    monkeypatch.setattr(yaml_io, "load_machine_yaml_str", counted)
     text = "lockfile_version: '1'\ndependencies:\n- repo_url: o/identity-memo\n"
-    assert lockfile_identity(text) == lockfile_identity(text)
-    assert parses == [text]
+    key = lockfile_container.parse_key(text)
+    lockfile_container._parsed_texts.pop(key, None)
+    first = lockfile_identity(text)
+    parsed = lockfile_container._parsed_texts[key]
+    assert lockfile_identity(text) == first
+    assert lockfile_container._parsed_texts[key] is parsed

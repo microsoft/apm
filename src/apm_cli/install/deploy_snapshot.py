@@ -367,8 +367,7 @@ def lockfile_identity(text: str) -> str:
     from apm_cli.deps.lockfile_container import parse_lockfile_text
 
     try:
-        # The lockfile owner's memoized parse: the same text is identified at the
-        # commit mark and again at settle, and was usually just read or written.
+        # The owner's memoized parse: one text is identified at commit and settle.
         canonical = json.dumps(parse_lockfile_text(text), sort_keys=True, default=str)
     except (yaml.YAMLError, ValueError, TypeError, RecursionError):
         canonical = text.replace("\r\n", "\n")
