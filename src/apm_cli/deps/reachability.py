@@ -400,11 +400,11 @@ def local_sources_reach(
         if directory in seen:
             continue
         seen.add(directory)
-        if directory.is_file():
-            if _local_file_not_a_leaf(local_path, anchor) is None:
-                continue  # an admitted primitive file declares no dependencies
-            return True  # any other file proves nothing
         try:
+            if directory.is_file():
+                if _local_file_not_a_leaf(local_path, anchor) is None:
+                    continue  # an admitted primitive file declares no dependencies
+                return True  # any other file proves nothing
             package = _read_node(directory, local=True)
         except (OSError, ValueError, RuntimeError):
             return True
@@ -663,13 +663,13 @@ def compute_forward_reachable_keys(
             manifest_dir = install_path
             node_key = visit_key
 
-        if edge is not None and manifest_dir.is_file():
-            # An admitted primitive file declares no dependencies; any other
-            # file is not a package, so its subtree is unknown.
-            if (reason := _local_file_not_a_leaf(*edge)) is not None:
-                unverifiable.append((visit_key, reason))
-            continue
         try:
+            if edge is not None and manifest_dir.is_file():
+                # An admitted primitive file declares no dependencies; any other
+                # file is not a package, so its subtree is unknown.
+                if (reason := _local_file_not_a_leaf(*edge)) is not None:
+                    unverifiable.append((visit_key, reason))
+                continue
             package = _read_node(manifest_dir, local=ref.is_local)
             if package is None:
                 continue
@@ -946,13 +946,20 @@ def _retain_alias_anchors(
 def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
     """Why a survivor cannot be re-parented by prune, or None when it can.
 
-    Re-parenting records the nearest surviving parent; that parent must keep
-    a lock row (an unlocked parent leaves the survivor unresolvable) and must
-    spell the survivor by its own identity (an alias would re-key it).
+    Re-parenting records the nearest surviving parent; it must be the first
+    parent the walk saw (its path and identity are then one edge), keep a
+    lock row (an unlocked parent leaves the survivor unresolvable) and spell
+    the survivor by its own identity (an alias would re-key it).
     """
     if not nearest:
         return f"{repo_url} still resolves through it, and apm.yml now declares {repo_url}"
     parent = min(nearest)
+    if parent != nearest[0]:
+        # The repair would pair one parent's path with another's identity (#5126).
+        return (
+            f"{repo_url} still resolves through it, and several packages at the same "
+            f"depth now declare {repo_url}"
+        )
     if parent not in lockfile.dependencies:
         return (
             f"{repo_url} still resolves through it, and the package that now declares "
