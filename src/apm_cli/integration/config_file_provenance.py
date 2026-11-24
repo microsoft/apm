@@ -175,6 +175,9 @@ class _Store:
     generation: str = ""
     # The index as this store last read or wrote it: a save re-reads it only if changed.
     marker_stamp: tuple[int, int, int] | None = None
+    # Each record file as this store read it (stamp, records, history): a save applies
+    # only this writer's changes onto a newer copy another writer saved (#5270).
+    read_as: dict[str, tuple[tuple[int, int, int] | None, dict, dict]] = field(default_factory=dict)
 
     def _shard_path(self, shard: str) -> Path:
         return self.path.parent / f"d-{shard}.json"
@@ -213,7 +216,9 @@ class _Store:
             raise ValueError("unknown version or layout")
         self.generation, self.indexed = generation, True
 
-    def _absorb(self, data: dict[str, Any]) -> None:
+    @staticmethod
+    def _parse(data: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+        """The records and history one stored file holds."""
         if not isinstance(data.get("files"), list):
             raise ValueError("unknown version or layout")
         rows: dict[str, dict[str, Any]] = {}
@@ -224,20 +229,28 @@ class _Store:
             if isinstance(key, str) and _canonical_key(key):
                 rows[key] = {k: v for k, v in row.items() if k != "path"}
         history = data.get("history")
+        history = history if isinstance(history, dict) else {}
+        # A str, or a journal's {"prior", "journal"} (#5051).
+        return rows, {key: history[key] for key in rows if _history_entry(history.get(key))}
+
+    def _absorb(self, data: dict[str, Any]) -> tuple[dict, dict]:
+        rows, history = self._parse(data)
         for key, row in rows.items():
             # A record changed in memory before its file was read stays as changed.
             if key not in self.files:
                 self.files[key] = row
-                prior = history.get(key) if isinstance(history, dict) else None
-                if _history_entry(prior):  # a str, or a journal's {"prior", "journal"}
-                    self.history[key] = prior
+                if key in history:
+                    self.history[key] = history[key]
+        return rows, history
 
     def _load_shard(self, shard: str) -> None:
         if shard in self.loaded:
             return
         path = self._shard_path(shard)
+        stamp = _stamp(path)
         if not os.path.lexists(path):
             self.loaded.add(shard)
+            self.read_as[shard] = (None, {}, {})
             return
         try:
             data = _read_json(path)
@@ -247,10 +260,48 @@ class _Store:
                 # Another generation's leftover proves nothing. It is not loaded, so a
                 # save never deletes it; a save with records there overwrites it.
                 return
-            self._absorb(data)
+            self.read_as[shard] = (stamp, *self._absorb(data))
             self.loaded.add(shard)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{path}: {exc}") from exc
+
+    def _merge_newer(self, shard: str) -> None:
+        """Under the save lock: keep another writer's changes to a record file read earlier.
+
+        A record this writer left as it read it takes the file's current value (added,
+        changed or removed by the other writer); a record this writer changed keeps its
+        change. History follows the same rule (#5270).
+        """
+        seen = self.read_as.get(shard)
+        path = self._shard_path(shard)
+        stamp = _stamp(path)
+        if seen is None or stamp == seen[0]:
+            return
+        rows: dict[str, dict[str, Any]] = {}
+        history: dict[str, Any] = {}
+        if stamp is not None:
+            try:
+                data = _read_json(path)
+                if data.get("version") != _VERSION:
+                    raise ValueError("unknown version or layout")
+                if data.get("generation", "") == self.generation:
+                    rows, history = self._parse(data)
+            except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+                raise _UnreadableStore(f"{path}: {exc}") from exc
+        _, read_rows, read_history = seen
+        for mine, read, now in (
+            (self.files, read_rows, rows),
+            (self.history, read_history, history),
+        ):
+            ours = {key for key in mine if _shard_id(key) == shard}
+            for key in ours | set(read) | set(now):
+                if mine.get(key) != read.get(key):
+                    continue  # this writer's change wins
+                if key in now:
+                    mine[key] = now[key]
+                else:
+                    mine.pop(key, None)
+        self.read_as[shard] = (stamp, rows, history)
 
     def _load_all(self) -> None:
         for path in self._shard_files():
@@ -362,6 +413,9 @@ class _Store:
             return
         if not self.indexed and grouped:
             self._start_index()
+        for shard in sorted(self.loaded):
+            self._merge_newer(shard)  # +1 stat per record file read (#5270)
+        grouped = self._grouped()
         for shard in sorted(set(grouped) - self.loaded):
             self._load_if_indexed(shard)  # a record file is never saved unread
             grouped = self._grouped()

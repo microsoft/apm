@@ -1,0 +1,15 @@
+{
+  "issue": 5270,
+  "fixed_in": "Unreleased",
+  "summary": "Two apm processes sharing APM_HOME could each read a config file record file and save it; the second save dropped the first writer's record, so a file recorded as the user's lost its deletion protection. A save now re-reads a record file that changed since it read it and applies only its own changes.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/integration/test_config_file_provenance.py::test_a_save_from_a_stale_read_keeps_another_writers_preexisting_record",
+    "tests/unit/integration/test_config_file_provenance.py::test_a_save_from_a_stale_read_never_brings_back_a_record_another_writer_forgot"
+  ]
+}
