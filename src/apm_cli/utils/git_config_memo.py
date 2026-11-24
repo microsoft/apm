@@ -128,6 +128,8 @@ def _include_files(
             if not homes:
                 return None
             absolute.update(os.path.join(home, value[2:]) for home in homes)
+        elif value.startswith("~"):
+            return None  # ``~user/``: another user's home, resolved by Git alone
         elif os.path.isabs(value):
             absolute.add(value)
         else:
@@ -177,7 +179,11 @@ def git_config_paths(env: Mapping[str, str]) -> tuple[str, ...] | None:
             return None
         if result.returncode != 0 or not isinstance(result.stdout, bytes):
             return None
-        paths.extend(line for line in result.stdout.decode("utf-8", "replace").splitlines() if line)
+        try:
+            text = result.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            return None  # a path this process cannot name exactly is not fingerprinted
+        paths.extend(line for line in text.splitlines() if line)
     # The null device names no file. Any other path this process would open
     # differently from Git (an MSYS-style ``/etc/gitconfig`` on Windows)
     # cannot be fingerprinted, so the probe is not memoized.

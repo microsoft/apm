@@ -283,3 +283,14 @@ def test_concurrent_misses_on_one_key_probe_once(world: _World) -> None:
             thread.join()
     _assert_probes(world, 1)
     assert len({id(result) for result in results}) == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git expands ~user only on POSIX")
+def test_a_named_user_include_is_never_kept(world: _World) -> None:
+    import getpass
+
+    (world.home / ".gitconfig").write_text(f"[include]\n\tpath = ~{getpass.getuser()}/no.cfg\n")
+    with invocation_scope():
+        world.read()
+        world.read()
+    _assert_probes(world, 2)
