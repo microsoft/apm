@@ -2209,3 +2209,125 @@ def test_a_journal_path_through_a_junction_is_refused(tmp_path: Path, apm_home: 
 
     assert "alias/claimed.md" in [path for path, _reason in kept.value.issues]
     assert claimed.read_bytes() == b"committed\n"
+
+
+_APM_MCP_TWO = _APM_MCP.replace(b'"srv"', b'"srv2"')
+
+
+def _two_journal_bound_writes(apm_home: Path, project: Path, path: Path) -> Path:
+    """Two recorded config writes in one install through the real seam listener, then a kill.
+
+    The config file records keep the bytes before the first write, bound to
+    this journal's token (#5051).
+    """
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration.config_file_provenance import recorded_config_write
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def record(target: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(target, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write, journal=journal.token)
+    try:
+        for data in (_APM_MCP, _APM_MCP_TWO):
+            with recorded_config_write(path, manifest_root=project):
+                write_seam.atomic_write_text(path, data.decode("utf-8"))
+    finally:
+        write_seam.stop_listening(record)
+    assert path.read_bytes() == _APM_MCP_TWO
+    assert journal.store is not None
+    return journal.store
+
+
+def _rewrite_manifest(store: Path, edit) -> None:
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    edit(lines)
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+
+def _drop_token(lines: list) -> None:
+    del lines[0]["token"]
+
+
+def _replace_token(lines: list) -> None:
+    lines[0]["token"] = "0" * 32
+
+
+def test_a_journal_bound_config_history_restores_the_first_prior_bytes(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Untampered: two writes in one killed install restore the bytes before the first (#5188)."""
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _two_journal_bound_writes(apm_home, project, config)
+    header = json.loads((store / "journal.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert isinstance(header.get("token"), str)
+
+    outcome = _replay(apm_home, project)
+
+    # The config file and the records directory the killed install created.
+    assert outcome.restored == 2
+    assert config.read_bytes() == _USER_MCP
+    assert not (_receipts(apm_home) / "config-files").exists()
+    assert not store.exists()
+
+
+@pytest.mark.parametrize(
+    "tamper", [_drop_token, _replace_token], ids=["token-removed", "token-replaced"]
+)
+def test_a_journal_whose_header_token_was_tampered_keeps_the_config(
+    tmp_path: Path, apm_home: Path, tamper
+) -> None:
+    """A header token removed or replaced vouches for no journal-bound history: kept (#5188)."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _two_journal_bound_writes(apm_home, project, config)
+    _rewrite_manifest(store, tamper)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(".mcp.json", "the deployment ledger does not record these bytes")]
+    assert config.read_bytes() == _APM_MCP_TWO
+    assert kept.value.store.is_dir()
+
+
+def test_a_forged_journal_copy_with_a_matching_hash_keeps_the_config(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A saved copy replaced, with its unit hash rewritten to match, is not the prior (#5188)."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _two_journal_bound_writes(apm_home, project, config)
+    units = [
+        line
+        for line in (
+            json.loads(text)
+            for text in (store / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        )
+        if line.get("path") == ".mcp.json"
+    ]
+    assert len(units) == 1
+    copy = store / units[0]["copy"]
+    copy.write_bytes(b'{"mcpServers": {"forged": {"command": "forged"}}}\n')
+
+    def rehash(lines: list) -> None:
+        for line in lines:
+            if line.get("path") == ".mcp.json":
+                line["hash"] = compute_file_hash(copy)
+
+    _rewrite_manifest(store, rehash)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(".mcp.json", "the deployment ledger does not record these bytes")]
+    assert config.read_bytes() == _APM_MCP_TWO
+    assert kept.value.store.is_dir()
