@@ -79,6 +79,22 @@ def _hash_package_tree(
     package_path: Path, exclude: Collection[str], *, legacy: bool, framed: bool
 ) -> tuple[str, str]:
     """Feed only the requested streams; an unrequested stream returns ``""``."""
+    from apm_cli.utils import research_memo
+
+    if research_memo.eligible(Path(package_path) / "x"):
+        key = ("tree", str(package_path), frozenset(exclude or ()), legacy, framed)
+        return research_memo.memo_hash(
+            key,
+            lambda: _hash_package_tree_uncached(
+                package_path, exclude, legacy=legacy, framed=framed
+            ),
+        )
+    return _hash_package_tree_uncached(package_path, exclude, legacy=legacy, framed=framed)
+
+
+def _hash_package_tree_uncached(
+    package_path: Path, exclude: Collection[str], *, legacy: bool, framed: bool
+) -> tuple[str, str]:
     if not package_path.is_dir():
         return (_EMPTY_HASH if legacy else ""), (_EMPTY_HASH if framed else "")
     legacy_hasher = hashlib.sha256() if legacy else None
@@ -318,6 +334,16 @@ def exact_hash_of_bytes(raw: bytes) -> str:
 
 
 def compute_exact_file_hash(file_path: Path) -> str:
+    from apm_cli.utils import research_memo
+
+    if research_memo.eligible(file_path):
+        return research_memo.memo_hash(
+            ("exact", str(file_path)), lambda: _compute_exact_file_hash(file_path)
+        )
+    return _compute_exact_file_hash(file_path)
+
+
+def _compute_exact_file_hash(file_path: Path) -> str:
     """:func:`exact_hash_of_bytes` of the regular file at *file_path*."""
     return exact_hash_of_bytes(file_path.read_bytes())
 
