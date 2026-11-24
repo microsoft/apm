@@ -7119,11 +7119,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|approve-deny|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=canvas": {
    "credited_by": [
@@ -7610,11 +7614,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|audit|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -8004,11 +8012,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|compile|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -8419,11 +8431,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|install|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=install|SRC=pkg-registry|PRIM=canvas": {
    "credited_by": [
@@ -8910,11 +8926,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|lock|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -9553,11 +9573,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|prune|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -9963,11 +9987,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|uninstall|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -10392,11 +10420,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|update|pkg-registry"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -14826,6 +14858,7 @@
     "SB|approve-deny|file-mkt",
     "SB|approve-deny|local-mkt",
     "SB|approve-deny|native",
+    "SB|approve-deny|pkg-registry",
     "SB|approve-deny|plugin-at-mkt",
     "SB|approve-deny|shorthand"
    ],
@@ -15267,6 +15300,7 @@
     "SB|audit|file-mkt",
     "SB|audit|local-mkt",
     "SB|audit|native",
+    "SB|audit|pkg-registry",
     "SB|audit|plugin-at-mkt",
     "SB|audit|shorthand"
    ],
@@ -16138,6 +16172,7 @@
     "SB|compile|file-mkt",
     "SB|compile|local-mkt",
     "SB|compile|native",
+    "SB|compile|pkg-registry",
     "SB|compile|plugin-at-mkt",
     "SB|compile|shorthand"
    ],
@@ -16677,6 +16712,7 @@
     "SB|install|file-mkt",
     "SB|install|local-mkt",
     "SB|install|native",
+    "SB|install|pkg-registry",
     "SB|install|plugin-at-mkt",
     "SB|install|shorthand"
    ],
@@ -17230,6 +17266,7 @@
     "SB|lock|file-mkt",
     "SB|lock|local-mkt",
     "SB|lock|native",
+    "SB|lock|pkg-registry",
     "SB|lock|plugin-at-mkt",
     "SB|lock|shorthand"
    ],
@@ -18689,6 +18726,7 @@
     "SB|prune|file-mkt",
     "SB|prune|local-mkt",
     "SB|prune|native",
+    "SB|prune|pkg-registry",
     "SB|prune|plugin-at-mkt",
     "SB|prune|shorthand"
    ],
@@ -19167,6 +19205,7 @@
     "SB|uninstall|file-mkt",
     "SB|uninstall|local-mkt",
     "SB|uninstall|native",
+    "SB|uninstall|pkg-registry",
     "SB|uninstall|plugin-at-mkt",
     "SB|uninstall|shorthand"
    ],
@@ -19649,6 +19688,7 @@
     "SB|update|file-mkt",
     "SB|update|local-mkt",
     "SB|update|native",
+    "SB|update|pkg-registry",
     "SB|update|plugin-at-mkt",
     "SB|update|shorthand"
    ],
@@ -25568,11 +25608,22 @@
    "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_from_each_source_and_says_so[pkg-registry]"
   },
   "pair|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "SB|approve-deny|pkg-registry",
+    "SB|audit|pkg-registry",
+    "SB|compile|pkg-registry",
+    "SB|install|pkg-registry",
+    "SB|lock|pkg-registry",
+    "SB|prune|pkg-registry",
+    "SB|uninstall|pkg-registry",
+    "SB|update|pkg-registry"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|SRC=pkg-registry|PRIM=canvas": {
    "credited_by": [
