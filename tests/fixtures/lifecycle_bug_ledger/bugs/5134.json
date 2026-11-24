@@ -9,6 +9,11 @@
     "transaction.failed_command_preserves_state"
   ],
   "regression_tests": [
-    "tests/unit/install/test_deploy_snapshot.py::test_a_recorded_mode_wider_than_the_path_has_now_is_kept_and_reported"
+    "tests/unit/install/test_deploy_snapshot.py::test_a_recorded_mode_wider_than_the_path_has_now_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_store_others_can_write_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_store_another_user_owns_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_journal_that_is_a_link_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_file_recreated_from_absence_honors_the_umask",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_directory_recreated_from_absence_honors_the_umask"
   ]
 }
