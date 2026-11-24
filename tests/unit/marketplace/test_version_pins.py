@@ -321,3 +321,29 @@ def test_a_hosted_catalog_query_never_reaches_the_pins_file(tmp_path):
 
     assert "s3cret" not in (tmp_path / "version-pins.json").read_text()
     assert load_ref_pins(str(tmp_path)) == {f"{catalog}#tool/1.0.0": "v1"}
+
+
+def test_a_pins_lock_that_cannot_be_taken_skips_advisory_writes_and_fails_strict_ones(
+    tmp_path,
+):
+    """An unavailable pins lock never fails a committed install; adoption refuses (#5169)."""
+    from apm_cli.marketplace.version_pins import (
+        RefPinWriteError,
+        adopt_alias_ref_pins,
+        open_ref_pin_stage,
+    )
+
+    pins_dir = str(tmp_path)
+    save_ref_pins({"mkt/plug/1.0.0": "v1"}, pins_dir)
+    (tmp_path / "version-pins.lock").mkdir()
+    before = (tmp_path / "version-pins.json").read_bytes()
+    stage = open_ref_pin_stage()
+    stage.add("mkt", "other", "v2", "1.0.0", catalog="cat")
+
+    stage.commit(pins_dir=pins_dir)
+    record_ref_pin("mkt", "plug", "v3", "1.0.0", pins_dir)
+
+    assert (tmp_path / "version-pins.json").read_bytes() == before
+    with pytest.raises(RefPinWriteError):
+        adopt_alias_ref_pins("mkt", "cat", pins_dir)
+    assert (tmp_path / "version-pins.json").read_bytes() == before
