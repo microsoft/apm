@@ -224,17 +224,41 @@ def record_bundle_markdown_hooks(
             )
 
 
+def _frames(project_root: Path, targets: Any) -> dict[Path, tuple[str, ...]]:
+    """Return each containment base with the prefixes judged below it (#5289).
+
+    A target rooted outside the project (user scope with a relocated
+    ``CLAUDE_CONFIG_DIR``) records absolute rows: they are judged below the
+    root's parent, under the root's own name, as the hook retirement does.
+    """
+    from .local_bundle_hook_trust import _target_base
+
+    frames: dict[Path, list[str]] = {}
+    for target in targets or ():
+        prefixes = list(_prefixes(target))
+        if Path(target.root_dir).is_absolute():
+            frames.setdefault(_target_base(project_root, target), []).append(
+                Path(target.root_dir).name + "/"
+            )
+            prefixes = prefixes[1:]
+        frames.setdefault(Path(project_root), []).extend(prefixes)
+    return {base: tuple(dict.fromkeys(found)) for base, found in frames.items() if found}
+
+
 def _hooked_rows(project_root: Path, targets: Any, lock_paths: Collection[str]) -> set[str]:
     """Return the local-bundle lock rows, inside a target root, that declare hooks."""
     from .local_bundle_hook_trust import _relative_value, contained_bundle_path
     from .local_bundle_paths import markdown_declares_hooks
 
-    prefixes = tuple(prefix for target in targets or () for prefix in _prefixes(target))
+    frames = _frames(Path(project_root), targets)
     rows: set[str] = set()
     for value in lock_paths:
-        path = contained_bundle_path(project_root, value, prefixes)
-        if path is not None and path.is_file() and markdown_declares_hooks(path):
-            rows.add(_relative_value(value, Path(project_root)))
+        for base, prefixes in frames.items():
+            path = contained_bundle_path(base, value, prefixes)
+            if path is not None:
+                if path.is_file() and markdown_declares_hooks(path):
+                    rows.add(_relative_value(value, Path(project_root)))
+                break
     return rows
 
 
