@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING, Any, Union
 import requests
 
 from ..cache.cached_repo import validate_cached_links
-from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
+from ..cache.checkout_verify import (
+    materialize_verified_copy,
+    require_verified_checkout,
+    require_verified_copy,
+)
 from ..cache.commit_reachability import name_a_lost_admitted_commit
 from ..cache.git_cache import dir_size, raise_if_tampered
 from ..core.auth import AuthContext, AuthResolver
@@ -1899,13 +1903,8 @@ class GitHubPackageDownloader:
                 # A shard keeps unresolvable links as text; the clone path
                 # below then raises the strict diagnostic (#3457).
                 validate_cached_links(_cached, None, self._git_env_dict())
-                from ..utils.file_ops import robust_copy_entry
-
-                for item in _cached.iterdir():
-                    if item.name == ".git":
-                        continue
-                    robust_copy_entry(_cached / item.name, target_path / item.name)
-                require_verified_copy(target_path, _cached, _cached.parent.name)
+                # One pass: each verified source byte is checked, then written (no re-read).
+                materialize_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)

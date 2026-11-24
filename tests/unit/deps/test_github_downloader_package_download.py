@@ -1053,6 +1053,7 @@ class TestPersistentGitCacheInDownloadPackage:
             patch("apm_cli.utils.file_ops.robust_copytree"),
             patch("apm_cli.utils.file_ops.robust_copy2"),
             patch("apm_cli.deps.github_downloader.require_verified_copy"),  # nothing is copied
+            patch("apm_cli.deps.github_downloader.materialize_verified_copy"),
             patch.object(downloader, "_git_env_dict", return_value={}),
         ):
             result = downloader.download_package(dep, tmp_path / "out")
