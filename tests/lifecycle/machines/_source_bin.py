@@ -110,7 +110,9 @@ class SourceBin(StepRunner):
                 )
                 fields["allowed"] = {"home": (*self.bench.allowed().get("home", ()), *home)}
             if op == "marketplace":
-                fields["forbidden"] = {"project": ("*",), "outside": ("*",)}
+                # Keep the bench's roots (HOME outside the catalog allowances) and add
+                # the project: a catalog command writes no project byte.
+                fields["forbidden"] = {**self.bench.forbidden(), "project": ("*",)}
             step = self.step(
                 words,
                 exits=frozenset({0}),

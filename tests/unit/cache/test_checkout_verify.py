@@ -507,12 +507,13 @@ def test_a_wrong_kind_object_larger_than_a_pipe_never_hangs_the_reader(tmp_path:
 
     from apm_cli.cache.checkout_verify import _Objects
     from apm_cli.utils.git_env import get_git_executable
+    from apm_cli.utils.git_object_id import object_format
 
     repo, _sha = _plain_repo(tmp_path)
     big = repo / "big.bin"
     big.write_bytes(b"x" * (4 << 20))
     oid = git("-C", str(repo), "hash-object", "-w", str(big))
-    algorithm = "sha256" if len(oid) == 64 else "sha1"
+    algorithm = object_format(oid)
     outcome: list[BaseException] = []
 
     def read_as_tree() -> None:

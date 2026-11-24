@@ -351,6 +351,10 @@ class WorldServices:
         _check_slug(slug)
         self._repositories[slug] = origin
 
+    def served_repository(self, slug: str) -> Path:
+        """The bare repository served as ``owner/repo`` *slug* (``KeyError`` when none)."""
+        return self._repositories[slug]
+
     def script(
         self,
         host: str,

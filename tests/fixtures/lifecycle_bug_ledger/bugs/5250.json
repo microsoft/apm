@@ -1,0 +1,18 @@
+{
+  "issue": 5250,
+  "fixed_in": "Unreleased",
+  "summary": "apm prune removed an orphaned package but left its LSP server entry in the harness config and its lsp_servers and lsp_configs lock records until the next install; prune now runs the LSP cleanup uninstall uses, removing only lock-owned entries.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_prune_lsp_cleanup_lifecycle.py::test_prune_removes_the_pruned_package_lsp_entry_and_lock_records",
+    "tests/integration/test_prune_lsp_cleanup_lifecycle.py::test_prune_keeps_a_surviving_package_and_a_user_lsp_entry",
+    "tests/integration/test_prune_lsp_cleanup_lifecycle.py::test_prune_keeps_an_unreadable_lsp_config_and_its_lock_records"
+  ]
+}
