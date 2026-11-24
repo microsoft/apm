@@ -331,6 +331,29 @@ def _existing_link(path: Path) -> bool:
         return False
 
 
+def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
+    """Return the first symlinked component of *path* below *base_dir*, or ``None``.
+
+    ``..`` is collapsed first; the walk stops at the first missing component.
+    Raises ``ValueError`` when *path* is not under *base_dir* or a ``..``
+    escapes it or steps back over a link, and ``OSError`` when a component
+    cannot be inspected; :func:`has_symlink_component` turns both into a refusal.
+    """
+    parts = _collapse_relative_parts(base_dir, path.relative_to(base_dir).parts)
+    if parts is None:
+        raise ValueError(f"{path} leaves {base_dir} or steps back over a link")
+    current = base_dir
+    for part in parts:
+        current /= part
+        try:
+            linked = _is_link(current)
+        except FileNotFoundError:
+            return None
+        if linked:
+            return current
+    return None
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     """Reject linked components (symbolic links and Windows junctions) below *base_dir*,
     optionally preserving access errors for diagnostics.
@@ -339,19 +362,7 @@ def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = 
     cannot hide a linked component after it.
     """
     try:
-        parts = _collapse_relative_parts(base_dir, path.relative_to(base_dir).parts)
-        if parts is None:
-            return True
-        current = base_dir
-        for part in parts:
-            current /= part
-            try:
-                linked = _is_link(current)
-            except FileNotFoundError:
-                return False
-            if linked:
-                return True
-        return False
+        return first_symlink_component(base_dir, path) is not None
     except OSError:
         if raise_on_error:
             raise

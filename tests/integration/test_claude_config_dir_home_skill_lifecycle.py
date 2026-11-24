@@ -165,8 +165,12 @@ def test_a_symlinked_skills_dir_under_a_home_claude_root_is_refused(
 
     # P-INV-I7: the escape is refused before any write. The manifest, lockfile
     # and deployed set are byte-identical, the link stays, and nothing lands
-    # outside the root. The refusal wording is tracked in #5156.
+    # outside the root. The refusal names the link and the next step (#5156).
     assert result.returncode == 1, _evidence(result)
+    text = " ".join((result.stdout + result.stderr).split())
+    assert "Refusing deployment through a symlinked path component: skills." in text, text
+    assert "Replace the symlink with a regular directory or remove it, then retry." in text
+    assert "This is a bug" not in text, text
     assert world.state() == before, _evidence(result)
     assert (world.home / "skills").is_symlink(), _evidence(result)
     assert list(outside.rglob("*")) == [], _evidence(result)
