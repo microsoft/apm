@@ -170,8 +170,8 @@ def test_a_non_github_or_non_sha1_pin_never_fetches(tmp_path: Path) -> None:
     [
         (429, {}),
         (403, {}),
-        (503, {"Retry-After": "60"}),
-        (200, {"X-RateLimit-Remaining": "0"}),
+        (403, {"Retry-After": "60"}),
+        (403, {"X-RateLimit-Remaining": "0"}),
     ],
 )
 def test_a_rate_limit_answer_sends_the_rest_of_the_command_to_git(

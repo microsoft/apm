@@ -54,7 +54,7 @@ _USER_GITCONFIG = """
 """
 
 
-def _install(apm: Path, project: Path, env: dict[str, str], *args: str) -> int:
+def _assert_installed(apm: Path, project: Path, env: dict[str, str], *args: str) -> int:
     """Run a cold install; return how many packages the in-process fetch landed."""
     result = subprocess.run(
         [str(apm), "install", *args],
@@ -97,7 +97,7 @@ def test_in_process_and_git_installs_are_byte_identical(
         env = dict(world.env)
         fast = tmp_path / "in-process"
         shutil.copytree(tree.project, fast)
-        engaged = _install(apm_binary_path, fast, env)
+        engaged = _assert_installed(apm_binary_path, fast, env)
         fast_receipts = _receipts(world.cache_dir)
 
         # An empty global attributes file changes no bytes but makes the fetch refuse.
@@ -108,7 +108,7 @@ def test_in_process_and_git_installs_are_byte_identical(
             world.clear_cache()
             slow = tmp_path / "git"
             shutil.copytree(tree.project, slow)
-            forced = _install(apm_binary_path, slow, env)
+            forced = _assert_installed(apm_binary_path, slow, env)
         finally:
             os.unlink(attributes)
         git_receipts = _receipts(world.cache_dir)
@@ -130,7 +130,7 @@ def test_every_package_is_fetched_in_process_under_a_realistic_user_config(
         project = tmp_path / "project"
         shutil.copytree(tree.project, project)
 
-        engaged = _install(apm_binary_path, project, dict(world.env))
+        engaged = _assert_installed(apm_binary_path, project, dict(world.env))
 
         print(f"in-process hit rate: {engaged}/{len(tree.packages)}")
         assert engaged == len(tree.packages) == 10
@@ -159,7 +159,7 @@ def test_a_rate_limit_mid_install_sends_the_rest_to_git_with_the_same_lockfile(
         env = dict(world.env)
         reference = tmp_path / "reference"
         shutil.copytree(tree.project, reference)
-        assert _install(apm_binary_path, reference, env) == 10
+        assert _assert_installed(apm_binary_path, reference, env) == 10
 
         world.clear_cache()
         world.services.proxy.clear()
@@ -176,7 +176,7 @@ def test_a_rate_limit_mid_install_sends_the_rest_to_git_with_the_same_lockfile(
         )
         project = tmp_path / "limited"
         shutil.copytree(tree.project, project)
-        engaged = _install(apm_binary_path, project, env, "--parallel-downloads", "1")
+        engaged = _assert_installed(apm_binary_path, project, env, "--parallel-downloads", "1")
 
         assert [request.status for request in _fetches(world)] == [429], "no retry after a 429"
         assert engaged == 0
@@ -196,7 +196,7 @@ def test_an_authenticated_attempt_never_uses_the_in_process_fetch(
         shutil.copytree(tree.project, project)
         world.services.proxy.clear()
 
-        assert _install(apm_binary_path, project, env) == 0
+        assert _assert_installed(apm_binary_path, project, env) == 0
         assert _fetches(world) == []
 
         dep = load_yaml(project / "apm.lock.yaml")["dependencies"][0]

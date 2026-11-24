@@ -478,17 +478,13 @@ def _rate_limited() -> bool:
 def _admit(status: int, headers: Mapping[str, str]) -> None:
     """Refuse a non-200 answer; a rate-limit answer also sends the rest of the command to git.
 
-    429, 403, ``Retry-After`` or ``X-RateLimit-Remaining: 0`` trip the breaker:
-    no retry, no sleep, and no further in-process request in this command.
+    A throttle (``deps/github_rate_limit``) or any 403 trips the breaker: no
+    retry, no sleep, and no further in-process request in this command.
     """
     from ..core.invocation_memo import invocation_memo
+    from ..deps.github_rate_limit import classify_github_throttle
 
-    limited = (
-        status in (403, 429)
-        or headers.get("Retry-After") is not None
-        or (headers.get("X-RateLimit-Remaining") or "").strip() == "0"
-    )
-    if limited:
+    if status == 403 or classify_github_throttle(status, headers) is not None:
         memo = invocation_memo(_BREAKER_MEMO)
         if memo is not None:
             memo["tripped"] = True
