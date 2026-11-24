@@ -30,6 +30,7 @@ from apm_cli.install.local_bundle_hook_states import (
     _MergedHookState,
     _modified_slugs,
     _recorded_slugs,
+    _sidecar_identities,
 )
 
 REASON_UNRECORDED = "no approval record"
@@ -526,20 +527,6 @@ def bundle_hook_leftovers(
             )
             if slug and sep:
                 found.setdefault(slug, set()).add(value)
-    return found
-
-
-def _sidecar_identities(project_root: Path, targets: Any) -> set[tuple[str, str | None]]:
-    """Return ``(slug, approval_key)`` for every bundle marker the merged sidecars keep."""
-    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
-
-    found: set[tuple[str, str | None]] = set()
-    for _data, sidecar, _container in _merged_hook_documents(project_root, targets):
-        for entries in (sidecar or {}).values():
-            for entry in entries if isinstance(entries, list) else ():
-                marker = entry.get("_apm_source") if isinstance(entry, dict) else None
-                if (parsed := parse_local_bundle_hook_source(marker)) is not None:
-                    found.add(parsed)
     return found
 
 
