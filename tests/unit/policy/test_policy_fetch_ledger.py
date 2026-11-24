@@ -62,4 +62,9 @@ def test_a_failed_fetch_is_still_counted(monkeypatch: pytest.MonkeyPatch, channe
     with contextlib.suppress(Exception):  # the channel's own error handling is not under test
         channel()
 
+    _assert_counted(before)
+
+
+def _assert_counted(before: int) -> None:
+    """The ledger is the durable state the record writer reads."""
     assert fetch_attempts() > before
