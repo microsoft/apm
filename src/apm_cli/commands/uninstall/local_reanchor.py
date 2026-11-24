@@ -62,6 +62,9 @@ class LocalReanchorPlan:
     snapshot: tuple[tuple[Path, str], ...] = ()
     # (current, re-anchored) install directory of each re-keyed root (#4999).
     moves: tuple[tuple[Path, Path], ...] = ()
+    # (current install directory, its dependency reference, framed hash) of each
+    # moving copy whose hash-excluded files went stale: re-materialized (#5102).
+    fresh: tuple[tuple[Path, Any, bool], ...] = ()
     # Lock key -> install's breadth-first visit rank, for request order (#4999).
     visit_order: dict[str, int] = field(default_factory=dict)
     # Deployed path -> the writer a fresh install records once re-ranked (#5048).
@@ -201,6 +204,7 @@ def plan_local_reanchor(
         for key, node in nodes.items()
     }
     moves = _materialization_moves(lockfile, nodes, modules_dir, label)
+    fresh = _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir)
     declaring_parents: dict[str, tuple[str, str | None]] = {}
     resolved_by: dict[str, str | None] = {}
     for key in decision.rescued_parents:
@@ -226,8 +230,37 @@ def plan_local_reanchor(
         declaring_parents,
         resolved_by,
         moves=moves,
+        fresh=fresh,
         visit_order=dict(getattr(walk, "visit_order", {}) or {}),
     )
+
+
+def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> tuple:
+    """Moving copies whose hash-excluded files (.git/, __pycache__/) differ from source.
+
+    Moving such a copy as-is would leave bytes a fresh install replaces, so it
+    is re-materialized from source instead (#5102). Read-only; a copy that
+    cannot be compared keeps today's plain move.
+    """
+    moving = {current for current, _target in moves}
+    fresh = []
+    for key in nodes:
+        row = lockfile.get_dependency(key)
+        ref = row.to_dependency_ref()
+        current = ref.get_install_path(modules_dir)
+        source = (getattr(walk, "local_dirs", None) or {}).get(key)
+        if source is None and ref.local_path:
+            # A rescued root was declared by the project: its path is project-relative.
+            source = modules_dir.parent / ref.local_path
+        if current not in moving or source is None:
+            continue
+        try:
+            stale = not _unhashed_files_match(Path(source), current)
+        except (OSError, ValueError):
+            stale = False
+        if stale:
+            fresh.append((current, ref, row.content_hash_framed))
+    return tuple(fresh)
 
 
 def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
@@ -955,35 +988,146 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
 
 
 def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
-    """Move re-anchored roots' apm_modules directories before the lock commits (#4999)."""
+    """Move re-anchored roots' apm_modules directories before the lock commits (#4999).
+
+    A copy with stale hash-excluded files is swapped for a verified fresh copy;
+    the old one waits aside until the lock commits (#5102).
+    """
     plan = repair.reanchor
     if not plan or not plan.moves:
         return ()
+    staged: list[Path] = []
     try:
-        return move_materializations(plan.moves, modules_dir)
+        moves = _fresh_copy_moves(plan, modules_dir, staged)
+        return move_materializations(moves, modules_dir)
     except (OSError, ValueError) as exc:
+        left = _discard_dirs(staged, modules_dir)
+        note = f"; the staged copy {', '.join(left)} could not be removed" if left else ""
         _roll_back_and_exit(
             plan,
             logger,
-            f"The re-anchored package's apm_modules directory could not be moved ({exc})",
+            f"The re-anchored package's apm_modules directory could not be moved ({exc}){note}",
         )
     except BaseException as exc:
-        _undo_reanchor(exc, (), modules_dir, repair, logger)
+        # An interrupt names any staged copy it could not remove, never silently.
+        _undo_reanchor(
+            exc, (), modules_dir, repair, logger, left=_discard_dirs(staged, modules_dir)
+        )
         raise
+
+
+_FRESH = ".apm-reanchor-fresh-"
+_ASIDE = ".apm-reanchor-aside-"
+
+
+def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
+    """The renames of a re-anchor, with each stale copy replaced by a fresh one (#5102).
+
+    A fresh copy is staged next to the old one through install's own image
+    owner and must hash as the old copy does; then the old copy moves aside
+    and the fresh one takes its re-anchored path. A copy that cannot be staged
+    and verified keeps the plain move (the next install rebuilds it, as today).
+    """
+    fresh = {current: (ref, framed) for current, ref, framed in plan.fresh}
+    moves = []
+    for current, target in plan.moves:
+        stage = current.with_name(f"{_FRESH}{current.name}")
+        aside = current.with_name(f"{_ASIDE}{current.name}")
+        # lexists: a dangling symlink there is in the way too, never written through.
+        if current not in fresh or os.path.lexists(stage) or os.path.lexists(aside):
+            moves.append((current, target))
+            continue
+        # Registered before the copy starts, so an interrupt never strands it.
+        staged.append(stage)
+        if not _stage_fresh_copy(stage, current, *fresh[current], modules_dir):
+            if _discard_dirs([stage], modules_dir):
+                # Still registered: the caller reports it and nothing commits.
+                raise OSError(f"its staged copy {_modules_path(stage, modules_dir)} remains")
+            staged.pop()
+            moves.append((current, target))
+            continue
+        moves += [(current, aside), (stage, target)]
+    return tuple(moves)
+
+
+def _stage_fresh_copy(stage: Path, current: Path, ref, framed: bool, modules_dir: Path) -> bool:
+    """Write install's image of *ref* to *stage*; whether it hashes as *current* does.
+
+    Install drops a stale ``.apm-pin`` from an unmarkable (local) copy, which
+    the hash does not see, so the staged image gets the same cleanup first.
+    """
+    from ...install.cache_pin import MARKER_FILENAME, _remove_marker
+    from ...install.phases.local_content import (
+        LocalPackageError,
+        compute_local_package_hash,
+        materialize_local_package,
+    )
+    from ...utils.path_security import PathTraversalError
+
+    try:
+        materialize_local_package(ref, stage, modules_dir.parent)
+        _remove_marker(stage, modules_dir)
+        if os.path.lexists(stage / MARKER_FILENAME):
+            return False
+        return compute_local_package_hash(stage, framed=framed) == compute_local_package_hash(
+            current, framed=framed
+        )
+    except (LocalPackageError, PathTraversalError, OSError, ValueError, TypeError):
+        return False
+
+
+def _discard_dirs(paths, modules_dir: Path) -> list[str]:
+    """Remove staged or set-aside copies inside apm_modules; return those left behind."""
+    from ...utils.path_security import safe_rmtree
+
+    left: list[str] = []
+    for path in paths:
+        try:
+            if path.exists():
+                safe_rmtree(path, modules_dir)
+        except (OSError, ValueError):
+            left.append(_modules_path(path, modules_dir))
+    return left
+
+
+def _fresh_swaps(moved: tuple) -> list[tuple[Path, Path]]:
+    """``(aside, stage)`` of each fresh-copy swap in a move journal (#5102).
+
+    A swap is exactly two journal entries in a row: the old copy moved to its
+    aside path, then the staged copy moved into place. A package whose own
+    name merely looks like a staging path is a plain move and never matches.
+    """
+    from itertools import pairwise
+
+    swaps = []
+    for (current, aside, _), (stage, _target, _created) in pairwise(moved):
+        if aside == current.with_name(f"{_ASIDE}{current.name}") and stage == current.with_name(
+            f"{_FRESH}{current.name}"
+        ):
+            swaps.append((aside, stage))
+    return swaps
+
+
+def discard_set_aside_copies(moved: tuple, modules_dir, logger) -> None:
+    """After the lock commits, remove the stale copies a re-anchor set aside (#5102)."""
+    aside = [aside for aside, _stage in _fresh_swaps(moved)]
+    if left := _discard_dirs(aside, Path(modules_dir)):
+        logger.warning(f"Could not remove the replaced copy {', '.join(left)}; delete it manually.")
 
 
 # The lock was not saved: the re-anchor rolls back, as for any non-exit failure.
 _UNSAVED_LOCK = RuntimeError("the lockfile was not saved")
 
 
-def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger) -> None:
+def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger, left=()) -> None:
     """Move the re-anchored directories back; anything but a handled exit also restores
     apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor.
 
     The manifest rollback runs even when a directory cannot be moved back, and
-    anything left unrestored is named and exits 1, never silently.
+    anything left unrestored (or *left* behind by staging) is named and exits
+    1, never silently.
     """
-    unrestored: list[str] = []
+    unrestored: list[str] = list(left)
     try:
         unrestored += _restore_reanchored_dirs(moved, modules_dir)
     finally:
@@ -1006,7 +1150,13 @@ def _report_unrestored(unrestored: list[str], logger) -> None:
 
 
 def _restore_reanchored_dirs(moved: tuple, modules_dir) -> list[str]:
-    """Undo the directory moves of a re-anchor whose transaction did not commit."""
+    """Undo the directory moves of a re-anchor whose transaction did not commit.
+
+    A fresh copy staged for a stale one (#5102) goes back to its staging path
+    and is removed; the old copy returns from aside.
+    """
     if not moved:
         return []
-    return restore_materializations(moved, modules_dir)
+    unrestored = restore_materializations(moved, modules_dir)
+    staged = [stage for _aside, stage in _fresh_swaps(moved)]
+    return unrestored + _discard_dirs(staged, Path(modules_dir))
