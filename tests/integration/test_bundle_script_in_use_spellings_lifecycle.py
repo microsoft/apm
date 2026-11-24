@@ -5,8 +5,10 @@ when an unowned hook still runs one of them (#4679, narrowed to handler position
 by #5136). Each cell writes one user hook that RUNS the bundle's script through a
 different spelling, then checks that uninstall refuses, keeps the script and its
 lock claim, and changes nothing but the pending record (#5291 owns that write).
-Required cells taken from QL's #5290 draft; its other cells stay there.
-Owner: install/hook_script_refs.py through install/local_bundle_hook_trust.py.
+Required cells taken from QL's #5290 draft; its other cells stay there. The
+``cwd-field`` cell runs the script through the handler's ``cwd`` (#5281).
+Owner: install/hook_script_refs.py and install/local_bundle_hook_cwd.py through
+install/local_bundle_hook_trust.py.
 """
 
 from __future__ import annotations
@@ -33,8 +35,8 @@ pytestmark = [
 ]
 
 
-def _handler(bash: str) -> dict:
-    return {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": bash}]}}
+def _handler(bash: str, **extra: str) -> dict:
+    return {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": bash, **extra}]}}
 
 
 def _script_dir(script: str) -> str:
@@ -45,6 +47,7 @@ SPELLINGS = {
     "absolute": lambda s, root: _handler(f"{root}/{s}"),
     "backslashes": lambda s, root: _handler(s.replace("/", "\\")),
     "cd-prefix": lambda s, root: _handler(f"cd {_script_dir(s)} && ./x.sh"),
+    "cwd-field": lambda s, root: _handler("./x.sh", cwd=_script_dir(s)),
     "dot-segment": lambda s, root: _handler(s.replace("/scripts/", "/scripts/./")),
     "dot-slash": lambda s, root: _handler(f"./{s}"),
     "double-slash": lambda s, root: _handler(s.replace("/scripts/", "/scripts//")),
@@ -85,6 +88,24 @@ def test_uninstall_bundle_keeps_a_script_a_user_hook_runs(
     assert result.returncode == 1, text
     assert ".github/hooks/user.json" in text, text
     assert "Remove or repair those files, then retry" in text, text
+    _assert_refused_unchanged(consumer, before, script)
+
+
+def test_uninstall_bundle_refuses_when_a_user_hook_file_carries_a_bom(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A hook file the reader cannot parse (UTF-8 BOM) may still run the script: fail closed."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "bom-consumer")
+    (script,) = [c for c in _claims_of(consumer) if c.endswith("/x.sh")]
+    path = consumer / ".github" / "hooks" / "user.json"
+    write(path, json.dumps(_handler(script)))
+    path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes().replace(b"\n", b"\r\n"))
+    before = tree_bytes(consumer)
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".github/hooks/user.json" in text, text
     _assert_refused_unchanged(consumer, before, script)
 
 

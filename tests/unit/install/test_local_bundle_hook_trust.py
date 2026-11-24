@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -79,6 +80,117 @@ def test_no_deployed_bundle_hooks_never_resolves_trust(tmp_path: Path) -> None:
     targets = [SimpleNamespace(name="claude", root_dir=".claude")]
     assert unadmitted_bundle_hooks(tmp_path, targets, lambda: calls.append(1)) == []
     assert calls == []
+
+
+_COPILOT_SCRIPT = ".github/hooks/scripts/hookpkg/hooks/scripts/x.sh"
+
+
+def _user_hook_with_cwd(project: Path, command: str, cwd: object, prepare=None) -> set[str]:
+    """Write an unowned Copilot hook running *command* in *cwd*; return the hook files in use."""
+    from apm_cli.install.local_bundle_hook_trust import _per_file_configs_running
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (project / _COPILOT_SCRIPT).parent.mkdir(parents=True)
+    (project / _COPILOT_SCRIPT).write_bytes(b"#!/bin/sh\n")
+    if prepare is not None:
+        prepare(project)
+    handler = {"type": "command", "bash": command, "cwd": cwd}
+    hook = project / ".github" / "hooks" / "user.json"
+    hook.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": [handler]}}))
+    return _per_file_configs_running(project, [KNOWN_TARGETS["copilot"]], set(), {_COPILOT_SCRIPT})
+
+
+def test_a_handler_running_a_bundle_script_through_its_cwd_is_in_use(tmp_path: Path) -> None:
+    """#5281: ``./x.sh`` in the script's own directory runs the bundle's script."""
+    assert _user_hook_with_cwd(
+        tmp_path, "./x.sh", ".github/hooks/scripts/hookpkg/hooks/scripts"
+    ) == {".github/hooks/user.json"}
+
+
+def test_a_handler_whose_cwd_points_elsewhere_is_not_in_use(tmp_path: Path) -> None:
+    """#5281 control: the same command in an unrelated directory runs another script.
+
+    A bare ``./x.sh`` stays in use under #5106's default-deny, so the control
+    names a directory that certainly resolves elsewhere from every base.
+    """
+    assert _user_hook_with_cwd(tmp_path, "./scripts/x.sh", "tools") == set()
+
+
+def test_a_handler_whose_cwd_cannot_be_resolved_inside_the_project_is_in_use(
+    tmp_path: Path,
+) -> None:
+    """#5281: an escaping, variable or non-string cwd cannot be cleared; fail closed."""
+    for index, cwd in enumerate(
+        ("../outside", "$HOME/hooks", "%USERPROFILE%/hooks", "~/hooks", 7, "")
+    ):
+        project = tmp_path / f"p{index}"
+        assert _user_hook_with_cwd(project, "./x.sh", cwd) == {".github/hooks/user.json"}, cwd
+
+
+_SCRIPT_DIR = _COPILOT_SCRIPT.rsplit("/", 1)[0]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_handler_whose_cwd_links_to_the_script_directory_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: a cwd that is a symlink to the script's directory runs it."""
+
+    def link(project: Path) -> None:
+        (project / "lk").symlink_to(project / _SCRIPT_DIR, target_is_directory=True)
+
+    assert _user_hook_with_cwd(tmp_path, "./x.sh", "lk", link) == {".github/hooks/user.json"}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_handler_whose_cwd_runs_through_a_symlinked_ancestor_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: ``lk -> .github/hooks`` makes ``lk/scripts/...`` the script's directory."""
+
+    def link(project: Path) -> None:
+        (project / "lk").symlink_to(project / ".github" / "hooks", target_is_directory=True)
+
+    cwd = "lk/" + _SCRIPT_DIR.removeprefix(".github/hooks/")
+    assert _user_hook_with_cwd(tmp_path, "./x.sh", cwd, link) == {".github/hooks/user.json"}
+
+
+def test_a_handler_whose_cwd_differs_only_in_case_is_in_use_where_case_folds(
+    tmp_path: Path,
+) -> None:
+    """#5296 review: on a case-insensitive filesystem ``.GITHUB/...`` is the same directory."""
+    probe = tmp_path / "Probe"
+    probe.mkdir()
+    if not (tmp_path / "probe").exists():
+        pytest.skip("case-sensitive filesystem")
+    cwd = _SCRIPT_DIR.replace(".github", ".GITHUB")
+    project = tmp_path / "p"
+    assert _user_hook_with_cwd(project, "./x.sh", cwd) == {".github/hooks/user.json"}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_handler_whose_cwd_links_outside_the_project_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: a cwd that escapes through a symlink cannot be cleared; fail closed."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    def link(project: Path) -> None:
+        (project / "external").symlink_to(outside, target_is_directory=True)
+
+    project = tmp_path / "p"
+    assert _user_hook_with_cwd(project, "./x.sh", "external", link) == {".github/hooks/user.json"}
+
+
+def test_a_handler_whose_cwd_holds_a_nul_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: an embedded NUL is no path; it refuses instead of crashing."""
+    assert _user_hook_with_cwd(tmp_path, "./x.sh", "tools\x00bad") == {".github/hooks/user.json"}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_handler_whose_cwd_climbs_out_of_a_link_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: ``lk/..`` follows the link before ``..``, landing in the script directory."""
+
+    def link(project: Path) -> None:
+        (project / _SCRIPT_DIR / "child").mkdir()
+        (project / "lk").symlink_to(project / _SCRIPT_DIR / "child", target_is_directory=True)
+
+    assert _user_hook_with_cwd(tmp_path, "./x.sh", "lk/..", link) == {".github/hooks/user.json"}
 
 
 _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
