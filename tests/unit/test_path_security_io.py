@@ -10,6 +10,7 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
+    has_symlink_component,
     resolve_for_containment,
     resolved_relative_within,
     safe_rmtree,
@@ -238,3 +239,56 @@ class TestResolvedContainment:
         assert resolved_relative_within(escaped, base) is None
         with pytest.raises(PathTraversalError):
             ensure_path_within(tmp_path / "base" / "link" / "f.md", tmp_path / "base")
+
+
+# ---------------------------------------------------------------------------
+# has_symlink_component
+# ---------------------------------------------------------------------------
+
+
+def _tree(root: Path) -> list[str]:
+    return sorted(
+        f"{p.relative_to(root).as_posix()}{'@' if p.is_symlink() else ''}" for p in root.rglob("*")
+    )
+
+
+def _assert_tree_unchanged(root: Path, before: list[str]) -> None:
+    assert _tree(root) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+class TestHasSymlinkComponent:
+    """``..`` is collapsed below the base before linked components are checked.
+
+    The check is read-only: every case also asserts the tree is unchanged.
+    """
+
+    @pytest.fixture
+    def base(self, tmp_path):
+        base = tmp_path / "base"
+        (base / "real").mkdir(parents=True)
+        (tmp_path / "outside").mkdir()
+        (base / "link").symlink_to(tmp_path / "outside", target_is_directory=True)
+        return base
+
+    @pytest.mark.parametrize(
+        ("relative", "expected"),
+        [
+            pytest.param("../outside/f.md", True, id="dotdot-escapes-base"),
+            pytest.param("missing/../link/f.md", True, id="missing-dir-dotdot-then-link"),
+            pytest.param("missing/../real/f.md", False, id="missing-dir-dotdot-then-real"),
+            pytest.param("link/../real/f.md", True, id="dotdot-steps-back-over-link"),
+            pytest.param("real/f.md", False, id="no-dotdot-real"),
+            pytest.param("real/missing/f.md", False, id="no-dotdot-missing-tail"),
+            pytest.param("missing/deeper/f.md", False, id="no-dotdot-missing-middle"),
+            pytest.param("link/f.md", True, id="no-dotdot-through-link"),
+            pytest.param("link", True, id="no-dotdot-link-itself"),
+        ],
+    )
+    def test_collapses_dotdot_and_leaves_the_tree_unchanged(self, base, relative, expected):
+        before = _tree(base.parent)
+
+        linked = has_symlink_component(base, base / relative)
+
+        assert linked is expected
+        _assert_tree_unchanged(base.parent, before)
