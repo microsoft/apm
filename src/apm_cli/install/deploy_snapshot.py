@@ -286,6 +286,9 @@ class DeployJournal:
         with self._lock:
             units = list(reversed(self._units))
         for unit in units:
+            if self._crosses_link(unit.path):
+                issues.append((unit.path, "kept: a parent directory is a symbolic link"))
+                continue
             try:
                 self._restore_unit(unit)
             except OSError as exc:
@@ -296,6 +299,13 @@ class DeployJournal:
         else:
             self.discard()
         return issues
+
+    def _crosses_link(self, path: Path) -> bool:
+        """Whether a directory between *path* and its deploy root (or APM home) is a link."""
+        for base in (self.root, self.store_parent.parent):
+            if base is not None and path.parent.is_relative_to(base):
+                return has_symlink_component(base, path.parent)
+        return False
 
     def _retain(self) -> Path:
         """Rename the store so no later install reaps the copies a user still needs."""
