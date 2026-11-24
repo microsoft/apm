@@ -3405,6 +3405,37 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Uninstall stops refusing out-of-project paths before any change.",
     ),
     MutationCase(
+        guard_id="install-deployment-uninstall-preflight-consent-kept-link-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/integration/cleanup.py",
+        old="if not _consent_keeps_link(physical, lockfile_consent=self._lockfile_consent):",
+        new="if not (self._lockfile_consent and physical.is_symlink()):",
+        intent="Cleanup's consent link rule forks from the one the read-only hook decision asks.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-hook-sync-consent-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/integration/cleanup.py",
+        old=(
+            "        and not _consent_keeps_link(project_root / rel_path, "
+            "lockfile_consent=lockfile_consent)\n"
+        ),
+        new="",
+        intent="The read-only hook decision drops the consent link rule the hook sync applies.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-hook-sync-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/policy/allowlist_remedy.py",
+        old=(
+            "return hook_sync_unlinks(\n"
+            "                    path, root, recorded_hash=hashes.get(path), lockfile_consent=False\n"
+            "                )"
+        ),
+        new="return not hashes.get(path)",
+        intent="Audit's advice re-derives the hook sync's link decision beside its owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-reachability",
         rule_id="install-deployment-uninstall-reachability",
         path="src/apm_cli/install/orphans.py",
