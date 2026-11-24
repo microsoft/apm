@@ -484,8 +484,47 @@ def _verify(
     env: dict[str, str] | None,
 ) -> _Manifest:
     algorithm = object_format(sha)
+    from .pack_objects import PackObjects
+
+    pack = PackObjects(repo, algorithm)
+    try:
+        return _verify_with(repo, sha, scope, cone, algorithm, _PackSource(pack, algorithm))
+    except _PackMiss:
+        pass  # all-or-nothing per package (W3d 2a): git answers the whole package
+    finally:
+        pack.close()
     objects = _Objects(git_exe, repo, env, algorithm)
     try:
+        return _verify_with(repo, sha, scope, cone, algorithm, objects)
+    finally:
+        objects.close()
+
+
+class _PackMiss(Exception):
+    """The pack could not serve an object: verify the package through git instead."""
+
+
+class _PackSource:
+    def __init__(self, pack, algorithm: str) -> None:
+        self._pack = pack
+        self._algorithm = algorithm
+
+    def read(self, oid: str, kind: str) -> bytes:
+        found = self._pack.read(oid)
+        if found is None:
+            raise _PackMiss(oid)
+        if found[0] != kind:
+            raise CheckoutVerificationError(f"object {oid[:12]} is not a {kind}")
+        if git_object_id(self._algorithm, kind, found[1]) != oid:
+            raise CheckoutVerificationError(f"{kind} {oid[:12]} does not hash to its id")
+        return found[1]
+
+    def close(self) -> None:
+        pass
+
+
+def _verify_with(repo, sha, scope, cone, algorithm, objects) -> _Manifest:
+    if True:
         commit = objects.read(sha, "commit")
         first = commit.split(b"\n", 1)[0]
         if not first.startswith(b"tree "):
@@ -501,8 +540,6 @@ def _verify(
         if missing:
             raise CheckoutVerificationError(f"{missing[0]} is missing from the checkout")
         return _Manifest(algorithm, accepted)
-    finally:
-        objects.close()
 
 
 def _key(repo: Path, sha: str) -> tuple[str, str]:
