@@ -68,6 +68,11 @@ TOOL_PROMPT = (
 )
 SCOPES = ("user", "project")
 HARNESSES = ("claude", "copilot")
+# #1120: two packages whose native plugins share a skill (and command) name.
+# "distinct": different plugin names; "same": one plugin name from two packages.
+COLLISION_ENVS = ("collision-distinct", "collision-same")
+COLLIDING = "analyze"
+COLLISION_MARKERS = {"rh-a": "RH_A_BODY", "rh-b": "RH_B_BODY"}
 SESSION_SECONDS = 45
 
 _AGENT_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
@@ -744,6 +749,229 @@ def summarize(out: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+class CollisionCell(Cell):
+    """#1120: two native plugins with the same inner skill (and command) name.
+
+    Installs packages A and B, checks through the real harness that both skills
+    load under distinguishable plugin namespaces, that both deployed plugin roots
+    keep their source bytes, then uninstalls A and checks that B still loads.
+    """
+
+    def plugin_names(self) -> tuple[str, str]:
+        return ("rh-a", "rh-b") if self.env == "collision-distinct" else ("rh-dup", "rh-dup")
+
+    def write_package(self, label: str, name: str) -> Path:
+        source = self.root / "src" / f"pkg-{label}"
+        marker = f"RH_{label.upper()}_BODY"
+        _write(
+            source / "skills" / COLLIDING / "SKILL.md",
+            f"---\nname: {COLLIDING}\ndescription: {marker} skill\n---\n\n{marker}\n",
+        )
+        if self.agent_plugin:
+            _json(
+                source / "plugin.json",
+                {
+                    "$schema": _AGENT_PLUGIN_SCHEMA,
+                    "name": name,
+                    "version": "1.0.0",
+                    "description": f"collision fixture {label}",
+                    "license": "MIT",
+                },
+            )
+        else:
+            _json(
+                source / ".claude-plugin" / "plugin.json",
+                {"name": name, "version": "1.0.0", "description": f"collision fixture {label}"},
+            )
+            _write(
+                source / "commands" / f"{COLLIDING}.md",
+                f"---\ndescription: {marker} command\n---\n\n{marker}\n",
+            )
+        return source
+
+    def manifest(self, packages: list[Path]) -> Path:
+        deps = "".join(f"    - {pkg}\n" for pkg in packages)
+        if self.scope == "project":
+            path = self.project / "apm.yml"
+            _write(
+                path,
+                f"name: consumer\nversion: 1.0.0\ntargets: [{self.harness}]\n"
+                f"dependencies:\n  apm:\n{deps}",
+            )
+        else:
+            path = self.home / ".apm" / "apm.yml"
+            _write(path, f"name: user\nversion: 1.0.0\ndependencies:\n  apm:\n{deps}")
+        return path
+
+    def apm(self, label: str, *argv: str) -> subprocess.CompletedProcess:
+        apm = os.environ.get("APM_BIN", "apm")
+        flags = ["-g"] if self.scope == "user" else []
+        return self.run(label, [apm, *argv[:1], *flags, *argv[1:]], self.project)
+
+    def plugins_root(self) -> Path:
+        base = self.home if self.scope == "user" else self.project
+        return base / ".agents" / "plugins"
+
+    def deployed_roots(self) -> list[Path]:
+        base = self.home / ".apm" if self.scope == "user" else self.project
+        lock = _read(base / "apm.lock.yaml")
+        roots = re.findall(r"native_plugin:\n\s+name: \S+\n\s+root: (\S+)", lock)
+        anchor = self.home if self.scope == "user" else self.project
+        return [anchor / root for root in roots]
+
+    def bytes_intact(self, source: Path) -> bool:
+        """Some deployed native plugin root holds exactly the source's files and bytes."""
+        want = {
+            str(f.relative_to(source)): f.read_bytes() for f in source.rglob("*") if f.is_file()
+        }
+        for root in self.deployed_roots():
+            have = {
+                str(f.relative_to(root)): f.read_bytes() for f in root.rglob("*") if f.is_file()
+            }
+            if have == want:
+                return True
+        return False
+
+    def observe(self, label: str) -> dict:
+        """What the harness loads now: qualified skill names per plugin."""
+        cwd = self.project
+        if self.harness == "claude":
+            _output, init = self.claude_session(f"session-{label}", cwd)
+            skills = (init or {}).get("skills") or []
+            commands = (init or {}).get("slash_commands") or []
+            plugins = [str(p.get("source")) for p in (init or {}).get("plugins") or []]
+            return {
+                "skills": sorted(s for s in skills if COLLIDING in s),
+                "commands": sorted(c for c in commands if COLLIDING in c),
+                "plugins": sorted(p for p in plugins if p.startswith("rh-")),
+            }
+        out = {}
+        for key, argv in (
+            ("plugin_list", ["copilot", "plugin", "list"]),
+            ("skill_list", ["copilot", "skill", "list"]),
+        ):
+            proc = self.run(f"{key}-{label}", argv, cwd, timeout=90)
+            out[key] = _tail(_ANSI.sub("", proc.stdout + proc.stderr), 3000)
+        lines = out["skill_list"].splitlines()
+        out["skills"] = [line.strip() for line in lines if COLLIDING in line]
+        out["plugins"] = sorted(set(re.findall(r"rh-[a-z]+", out["plugin_list"])))
+        return out
+
+    def loads(self, seen: dict, names: set[str]) -> bool:
+        """Each named plugin contributes a distinguishable `analyze` skill (and command)."""
+        if self.harness == "claude":
+            return all(
+                f"{name}:{COLLIDING}" in seen["skills"]
+                and f"{name}:{COLLIDING}" in seen["commands"]
+                for name in names
+            )
+        # Copilot qualifies a skill name only while it is ambiguous, so each
+        # package's skill is identified by the body marker in its description.
+        joined = "\n".join(seen["skills"])
+        return all(name in seen["plugins"] and COLLISION_MARKERS[name] in joined for name in names)
+
+    def gone(self, seen: dict, name: str) -> bool:
+        """No trace of the plugin: not registered, no skill, no command."""
+        if self.harness == "claude":
+            qualified = f"{name}:{COLLIDING}"
+            registered = any(p.startswith(f"{name}@") for p in seen["plugins"])
+            return not registered and qualified not in seen["skills"] + seen["commands"]
+        joined = "\n".join(seen["skills"])
+        return name not in seen["plugins"] and COLLISION_MARKERS[name] not in joined
+
+    def settings_untouched(self) -> bool:
+        """No harness settings file declares the refused plugin name."""
+        files = [
+            self.project / ".claude" / "settings.json",
+            self.project / ".github" / "copilot" / "settings.json",
+            self.home / ".claude" / "settings.json",
+            self.home / ".copilot" / "settings.json",
+        ]
+        return not any("rh-dup" in _read(path) for path in files)
+
+    def execute(self) -> dict:
+        name_a, name_b = self.plugin_names()
+        pkg_a = self.write_package("a", name_a)
+        pkg_b = self.write_package("b", name_b)
+        self.git("init", "-q", "-b", "main")
+        self.git("remote", "add", "origin", ORIGIN)
+        _write(self.project / "README.md", "consumer\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "init")
+        self.seed_harness()
+        self.manifest([pkg_a, pkg_b])
+        install = self.apm("apm-install", "install", "--no-policy", "--target", self.harness)
+        output = install.stdout + install.stderr
+        self.evidence["install_exit"] = install.returncode
+        self.evidence["install_tail"] = _tail(output, 2500)
+        self.evidence["plugins_dir"] = sorted(
+            p.name
+            for p in self.plugins_root().glob("*")
+            if p.is_dir() and p.name != ".claude-plugin"
+        )
+        if self.env == "collision-same" and install.returncode != 0:
+            refusal = [line for line in output.splitlines() if "[x]" in line]
+            detail = f"exit {install.returncode}: {' | '.join(refusal)[:300]}"
+            clean = (
+                install.returncode == 1
+                and "Native plugin name collision" in output
+                and not self.evidence["plugins_dir"]
+                and self.settings_untouched()
+            )
+            # Only the collision diagnostic with nothing deployed is the expected refusal.
+            return self.finish("REFUSED" if clean else "ERROR", detail)
+        if install.returncode != 0:
+            return self.finish("ERROR", f"apm install exit {install.returncode}")
+        before = self.observe("both")
+        self.evidence["both"] = before
+        intact = {"a": self.bytes_intact(pkg_a), "b": self.bytes_intact(pkg_b)}
+        self.evidence["bytes_intact"] = intact
+        uninstall = self.apm("apm-uninstall-a", "uninstall", str(pkg_a))
+        self.evidence["uninstall_exit"] = uninstall.returncode
+        self.evidence["uninstall_tail"] = _tail(uninstall.stdout + uninstall.stderr, 2000)
+        after = self.observe("after-uninstall-a")
+        self.evidence["after"] = after
+        self.evidence["bytes_intact_b_after"] = self.bytes_intact(pkg_b)
+        if self.env == "collision-same":
+            reason = (
+                f"install exit 0; plugins_dir={self.evidence['plugins_dir']}; "
+                f"both={before.get('skills')}; bytes={intact}; after={after.get('skills')}"
+            )
+            ok = intact["a"] and intact["b"] and len(before.get("skills", [])) >= 2
+            return self.finish("LOADS" if ok else "PARTIAL", reason)
+        both_ok = self.loads(before, {name_a, name_b}) and all(intact.values())
+        b_ok = (
+            uninstall.returncode == 0
+            and self.loads(after, {name_b})
+            and self.gone(after, name_a)
+            and self.evidence["bytes_intact_b_after"]
+        )
+        reason = (
+            f"both={before.get('skills')}; bytes={intact}; uninstall_a exit "
+            f"{uninstall.returncode}; after={after.get('skills')}"
+        )
+        if both_ok and b_ok:
+            return self.finish("LOADS", reason)
+        return self.finish("PARTIAL" if (both_ok or b_ok) else "DOES NOT LOAD", reason)
+
+    def finish(self, verdict: str, reason: str) -> dict:
+        result = {
+            "cell": self.id,
+            "harness": self.harness,
+            "env": self.env,
+            "scope": self.scope,
+            "fixture": "agent-plugin" if self.agent_plugin else "claude-plugin",
+            "harness_version": self.harness_version(),
+            "verdict": verdict,
+            "reason": reason,
+            "signals": {},
+            "evidence": self.evidence,
+            "steps": self.steps,
+        }
+        _json(self.root / "cell.json", result)
+        return result
+
+
 def secret_needles(token: str) -> tuple[list[bytes], list[bytes]]:
     """The token as written, and its base64 forms at every byte alignment.
 
@@ -815,7 +1043,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--harness", choices=HARNESSES, required=True)
-    run.add_argument("--env", choices=ENVS + DIAG_ENVS, action="append")
+    run.add_argument("--env", choices=ENVS + DIAG_ENVS + COLLISION_ENVS, action="append")
     run.add_argument("--scope", choices=SCOPES, action="append")
     run.add_argument("--out", type=Path, required=True)
     summ = sub.add_parser("summarize")
@@ -841,7 +1069,8 @@ def main() -> int:
         return 0
     for env in args.env or ENVS:
         for scope in args.scope or SCOPES:
-            result = Cell(args.out, args.harness, env, scope).execute()
+            kind = CollisionCell if env in COLLISION_ENVS else Cell
+            result = kind(args.out, args.harness, env, scope).execute()
             print(f"{result['cell']}: {result['verdict']} ({result['reason']})", flush=True)
     return 0
 
