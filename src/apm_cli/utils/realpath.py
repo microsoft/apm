@@ -13,8 +13,11 @@ no link anywhere on its path (W3d ``containment-once`` K1-K9). Such a proof is
 kept in the command's invocation memo, which user code (a lifecycle script)
 clears, and lets a path directly under a proven directory resolve with one
 ``lstat`` of its leaf instead of a walk. A leaf that is a link or a reparse
-point, a ``..`` anywhere, a case-variant name on Windows, or any doubt takes
-the full resolution.
+point, a ``..`` anywhere, a volatile component (``.git``, staging, ``.inc.``,
+``.tmp``, backups), a case-variant name on Windows, or any doubt takes the full
+resolution. APM drops the proofs under a path before it renames or deletes there
+(:func:`forget_proofs`, called by ``realpath_win.release_held``). On Windows the
+exact forms live in :mod:`apm_cli.utils.realpath_win`.
 """
 
 from __future__ import annotations
@@ -70,13 +73,28 @@ def _exact_name(head: str, name: str) -> bool:
     return name in names
 
 
+_VOLATILE_MARKERS = ("staging", ".inc.", ".tmp", "backup", "migration", "refresh")
+
+
+def _components(text: str) -> list[str]:
+    return text.replace("\\", "/").split("/")
+
+
+def _volatile(text: str) -> bool:
+    """R3: APM renames and deletes under these components, so nothing there is proven."""
+    for part in _components(text.lower()):
+        if part == ".git" or any(marker in part for marker in _VOLATILE_MARKERS):
+            return True
+    return False
+
+
 def _proven_answer(text: str, proofs: dict) -> str | None:
     """The resolved form of *text* when its directory is proven link-free, else ``None``."""
-    if ".." in text.replace("\\", "/").split("/"):
+    if ".." in _components(text):
         return None
     absolute = os.path.abspath(text)
     head, name = os.path.split(absolute)
-    if not name or head not in proofs:
+    if not name or head not in proofs or _volatile(name):
         return None
     try:
         info = os.lstat(absolute)
@@ -87,7 +105,7 @@ def _proven_answer(text: str, proofs: dict) -> str | None:
     if _leaf_is_link(info) or (_WINDOWS and not _exact_name(head, name)):
         return None
     if stat.S_ISDIR(info.st_mode):
-        proofs[absolute] = True
+        proofs[absolute] = True  # an existing, non-link directory under a proven one
     return absolute
 
 
@@ -148,7 +166,7 @@ def _missing_realpath(text: str, depth: int) -> str | None:
 
 
 def resolve_path(path: Path) -> Path:
-    """Return ``path.resolve()``, computed in the kernel when that is exact.
+    """Return ``path.resolve()``, through an exact fast form when one applies.
 
     Only a stock ``PosixPath`` or ``WindowsPath`` takes a fast form: a subclass
     (which may override ``resolve`` or ``__fspath__``) keeps its own behavior,
@@ -161,18 +179,52 @@ def resolve_path(path: Path) -> Path:
         answer = _proven_answer(text, proofs)
         if answer is not None:
             return type(path)(answer)
-    resolved = _resolve(path, text)
-    if proofs is not None and ".." not in text.replace("\\", "/").split("/"):
-        absolute = os.path.abspath(text)
-        if str(resolved) == absolute:
-            # Resolution kept the exact text: no component up to the leaf is a link.
-            head = os.path.dirname(absolute)
-            if head and head != absolute:
-                proofs[head] = True
+    resolved = _platform_resolve(path, text)
+    if proofs is not None:
+        _record_proof(text, str(resolved), proofs)
     return resolved
 
 
-def _resolve(path: Path, text: str) -> Path:
+def _record_proof(text: str, resolved: str, proofs: dict) -> None:
+    """Prove the leaf's directory when resolution kept the exact text (R1: it must exist now)."""
+    if ".." in _components(text):
+        return
+    absolute = os.path.abspath(text)
+    head = os.path.dirname(absolute)
+    if resolved != absolute or not head or head == absolute or _volatile(head):
+        return
+    try:
+        info = os.lstat(head)
+    except OSError:
+        return  # a missing directory is never proven before it exists
+    if stat.S_ISDIR(info.st_mode) and not _leaf_is_link(info):
+        proofs[head] = True
+
+
+def forget_proofs(under: object = None) -> None:
+    """Drop the proofs at or below *under* (``None``: all of them).
+
+    APM calls this (through ``realpath_win.release_held``) before it renames,
+    deletes or recreates a tree, so a proof never outlives the directory it saw.
+    """
+    for name in (_PROOFS, _LISTINGS):
+        memo = _memo(name)
+        if not memo:
+            continue
+        if under is None:
+            memo.clear()
+            continue
+        try:
+            base = os.path.abspath(os.fspath(under))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            memo.clear()
+            continue
+        prefix = base.rstrip("/\\") + os.sep
+        for key in [k for k in list(memo) if k == base or k.startswith(prefix)]:
+            memo.pop(key, None)
+
+
+def _platform_resolve(path: Path, text: str) -> Path:
     if _FAST and type(path) is PosixPath and PosixPath.resolve is _STOCK_RESOLVE:
         if text.startswith("/") and not text.startswith("//"):
             try:
@@ -181,4 +233,13 @@ def _resolve(path: Path, text: str) -> Path:
                 resolved = None
             if resolved is not None:
                 return type(path)(resolved)
+    if _WINDOWS:
+        fast = _resolve_windows(path)
+        if fast is not None:
+            return fast
     return path.resolve()
+
+
+if _WINDOWS:
+    # Bound once at import: other platforms never load the Windows forms.
+    from apm_cli.utils.realpath_win import resolve_windows as _resolve_windows

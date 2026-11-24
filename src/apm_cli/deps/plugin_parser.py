@@ -28,6 +28,7 @@ from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath
+from ..utils.realpath_win import release_held
 
 _logger = logging.getLogger(__name__)
 
@@ -544,6 +545,7 @@ def _remove_stale_normalized_skills(
                 raise PluginIntegrityError(
                     f"Refusing to remove symlinked plugin skill destination: {stale}"
                 )
+            release_held(stale)
             shutil.rmtree(stale)
 
 
