@@ -201,3 +201,22 @@ def test_a_skill_linked_out_of_the_bundle_is_still_refused(tmp_path: Path) -> No
     (skills / "evil").symlink_to(outside, target_is_directory=True)
     result = validate_apm_package(tmp_path / "pkg")
     assert [e for e in result.errors if "evil" in e and "outside" in e]
+
+
+@pytest.mark.skipif(not realpath._openat2_state["usable"], reason="openat2 is Linux 5.6+")
+def test_a_link_free_path_resolves_without_the_proc_name(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plain, linked = tree / "dir" / "sub", tree / "link_dir" / "sub"
+    missing = tree / "dir" / "missing" / "x.md"
+    expected = [plain.resolve(), missing.resolve(), linked.resolve()]
+    readlinks: list[str] = []
+    readlink = os.readlink
+
+    def counted(value, *args, **kwargs):
+        readlinks.append(os.fspath(value))
+        return readlink(value, *args, **kwargs)
+
+    monkeypatch.setattr(os, "readlink", counted)
+    assert [resolve_path(plain), resolve_path(missing), resolve_path(linked)] == expected
+    assert len(readlinks) == 1  # only the path through a link needs the /proc name
