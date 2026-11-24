@@ -4429,6 +4429,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="GitLab file downloads bypass the executed HTTPS plan gate before REST.",
     ),
     MutationCase(
+        guard_id="transport-platform-held-directory-release",
+        rule_id="transport-platform-held-directory-release",
+        path="src/apm_cli/commands/uninstall/local_reanchor.py",
+        old="            release_held(current)\n            current.rename(target)\n",
+        new="            current.rename(target)\n",
+        intent="A re-anchor move renames a package directory path resolution may still hold.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-held-root-registration",
+        rule_id="transport-platform-held-root-registration",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="from ...utils.realpath_win import release_held\n",
+        new="from ...utils.realpath_win import register_held_root, release_held\n",
+        intent="A module other than package activation can register a held directory.",
+    ),
+    MutationCase(
         guard_id="transport-platform-host-credential-resolution",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/deps/download_strategies.py",

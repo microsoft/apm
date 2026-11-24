@@ -571,6 +571,7 @@ def _remove_created(created: tuple[Path, ...]) -> None:
     """Remove the parents a move created, deepest first, while they stay empty."""
     for parent in reversed(created):
         if parent.is_dir() and not any(parent.iterdir()):
+            release_held(parent)
             parent.rmdir()
 
 
