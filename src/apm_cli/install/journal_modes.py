@@ -277,15 +277,21 @@ def read_private_journal(path: Path, *, first_line: bool = False) -> str:
 
 
 def for_destination(path: Path, mode: int | dict[str, int], copy: Path) -> int | dict[str, int]:
-    """The mode to give a restore: a path recreated from absence is capped by the umask."""
-    if os.name == "nt" or os.path.lexists(path):
+    """The mode to give a restore: each path recreated from absence is capped by the umask.
+
+    A directory that still exists may have lost children (a removal killed partway);
+    those children are recreated too, so each entry is judged on its own.
+    """
+    if os.name == "nt":
         return mode
     from apm_cli.cache.deploy_store import process_umask
 
     umask = process_umask()  # the process's umask, read once
     if isinstance(mode, int):
-        return mode & _NEW_FILE & ~umask
+        return mode if os.path.lexists(path) else mode & _NEW_FILE & ~umask
     return {
-        rel: bits & (_NEW_DIR if not rel or (copy / rel).is_dir() else _NEW_FILE) & ~umask
+        rel: bits
+        if os.path.lexists(path / rel if rel else path)
+        else bits & (_NEW_DIR if not rel or (copy / rel).is_dir() else _NEW_FILE) & ~umask
         for rel, bits in mode.items()
     }
