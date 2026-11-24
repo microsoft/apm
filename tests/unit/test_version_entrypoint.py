@@ -90,3 +90,17 @@ def test_argument_placement_preserves_click_behavior(
     captured = capsys.readouterr()
     assert exit_info.value.code == exit_code
     assert message in captured.out + captured.err
+
+
+def test_the_cli_process_collects_young_garbage_rarely() -> None:
+    """Process-wide: one install allocates millions of acyclic objects (#4939)."""
+    import gc
+
+    before = gc.get_threshold()
+    try:
+        with patch.object(sys, "argv", ["apm", "--help"]), patch("apm_cli.cli.main"):
+            main()
+        assert gc.get_threshold()[0] >= 100_000
+        assert gc.isenabled()
+    finally:
+        gc.set_threshold(*before)

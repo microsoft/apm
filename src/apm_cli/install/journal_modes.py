@@ -218,13 +218,23 @@ def private_dir(path: Path) -> None:
             os.chmod(path, stat.S_IMODE(st.st_mode) & ~0o022)
 
 
-def append_private(path: Path, text: str) -> None:
-    """Append *text* to the journal file *path*, which is only ever this user's to write."""
+def open_private_append(path: Path) -> int:
+    """Open the journal file *path* for appending, private to this user; return the fd."""
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
     try:
         if os.name != "nt" and os.fstat(fd).st_mode & 0o077:
             os.fchmod(fd, 0o600)  # set explicitly, never left to the umask
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def append_private(path: Path, text: str) -> None:
+    """Append *text* to the journal file *path*, which is only ever this user's to write."""
+    fd = open_private_append(path)
+    try:
         os.write(fd, text.encode("utf-8"))
     finally:
         os.close(fd)
