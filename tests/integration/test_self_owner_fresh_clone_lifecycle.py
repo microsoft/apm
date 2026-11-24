@@ -101,7 +101,10 @@ def test_a_fresh_clone_installs_over_a_legacy_self_owned_rule_row(
 
     assert first.returncode == 0, _evidence(first)
     assert "path segments must not be empty" not in first.stdout + first.stderr
-    assert (project / _RULE).read_bytes() == rule_before, "the hash-matching rule is kept"
+    # No AGENTS.md carries it, so install re-renders its own unedited rule (#5343).
+    rendered = (project / _RULE).read_text(encoding="utf-8")
+    assert rendered != rule_before.decode("utf-8") and "Front only." in rendered
+    assert f'- "{apply_to}"' in rendered, rendered
     if claude_md is not None:
         assert (project / "CLAUDE.md").read_text(encoding="utf-8") == claude_md
     else:

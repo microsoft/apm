@@ -59,7 +59,7 @@ def test_apm_format_pack_ships_rules_claude_compiles_into_agents_md(
     _run_success(
         scenario, producer, _INSTALL_ARGS, environment=source.environment, scenario_id="install"
     )
-    assert not (producer.root / _RULE).exists(), "always-on rule now compiles into AGENTS.md"
+    assert (producer.root / _RULE).read_bytes() == legacy_rule, "no compile, so the rule stays"
 
     out = tmp_path / "bundles"
     _run_success(
@@ -118,7 +118,8 @@ def test_default_plugin_pack_ships_routed_instructions_like_legacy_layout(
             environment=source.environment,
             scenario_id=f"install-{consumer.root.name}",
         )
-    assert not (producer.root / _RULE).exists()
+    # No compiled AGENTS.md carries it, so the producer keeps the rule (#5343).
+    assert (producer.root / _RULE).read_bytes() == (legacy.root / _RULE).read_bytes()
 
     expected = _files(_pack(scenario, legacy, source, tmp_path / "legacy-out"))
     shipped = _files(_pack(scenario, producer, source, tmp_path / "producer-out"))
@@ -157,9 +158,8 @@ def test_cli_target_claude_install_with_ambiguous_folders_never_drops_rules_sile
 ) -> None:
     """``--target claude`` on a ``.claude/`` + ``.cursor/`` producer without ``targets:``.
 
-    Pack cannot see the CLI target. A recorded Claude deployment decides
-    (recorded targets win); without one, pack warns instead of dropping the
-    routed rule silently.
+    Pack cannot see the CLI target, but install keeps and records the rule
+    (#5343), so the recorded Claude deployment decides and the bundle ships it.
     """
     scenario = _new_scenario(tmp_path / "cli-target", apm_binary_path)
     source = _publish(
@@ -175,7 +175,7 @@ def test_cli_target_claude_install_with_ambiguous_folders_never_drops_rules_sile
         environment=source.environment,
         scenario_id="install",
     )
-    assert not (producer.root / _RULE).exists()
+    assert (producer.root / _RULE).is_file()
 
     out = tmp_path / "apm-out"
     packed = _run_success(
@@ -186,12 +186,9 @@ def test_cli_target_claude_install_with_ambiguous_folders_never_drops_rules_sile
         scenario_id="pack",
     )
     (bundle,) = [path for path in out.iterdir() if path.is_dir()]
-    if with_skill:
-        assert (bundle / _RULE).is_file()
-    else:
-        assert not (bundle / _RULE).exists()
-        text = packed.stdout + packed.stderr
-        assert "Skipped 1 Claude rule(s) routed to AGENTS.md" in " ".join(text.split()), text
+    assert (bundle / _RULE).read_bytes() == (producer.root / _RULE).read_bytes()
+    text = packed.stdout + packed.stderr
+    assert "Skipped" not in text, text
 
 
 def test_pack_refuses_routed_rules_from_an_apm_modules_copy_the_lock_does_not_attest(
