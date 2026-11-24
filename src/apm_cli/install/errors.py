@@ -290,3 +290,8 @@ def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission
         f"not list transitive MCP server(s) {', '.join(refused)}. Ask the policy owner to "
         "add them to mcp.allow or set mcp.trust_transitive: true."
     )
+
+
+def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
+    """One ``--frozen`` refusal line for an unrecorded service claim."""
+    return f"  - {service} server {name!a} target {target!a} ownership is not recorded in apm.lock.yaml"
