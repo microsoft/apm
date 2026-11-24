@@ -127,7 +127,7 @@ def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     resolved again per path within this call.
     """
     try:
-        resolved_base: Path | None = base.resolve()
+        resolved_base: Path | None = resolve_path(base)
     except (OSError, RuntimeError):
         resolved_base = None
     results: list[str] = []
@@ -135,12 +135,12 @@ def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
         relative = None
         if resolved_base is not None:
             try:
-                relative = relative_posix(path.resolve(), resolved_base)
+                relative = relative_posix(resolve_path(path), resolved_base)
             except (ValueError, OSError, RuntimeError):
                 relative = None
         if relative is None:
             try:
-                relative = path.resolve().as_posix()
+                relative = resolve_path(path).as_posix()
             except (OSError, RuntimeError):
                 relative = path.as_posix()
         results.append(relative)
