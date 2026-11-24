@@ -364,7 +364,12 @@ def write_lf(path: Path, text: str) -> None:
     path.write_bytes(text.encode("utf-8"))
 
 
-def consumer_manifest(name: str, dependencies: list[str], targets: tuple[str, ...]) -> str:
+def consumer_manifest(
+    name: str,
+    dependencies: list[str],
+    targets: tuple[str, ...],
+    allow_executables: dict[str, dict[str, bool]] | None = None,
+) -> str:
     document = {
         "name": name,
         "version": "1.0.0",
@@ -372,6 +377,8 @@ def consumer_manifest(name: str, dependencies: list[str], targets: tuple[str, ..
         "targets": list(targets),
         "dependencies": {"apm": dependencies},
     }
+    if allow_executables:
+        document["allowExecutables"] = allow_executables
     return yaml.safe_dump(document, sort_keys=False)
 
 
@@ -397,8 +404,14 @@ def build_tree(recipe: TreeRecipe, root: Path) -> TreeFixture:
         direct = [package_spec(recipe, name, ref=pins[name]) for name in levels[0]]
     else:
         direct = [package_spec(recipe, name) for name in levels[0]]
+    allow = (
+        {package_spec(recipe, name): {"hooks": True, "mcp": True} for name in packages}
+        if recipe.allow_executables
+        else None
+    )
     write_lf(
-        project / "apm.yml", consumer_manifest(f"{recipe.name}-consumer", direct, recipe.targets)
+        project / "apm.yml",
+        consumer_manifest(f"{recipe.name}-consumer", direct, recipe.targets, allow),
     )
     return TreeFixture(
         recipe=recipe,

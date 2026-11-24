@@ -57,6 +57,8 @@ class TreeRecipe:
     # that is no longer the branch tip). Transitive edges keep "tag" except
     # under "tip"; the tag names the same commit as the "sha" pin.
     pin: str = "tag"
+    # Consumer approves every package's executables (hooks, MCP) in allowExecutables.
+    allow_executables: bool = False
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,14 @@ TREE_RECIPES: dict[str, TreeRecipe] = {
         replace(base, name=f"{base.name}-sha", pin="sha"),
     )
 }
+
+# Executables approved: a hook in every package and an MCP server in every second one.
+TREE_RECIPES["tree-50-exec"] = replace(
+    _BASE_TREES[1],
+    name="tree-50-exec",
+    primitives=PrimitiveMix(hook_every=1, mcp_every=2),
+    allow_executables=True,
+)
 
 MONOREPO_RECIPES: dict[str, MonorepoRecipe] = {
     recipe.name: recipe for recipe in (MonorepoRecipe("monorepo-4"),)
