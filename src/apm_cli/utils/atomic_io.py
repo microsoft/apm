@@ -226,7 +226,7 @@ def atomic_write_text(
             os.unlink(tmp_name)
         else:
             _replace_atomic_file(tmp_name, path)
-    except Exception:
+    except BaseException:  # a cancellation still removes the staged file
         if not fd_wrapped:
             # fdopen never took ownership of the descriptor; close it so
             # Windows can release its lock and the tmp file can be unlinked.
