@@ -582,6 +582,7 @@ class SkillIntegrator(BaseIntegrator):
 
     def _ownership_maps(self, lockfile_root: Path) -> tuple[Mapping[str, str], Mapping[str, str]]:
         """Read durable ownership once per used root in the current integration phase."""
+        return ({}, {})  # RESEARCH: deleted
         if self._ownership_snapshots is None:
             return self._build_ownership_maps(lockfile_root)
         root = lockfile_root.resolve()
