@@ -23,6 +23,7 @@ from apm_cli.utils.path_security import (
     has_symlink_component,
 )
 from apm_cli.utils.paths import is_within, relative_to, stored_alias
+from apm_cli.utils.realpath import resolve_path
 
 if TYPE_CHECKING:
     from apm_cli.core.deployment_ledger import OverwriteGate
@@ -1136,9 +1137,9 @@ class BaseIntegrator:
         try:
             if has_symlink_component(project_root, target.parent):
                 return False
-            root = resolved_project_root or project_root.resolve()
+            root = resolved_project_root or resolve_path(project_root)
             containment_target = target.parent if allow_final_symlink else target
-            if not is_within(containment_target.resolve(), root):
+            if not is_within(resolve_path(containment_target), root):
                 return False
         except (ValueError, OSError):
             return False
@@ -1397,8 +1398,8 @@ class BaseIntegrator:
         as ``HookIntegrator._is_root_local_package``).
         """
         try:
-            resolved_install = Path(package_info.install_path).resolve()
-            if resolved_install == Path(project_root).resolve():
+            resolved_install = resolve_path(Path(package_info.install_path))
+            if resolved_install == resolve_path(Path(project_root)):
                 return True
             root_local = getattr(package_info, "root_local_project_root", None)
             if root_local is not None:
