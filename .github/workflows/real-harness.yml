@@ -14,9 +14,11 @@
 # environment, whose deployment branches are main only. Copilot jobs enter
 # that environment only for schedule and workflow_dispatch on main, so neither
 # pull requests nor a dispatch of another branch's workflow can reach it;
-# their Copilot session cells report BLOCKED. Evidence is staged and scanned
-# for the token before upload (Actions masks logs, not artifacts). Claude Code
-# never reaches a model: ANTHROPIC_BASE_URL is a closed local port. Harness
+# their Copilot session cells report BLOCKED. Only the probe step runs code
+# with the token; the summary and staging steps hold it only to scan their
+# output (raw and base64) before publishing it, since Actions masks logs but
+# not artifacts or step summaries. Claude Code never reaches a model:
+# ANTHROPIC_BASE_URL is a closed local port. Harness
 # packages install with `npm ci` from scripts/real_harness/npm/<pin>/, whose
 # lockfile pins every package, platform binary included, by sha512 integrity.
 # Never add pull_request_target. No cache is saved.
@@ -67,7 +69,6 @@ jobs:
           - { harness: copilot, version: '1.0.114-0', os: ubuntu-24.04 }
     env:
       PIN_DIR: scripts/real_harness/npm/${{ matrix.harness }}-${{ matrix.version }}
-      COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,7 +120,11 @@ jobs:
             echo "::error::${PACKAGE}@${VERSION} integrity ${PUBLISHED} does not match the pinned ${PINNED}"
             exit 1
           fi
-          npm ci --prefix "$PIN_DIR" --no-fund --no-audit
+          # Copilot pins need no install script. Claude Code's postinstall copies its
+          # platform binary out of the pinned optional dependency (no network), so it
+          # keeps scripts; no job step before the probe ever holds a token.
+          if [ "$HARNESS" = copilot ]; then IGNORE=--ignore-scripts; else IGNORE=; fi
+          npm ci --prefix "$PIN_DIR" --no-fund --no-audit $IGNORE
           echo "$PWD/$PIN_DIR/node_modules/.bin" >> "$GITHUB_PATH"
           "$PIN_DIR/node_modules/.bin/$HARNESS" --version
           command -v tmux || { sudo apt-get update -q && sudo apt-get install -y -q tmux; }
@@ -127,6 +132,7 @@ jobs:
       - name: Probe every cell
         env:
           HARNESS: ${{ matrix.harness }}
+          COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
         run: |
           export COPILOT_GITHUB_TOKEN="$COPILOT_TOKEN"
           python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
@@ -141,15 +147,22 @@ jobs:
         if: always()
         env:
           TITLE: ${{ matrix.harness }} ${{ matrix.version }} on ${{ matrix.os }}
+          COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
         run: |
+          # Built from each cell.json verdict and reason only, and scanned for the
+          # token before it reaches the public step summary.
           {
             echo "### $TITLE"
             python3 scripts/real_harness/probe.py summarize "$RUNNER_TEMP/rh"
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > "$RUNNER_TEMP/summary.md"
+          python3 scripts/real_harness/probe.py scan "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Stage evidence and scan it for the token
         id: stage
         if: always()
+        env:
+          COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
           cd "$RUNNER_TEMP/rh"
@@ -159,7 +172,7 @@ jobs:
               */work/*/apm.yml */work/*/apm.lock.yaml; do
             cp -r --parents "$path" "$RUNNER_TEMP/evidence/"
           done
-          if [ -n "$COPILOT_TOKEN" ] && grep -rqF -- "$COPILOT_TOKEN" "$RUNNER_TEMP/evidence"; then
+          if ! python3 "$GITHUB_WORKSPACE/scripts/real_harness/probe.py" scan "$RUNNER_TEMP/evidence"; then
             rm -rf "$RUNNER_TEMP/evidence"
             echo "::error::The Copilot token appears in the evidence; nothing is uploaded."
             exit 1

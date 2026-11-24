@@ -1,7 +1,8 @@
-"""The real-harness verdict gate: expected.json is a red-first oracle, BLOCKED never fails."""
+"""The real-harness verdict gate (expected.json is a red-first oracle) and token scan."""
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -69,3 +70,23 @@ def test_committed_expectations_name_only_known_cells() -> None:
     }
     assert set(expected) <= known
     assert {row["verdict"] for row in expected.values()} <= {"LOADS", "PARTIAL", "DOES NOT LOAD"}
+
+
+@pytest.mark.parametrize(
+    "leak",
+    [
+        "TOKEN123abc",
+        base64.b64encode(b"TOKEN123abc").decode(),
+        base64.b64encode(b"x-access-token:TOKEN123abc").decode(),
+    ],
+)
+def test_scan_finds_the_token_and_its_base64_forms(tmp_path: Path, leak: str) -> None:
+    (tmp_path / "clean.log").write_text("nothing here", encoding="utf-8")
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "leak.log").write_text(f"auth: {leak}\n", encoding="utf-8")
+    assert probe.scan([tmp_path], "TOKEN123abc") == [tmp_path / "nested" / "leak.log"]
+
+
+def test_scan_without_a_token_finds_nothing(tmp_path: Path) -> None:
+    (tmp_path / "a.log").write_text("anything", encoding="utf-8")
+    assert probe.scan([tmp_path], "") == []

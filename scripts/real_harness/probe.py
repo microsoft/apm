@@ -27,6 +27,7 @@ other's state. Usage::
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -721,6 +722,30 @@ def summarize(out: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+def secret_needles(token: str) -> list[bytes]:
+    """The token as written, and its base64 forms (bare and as a basic-auth pair)."""
+    if not token:
+        return []
+    needles = [token.encode()]
+    for plain in (token, f"x-access-token:{token}"):
+        encoded = base64.b64encode(plain.encode()).rstrip(b"=")
+        needles.append(encoded)
+    return needles
+
+
+def scan(paths: list[Path], token: str) -> list[Path]:
+    """Files under ``paths`` that contain the token in any form (never printed)."""
+    needles = secret_needles(token)
+    hits = []
+    for root in paths:
+        files = [root] if root.is_file() else sorted(f for f in root.rglob("*") if f.is_file())
+        for path in files:
+            data = path.read_bytes()
+            if any(needle in data for needle in needles):
+                hits.append(path)
+    return hits
+
+
 def check(out: Path, expected_path: Path) -> list[str]:
     """Compare every cell verdict with the committed expectation (red-first oracle).
 
@@ -762,7 +787,14 @@ def main() -> int:
     chk = sub.add_parser("check")
     chk.add_argument("out", type=Path)
     chk.add_argument("--expected", type=Path, default=Path(__file__).with_name("expected.json"))
+    scn = sub.add_parser("scan", help="fail if $COPILOT_TOKEN appears in the files")
+    scn.add_argument("paths", type=Path, nargs="+")
     args = parser.parse_args()
+    if args.command == "scan":
+        hits = scan(args.paths, os.environ.get("COPILOT_TOKEN", ""))
+        for hit in hits:
+            print(f"[x] the Copilot token appears in {hit}")
+        return 1 if hits else 0
     if args.command == "check":
         problems = check(args.out, args.expected)
         for problem in problems:
