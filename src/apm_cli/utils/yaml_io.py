@@ -593,6 +593,27 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+def _non_string_keys(text: str) -> str:
+    """Name the non-string keys of *text*'s frontmatter for a diagnostic."""
+    metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+    data = _BOUNDED_FRONTMATTER_HANDLER.load(metadata)
+    keys = [
+        _key_label(k) for k in (data if isinstance(data, dict) else {}) if not isinstance(k, str)
+    ]
+    return ", ".join(keys) or "unknown"
+
+
+def _key_label(key: Any) -> str:
+    """Name one repository-controlled key safely: printable ASCII, never a failing render."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    try:
+        text = repr(key)
+    except ValueError:  # an int past Python's digit limit
+        return f"<{type(key).__name__}>"
+    return printable_ascii_text(text) if len(text) <= 40 else f"<{type(key).__name__}>"
+
+
 def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     """Parse Markdown text through the bounded handler.
 
@@ -611,6 +632,9 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
     except yaml.YAMLError:
         raise
+    except TypeError as exc:
+        # Post(**metadata) refuses a non-string key such as ``1:`` (#4922, #5028).
+        raise yaml.YAMLError(f"non-string frontmatter key(s): {_non_string_keys(text)}") from exc
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:
