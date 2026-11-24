@@ -9,7 +9,9 @@ seeded ``tree-10`` fixture behind the offline mirror (rtt 0):
 - install-noop: the same project again, everything installed;
 - install-warm: a fresh checkout with the cache the cold install filled;
 - outdated: that installed project asks which dependencies have newer refs;
-- update: ``update -y`` on that project, with nothing newer to take.
+- update: ``update -y`` on that project, with nothing newer to take;
+- install-cold-auth / install-warm-auth: cold and warm again for an authenticated
+  user (a token, auth tried first: the token-first git path private hosts take).
 
 Each journey's counters must stay within ``tests/perf/count_budgets.json``.
 Over budget, or a counter with no row, fails with the diff; a counter well under
@@ -44,6 +46,8 @@ pytestmark = [
 ]
 
 _TREE = "tree-10"
+# A fixed placeholder token the offline mirror accepts; auth is tried first.
+_AUTH = {"GITHUB_APM_PAT": "ghp_" + "0" * 36, "APM_GITHUB_AUTH_FIRST": "1"}
 _MEASURE = os.environ.get("APM_PERF_COUNT_BUDGETS_MEASURE") == "1"
 
 
@@ -66,10 +70,13 @@ def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, 
                 shutil.rmtree(project)
             shutil.copytree(tree.project, project)
 
-        def run(journey: str, *args: str) -> None:
+        def run(journey: str, *args: str, env: dict[str, str] | None = None) -> None:
             world.reset_traffic()
             result, counts = run_counted(
-                [*apm, *args], cwd=project, env=world.env, log=work / f"{journey}.jsonl"
+                [*apm, *args],
+                cwd=project,
+                env={**world.env, **(env or {})},
+                log=work / f"{journey}.jsonl",
             )
             assert result.returncode == 0, (
                 f"{journey}: {result.stdout[-3000:]}\n{result.stderr[-3000:]}"
@@ -85,6 +92,11 @@ def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, 
         run("install-warm", "install")
         run("outdated", "outdated")
         run("update", "update", "-y")
+        world.clear_cache()
+        checkout()
+        run("install-cold-auth", "install", env=_AUTH)
+        checkout()
+        run("install-warm-auth", "install", env=_AUTH)
     return observed
 
 
