@@ -46,6 +46,7 @@ DENY_POLICY = "deny-native"
 # Harness settings files whose enabledPlugins declare a project-scope plugin.
 SETTINGS = (".claude/settings.json", ".github/copilot/settings.json")
 _RETIRED = r"1 native plugin\(s\) removed"
+_READ_ONLY = ("marketplace", "audit-ci", "pack")
 
 
 class PluginBinBench(Bench):
@@ -98,8 +99,8 @@ class GatePluginBin(StepRunner):
         self.credited.add(cell)
         requested = self._requested(op)
         if not self.dry:
-            fields: dict[str, object] = {"mutating": op not in ("marketplace", "audit-ci")}
-            if op == "audit-ci":
+            fields: dict[str, object] = {"mutating": op not in _READ_ONLY}
+            if op in ("audit-ci", "pack"):
                 fields["read_only"] = True
             if op == "marketplace":
                 fields.update(forbidden={"project": ("*",), "outside": ("*",)}, allowed={})
@@ -120,6 +121,9 @@ class GatePluginBin(StepRunner):
 
     def _check_outcome(self, op: str, requested: PluginBinState, step: Step, retires: bool) -> None:
         """What I1-I9 cannot see: the whole root and its declarations go or stay together."""
+        if op == "pack":
+            self._check_pack(step)
+            return
         after = set(step.after.deployed)
         wanted = {"/".join(c) for c in expected_deployed(requested.model(), KINDS)}
         if op == "install":
@@ -158,6 +162,16 @@ class GatePluginBin(StepRunner):
         records = [k for k in rows if lock.dependencies[k].native_plugin]
         assert not records, f"prune kept the native plugin record: {records}"
 
+    def _check_pack(self, step: Step) -> None:
+        """Pack leaves the whole plugin out and says so once, with no looping remedy (#5253)."""
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        listed = {line.strip() for line in step.result.stdout.splitlines()}
+        assert not any(f"bin/{PLUGIN}" in line for line in listed), step.result.stdout
+        named = [line for line in output.splitlines() if f"lifecycle/{PLUGIN}" in line]
+        assert len(named) == 1, f"want one line naming the native plugin: {named}"
+        assert named[0].lstrip().startswith("[!]"), named[0]
+        assert "'apm install' to record provenance" not in output, output
+
     def _credit(self, op: str, cell: str, step: Step, retires: bool) -> None:
         present: dict[str, list[str]] = {}
         absent: dict[str, list[str]] = {}
@@ -168,7 +182,7 @@ class GatePluginBin(StepRunner):
             matches = (_RETIRED,)
         elif op != "install":
             # A catalog command leaves every project byte alone; approve leaves the root.
-            unchanged["project"] = ("*",) if op == "marketplace" else (ROOT, *SETTINGS)
+            unchanged["project"] = ("*",) if op in ("marketplace", "pack") else (ROOT, *SETTINGS)
         if not retires and step.after.deployed:
             present["project"] = [BIN_PATH]
         evidence = Evidence(
@@ -258,6 +272,8 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     # then an orphaned plugin is pruned whole.
     machine.run("install", *install, machine.spec())
     machine.run("audit-ci", "audit", "--ci")
+    # pack leaves the whole plugin out, naming it once (#5253).
+    machine.run("pack", "pack", "--dry-run")
     machine.undeclare()
     machine.run("prune", "prune", retires=True)
     # unapproved-exec: the gate turns on over a plugin deployed with it off.
@@ -267,6 +283,7 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     # denied-dependency: org policy denies the approved, deployed plugin.
     machine.run("approve", "approve", PLUGIN)
     machine.run("install", *install)
+    machine.run("pack", "pack", "--dry-run")
     machine.deny_by_policy()
     machine.run("marketplace", "marketplace", "add", machine.marketplace_url())
     machine.run("prune", "prune", retires=True)
