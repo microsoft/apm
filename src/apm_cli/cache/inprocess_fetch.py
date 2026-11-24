@@ -396,7 +396,7 @@ def _classify(entries) -> tuple[dict[str, str], tuple[str, ...]]:
     from ..deps.anonymous_ref_listing import _list_key
 
     values: dict[str, str] = {}
-    headers: dict[str, list[str]] = {}
+    headers: dict[str, list[tuple[str, str]]] = {}
     prefixes: list[str] = []
     for entry in entries:
         key = entry.key.lower()
@@ -409,7 +409,7 @@ def _classify(entries) -> tuple[dict[str, str], tuple[str, ...]]:
         list_key = _list_key(entry.key)
         if list_key is not None:
             live = headers.get(list_key[1], [])
-            headers[list_key[1]] = [*live, entry.value] if entry.value else []
+            headers[list_key[1]] = [*live, (entry.key, entry.value)] if entry.value else []
         elif key in _TRUST_KEYS:
             values[key] = entry.value
         elif key.startswith("url.") and key.endswith(".insteadof"):
@@ -418,8 +418,9 @@ def _classify(entries) -> tuple[dict[str, str], tuple[str, ...]]:
             continue
         elif key.startswith(_FORCING_PREFIXES) or key in _FORCING_KEYS:
             raise _Refuse(f"git config {entry.key}")
-    if any(headers.values()):
-        raise _Refuse("git config http.extraHeader")
+    for live in headers.values():
+        if live:
+            raise _Refuse(f"git config {live[-1][0]}")
     return values, tuple(prefixes)
 
 
@@ -888,6 +889,38 @@ def _post(upload_url: str, proxy: str | None, trust: tuple[str, str], body: byte
             chunks.append(chunk)
 
 
+_SETTLED_MEMO = "inprocess-fetch-settled"
+_first_fetch_lock = threading.Lock()
+
+
+def _admitted_post(
+    upload_url: str, proxy: str | None, trust: tuple[str, str], body: bytes
+) -> bytes:
+    """``_post`` behind the breaker, with the command's first answer awaited alone.
+
+    Until one in-process fetch of this command has been answered 200, fetches
+    run one at a time and re-check the breaker after waiting, so a throttle on
+    the first answer sends every other download to git without a second
+    request. After that they run concurrently (a later throttle still trips the
+    breaker for every fetch not yet sent).
+    """
+    from ..core.invocation_memo import invocation_memo
+
+    if _rate_limited():  # another download tripped it while this one was gated
+        raise _Refuse("rate limited earlier in this command")
+    settled = invocation_memo(_SETTLED_MEMO)
+    if settled is None or settled.get("ok"):
+        return _post(upload_url, proxy, trust, body)
+    with _first_fetch_lock:
+        if _rate_limited():
+            raise _Refuse("rate limited earlier in this command")
+        if settled.get("ok"):
+            return _post(upload_url, proxy, trust, body)
+        answer = _post(upload_url, proxy, trust, body)
+        settled["ok"] = True
+        return answer
+
+
 def _note(url: str, outcome: str) -> None:
     """Debug-log each hit and fallback with the forcing key; never a credential (W3d R3)."""
     _log.debug("in-process fetch %s: %s", _redact(url), _redact(outcome))
@@ -958,9 +991,7 @@ def fetch_worktree(
         return None
     try:
         upload_url, proxy, trust = _gate(url, env if env is not None else os.environ)
-        if _rate_limited():  # another download tripped it while this one was gated
-            raise _Refuse("rate limited earlier in this command")
-        body = _post(upload_url, proxy, trust, _request_body(sha))
+        body = _admitted_post(upload_url, proxy, trust, _request_body(sha))
         objects = parse_pack(_pack_from_response(body))
         files, reached = _plan(objects, sha)
         root = str(staged)
