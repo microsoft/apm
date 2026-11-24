@@ -252,8 +252,8 @@ def _report(out: str, wall: float, exit_code) -> None:
         },
         "children_exact": not _WIN,
         "module_inclusive": top(_module_incl, 40),
-        "function_inclusive": top(_incl, 60),
-        "function_self": top(_self, 60),
+        "function_inclusive": top(_incl, 400),
+        "function_self": top(_self, 400),
     }
     with open(out, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=1)
