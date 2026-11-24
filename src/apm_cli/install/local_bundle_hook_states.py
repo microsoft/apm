@@ -25,6 +25,13 @@ class _MergedHookState:
     config_unreadable: bool = False
     sidecar_unreadable: bool = False
 
+    @property
+    def sidecar_label(self) -> str:
+        """The project-relative path of this target's ownership sidecar."""
+        from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
+
+        return Path(self.target.root_dir, _APM_HOOKS_SIDECAR).as_posix()
+
 
 def _merged_hook_states(project_root: Path, targets: Any) -> Iterator[_MergedHookState]:
     """Read every merged hook target's config and sidecar, each once (#5078)."""
@@ -37,9 +44,13 @@ def _merged_hook_states(project_root: Path, targets: Any) -> Iterator[_MergedHoo
             continue
         json_path = Path(project_root) / target.root_dir / config.config_filename
         documents: list[dict[str, Any] | None] = []
-        for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
+        # The sidecar is APM's own record: never read through a link or a FIFO (#5328).
+        for path, regular_only in (
+            (json_path, False),
+            (json_path.parent / _APM_HOOKS_SIDECAR, True),
+        ):
             try:
-                documents.append(read_hook_object(path))
+                documents.append(read_hook_object(path, regular_only=regular_only))
             except (OSError, ValueError, TypeError):
                 documents.append(None)
         yield _MergedHookState(

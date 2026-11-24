@@ -746,14 +746,17 @@ _LOCAL_BUNDLE_HOOK_REFUSALS = {
     _forged_bundle_marker: "- x: approval no longer granted",
 }
 
-# A sidecar that is not a regular file is refused as unreadable without being
-# read, and named (#5328).
+# A sidecar that is not a regular file (a FIFO, or a link) is refused as
+# unreadable without being read or followed, and named (#5328).
+_UNREADABLE_SIDECAR = (
+    "- .claude/settings.json: the hook config or its ownership record cannot be read"
+    " (unreadable: .claude/apm-hooks.json)"
+)
 _NAMED_UNREADABLE_SIDECAR = {
-    _fifo_sidecar: (
-        "- .claude/settings.json: the hook config or its ownership record cannot be read"
-        " (unreadable: .claude/apm-hooks.json)"
-    ),
+    _fifo_sidecar: _UNREADABLE_SIDECAR,
+    _link_sidecar: _UNREADABLE_SIDECAR,
 }
+_LOCAL_BUNDLE_HOOK_REFUSALS.update(_NAMED_UNREADABLE_SIDECAR)
 
 
 def _fingerprint(path: Path) -> object:

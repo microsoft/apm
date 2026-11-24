@@ -20,11 +20,21 @@ from apm_cli.utils.path_security import (
 )
 
 
-def read_hook_object(path: Path) -> dict[str, Any]:
-    """Read an optional native hook document without changing its contents."""
-    if not path.exists():
+def read_hook_object(path: Path, *, regular_only: bool = False) -> dict[str, Any]:
+    """Read an optional native hook document without changing its contents.
+
+    With *regular_only* (an APM-owned sidecar) the file is opened without
+    following a link and read only if it is a regular file (#5328): a link,
+    FIFO, socket or device raises ``OSError`` instead of being read or blocking.
+    """
+    if regular_only and (path.is_symlink() or path.exists()):
+        with open_regular_file(path) as handle:
+            text = handle.read().decode("utf-8")
+    elif not path.exists():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        text = path.read_text(encoding="utf-8")
+    data = json.loads(text)
     if not isinstance(data, dict):
         raise TypeError("native hook document must contain an object")
     return data

@@ -221,9 +221,10 @@ def bundle_hook_ownership(
         if state.sidecar_unreadable or (
             state.config_unreadable and (scripted or _recorded_slugs(state))
         ):
+            named = f" (unreadable: {state.sidecar_label})" if state.sidecar_unreadable else ""
             problems.append(
-                f"{state.label}: the hook config or its ownership record cannot be read, "
-                "so bundle hooks there cannot be attributed"
+                f"{state.label}: the hook config or its ownership record cannot be read"
+                f"{named}, so bundle hooks there cannot be attributed"
             )
             continue
         problems += [
