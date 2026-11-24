@@ -10,6 +10,7 @@ permission bits for every staged entry; otherwise the unit is kept and reported.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import stat
@@ -238,6 +239,33 @@ def append_private(path: Path, text: str) -> None:
         os.write(fd, text.encode("utf-8"))
     finally:
         os.close(fd)
+
+
+def append_held(owner: Any, path: Path, text: str) -> None:
+    """Append *text* to *path* through one private fd that *owner* holds (#4939).
+
+    The same open as :func:`append_private`, once per journal file, then one
+    ``write`` per line: record order and durability are unchanged. A new
+    *path* (a renamed store) closes the old fd first. Windows opens per line:
+    a held handle blocks the in-process replay's rename and delete of a store.
+    """
+    if os.name == "nt":
+        append_private(path, text)
+        return
+    held = getattr(owner, "_held_journal", None)
+    if held is None or held[0] != path:
+        close_held(owner)
+        held = owner._held_journal = (path, open_private_append(path))
+    os.write(held[1], text.encode("utf-8"))
+
+
+def close_held(owner: Any) -> None:
+    """Close the journal fd *owner* holds, if any."""
+    held = getattr(owner, "_held_journal", None)
+    owner._held_journal = None
+    if held is not None:
+        with contextlib.suppress(OSError):
+            os.close(held[1])
 
 
 def require_private_store(store: Path) -> None:

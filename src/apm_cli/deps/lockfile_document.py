@@ -7,7 +7,6 @@ destination's own bytes; these helpers compare parsed documents for that check.
 from __future__ import annotations
 
 import copy
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -60,28 +59,23 @@ def holds_document(current: str | None, plain: object, parsed_current: object = 
 
 
 def read_destination(
-    path: Path, *, parse: bool
-) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
-    """The lockfile a write replaces: ``(text, parsed data, no-op snapshot)``.
+    text: str | None, staged: dict[str, Any] | None, *, parse: bool
+) -> tuple[Any, dict[str, Any] | None]:
+    """The lockfile a write replaces, as ``(parsed data, no-op snapshot)``.
 
-    A document this command staged as data comes back as private copies with no
-    text, so nothing emits it (#4939). Without *parse* only a staged document
-    yields data; the caller already holds the existing lockfile.
+    *staged* is a private copy of a document this command staged as data, so
+    nothing emits or parses it (#4939). Without *parse* only *staged* yields
+    a snapshot; the caller already holds the existing lockfile.
     """
-    from ..utils.yaml_io import load_yaml_str
-    from .lockfile_write_authority import staged_document_copy, staged_lockfile_text
+    from ..utils.yaml_io import copy_plain_tree, load_yaml_str
 
-    staged = staged_document_copy(path)
     if staged is not None:
-        return None, staged_document_copy(path) if parse else None, staged
-    text = staged_lockfile_text(path)
+        return (copy_plain_tree(staged) if parse else None), staged
     if not parse or text is None:
-        return text, None, None
+        return None, None
     try:
         data = load_yaml_str(text)
     except (yaml.YAMLError, ValueError):
-        return text, None, None
-    if not isinstance(data, dict):
-        return text, data, None
+        return None, None
     # Construction shares nested objects; snapshot for the no-op check.
-    return text, data, document_snapshot(data)
+    return data, (document_snapshot(data) if isinstance(data, dict) else None)

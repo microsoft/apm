@@ -94,13 +94,22 @@ def test_argument_placement_preserves_click_behavior(
 
 def test_the_cli_process_collects_young_garbage_rarely() -> None:
     """Process-wide: one install allocates millions of acyclic objects (#4939)."""
-    import gc
+    import subprocess
 
-    before = gc.get_threshold()
-    try:
-        with patch.object(sys, "argv", ["apm", "--help"]), patch("apm_cli.cli.main"):
-            main()
-        assert gc.get_threshold()[0] >= 100_000
-        assert gc.isenabled()
-    finally:
-        gc.set_threshold(*before)
+    probe = (
+        "import gc, sys\n"
+        "from unittest import mock\n"
+        "from apm_cli.entrypoint import main\n"
+        "sys.argv = ['apm', '--help']\n"
+        "with mock.patch('apm_cli.cli.main'):\n"
+        "    main()\n"
+        "print(gc.isenabled(), gc.get_threshold()[0])\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=False, timeout=120
+    )
+
+    assert result.returncode == 0, result.stderr
+    enabled, threshold = result.stdout.split()
+    assert enabled == "True"
+    assert int(threshold) >= 100_000

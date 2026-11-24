@@ -84,23 +84,26 @@ def _write_twice_and_noop(path) -> None:
     LockFile.read(path).write(path)
 
 
-def test_a_command_emits_its_lockfile_once_however_often_it_writes(tmp_path, monkeypatch):
+def test_a_command_emits_its_lockfile_once_however_often_it_writes(tmp_path):
     """Staged writes stay data; only the commit emits text, byte-identical to eager (#4939)."""
     from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_write_scope
 
     eager = tmp_path / "eager" / "apm.lock.yaml"
     eager.parent.mkdir()
     _write_twice_and_noop(eager)
-    emits: list[int] = []
-    real = yaml_io.yaml_to_str
-    monkeypatch.setattr(yaml_io, "yaml_to_str", lambda *a, **k: emits.append(1) or real(*a, **k))
     path = tmp_path / "staged" / "apm.lock.yaml"
     path.parent.mkdir()
+    staged_emits: list[int] = []
 
-    with lockfile_write_scope(LockfileWriter.INSTALL):
-        _write_twice_and_noop(path)
-        assert emits == []
-        assert not path.exists()
+    def command() -> None:
+        with lockfile_write_scope(LockfileWriter.INSTALL):
+            staged_emits.append(
+                _count_calls(yaml_io.yaml_to_str.__code__, lambda: _write_twice_and_noop(path))
+            )
+            assert not path.exists()
 
-    assert len(emits) == 1
+    emits = _count_calls(yaml_io.yaml_to_str.__code__, command)
+
+    assert staged_emits == [0]
+    assert emits == 1
     assert path.read_bytes() == eager.read_bytes()

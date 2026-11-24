@@ -156,27 +156,7 @@ class DeployJournal:
     def _append_line(self, line: dict[str, Any]) -> None:
         if self.store is None:
             raise RuntimeError("no store to write the journal manifest to")
-        # One private fd per store (W3d S5): the same O_NOFOLLOW/0600 open as
-        # append_private, then one write per line, so record order and durability match.
-        # POSIX only: on Windows an open handle blocks the in-process replay's rename
-        # and delete of an abandoned store.
-        path = self.store / _MANIFEST
-        if os.name == "nt":
-            _modes.append_private(path, json.dumps(line, sort_keys=True) + "\n")
-            return
-        fd = getattr(self, "_journal_fd", None)
-        if fd is None or getattr(self, "_journal_path", None) != path:
-            self._close_journal()
-            fd = _modes.open_private_append(path)
-            self._journal_fd, self._journal_path = fd, path
-        os.write(fd, (json.dumps(line, sort_keys=True) + "\n").encode("utf-8"))
-
-    def _close_journal(self) -> None:
-        fd = getattr(self, "_journal_fd", None)
-        self._journal_fd = None
-        if fd is not None:
-            with contextlib.suppress(OSError):
-                os.close(fd)
+        _modes.append_held(self, self.store / _MANIFEST, json.dumps(line, sort_keys=True) + "\n")
 
     def _relative(self, path: Path) -> tuple[str, str]:
         """``(base, path)``: *path* as POSIX under APM home or the deploy root.
@@ -333,7 +313,6 @@ class DeployJournal:
         """Rename the store so no later install reaps the copies a user still needs."""
         if self.store is None:
             raise RuntimeError("no store to retain")
-        self._close_journal()  # Windows cannot rename a directory holding an open file.
         # The marker keeps the copies from the reaper even if the rename fails.
         (self.store / _RETAINED_MARKER).write_text(
             "Pre-install copies kept after a failed restore.\n", encoding="ascii"
@@ -368,7 +347,7 @@ class DeployJournal:
 
     def discard(self) -> None:
         """Delete the stored copies and the empty store parent."""
-        self._close_journal()
+        _modes.close_held(self)
         store, self.store = self.store, None
         if store is None:
             return

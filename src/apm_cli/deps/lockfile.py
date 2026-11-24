@@ -1757,13 +1757,15 @@ class LockFile:
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import yaml_to_str
+        from . import lockfile_write_authority as authority
         from .lockfile_container import plain_lockfile_document, remember_lockfile_text
         from .lockfile_document import holds_document, read_destination, same_document
-        from .lockfile_write_authority import stage_document, stage_lockfile
 
         legacy_timestamp_present = False
         unset = isinstance(existing_lockfile, _ExistingLockfileUnset)
-        existing_text, existing_data, existing_document = read_destination(path, parse=unset)
+        staged = authority.staged_document_copy(path)  # read without emitting it (#4939)
+        existing_text = None if staged is not None else authority.staged_lockfile_text(path)
+        existing_data, existing_document = read_destination(existing_text, staged, parse=unset)
         existing = None if unset else existing_lockfile
         if unset and isinstance(existing_data, dict):
             legacy_timestamp_present = existing_data.get("generated_at") is not None
@@ -1811,18 +1813,17 @@ class LockFile:
             self.apm_version = installed_apm_version()
         document = self._document(user_scope=user_scope)
         if (plain := plain_lockfile_document(document)) is not None:
-            # Staged as data, emitted once at commit (#4939); the text holds these strings.
-            assert_no_staging_paths(plain, path.name)
+            assert_no_staging_paths(plain, path.name)  # the emitted text holds these strings
             if unchanged and holds_document(existing_text, plain, existing_document):
                 return True  # a proven no-op keeps the file's own bytes
-            if stage_document(path, plain):
+            if authority.stage_document(path, plain):  # emitted once, at commit (#4939)
                 return True
         serialized = yaml_to_str(document)
         assert_no_staging_paths(serialized, path.name)
         if unchanged and same_document(existing_text, serialized, existing_document):
             # A proven no-op keeps the file's own bytes (comments, key style).
             return True
-        if not stage_lockfile(path, serialized):
+        if not authority.stage_lockfile(path, serialized):
             atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
         remember_lockfile_text(serialized, document)  # later reads skip the parse
         return True

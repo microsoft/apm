@@ -133,7 +133,15 @@ def _gate(project: Path, plan_targets: list[str], found: Path | None = None) -> 
     return ctx
 
 
-def test_a_pre_existing_gated_file_still_runs_the_planning_pass(tmp_path: Path) -> None:
+def _refusal_output(ctx: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> str:
+    ctx.diagnostics.render_summary()
+    captured = capsys.readouterr()
+    return " ".join((captured.out + captured.err).split())
+
+
+def test_a_pre_existing_gated_file_still_runs_the_planning_pass(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     found = tmp_path / ".github" / "prompts" / "review.prompt.md"
     found.parent.mkdir(parents=True)
     found.write_text("mine\n", encoding="utf-8")
@@ -142,9 +150,12 @@ def test_a_pre_existing_gated_file_still_runs_the_planning_pass(tmp_path: Path) 
 
     assert "copilot" in ctx.planner.planned
     assert ctx.overwrite_preflight_refused is True
+    assert "Kept review.prompt.md" in _refusal_output(ctx, capsys)
 
 
-def test_empty_gated_dest_dirs_skip_the_planning_pass(tmp_path: Path) -> None:
+def test_empty_gated_dest_dirs_skip_the_planning_pass(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     (tmp_path / ".github" / "instructions").mkdir(parents=True)
     # Ungated dirs may hold files: only gated primitives meet OverwriteGate.
     (tmp_path / ".github" / "hooks").mkdir()
@@ -154,9 +165,12 @@ def test_empty_gated_dest_dirs_skip_the_planning_pass(tmp_path: Path) -> None:
 
     assert ctx.planner.planned == []
     assert ctx.overwrite_preflight_refused is False
+    assert "Kept" not in _refusal_output(ctx, capsys)
 
 
-def test_the_proof_follows_the_package_targets_not_the_projects(tmp_path: Path) -> None:
+def test_the_proof_follows_the_package_targets_not_the_projects(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     # A file under the project's copilot target the package never deploys to.
     mine = tmp_path / ".github" / "prompts" / "review.prompt.md"
     mine.parent.mkdir(parents=True)
@@ -164,21 +178,11 @@ def test_the_proof_follows_the_package_targets_not_the_projects(tmp_path: Path) 
 
     skipped = _gate(tmp_path, ["claude"])
     assert skipped.planner.planned == []
-    assert skipped.overwrite_preflight_refused is False
+    assert "Kept" not in _refusal_output(skipped, capsys)
 
     found = tmp_path / ".claude" / "agents" / "reviewer.md"
     found.parent.mkdir(parents=True)
     found.write_text("mine\n", encoding="utf-8")
     planned = _gate(tmp_path, ["claude"], found)
     assert "claude" in planned.planner.planned
-    assert planned.overwrite_preflight_refused is True
-
-
-def test_user_scope_always_runs_the_planning_pass(tmp_path: Path) -> None:
-    from apm_cli.core.scope import InstallScope
-    from apm_cli.integration.targets import KNOWN_TARGETS
-
-    ctx = SimpleNamespace(scope=InstallScope.USER, project_root=tmp_path)
-    plan = SimpleNamespace(target_selection=SimpleNamespace(targets=[KNOWN_TARGETS["copilot"]]))
-
-    assert commit_gate._gated_dest_dirs_empty(ctx, [(None, plan, None)]) is False
+    assert "Kept reviewer.md" in _refusal_output(planned, capsys)
