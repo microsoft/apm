@@ -55,6 +55,7 @@ from .lockfile_version_remedy import with_version_remedy
 logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
+_READ_STUB: dict = {}
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
 SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3", "4"})
@@ -1834,6 +1835,30 @@ class LockFile:
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
+        """RESEARCH STUB (paired deletion): one parsed LockFile per lock state, shared."""
+        from .lockfile_write_authority import _key, _scope, staged_lockfile_document
+
+        staged_doc = staged_lockfile_document(path)
+        if staged_doc is not None:
+            key = (str(_key(path)), id(staged_doc))
+        else:
+            scope = _scope()
+            if scope is not None and _key(path) in scope.pending:
+                return cls._read_real(path)
+            try:
+                key = (str(_key(path)), path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, NotADirectoryError):
+                return None
+            except OSError:
+                return cls._read_real(path)
+        hit = _READ_STUB.get(key)
+        if hit is None:
+            hit = cls._read_real(path)
+            _READ_STUB[key] = hit
+        return hit
+
+    @classmethod
+    def _read_real(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None when the file does not exist."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
         from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
