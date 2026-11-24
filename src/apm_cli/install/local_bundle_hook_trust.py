@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
+from apm_cli.install.hook_script_refs import runs_script, script_refs
 
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
@@ -559,7 +560,8 @@ def _hook_commands(document: Any) -> list[str]:
         commands = [declared.command for declared in parse_hook_source(document).commands]
     except HookContractError:
         commands = list(_every_command_field(document))
-    return [command.replace("\\", "/") for command in commands]
+    # Raw text: the matcher reads backslash escapes; only the tail match normalizes (#5106).
+    return commands
 
 
 def _every_command_field(node: Any) -> Iterator[str]:
@@ -590,11 +592,13 @@ def _per_file_configs_running(
     from apm_cli.integration.hook_ownership import read_hook_object
 
     found: set[str] = set()
+    refs = script_refs(project_root, scripts)
     for target in _per_file_targets(targets):
         target_root = project_root / target.root_dir
         tails = _script_tails(project_root, target_root, scripts)
         hooks_dir = target_root / "hooks"
-        if not tails or not hooks_dir.is_dir():
+        # A hook in any target may run a script by any spelling (#5106).
+        if not refs[0] or not hooks_dir.is_dir():
             continue
         for path in sorted(hooks_dir.glob("*.json")):
             value = _record_value(path, project_root)
@@ -605,7 +609,10 @@ def _per_file_configs_running(
             except (OSError, ValueError, TypeError):
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
-            if any(tail in text for text in _hook_commands(document) for tail in tails):
+            texts = list(_hook_commands(document))
+            if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
+                runs_script(text, refs, (project_root, target_root), project_root) for text in texts
+            ):
                 found.add(value)
     return found
 
@@ -636,7 +643,7 @@ def _configs_still_running(
             return []
         handlers = [entry, *(h for h in entry.get("hooks") or () if isinstance(h, dict))]
         return [
-            value.replace("\\", "/")
+            value
             for handler in handlers
             for key in HOOK_COMMAND_KEYS
             if isinstance(value := handler.get(key), str)
@@ -644,6 +651,7 @@ def _configs_still_running(
 
     markers = LocalBundleMarkers(slug)
     found: set[str] = set()
+    refs = script_refs(project_root, scripts)
     for target in targets or ():
         config = _MERGE_HOOK_TARGETS.get(getattr(target, "name", None))
         if config is None:
@@ -651,7 +659,8 @@ def _configs_still_running(
         target_root = project_root / target.root_dir
         tails = _script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
-        if not tails or not json_path.is_file():
+        # A hook in any target may run a script by any spelling (#5106).
+        if not refs[0] or not json_path.is_file():
             continue
         try:
             hooks = read_hook_object(json_path).get(config.event_container_key)
@@ -669,7 +678,10 @@ def _configs_still_running(
             for entry in entries
             if not (isinstance(entry, dict) and entry.get("_apm_source") in markers)
         ]
-        if any(tail in text for entry in foreign for text in commands(entry) for tail in tails):
+        texts = [text for entry in foreign for text in commands(entry)]
+        if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
+            runs_script(text, refs, (project_root, target_root), project_root) for text in texts
+        ):
             found.add(_record_value(json_path, project_root))
     return found
 
