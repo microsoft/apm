@@ -243,3 +243,61 @@ def test_prune_mixed_failure_reconciles_only_successful_owners(tmp_path: Path) -
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr
     assert_unchanged(recovered, ArtifactSnapshot.capture(consumer.root))
     assert LifecycleStateSnapshot.capture(consumer.root, targets=("copilot",)) == recovered_state
+
+
+def test_prune_lock_write_failure_after_removal_names_it_and_retry_converges(
+    tmp_path: Path,
+) -> None:
+    """A failed lockfile write after the removal names what went; the next prune repairs (#5185)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+    environment = isolated.subprocess_env()
+    factory = LocalPackageFactory(isolated.work_root)
+    consumer = factory.create("consumer", targets=("copilot",))
+    for name in ("gone", "kept"):
+        source = factory.create(name, targets=("copilot",))
+        factory.add_instruction(source, name, f"---\napplyTo: '**'\n---\n# {name} instruction\n")
+        factory.add_relative_dependency(consumer, source)
+    runner = _runner(consumer.root / "apm_modules/_local/gone", "none")
+    installed = runner.run(
+        ("install", "--target", "copilot", "--no-policy"),
+        cwd=consumer.root,
+        env=environment,
+        scenario_id="prune-lock-write-install",
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"] = [
+        entry for entry in manifest["dependencies"]["apm"] if "gone" not in str(entry)
+    ]
+    dump_yaml(manifest, consumer.manifest_path)
+    locked = (consumer.root / "apm.lock.yaml").read_bytes()
+
+    failed = runner.run(
+        ("prune",),
+        cwd=consumer.root,
+        env={**environment, "APM_TEST_FAIL_LOCK_REPLACE": "1"},
+        scenario_id="prune-lock-write-failure",
+    )
+
+    output = " ".join((failed.stdout + failed.stderr).split())
+    assert failed.returncode == 1, output
+    assert "Failed to update apm.lock.yaml" in output, output
+    assert "Package directories already removed: _local/gone." in output, output
+    assert not (consumer.root / "apm_modules/_local/gone").exists()
+    assert (consumer.root / "apm.lock.yaml").read_bytes() == locked
+
+    retry = runner.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-lock-write-retry"
+    )
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    lock = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert lock is not None
+    assert [key for key in lock.dependencies if "gone" in key] == [], sorted(lock.dependencies)
+    assert [key for key in lock.dependencies if "kept" in key], sorted(lock.dependencies)
+    assert not (consumer.root / ".github/instructions/gone.instructions.md").exists()
+    assert (consumer.root / ".github/instructions/kept.instructions.md").is_file()
+    repeated = runner.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-lock-write-repeat"
+    )
+    assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+    assert "No orphaned packages found" in repeated.stdout
