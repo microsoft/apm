@@ -613,6 +613,11 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
     skill = ctx.integrators.get("skill")
     if getattr(skill, "_materialization_session", None) is None or ctx.diagnostics is None:
         return
+    if _no_deploy_root_exists(ctx):
+        # PERF N1 HACK (W3d S1): no target root exists, so no planned dest exists
+        # and nothing can be kept: the planning pass would return nothing.
+        ctx.overwrite_preflight_refused = False
+        return
     kept = [
         (owner, path, edit)
         for package_info, plan, managed in write_plan
@@ -624,6 +629,33 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
         message = kept_edit_message(entry, user_scope=user_scope, proven_edit=edit is not None)
         ctx.diagnostics.error(message, package=owner)
     ctx.overwrite_preflight_refused = bool(kept)
+
+
+def _no_deploy_root_exists(ctx: InstallContext) -> bool:
+    """Whether none of the directories any target may write under exists (one lstat each)."""
+    import os
+
+    from apm_cli.core.scope import InstallScope
+
+    if ctx.scope is InstallScope.USER or ctx.project_root is None or not ctx.targets:
+        return False
+    roots: set[str] = set()
+    for target in ctx.targets:
+        roots.add(target.root_dir)
+        for mapping in (getattr(target, "primitives", None) or {}).values():
+            if getattr(mapping, "deploy_root", None):
+                roots.add(mapping.deploy_root)
+    for root in roots:
+        if not root or root in (".", "") or os.path.isabs(root):
+            return False
+        try:
+            os.lstat(os.path.join(str(ctx.project_root), root))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        return False
+    return True
 
 
 def _planned_keeps(
