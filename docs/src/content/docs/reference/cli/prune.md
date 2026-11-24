@@ -20,7 +20,7 @@ apm prune [--dry-run]
 `apm prune` mirrors `npm prune`: it removes installed packages that are not in
 the manifest's resolved dependency graph. Unlike npm, it also removes the
 harness-deployed files those packages produced (prompts, agents, hooks, MCP
-wiring) and rewrites the lockfile.
+and LSP wiring) and rewrites the lockfile.
 :::
 
 ## Description
@@ -68,6 +68,11 @@ owned harness deployments using the protections below, removes its entry from
 deleted only with evidence that APM wrote its current bytes: a local deployment
 receipt, or byte equality with the locked version's render, taken before the
 package directory is removed. Files without evidence are kept with a warning.
+The orphan's MCP and LSP server entries go in the same run, through the same
+cleanup `apm uninstall` uses: only entries the lockfile records as APM-owned
+are removed, and user-authored entries stay. If an LSP config cannot be
+updated, it is left as is, its lockfile records stay, and prune exits 1; fix
+the config, then run `apm install`.
 
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
