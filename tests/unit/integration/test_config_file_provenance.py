@@ -1090,3 +1090,53 @@ def test_a_journal_first_touch_entry_survives_migration_to_record_files(tmp_path
     assert json.loads(store.read_text(encoding="utf-8"))["version"] == 2
     assert vouches_for_current_bytes(config, first, journal="install-1") is True
     assert vouches_for_current_bytes(config, first, journal="install-2") is False
+
+
+def test_a_save_from_a_stale_read_keeps_another_writers_preexisting_record(
+    tmp_path, apm_home
+) -> None:
+    """#5270: writer B read the record file before writer A saved the user's record into it;
+    B's save applies only B's change, so the user's file keeps its deletion protection."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    project = tmp_path / "project"
+    ours, users = project / "other.json", project / ".mcp.json"
+    _apm_writes(ours, _WITH_ENTRY)  # a record already in that directory's record file
+    stale = _Store.load()
+    stale.lookup(ours)  # writer B reads the record file
+    users.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(users, _WITH_ENTRY, manifest_root=project)  # writer A records the user's file
+    stale.files[config_file_key(ours)] = {"origin": "created", "hash": _sha(_SKELETON)}
+    stale.save()  # writer B saves its change
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    before = users.read_bytes()
+    assert _apm_empties(users, root=project) is False
+    assert users.read_bytes() == before
+    ours.write_text(_SKELETON, encoding="utf-8")
+    assert _apm_empties(ours, root=project) is True, "writer B's own change was kept"
+    assert not ours.exists()
+
+
+def test_a_save_from_a_stale_read_never_brings_back_a_record_another_writer_forgot(
+    tmp_path, apm_home
+) -> None:
+    """#5270: a record removed after writer B read the file stays removed."""
+    from apm_cli.integration.config_file_provenance import _Store, forget_config_file
+
+    project = tmp_path / "project"
+    ours, gone = project / "other.json", project / ".mcp.json"
+    _apm_writes(ours, _WITH_ENTRY)
+    _apm_writes(gone, _WITH_ENTRY)
+    stale = _Store.load()
+    stale.lookup(ours)  # writer B reads the record file, both records in it
+    gone.unlink()
+    forget_config_file(gone)  # writer A removed its file and forgot its record
+    stale.files[config_file_key(ours)] = {"origin": "created", "hash": _sha(_SKELETON)}
+    stale.save()
+
+    assert config_file_origin(gone) is None
+    assert config_file_origin(ours) is Origin.CREATED
+    store = apm_home / "deployment-receipts" / "config-files"
+    stored = b"".join(path.read_bytes() for path in sorted(store.glob("*.json")))
+    assert json.dumps(config_file_key(gone)).encode() not in stored
