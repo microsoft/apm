@@ -659,6 +659,24 @@ def refresh_compiled_digest(base_dir: Path, agents_md: Path) -> None:
         write_record(base_dir, files)
 
 
+def compiled_agents_md_may_carry(project_root: Path) -> bool:
+    """Whether a compiled ``AGENTS.md`` may stand in for a Claude rule here (#5343).
+
+    The lockfile records only the rules install wrote, not the ones it left
+    to a carrying ``AGENTS.md``, so a fast path that replays the lock must
+    defer to the full run when APM home records a compile for this root or a
+    root ``AGENTS.md`` or ``CLAUDE.md`` exists.
+    """
+    from ..core.agents_md_compile_record import read_record
+
+    if read_record(project_root):
+        return True
+    return any(
+        (project_root / name).is_symlink() or (project_root / name).exists()
+        for name in ("AGENTS.md", "CLAUDE.md")
+    )
+
+
 def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> bool:
     """One-off :meth:`CompiledCoverage.has` (install reuses one instance per root)."""
     return CompiledCoverage(project_root).has(apply_to, body)
