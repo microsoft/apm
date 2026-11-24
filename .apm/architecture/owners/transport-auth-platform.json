@@ -86,7 +86,7 @@
       "id": "url-path-containment-decoding",
       "decision": "Symlink-component containment, filesystem-aware (case-insensitive) path containment and strict percent-encoded URL-path decoding",
       "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments)",
-      "selectors": ["src/apm_cli/utils/path_security.py"],
+      "selectors": ["src/apm_cli/utils/path_security.py", "src/apm_cli/utils/realpath.py"],
       "guards": ["transport-platform-url-path-security"]
     },
     {

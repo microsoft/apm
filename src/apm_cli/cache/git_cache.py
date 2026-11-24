@@ -1488,8 +1488,10 @@ def _names_shard(shard: str):
 
 
 def _same_path(value: str, path: Path) -> bool:
+    from apm_cli.utils.realpath import resolve_path
+
     try:
-        return Path(value).resolve() == path.resolve()
+        return resolve_path(Path(value)) == resolve_path(path)
     except (OSError, ValueError, RuntimeError):
         return False
 
