@@ -36,7 +36,6 @@ import json
 import math
 import os
 import platform
-import pstats
 import shutil
 import statistics
 import subprocess
@@ -795,19 +794,25 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
 
 
 def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
-    """One extra run under cProfile; only for a Python console-script ``apm``."""
+    """One extra run under the per-thread CPU sampler (``cpu_attr.py``)."""
     apm = Path(ctx.apm[-1])
-    first = apm.read_bytes()[:200].split(b"\n", 1)[0]
-    if not first.startswith(b"#!") or b"python" not in first:
-        return None
-    python = first[2:].decode().strip()
+    if apm.suffix.lower() == ".exe":
+        python = str(apm.with_name("python.exe"))
+        target_argv = ["--entry", "apm_cli.entrypoint:main"]
+    else:
+        first = apm.read_bytes()[:200].split(b"\n", 1)[0]
+        if not first.startswith(b"#!") or b"python" not in first:
+            return None
+        python = first[2:].decode().strip()
+        target_argv = [str(apm)]
+    sampler = str(Path(__file__).with_name("cpu_attr.py"))
     journey.setup(ctx)
-    prof = out / "profiles" / f"{ctx.fixture.name}-{journey.name}-rtt{int(ctx.world.rtt_ms)}.prof"
+    prof = out / "profiles" / f"{ctx.fixture.name}-{journey.name}-rtt{int(ctx.world.rtt_ms)}.json"
     prof.parent.mkdir(parents=True, exist_ok=True)
     for index, (argv, cwd) in enumerate(journey.steps(ctx)):
-        target = prof if index == 0 else prof.with_suffix(f".{index}.prof")
+        target = prof if index == 0 else prof.with_suffix(f".{index}.json")
         result = subprocess.run(
-            [python, "-m", "cProfile", "-o", str(target), str(apm), *argv],
+            [python, sampler, "-o", str(target), *target_argv, *argv],
             cwd=cwd,
             env=ctx.world.env,
             capture_output=True,
@@ -815,13 +820,10 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             check=False,
         )
         if result.returncode != 0 or not target.is_file():
-            print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
+            print(f"[!] cpu_attr run failed for {journey.name}: {result.stderr[-500:]}")
             return None
     if prof.exists():
-        with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
-            stats = pstats.Stats(str(prof), stream=handle)
-            stats.sort_stats("cumulative").print_stats(60)
-            stats.sort_stats("tottime").print_stats(40)
+        prof.with_suffix(".txt").write_text(prof.read_text(encoding="utf-8"), encoding="utf-8")
     return str(prof)
 
 
