@@ -76,6 +76,8 @@ NETWORK_JOURNEYS = (
     "install-frozen-warm",
     "install-global-cold",
     "install-global-warm",
+    "install-cold-auth",
+    "install-warm-auth",
     "update",
     "uninstall",
     "outdated",
@@ -672,10 +674,15 @@ class Journey:
     name: str
     setup: Callable[[Context], None]
     steps: Callable[[Context], list[Step]]
+    # Extra child environment for this journey only (setup, timed steps, profile).
+    env: tuple[tuple[str, str], ...] = ()
 
 
 def _noop(_ctx: Context) -> None:
     return None
+
+
+_AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
 
 
 JOURNEYS: dict[str, Journey] = {
@@ -685,6 +692,11 @@ JOURNEYS: dict[str, Journey] = {
         Journey("boot-help", _noop, lambda c: [(["--help"], c.elsewhere)]),
         Journey("install-cold", _setup_cold, lambda c: _per_root(c, ["install"])),
         Journey("install-warm", _setup_warm, lambda c: _per_root(c, ["install"])),
+        # Authenticated users (private repos, GHE, ADO, GitLab, or a token to
+        # avoid the anonymous rate limit) take the token-first git CLI path: a
+        # fixed placeholder token the offline mirror accepts, auth first.
+        Journey("install-cold-auth", _setup_cold, lambda c: _per_root(c, ["install"]), _AUTH),
+        Journey("install-warm-auth", _setup_warm, lambda c: _per_root(c, ["install"]), _AUTH),
         Journey("install-noop", Context.installed, lambda c: _per_root(c, ["install"])),
         Journey("install-frozen", _setup_frozen, lambda c: _per_root(c, ["install", "--frozen"])),
         Journey("install-locked-warm", _locked_project, lambda c: _per_root(c, ["install"])),
@@ -825,7 +837,28 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
     return str(prof)
 
 
+@contextlib.contextmanager
+def _journey_env(ctx: Context, journey: Journey):
+    """Overlay *journey*'s extra environment on the world's child env, then restore it."""
+    env = ctx.world.env
+    saved = {key: env.get(key) for key, _value in journey.env}
+    env.update(journey.env)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+
+
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
+    with _journey_env(ctx, journey):
+        return _measure(ctx, journey, args)
+
+
+def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
     samples: list[Sample] = []
     error = ""
     for _ in range(args.runs):
