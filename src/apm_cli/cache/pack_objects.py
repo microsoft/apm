@@ -66,9 +66,15 @@ class _Pack:
         except (OSError, ValueError):
             self._file.close()
             raise
-        if bytes(self.data[:4]) != b"PACK":
+        # git opens only versions 2 and 3, with a 12-byte header and 20-byte trailer.
+        header = bytes(self.data[:8])
+        if (
+            len(self.data) < 32
+            or header[:4] != b"PACK"
+            or int.from_bytes(header[4:8], "big") not in (2, 3)
+        ):
             self.close()
-            raise _Unsupported("not a pack")
+            raise _Unsupported("not a pack git reads")
         self.view = memoryview(self.data)
         self.bases: dict[int, tuple[str, bytes]] = {}
         self.base_bytes = 0
@@ -300,7 +306,8 @@ def materialize_tree(
                     files.append((path, oid, mode == "100755"))
                 else:
                     raise _Refuse("mode needs git")
-        blobs = {oid: read(oid, "blob") for _, oid, _ in files}
+        # One read per distinct blob: the shared budget counts what is held.
+        blobs = {oid: read(oid, "blob") for oid in {oid for _, oid, _ in files}}
     except (_Refuse, ValueError, IndexError, OSError, zlib.error):
         return None
     finally:
@@ -416,6 +423,11 @@ def _write_index(root: str, files: list[tuple[str, str, bool]]) -> None:
         0o644,
     )
     try:
-        os.write(fd, bytes(body))
+        view = memoryview(bytes(body))
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError("index write made no progress")
+            view = view[written:]
     finally:
         os.close(fd)
