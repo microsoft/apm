@@ -346,6 +346,7 @@ def prune(ctx, dry_run):
 
         removed_count = 0
         failed_count = 0
+        lsp_cleanup_error = None
         removed_packages: list[str] = []
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
@@ -433,19 +434,15 @@ def prune(ctx, dry_run):
                 lockfile.dependencies.pop(dep_key, None)
             lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
-            if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
-                from .uninstall.engine import _cleanup_stale_mcp
-
-                _cleanup_stale_mcp(
-                    apm_package,
-                    lockfile,
-                    lockfile_path,
-                    set(lockfile.mcp_servers),
-                    modules_dir=apm_modules_dir,
-                    project_root=project_root,
-                    scope=InstallScope.PROJECT,
-                    persist=False,
-                )
+            lsp_cleanup_error = _cleanup_stale_server_configs(
+                apm_package,
+                lockfile,
+                lockfile_path,
+                apm_modules_dir,
+                project_root,
+                logger,
+                pruned_keys,
+            )
             try:
                 if lockfile_has_persisted_state(lockfile):
                     lockfile.write(lockfile_path)
@@ -511,6 +508,8 @@ def prune(ctx, dry_run):
 
         hint_compile_after_removal(compile_inputs, apm_modules_dir, logger)
 
+        if lsp_cleanup_error is not None:
+            sys.exit(1)
         if failed_count:
             logger.error(
                 f"Prune incomplete: removed {removed_count} orphaned package(s); "
@@ -536,6 +535,45 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _cleanup_stale_server_configs(
+    apm_package, lockfile, lockfile_path, apm_modules_dir, project_root, logger, pruned_keys
+):
+    """Retire pruned packages' MCP and LSP servers through uninstall's owners.
+
+    Returns the LSP cleanup error, already reported, or None (#5250).
+    """
+    if not pruned_keys:
+        return None
+    if lockfile.mcp_servers or lockfile.mcp_target_servers:
+        from .uninstall.engine import _cleanup_stale_mcp
+
+        _cleanup_stale_mcp(
+            apm_package,
+            lockfile,
+            lockfile_path,
+            set(lockfile.mcp_servers),
+            modules_dir=apm_modules_dir,
+            project_root=project_root,
+            scope=InstallScope.PROJECT,
+            persist=False,
+        )
+    # Only lock-owned entries of packages no survivor declares go.
+    from .uninstall.cli import _cleanup_stale_lsp
+
+    _, error = _cleanup_stale_lsp(
+        apm_package=apm_package,
+        manifest_path=manifest_file(project_root),
+        lockfile=lockfile,
+        lockfile_path=lockfile_path,
+        modules_dir=apm_modules_dir,
+        deploy_root=project_root,
+        user_scope=False,
+        logger=logger,
+        command="Prune",
+    )
+    return error
 
 
 def _native_ownership(lockfile, lockfile_path):
