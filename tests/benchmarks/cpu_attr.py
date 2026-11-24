@@ -68,6 +68,19 @@ if _WIN:
     _k32.OpenThread.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
     _k32.CreateJobObjectW.restype = wintypes.HANDLE
     _k32.GetCurrentProcess.restype = wintypes.HANDLE
+    # Without argtypes ctypes passes a Python int as a C int: the pseudo-handle
+    # of GetCurrentProcess (-1 as an unsigned pointer) overflows it.
+    _k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    _LPFT = ctypes.POINTER(wintypes.FILETIME)
+    _k32.GetThreadTimes.argtypes = (wintypes.HANDLE, _LPFT, _LPFT, _LPFT, _LPFT)
+    _k32.GetProcessTimes.argtypes = (wintypes.HANDLE, _LPFT, _LPFT, _LPFT, _LPFT)
+    _k32.QueryInformationJobObject.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    )
 
     def _ft(ft) -> float:
         return ((ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 1e7
