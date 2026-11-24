@@ -732,3 +732,30 @@ class TestRoutingFollowUps:
         assert not (project / "AGENTS.md").exists()
         assert not (project / "CLAUDE.md").exists()
         assert not (project / "src" / "CLAUDE.md").exists()
+
+
+@pytest.mark.parametrize(
+    ("body", "apply_to", "carried"),
+    [
+        ("use tabs", "**", False),
+        ("never use tabs", "**", True),
+        ("never use tabs", None, False),
+    ],
+    ids=["substring", "whole-block", "other-scope-section"],
+)
+def test_a_fresh_clone_reads_a_compiled_body_only_as_whole_lines_in_its_scope(
+    tmp_path, body, apply_to, carried
+):
+    """With no compile record, a committed AGENTS.md carries an instruction only when
+    its body is a run of complete lines under its own scope section (#5343)."""
+    from apm_cli.compilation.claude_agents_md import CompiledCoverage
+
+    project = tmp_path / "fresh-clone"
+    project.mkdir()
+    (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    (project / "AGENTS.md").write_text(
+        "# AGENTS.md\n\n## Files matching `**`\n\n<!-- Source: style -->\nnever use tabs\n\n",
+        encoding="utf-8",
+    )
+
+    assert (CompiledCoverage(project).carrier(apply_to, body) is not None) is carried
