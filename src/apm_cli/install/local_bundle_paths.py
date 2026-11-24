@@ -128,10 +128,10 @@ def bundle_deploy_relative_path(
     known_deploy_prefixes: frozenset[str],
     *,
     target: TargetProfile | None = None,
+    source: Path | None = None,
     hooks_approved: bool,
     canvas_approved: bool,
     rendering_extension: str | None = None,
-    source: Path | None = None,
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root.
 
@@ -312,54 +312,23 @@ def _deploy_relative_candidate(
     return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
 
 
-_FRONTMATTER_PREFIX_BYTES = 4096
-
-
-def _frontmatter_text(path: Path) -> str:
-    """Return *path*'s frontmatter block, through its closing fence, as text.
-
-    A 4 KiB prefix is read; the whole file only when the fence is still open
-    at the end of the prefix. Text after the closing fence is never decoded
-    strictly, so only the frontmatter can make the file unreadable. A file
-    without frontmatter yields ``""``.
-    """
-    from frontmatter.default_handlers import YAMLHandler
-
-    with path.open("rb") as handle:
-        data = handle.read(_FRONTMATTER_PREFIX_BYTES)
-        complete = len(data) < _FRONTMATTER_PREFIX_BYTES
-        while True:
-            text = data.decode("utf-8", errors="surrogateescape").removeprefix("\ufeff")
-            if not YAMLHandler.FM_BOUNDARY.match(text):
-                return ""
-            fences = YAMLHandler.FM_BOUNDARY.finditer(text)
-            next(fences)
-            closing = next(fences, None)
-            if complete or (closing is not None and closing.end() < len(text)):
-                break
-            data += handle.read()
-            complete = True
-    block = text[: closing.end()] if closing is not None else text
-    block.encode("utf-8")  # undecodable frontmatter bytes raise UnicodeEncodeError
-    return block
-
-
 def markdown_declares_hooks(path: Path, *, unreadable: bool = True) -> bool:
-    """Whether a packed Markdown file's frontmatter declares ``hooks``.
+    """Whether a packed file's frontmatter declares ``hooks``.
 
-    Frontmatter that cannot be read or decoded always counts as declaring
-    hooks. Frontmatter that is not valid YAML returns *unreadable*: by default
-    it counts as declaring hooks too, so it never deploys without the bundle
-    hook approval; a converter that judges YAML itself passes ``False``.
+    Every packed file is checked, whatever its suffix: a primitive may deploy
+    as Markdown from another packed name. A file without a frontmatter fence
+    declares none. Frontmatter that cannot be read or decoded always counts as
+    declaring hooks. Frontmatter that is not valid YAML returns *unreadable*:
+    by default it counts as declaring hooks too, so it never deploys without
+    the bundle hook approval; a converter that judges YAML itself passes
+    ``False``.
     """
-    if path.suffix.lower() != ".md":
-        return False
     import yaml
 
-    from ..utils.yaml_io import loads_frontmatter
+    from ..utils.yaml_io import loads_frontmatter, read_frontmatter_block
 
     try:
-        text = _frontmatter_text(path)
+        text = read_frontmatter_block(path)
     except (OSError, UnicodeError):
         return True
     try:

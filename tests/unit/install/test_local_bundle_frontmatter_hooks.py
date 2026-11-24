@@ -125,7 +125,7 @@ def test_txt_command_with_frontmatter_hooks_is_skipped_as_hooks(tmp_path: Path) 
 @pytest.mark.parametrize(
     ("content", "block"),
     [
-        pytest.param(b"---\nname: x\n---\nbody\n", "---\nname: x\n---\n", id="closed"),
+        pytest.param(b"---\nname: x\n---\nbody\n", "---\nname: x\n---", id="closed"),
         pytest.param(b"\xef\xbb\xbf---\nname: x\n---\n", "---\nname: x\n---\n", id="bom"),
         pytest.param(b"# body\n", "", id="no-fence"),
     ],
