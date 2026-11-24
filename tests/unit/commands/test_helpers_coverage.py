@@ -457,3 +457,55 @@ class TestCreateMinimalApmYml:
         assert "targets" in content
         assert "claude" in content
         assert "copilot" in content
+
+
+# -- project root discovery trusts only the user's own ancestor manifest (#4545) --
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "geteuid"), reason="POSIX ownership")
+def test_an_ancestor_apm_yml_another_user_owns_is_skipped_and_named(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """/tmp/work never adopts another user's /tmp/apm.yml (git's safe.directory class)."""
+    import os
+
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    shared = tmp_path / "shared"
+    work = shared / "work" / "src"
+    work.mkdir(parents=True)
+    planted = shared / "apm.yml"
+    planted.write_text("name: planted\nversion: 0.0.1\n", encoding="utf-8")
+    monkeypatch.setattr(os, "geteuid", lambda: planted.stat().st_uid + 1)
+
+    assert _find_apm_yml(work) is None
+    out = " ".join(capsys.readouterr().out.split())
+    assert str(planted) in out, out
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "geteuid"), reason="POSIX ownership")
+def test_an_ancestor_apm_yml_the_user_owns_is_found(tmp_path: Path) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    work = tmp_path / "project" / "src"
+    work.mkdir(parents=True)
+    manifest = tmp_path / "project" / "apm.yml"
+    manifest.write_text("name: mine\nversion: 0.0.1\n", encoding="utf-8")
+
+    assert _find_apm_yml(work) == manifest.resolve()
+
+
+@pytest.mark.parametrize("package", ["foo", "name@market", "org/repo"])
+def test_a_bare_package_argument_is_never_rewritten_from_the_subdirectory(
+    tmp_path: Path, package: str
+) -> None:
+    """Only an explicit ./ or ../ path is relative to the invoking directory (#4545)."""
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+
+    root = tmp_path / "project"
+    subdir = root / "sub"
+    (subdir / "org").mkdir(parents=True)
+    (subdir / package.split("/")[0]).mkdir(exist_ok=True)
+
+    assert resolve_cli_packages_for_project_root((package,), subdir, root) == (package,)
+    assert resolve_cli_packages_for_project_root(("./pkg",), subdir, root) == ("./sub/pkg",)
