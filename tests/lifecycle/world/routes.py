@@ -38,6 +38,8 @@ class ScriptedRoute:
     host: str
     path_prefix: str
     response: ScriptedResponse
+    # Only requests this accepts are scripted; the rest reach the origin.
+    when: Callable[[ScriptedRequest], bool] | None = None
 
 
 @dataclass
@@ -55,7 +57,8 @@ class Routes:
         path = unquote(request.path)
         for route in reversed(self.scripted):
             if request.host == route.host and path.startswith(route.path_prefix):
-                return route.response
+                if route.when is None or route.when(request):
+                    return route.response
         return None
 
 
