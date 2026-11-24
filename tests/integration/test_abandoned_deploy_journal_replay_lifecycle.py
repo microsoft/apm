@@ -607,6 +607,54 @@ def test_a_shared_config_a_user_edits_after_the_kill_is_kept(
     assert _text(result).isascii(), _evidence(result)
 
 
+# -- two writers of one shared config in one install (#5051) ---------------------------
+#
+# Each package's hooks are merged into the shared settings by its own write. The
+# journal keeps the settings as the install first found them, so the records must
+# vouch for undoing every write of this install, not only the last one.
+
+
+def _write_package_hook(chain: Chain, revision: str) -> None:
+    hooks = chain.project / "pkg" / ".apm" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    command = {"type": "command", "command": f"echo pkg-{revision}"}
+    data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [command]}]}}
+    (hooks / "pkg.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_a_kill_after_two_writers_changed_one_shared_config_is_restored(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    chain = Chain(tmp_path / "two-writers", apm_binary_path, dirs=(".claude",))
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    chain.write_manifest([], apm=["./pkg"], targets=["claude"], includes="auto")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    settings = chain.project / _SETTINGS
+    installed = settings.read_text(encoding="utf-8")
+    assert "lint-v1" in installed and "pkg-v1" in installed, installed
+
+    _write_package_hook(chain, "v2")
+    _write_root_hook(chain, "v2")
+    _kill_mid_refusal(chain, _SHARED_GATE.fault)
+    _unit(_journal(_abandoned(chain)), _SETTINGS)
+    changed = settings.read_text(encoding="utf-8")
+    assert "lint-v2" in changed and "pkg-v2" in changed, changed
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "Kept" not in _text(result), _evidence(result)
+    assert "interrupted install" in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+
+
 # -- cleanup rewrites of files the records do not know yet (#5038) ---------------------
 #
 # An install before the config file records existed left hook settings with no
