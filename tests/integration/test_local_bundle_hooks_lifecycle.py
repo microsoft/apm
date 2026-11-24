@@ -1675,7 +1675,12 @@ def test_audit_names_a_sidecar_record_with_malformed_hook_files(
 
     audited = output(world.apm(consumer, "audit", "--ci", "--no-policy", expect=1))
 
-    assert "hookpkg: approval record in .github/apm-hooks.json is unreadable" in audited, audited
+    # Either fail-closed finding names the sidecar: the unadmitted reason (#5144)
+    # or the ownership problem the shared read reports first (#5211).
+    assert (
+        "hookpkg: approval record in .github/apm-hooks.json is unreadable" in audited
+        or ".github/apm-hooks.json: the bundle hook ownership record cannot be read" in audited
+    ), audited
     assert "no approval record" not in audited, audited
     assert "Traceback" not in audited, audited
     assert tree_bytes(consumer) == before
@@ -2069,3 +2074,23 @@ def test_a_refused_bundle_uninstall_leaves_the_pending_record_untouched(
     after = tree_bytes(consumer)
     changed = sorted(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
     assert changed == [], changed
+
+
+def test_audit_names_a_bundle_record_whose_hook_files_is_not_a_list(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144 via #5211: a corrupted bundle record fails audit naming the sidecar,
+    never reading as a bundle with no approval record."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "record-shape-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = record["hook_files"][0]
+    sidecar.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    text = output(world.apm(consumer, "audit", "--ci", "--no-policy", expect=1))
+
+    assert ".github/apm-hooks.json" in text, text
+    assert "ownership record cannot be read" in text, text
+    assert "no approval record" not in text, text

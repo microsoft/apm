@@ -428,3 +428,55 @@ def test_a_lone_documented_anchor_never_refuses(command: str) -> None:
     root = Path("/project")
 
     assert not runs_script(command, script_refs(root, [_SCRIPT]), (root, root / ".claude"), root)
+
+
+def test_the_audit_reads_each_hook_config_and_record_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5211: the local-bundle-hooks audit reads every config, sidecar and record once."""
+    from collections import Counter
+
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.policy.ci_checks import _check_local_bundle_hooks
+
+    root, _targets = _project(tmp_path, local_bundle_hook_source_marker("hookpkg", _KEY))
+    record = {"_apm_source": local_bundle_hook_source_marker("hookpkg", _KEY), "hook_files": []}
+    (root / ".github").mkdir()
+    (root / ".github" / "apm-hooks.json").write_text(json.dumps({"local-bundle-hooks": [record]}))
+    reads: Counter[str] = Counter()
+    real_read_text = Path.read_text
+
+    def counting(self: Path, *args, **kwargs):
+        reads[self.relative_to(root).as_posix() if self.is_relative_to(root) else str(self)] += 1
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting)
+    # A merged target's sidecar is read as a regular file only (#5328).
+    from apm_cli.integration import hook_ownership
+
+    real_open_regular = hook_ownership.open_regular_file
+
+    def counting_regular(path: Path, *args, **kwargs):
+        reads[path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)] += 1
+        return real_open_regular(path, *args, **kwargs)
+
+    monkeypatch.setattr(hook_ownership, "open_regular_file", counting_regular)
+    targets = [KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]]
+
+    result = _check_local_bundle_hooks(
+        root,
+        LockFile(),
+        APMPackage(name="p", version="1.0.0"),
+        targets,
+        user_scope=False,
+        no_policy=True,
+    )
+
+    assert result.name == "local-bundle-hooks"
+    read = {path: count for path, count in reads.items() if path.endswith(".json")}
+    assert read[".claude/settings.json"] == 1, read
+    assert read[".claude/apm-hooks.json"] == 1, read
+    assert read[".github/apm-hooks.json"] == 1, read
+    assert max(read.values()) == 1, read
