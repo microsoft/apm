@@ -1,0 +1,191 @@
+# Real Harness: does a real, pinned Claude Code / Copilot CLI LOAD a plugin
+# that apm installs natively? The lifecycle suite asserts deployed files and
+# settings; this lane asserts that the harness itself loads them: the plugin's
+# SessionStart hook fires, its stdio MCP server handshakes, and its skill is
+# listed (Claude: the `claude -p` init event; Copilot: `copilot skill list`).
+# See scripts/real_harness/probe.py.
+#
+# Red-first oracle: scripts/real_harness/expected.json holds the expected
+# verdict per cell, including known bugs. Any divergence fails the job; a fix
+# flips its cells there. BLOCKED (no credential, rate limit) never fails.
+#
+# Not a required check. Trust model (#5197, #5202): the Copilot token is the
+# environment secret REAL_HARNESS_COPILOT_TOKEN of the `real-harness`
+# environment, whose deployment branches are main only. Copilot jobs enter
+# that environment only for schedule and workflow_dispatch on main, so neither
+# pull requests nor a dispatch of another branch's workflow can reach it;
+# their Copilot session cells report BLOCKED. Only the probe step runs code
+# with the token; the summary and staging steps hold it only to scan their
+# output (raw and base64) before publishing it, since Actions masks logs but
+# not artifacts or step summaries. Claude Code never reaches a model:
+# ANTHROPIC_BASE_URL is a closed local port. Harness
+# packages install with `npm ci` from scripts/real_harness/npm/<pin>/, whose
+# lockfile pins every package, platform binary included, by sha512 integrity.
+# Never add pull_request_target. No cache is saved.
+name: Real Harness
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/real_harness/**
+      - .github/workflows/real-harness.yml
+      - src/apm_cli/native_plugins/**
+      - src/apm_cli/claude_plugins/**
+      - src/apm_cli/copilot_plugins/**
+      - src/apm_cli/agent_plugins/**
+      - src/apm_cli/install/native_plugin_admission.py
+      - src/apm_cli/install/phases/claude_plugins.py
+      - src/apm_cli/install/diff_apply.py
+      - src/apm_cli/install/manifest_reconcile.py
+      - src/apm_cli/install/target_governance.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  probe:
+    name: ${{ matrix.harness }} ${{ matrix.version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    environment: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'real-harness' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { harness: claude, version: '2.1.326', os: ubuntu-24.04 }
+          - { harness: claude, version: '2.1.323', os: ubuntu-24.04 }
+          - { harness: copilot, version: '1.0.106', os: ubuntu-24.04 }
+          - { harness: copilot, version: '1.0.113', os: ubuntu-24.04 }
+          - { harness: copilot, version: '1.0.114-0', os: ubuntu-24.04 }
+    env:
+      PIN_DIR: scripts/real_harness/npm/${{ matrix.harness }}-${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Exact version: its npm (10.9.9) is the one that wrote the pin lockfiles.
+          node-version: '22.23.5'
+          package-manager-cache: false
+
+      - name: Build apm from this SHA
+        run: |
+          uv sync --frozen
+          echo "APM_BIN=$PWD/.venv/bin/apm" >> "$GITHUB_ENV"
+          .venv/bin/apm --version
+
+      - name: Install the pinned ${{ matrix.harness }} ${{ matrix.version }}
+        env:
+          HARNESS: ${{ matrix.harness }}
+        run: |
+          # The registry must still publish the integrity the lockfile pins; npm ci
+          # then verifies every downloaded tarball against the lockfile.
+          read -r PACKAGE VERSION PINNED < <(python3 - "$PIN_DIR" <<'PY'
+          import json, sys
+          lock = json.load(open(f"{sys.argv[1]}/package-lock.json", encoding="utf-8"))
+          (name, version), = lock["packages"][""]["dependencies"].items()
+          print(name, version, lock["packages"][f"node_modules/{name}"]["integrity"])
+          PY
+          )
+          # The pin lockfiles were written by npm 10.9.9; fail fast if the toolchain drifts.
+          if [ "$(node --version)" != v22.23.5 ] || [ "$(npm --version)" != 10.9.9 ]; then
+            echo "::error::expected node v22.23.5 and npm 10.9.9, got $(node --version) and npm $(npm --version)"
+            exit 1
+          fi
+          PUBLISHED=$(npm view "${PACKAGE}@${VERSION}" dist.integrity)
+          if [ "$PUBLISHED" != "$PINNED" ]; then
+            echo "::error::${PACKAGE}@${VERSION} integrity ${PUBLISHED} does not match the pinned ${PINNED}"
+            exit 1
+          fi
+          # Copilot pins need no install script. Claude Code's postinstall copies its
+          # platform binary out of the pinned optional dependency (no network), so it
+          # keeps scripts; no job step before the probe ever holds a token.
+          if [ "$HARNESS" = copilot ]; then IGNORE=--ignore-scripts; else IGNORE=; fi
+          npm ci --prefix "$PIN_DIR" --no-fund --no-audit $IGNORE
+          echo "$PWD/$PIN_DIR/node_modules/.bin" >> "$GITHUB_PATH"
+          "$PIN_DIR/node_modules/.bin/$HARNESS" --version
+          command -v tmux || { sudo apt-get update -q && sudo apt-get install -y -q tmux; }
+
+      - name: Probe every cell
+        env:
+          HARNESS: ${{ matrix.harness }}
+          COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
+        run: |
+          export COPILOT_GITHUB_TOKEN="$COPILOT_TOKEN"
+          python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
+          if [ "$HARNESS" = claude ]; then
+            python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
+              --scope project --env tui-untrusted --env headless-rerun --env headless-abspath \
+              --env headless-untrusted --env headless-native --env headless-wt-branch \
+              --env headless-wt-after-main
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          TITLE: ${{ matrix.harness }} ${{ matrix.version }} on ${{ matrix.os }}
+          COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
+        run: |
+          # Built from each cell.json verdict and reason only, and scanned for the
+          # token before it reaches the public step summary.
+          {
+            echo "### $TITLE"
+            python3 scripts/real_harness/probe.py summarize "$RUNNER_TEMP/rh"
+          } > "$RUNNER_TEMP/summary.md"
+          python3 scripts/real_harness/probe.py scan "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage evidence and scan it for the token
+        id: stage
+        if: always()
+        env:
+          COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          cd "$RUNNER_TEMP/rh"
+          shopt -s nullglob
+          for path in */cell.json */logs */markers */home/.claude */home/.claude.json \
+              */home/.copilot/settings.json */work/*/.claude */work/*/.github \
+              */work/*/apm.yml */work/*/apm.lock.yaml; do
+            cp -r --parents "$path" "$RUNNER_TEMP/evidence/"
+          done
+          if ! python3 "$GITHUB_WORKSPACE/scripts/real_harness/probe.py" scan "$RUNNER_TEMP/evidence"; then
+            rm -rf "$RUNNER_TEMP/evidence"
+            echo "::error::The Copilot token appears in the evidence; nothing is uploaded."
+            exit 1
+          fi
+
+      - name: Upload evidence
+        if: always() && steps.stage.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: real-harness-${{ matrix.harness }}-${{ matrix.version }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/evidence/
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Check verdicts against expected.json
+        run: python3 scripts/real_harness/probe.py check "$RUNNER_TEMP/rh"
