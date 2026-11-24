@@ -1,0 +1,4 @@
+{
+  "description": "Count budgets per journey (perf promise engine layer 1; tests/fixtures/perf/count_budgets.py). budget = measured + max(1, 5%). A row changes only in a PR that re-measures it and states reason and pr.",
+  "journeys": {}
+}
