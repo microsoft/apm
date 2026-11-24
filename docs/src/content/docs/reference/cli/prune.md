@@ -78,6 +78,14 @@ source content does not preserve an undeclared package's deployment ownership.
 A stale dependency or owner reference is not
 "nothing to prune." If `apm.yml` is missing, the command exits with an error.
 
+Before it changes anything, prune checks that the lockfile it would write is
+valid. Removing the only package that declares a dependency redirected by a
+`replace` entry would leave that dependency without its parent, so prune (and
+`apm prune --dry-run`) exits 1, names the package and the dependency, and
+changes nothing. To prune it, remove the `replace` entry from `apm.yml` (or
+keep the declaring package), run `apm install` to rebuild the lockfile, then
+run `apm prune` again.
+
 ## Options
 
 | Option      | Description                                       |

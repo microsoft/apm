@@ -2106,3 +2106,103 @@ def test_a_rollback_never_cleans_a_directory_through_a_linked_parent(
 
     assert (outside / "sub").is_dir()
     assert deployed in [path for path, _reason in issues]
+
+
+def _shared_dir_install(apm_home: Path, project: Path, packages: int) -> Path:
+    """*packages* writers each ensure one shared directory, then write a file into it."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project.mkdir(parents=True, exist_ok=True)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    shared = project / ".github" / "prompts"
+
+    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        for index in range(packages):
+            write_seam.mkdir(shared, parents=True, exist_ok=True)
+            write_seam.write_text_lf(shared / f"p{index}.prompt.md", f"prompt {index}\n")
+    finally:
+        write_seam.stop_listening(record)
+    assert journal.store is not None
+    return journal.store
+
+
+def test_an_existing_directory_is_sealed_once_not_per_writer(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Re-ensuring a directory changes nothing, so it is not re-fingerprinted per package."""
+    import json
+
+    store = _shared_dir_install(apm_home, tmp_path / "project", packages=4)
+
+    lines = [json.loads(line) for line in (store / "journal.jsonl").read_text().splitlines()]
+    whole_dir_seals = [line for line in lines if line.get("sub") == "" and "sealed" in line]
+    assert len(whole_dir_seals) == 1
+    file_seals = [line for line in lines if "sealed" in line and line.get("sub")]
+    assert len(file_seals) == 4
+
+
+@pytest.mark.parametrize("user_file", [False, True])
+def test_a_killed_install_into_a_shared_directory_replays_as_before(
+    tmp_path: Path, apm_home: Path, user_file: bool
+) -> None:
+    """Every file below the directory carries its own seal, so replay decides as before."""
+    project = tmp_path / "project"
+    shared = project / ".github" / "prompts"
+    _shared_dir_install(apm_home, project, packages=3)
+    if user_file:
+        (shared / "mine.md").write_text("user\n", encoding="utf-8")
+
+    outcome = _replay(apm_home, project)
+
+    if user_file:
+        assert outcome.restored == 0 and len(outcome.kept) == 1
+        assert (shared / "mine.md").read_text(encoding="utf-8") == "user\n"
+    else:
+        assert (outcome.restored, outcome.kept) == (1, ())
+        assert not shared.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_shared_directory_swapped_for_a_link_is_journaled_and_never_followed(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Only a real directory skips the seam: a link takes the recording path."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import DeployJournal, JournalReplayError
+
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.md").write_text("not APM's\n", encoding="utf-8")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    shared = project / ".github" / "prompts"
+
+    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        write_seam.mkdir(shared, parents=True, exist_ok=True)
+        write_seam.write_text_lf(shared / "p0.prompt.md", "prompt 0\n")
+        shared.rename(tmp_path / "moved")
+        shared.symlink_to(outside, target_is_directory=True)
+        write_seam.mkdir(shared, parents=True, exist_ok=True)
+    finally:
+        write_seam.stop_listening(record)
+    assert journal.store is not None
+    manifest = (journal.store / "journal.jsonl").read_text(encoding="utf-8")
+    lines = [json.loads(line) for line in manifest.splitlines()]
+    whole = [line["state"] for line in lines if line.get("sub") == "" and "sealed" in line]
+    assert whole[-1] == {"link": str(outside)}
+
+    with pytest.raises(JournalReplayError):  # a link leaving the deploy root is refused
+        _replay(apm_home, project)
+
+    assert (outside / "keep.md").read_text(encoding="utf-8") == "not APM's\n"
+    assert sorted(p.name for p in outside.iterdir()) == ["keep.md"]
