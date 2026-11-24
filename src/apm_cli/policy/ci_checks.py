@@ -985,6 +985,20 @@ def resolve_audit_scope(
     return deployment_root, user_scope, targets
 
 
+def resolve_claim_scope(
+    project_root: Path, lock: LockFile
+) -> tuple[Path, bool, list[TargetProfile]]:
+    """:func:`resolve_audit_scope` with targets that resolve every recorded claim (#5312).
+
+    The one call the frozen install checks share with audit.
+    """
+    deploy_root, user_scope, targets = resolve_audit_scope(project_root, lock)
+    claim_targets = resolve_claim_targets(
+        project_root, lock, user_scope=user_scope, targets=targets
+    )
+    return deploy_root, user_scope, claim_targets
+
+
 def resolve_claim_targets(
     project_root: Path,
     lock: LockFile,

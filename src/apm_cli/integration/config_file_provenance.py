@@ -501,11 +501,11 @@ def delete_emptied_config(
         _log.debug("Unreadable config file records; keeping %s", path, exc_info=True)
         return False
     key, row = store.lookup(path)
-    if row is None and store.identity_recorded(path):
-        return False  # recorded under another path (a second mount): never the fallback
     origin = _origin(row)
-    if row is not None and origin is None:
-        return False  # a record APM cannot read proves nothing either way
+    if (row is not None and origin is None) or (row is None and store.identity_recorded(path)):
+        # A record APM cannot read proves nothing either way; one under another path
+        # (a second mount) means the unrecorded fallback never applies (#5189).
+        return False
     if origin is Origin.PREEXISTING:
         return False
     if origin is Origin.CREATED:

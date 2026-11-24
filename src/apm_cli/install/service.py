@@ -937,20 +937,13 @@ class InstallService:
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.local_edits import edited_file_remediations
-        from apm_cli.policy.ci_checks import (
-            resolve_audit_scope,
-            resolve_claim_targets,
-            verify_deployed_file_hashes,
-        )
+        from apm_cli.policy.ci_checks import resolve_claim_scope, verify_deployed_file_hashes
 
         lockfile_path = _frozen_lockfile_path(request)
         committed = committed or LockFile.read(lockfile_path)
         if committed is None:  # nothing declared, nothing locked (#4050)
             return
-        deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
-        targets = resolve_claim_targets(
-            lockfile_path.parent, committed, user_scope=user_scope, targets=targets
-        )
+        deploy_root, user_scope, targets = resolve_claim_scope(lockfile_path.parent, committed)
         drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)
         if not deployed and drifted:
             # Stale APM output (receipt-proven) is replaced, then re-verified.
