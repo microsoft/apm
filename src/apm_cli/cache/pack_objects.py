@@ -250,7 +250,6 @@ def materialize_tree(
     from .inprocess_fetch import (
         _MAX_ENTRIES,
         _MAX_PATH,
-        _require_no_attribute_sources,
         _safe_name,
         _write_file,
     )
@@ -258,12 +257,24 @@ def materialize_tree(
 
     if os.environ.get("APM_NO_INPROCESS_CHECKOUT"):
         return None
-    for key, value in env.items():
-        if key.startswith("GIT_CONFIG_KEY_") and value.lower().startswith(("core.", "filter.")):
-            return None
+    from ..utils.git_env import _read_effective_git_config
+    from .inprocess_fetch import _frozen_entries, _network_env, _require_inert_attributes
+
     try:
-        _require_no_attribute_sources(env)
-    except _Refuse:
+        # The user's config as git's checkout sees it (the B1 W4 gate's reading).
+        child_env = _network_env(env)
+        entries = _frozen_entries(child_env)
+        if entries is None:
+            entries = _read_effective_git_config(child_env).entries
+        for entry in entries:
+            key = entry.key.lower()
+            if key.startswith("filter.") or key in (
+                "core.attributesfile",
+                "core.checkroundtripencoding",
+            ):
+                return None
+        _require_inert_attributes(child_env, entries)
+    except Exception:
         return None
     objects = PackObjects(repo, "sha1")
     try:

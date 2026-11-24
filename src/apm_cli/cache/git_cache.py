@@ -1149,7 +1149,7 @@ class GitCache:
                 if not sparse_paths and not promisor_url:
                     from .pack_objects import materialize_tree
 
-                    inprocess_files = materialize_tree(staged, sha, subprocess_env)
+                    inprocess_files = materialize_tree(staged, sha, env or os.environ)
             except (RuntimeError, ValueError):
                 from ..utils.file_ops import robust_rmtree
 
