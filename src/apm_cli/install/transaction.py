@@ -18,6 +18,7 @@ from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.marketplace.version_pins import open_ref_pin_stage
 from apm_cli.models.results import InstallDisposition, InstallResult
+from apm_cli.utils.realpath_win import release_held
 
 if TYPE_CHECKING:
     from apm_cli.cache.deploy_store import StagedEvidence
@@ -703,6 +704,7 @@ class InstallTransaction:
 
     def rollback(self) -> None:
         """Restore the manifest, journaled deploy paths and resolution paths."""
+        release_held()  # rollback renames and deletes anywhere: nothing may stay held
         with self._lock:
             if self.committed or self._rolled_back:
                 return

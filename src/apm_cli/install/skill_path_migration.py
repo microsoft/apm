@@ -51,6 +51,7 @@ from apm_cli.utils.path_security import (
     safe_rmtree,
     validate_path_segments,
 )
+from apm_cli.utils.realpath_win import release_held
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -309,6 +310,7 @@ def _cleanup_empty_parents(deleted_path: Path, base_dir: Path) -> None:
             ensure_path_within(parent, base_dir)
             if parent.is_dir() and not any(parent.iterdir()):
                 record_before_write(parent, expected="absent")
+                release_held(parent)
                 parent.rmdir()
                 record_after_write(parent)
             else:

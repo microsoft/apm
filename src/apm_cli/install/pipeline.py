@@ -129,6 +129,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
         retire_receipts_of_missing_projects,
     )
     from apm_cli.integration.skill_adoption import locked_skill_sources
+    from apm_cli.utils.realpath_win import deploy_holds
 
     from .phases import integrate as _integrate_phase
     from .service import InstallService
@@ -153,11 +154,26 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
                 materialization_session=session,
             )
         ):
-            _run_phase("integrate", _integrate_phase, ctx)
+            with deploy_holds(ctx.project_root, _deploy_hold_dirs(ctx)):
+                _run_phase("integrate", _integrate_phase, ctx)
     finally:
         if locked is not None:
             locked.close()
     return session
+
+
+def _deploy_hold_dirs(ctx: InstallContext) -> list[Path]:
+    """The primitive destination directories path resolution may hold (project scope only)."""
+    from apm_cli.core.scope import InstallScope
+
+    if ctx.lockfile_only or ctx.dry_run or ctx.scope is not InstallScope.PROJECT:
+        return []
+    return [
+        ctx.project_root / (mapping.deploy_root or target.root_dir) / mapping.subdir
+        for target in ctx.targets or ()
+        for mapping in target.primitives.values()
+        if mapping.subdir
+    ]
 
 
 def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:

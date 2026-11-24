@@ -29,6 +29,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from apm_cli.utils.realpath_win import release_held
+
 
 @dataclass(frozen=True)
 class CreatedRoot:
@@ -38,6 +40,7 @@ class CreatedRoot:
 
     def discard(self) -> None:
         """Remove each created directory the failed command left empty."""
+        release_held()  # discarding created roots deletes them: nothing may stay held
         for directory in self.dirs:
             with contextlib.suppress(OSError):
                 directory.rmdir()

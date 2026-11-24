@@ -35,6 +35,8 @@ import os
 import re
 import sys
 import threading
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path, WindowsPath
 
 ENABLED = sys.platform == "win32"
@@ -422,21 +424,43 @@ def _walk_below(anchor: str, resolved: str, parts: list[str], *, adopt: bool) ->
     return resolved
 
 
+def _register(directory: Path, within: Path | None) -> bool:
+    """Register a plain *directory* strictly inside *within* (the walk still proves it)."""
+    if not ENABLED or within is None or not _holds_allowed():
+        return False
+    text, base = os.path.abspath(directory), os.path.abspath(within)
+    if not plain_win32(text) or _volatile(text):
+        return False
+    if not text.lower().startswith(base.lower().rstrip("\\") + "\\"):
+        return False
+    with _lock:
+        _registered.add(text.lower())
+    return True
+
+
 def register_held_root(package_dir: Path, modules_dir: Path | None) -> None:
     """Let the walk hold *package_dir* (just placed by activation) for this invocation.
 
     Only a plain path strictly inside *modules_dir* registers; the walk still
-    proves every component from the held project root before holding any.
+    proves every component from the held project root before it holds any.
     """
-    if not ENABLED or modules_dir is None or not _holds_allowed():
-        return
-    text, modules = os.path.abspath(package_dir), os.path.abspath(modules_dir)
-    if not plain_win32(text) or _volatile(text):
-        return
-    if not text.lower().startswith(modules.lower().rstrip("\\") + "\\"):
-        return
-    with _lock:
-        _registered.add(text.lower())
+    _register(package_dir, modules_dir)
+
+
+@contextmanager
+def deploy_holds(project_root: Path, directories: Iterable[Path]) -> Iterator[None]:
+    """Let the walk hold deploy destination directories while the block runs.
+
+    Deploy directories hold the user's files, so their holds live only for
+    the integrate phase (W3d DR1): every one is released, and unregistered,
+    when the block exits, before cleanup, rollback or compile run.
+    """
+    registered = [directory for directory in directories if _register(directory, project_root)]
+    try:
+        yield
+    finally:
+        for directory in registered:
+            release_held(directory)
 
 
 def release_held(under: object = None) -> None:

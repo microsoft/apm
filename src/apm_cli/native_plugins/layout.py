@@ -21,6 +21,7 @@ from pathlib import Path
 from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.content_hash import native_plugin_files
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component, safe_rmtree
+from apm_cli.utils.realpath_win import release_held
 
 from .record import PLUGINS_RELATIVE
 
@@ -260,6 +261,7 @@ def prune_empty(root: Path) -> None:
     """Remove the catalog directory and plugins root once nothing is left in them."""
     for empty in (root / ".claude-plugin", root):
         if empty.is_dir() and not empty.is_symlink() and not any(empty.iterdir()):
+            release_held(empty)
             empty.rmdir()
 
 
@@ -336,7 +338,9 @@ def deploy_plugin(
             )
         if destination.exists():
             replaced = _checked(root, root / f"{_STAGING}retiring-{name}-{uuid.uuid4().hex}")
+            release_held(destination)
             destination.rename(replaced)
+        release_held(staging)
         staging.rename(destination)
     finally:
         if staging.exists():
@@ -349,6 +353,7 @@ def restore_replaced(root: Path, name: str, replaced: Path) -> None:
     destination = _checked(root, root / name)
     if destination.exists():
         safe_rmtree(destination, root)
+    release_held(replaced)
     replaced.rename(destination)
 
 
