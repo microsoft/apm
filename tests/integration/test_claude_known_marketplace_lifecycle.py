@@ -3,12 +3,14 @@
 PROMISE: P-OWN-claude-native-plugin-registration -- a project-scope native
 plugin is committed under the relative ``./.agents/plugins`` marketplace, and
 ``apm install`` also lists that marketplace in Claude Code's user-level
-``plugins/known_marketplaces.json`` with its absolute path, so a first session
-loads the plugin's skills and hooks. The entry is per machine and idempotent,
-honours ``CLAUDE_CONFIG_DIR``, never touches another entry, and ``apm
-uninstall`` removes exactly APM's entry (source: issue #5176 accepted scope).
+``plugins/known_marketplaces.json`` with the installing checkout's absolute
+path, so a first session loads the plugin's skills and hooks. The entry is per
+machine and idempotent, honours ``CLAUDE_CONFIG_DIR``, never touches another
+entry, and ``apm uninstall`` removes exactly APM's entry. An install in a git
+worktree warns that Claude Code may load the main checkout's copy (source:
+issues #5176 and #5180, real-harness shape A, ruling PD-47).
 CELL: OP=install,reinstall,uninstall SRC=local PRIM=plugin(skills) SCOPE=project
-TGT=claude CLAUDE_CONFIG_DIR=unset|set KNOWN=absent|other-entry
+TGT=claude CLAUDE_CONFIG_DIR=unset|set KNOWN=absent|other-entry CHECKOUT=main|worktree
 """
 
 from __future__ import annotations
@@ -152,34 +154,28 @@ def test_install_and_uninstall_touch_only_apms_entry(tmp_path: Path, apm_binary_
     assert not (world.project / ".agents/plugins/kit").exists()
 
 
-@pytest.mark.parametrize("first", ["main", "worktree"], ids=["main-then-worktree", "two-worktrees"])
-def test_each_checkout_of_a_repository_loads_its_own_plugins(
-    tmp_path: Path, apm_binary_path: Path, first: str
-) -> None:
-    """#5180: Claude resolves ./.agents/plugins against the main checkout in a worktree.
+_WORKTREE_NOTICE = "This checkout is a git worktree: Claude Code may load the main checkout's copy"
 
-    After installs in two checkouts of one repository, each checkout's declared
-    marketplace must name that checkout's own absolute plugin root in Claude's
-    registry; neither install may redirect the other checkout.
-    """
+
+@pytest.mark.parametrize("checkout", ["main", "worktree"])
+def test_a_checkout_install_lists_its_own_plugin_root(
+    tmp_path: Path, apm_binary_path: Path, checkout: str
+) -> None:
+    """#5180 outcome 1: an install in a worktree alone lists that worktree's own root,
+    and warns that Claude Code may load the main checkout's copy; a main install does not."""
     world = _World(tmp_path, apm_binary_path)
     world.git("init", "-q", "--initial-branch=main")
     world.git("add", "-A")
     world.git("commit", "-q", "-m", "consumer")
-    second = world.isolated.work_root / "consumer-wt"
-    world.git("worktree", "add", "-q", str(second), "-b", "wt")
-    if first == "worktree":
-        checkouts = [world.isolated.work_root / "consumer-wt2", second]
-        world.git("worktree", "add", "-q", str(checkouts[0]), "-b", "wt2")
-    else:
-        checkouts = [world.project, second]
+    target = world.project
+    if checkout == "worktree":
+        target = world.isolated.work_root / "consumer-wt"
+        world.git("worktree", "add", "-q", str(target), "-b", "wt")
 
-    for checkout in checkouts:
-        world.ok("install", "--no-policy", cwd=checkout)
+    result = world.ok("install", "--no-policy", cwd=target)
 
-    known = _known(world)
-    for checkout in checkouts:
-        entry = known[world.marketplace(checkout)]
-        assert {k: entry[k] for k in ("source", "installLocation")} == _expected_entry(
-            world, checkout
-        ), checkout
+    entry = _known(world)[world.marketplace(target)]
+    assert {k: entry[k] for k in ("source", "installLocation")} == _expected_entry(world, target)
+    text = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert (f"[!] {_WORKTREE_NOTICE}" in text) is (checkout == "worktree"), text
+    assert text.count(_WORKTREE_NOTICE) <= 1, text
