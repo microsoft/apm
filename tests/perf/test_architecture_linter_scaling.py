@@ -636,7 +636,9 @@ def test_definition_index_answers_every_real_query_like_the_direct_scan() -> Non
     differing: list[str] = []
     found: list[str] = []
 
-    def compared(provider, rule_id, name, *, kinds):
+    def compared(
+        provider: FactsProvider, rule_id: str, name: str, *, kinds: tuple[str, ...]
+    ) -> tuple[frozenset[str], tuple[Violation, ...]]:
         indexed = _defining_files(provider, rule_id, name, kinds=kinds)
         if indexed != _scan_defining_files(provider, rule_id, name, kinds=kinds):
             differing.append(name)
