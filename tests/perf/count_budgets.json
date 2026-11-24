@@ -27,16 +27,16 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 81282,
-        "measured": 77411,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 15059,
+        "measured": 14341,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.realpath_calls": {
-        "budget": 8554,
-        "measured": 8146,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1185,
+        "measured": 1128,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.stat_calls": {
         "budget": 21960,
@@ -101,16 +101,16 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 79484,
-        "measured": 75699,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 15826,
+        "measured": 15072,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.realpath_calls": {
-        "budget": 8384,
-        "measured": 7984,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1201,
+        "measured": 1143,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.stat_calls": {
         "budget": 21844,
