@@ -79,7 +79,7 @@ def _missing_realpath(text: str, depth: int) -> str | None:
 
 _WIN_FAST = sys.platform == "win32"
 # PERF PROTOTYPE: compute Path.resolve() too and fail loudly on any difference.
-_WIN_DIFFERENTIAL = True
+_WIN_DIFFERENTIAL = False
 _WIN_PREFIX = "\\\\?\\"
 _WIN_RESERVED = frozenset(
     ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
