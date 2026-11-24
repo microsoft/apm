@@ -1,0 +1,14 @@
+{
+  "issue": 5199,
+  "fixed_in": "Unreleased",
+  "summary": "A dependency that names no ref was fetched by its default branch name after admission, so a branch that moved in between failed verification or installed the moved commit; it is now fetched by the admitted commit.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_pinned_commit_reachability.py::test_a_branch_that_moves_after_admission_installs_the_admitted_commit"
+  ]
+}

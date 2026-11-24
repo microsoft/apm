@@ -1450,6 +1450,10 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
         fake_repo.head.commit.hexsha = "abc1234"
 
         with (
+            # No admitted commit: the default branch keeps the by-name clone path.
+            patch.object(
+                downloader, "resolve_git_reference", return_value=MagicMock(resolved_commit=None)
+            ),
             patch.object(downloader, "_try_sparse_checkout", return_value=False),
             patch.object(downloader, "_clone_with_fallback", side_effect=fake_clone_with_fallback),
             patch("apm_cli.deps.github_downloader.Repo", return_value=fake_repo),
