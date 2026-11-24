@@ -22,7 +22,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
-from apm_cli.utils.paths import stored_alias
+from apm_cli.utils.paths import is_within, relative_to, stored_alias
 
 if TYPE_CHECKING:
     from apm_cli.core.deployment_ledger import OverwriteGate
@@ -567,7 +567,7 @@ class BaseIntegrator:
         for directory, filenames in self.admitted_source_listing(source, ignore):
             for name in filenames:
                 source_file = Path(directory) / name
-                target_file = destination / source_file.relative_to(source)
+                target_file = destination / relative_to(source_file, source)
                 if has_symlink_component(destination.parent, target_file, raise_on_error=True):
                     raise PathTraversalError(
                         f"Skill destination {target_file} contains a symlink -- refusing to deploy"
@@ -1137,7 +1137,7 @@ class BaseIntegrator:
                 return False
             root = resolved_project_root or project_root.resolve()
             containment_target = target.parent if allow_final_symlink else target
-            if not containment_target.resolve().is_relative_to(root):
+            if not is_within(containment_target.resolve(), root):
                 return False
         except (ValueError, OSError):
             return False
@@ -1641,7 +1641,7 @@ class BaseIntegrator:
                 # loop-fast and avoid raising on every malicious entry.
                 try:
                     pkg_resolved = package_path.resolve()
-                    if not resolved.is_relative_to(pkg_resolved):
+                    if not is_within(resolved, pkg_resolved):
                         continue
                 except (ValueError, OSError):
                     continue
