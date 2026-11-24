@@ -87,8 +87,8 @@ def _refuse_lock_graph(lockfile: LockFile | None, removed: set[str], logger, not
     """Exit 1 if the lock owner rejects *lockfile* without *removed* (#5140).
 
     Removing a replaced package's only parent leaves its row pointing at an
-    absent parent. The check runs the owner's graph rule on a shallow copy
-    (#5185 makes it public).
+    absent parent. The check runs the owner's public graph rule on a shallow
+    copy, without emitting YAML (#5185).
     """
     if lockfile is None or not removed:
         return
@@ -97,7 +97,7 @@ def _refuse_lock_graph(lockfile: LockFile | None, removed: set[str], logger, not
         key: dep for key, dep in lockfile.dependencies.items() if key not in removed
     }
     try:
-        remaining._validate_replacement_evidence()
+        remaining.validate_graph()
     except LockfileFormatError as exc:
         logger.error(f"Cannot prune {', '.join(sorted(removed))}: {exc}. {note}")
         logger.error_detail(PRUNE_REPLACED_PARENT.sentence())
