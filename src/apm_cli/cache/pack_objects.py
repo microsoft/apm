@@ -15,6 +15,7 @@ import bisect
 import contextlib
 import mmap
 import os
+import stat
 import struct
 import zlib
 from pathlib import Path
@@ -110,9 +111,9 @@ def _objects_dirs(repo: Path) -> list[str]:
         raise _Unsupported("gitdir file")
     base = git if git.is_dir() else repo
     own = str(base / "objects")
-    for marker in ("info/grafts",):
-        if os.path.lexists(os.path.join(own, marker)):
-            raise _Unsupported("grafts")
+    # Git reads grafts from $GIT_DIR/info/grafts; objects/info/grafts is refused too.
+    if any(os.path.lexists(os.path.join(d, "info", "grafts")) for d in (str(base), own)):
+        raise _Unsupported("grafts")
     dirs = [own]
     alternates = os.path.join(own, "info", "alternates")
     if os.path.lexists(alternates):
@@ -172,7 +173,8 @@ class PackObjects:
             return
         self._packs = packs
 
-    def read(self, oid: str) -> tuple[str, bytes] | None:
+    def read(self, oid: str, budget: list[int] | None = None) -> tuple[str, bytes] | None:
+        """One object, inflating within *budget* (shared by the caller) or a fresh cap."""
         if not self._packs:
             return None
         try:
@@ -185,7 +187,8 @@ class PackObjects:
             for pack in self._packs:
                 offset = pack.offset(raw)
                 if offset is not None:
-                    return self._at(pack, offset, 0, [_MAX_INFLATED])
+                    cap = budget if budget is not None else [_MAX_INFLATED]
+                    return self._at(pack, offset, 0, cap)
         except (_Refuse, IndexError, ValueError, struct.error, OSError, zlib.error):
             return None
         return None
@@ -245,7 +248,7 @@ class PackObjects:
 
 
 def materialize_tree(
-    repo: Path, sha: str, env: dict[str, str]
+    repo: Path, sha: str, env: dict[str, str], *, inflate_budget: int = _MAX_INFLATED
 ) -> dict[str, tuple[str, bool]] | None:
     """Write the pinned commit's worktree into *repo* from its packs (lever C), or ``None``.
 
@@ -266,10 +269,12 @@ def materialize_tree(
     if _switched_off("APM_NO_INPROCESS_CHECKOUT", env):
         return None
     objects = PackObjects(repo, "sha1", env)
+    # One inflate budget for the whole tree: every blob is held until written.
+    budget = [inflate_budget]
     try:
 
         def read(oid: str, kind: str) -> bytes:
-            found = objects.read(oid)
+            found = objects.read(oid, budget)
             if found is None or found[0] != kind or git_object_id("sha1", kind, found[1]) != oid:
                 raise _Refuse("object not served")
             return found[1]
@@ -300,33 +305,31 @@ def materialize_tree(
         return None
     finally:
         objects.close()
-    from ..utils.git_env import _read_effective_git_config
-    from .inprocess_fetch import _frozen_entries, _network_env, _require_inert_attributes
-
     # The gate reads git config (a spawn), so it runs only once the pack can serve
-    # the whole tree, and still before the first write.
+    # the whole tree, and still before the first write. It checks the attributes
+    # git's own checkout would read: the checkout env, not the parent's.
+    from .inprocess_fetch import _require_inert_checkout_attributes
+
     try:
-        # The user's config as git's checkout sees it (the B1 W4 gate's reading).
-        child_env = _network_env(env)
-        entries = _frozen_entries(child_env)
-        if entries is None:
-            entries = _read_effective_git_config(child_env).entries
-        # A filter, eol or encoding applies only through an attribute: with every
-        # attributes source outside the commit inert (W4) and the commit's own
-        # .gitattributes refused, filter.* definitions cannot change a byte.
-        _require_inert_attributes(child_env, entries)
+        _require_inert_checkout_attributes(env)
     except Exception:
         return None
     root = str(repo)
     manifest: dict[str, tuple[str, bool]] = {}
+    made: dict[str, tuple[int, int]] = {}
     try:
         # C8: the staged root holds only .git, so mkdir (never exist_ok) and
         # O_EXCL|O_NOFOLLOW prove every component is one this call created.
         for path in sorted(dirs):
-            os.mkdir(os.path.join(root, *path.split("/")), 0o755)
+            full = os.path.join(root, *path.split("/"))
+            os.mkdir(full, 0o755)
+            info = os.lstat(full)
+            made[path] = (info.st_dev, info.st_ino)
         for path, oid, executable in files:
             _write_file(os.path.join(root, *path.split("/")), blobs[oid], executable)
             manifest[path] = (oid, executable)
+        if not _sealed(root, made, set(manifest)):
+            raise _Refuse("the staged tree changed while it was written")
         _write_index(root, files)
         head = os.path.join(root, ".git", "HEAD")
         with open(head, "w", encoding="ascii", newline="\n") as handle:
@@ -335,6 +338,29 @@ def materialize_tree(
         _discard_worktree(root)
         return None
     return manifest
+
+
+def _sealed(root: str, made: dict[str, tuple[int, int]], files: set[str]) -> bool:
+    """C8 seal: the staged tree holds exactly the directories this call made (same
+    device and inode) and the files it wrote, with no link anywhere."""
+    seen_dirs: dict[str, tuple[int, int]] = {}
+    seen_files: set[str] = set()
+    stack = [""]
+    while stack:
+        rel = stack.pop()
+        for name in os.listdir(os.path.join(root, *rel.split("/")) if rel else root):
+            path = f"{rel}/{name}" if rel else name
+            if path == ".git":
+                continue
+            info = os.lstat(os.path.join(root, *path.split("/")))
+            if stat.S_ISDIR(info.st_mode):
+                seen_dirs[path] = (info.st_dev, info.st_ino)
+                stack.append(path)
+            elif stat.S_ISREG(info.st_mode):
+                seen_files.add(path)
+            else:
+                return False
+    return seen_dirs == made and seen_files == files
 
 
 def _discard_worktree(root: str) -> None:
