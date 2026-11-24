@@ -307,7 +307,9 @@ def test_symlinked_deploy_directory_is_refused(lifecycle_world) -> None:
 
     refused = scenario.run("install p-skill", exit=1)
     assert_changes(refused.changed, (), label="refused install")
-    assert "Refusing deployment through symlinked target directory" in refused.output
+    assert (
+        "Refusing deployment through a symlinked path component: .agents/skills." in refused.output
+    )
     elsewhere.assert_intact("refused install")
     assert sorted(path.name for path in elsewhere.root.iterdir()) == ["README.md"]
     scenario.finish()

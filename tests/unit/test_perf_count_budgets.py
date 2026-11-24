@@ -47,6 +47,9 @@ def test_a_row_without_reason_or_pr_or_beyond_its_slack_is_refused() -> None:
     assert "install-cold http.requests: pr must be '#<number>', got '5245'" in problems
     assert any(p.startswith("install-cold fs.stat_calls: budget 200 exceeds") for p in problems)
     assert row_problems({}) == [f"journey {name} has no budget rows" for name in JOURNEYS]
+    # A journey present with no rows budgets nothing: refused like a missing one.
+    empty = {name: {} for name in JOURNEYS}
+    assert row_problems(empty) == [f"journey {name} has no budget rows" for name in JOURNEYS]
 
 
 def test_slack_is_one_or_five_percent() -> None:

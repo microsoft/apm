@@ -494,7 +494,9 @@ def _verify(
 
 
 def _key(repo: Path, sha: str) -> tuple[str, str]:
-    return sha.lower(), str(Path(repo).resolve())
+    from apm_cli.utils.realpath import resolve_path
+
+    return sha.lower(), str(resolve_path(Path(repo)))
 
 
 def verify_checkout(

@@ -116,10 +116,16 @@ HOST_SPECS = {
 }
 
 
-def package_spec(recipe: TreeRecipe, name: str) -> str:
-    """``<host path>#<tag>`` of package *name*; the host is fixed per package."""
+def package_spec(recipe: TreeRecipe, name: str, *, ref: str | None = None) -> str:
+    """``<host path>#<ref>`` of package *name*; the host is fixed per package.
+
+    *ref* defaults to the recipe tag; a "tip" recipe references no ref at all.
+    """
     host = recipe.hosts[zlib.crc32(name.encode("ascii")) % len(recipe.hosts)]
-    return HOST_SPECS[host].format(owner=recipe.owner, name=name) + f"#{recipe.tag}"
+    path = HOST_SPECS[host].format(owner=recipe.owner, name=name)
+    if recipe.pin == "tip":
+        return path
+    return f"{path}#{ref or recipe.tag}"
 
 
 @dataclass(frozen=True)
@@ -386,7 +392,11 @@ def build_tree(recipe: TreeRecipe, root: Path) -> TreeFixture:
             ordinal += 1
     project = root / "project"
     project.mkdir(parents=True)
-    direct = [package_spec(recipe, name) for name in levels[0]]
+    if recipe.pin == "sha":
+        pins = _first_commits(root / "sha-probe", {n: packages[n] for n in levels[0]})
+        direct = [package_spec(recipe, name, ref=pins[name]) for name in levels[0]]
+    else:
+        direct = [package_spec(recipe, name) for name in levels[0]]
     write_lf(
         project / "apm.yml", consumer_manifest(f"{recipe.name}-consumer", direct, recipe.targets)
     )
@@ -480,10 +490,11 @@ _PINNED_CONFIG = (
 )
 
 
-def _git(*args: str, env: Mapping[str, str]) -> str:
+def _git(*args: str, env: Mapping[str, str], stdin: str | None = None) -> str:
     git = shutil.which("git") or "git"
     result = subprocess.run(
         (git, *_PINNED_CONFIG, *args),
+        input=stdin,
         capture_output=True,
         text=True,
         env=_publish_env(env),
@@ -495,11 +506,22 @@ def _git(*args: str, env: Mapping[str, str]) -> str:
     return result.stdout.strip()
 
 
-def commit_bare(bare: Path, tree: Path, *, tag: str | None) -> str:
+def _first_commits(directory: Path, trees: Mapping[str, Path]) -> dict[str, str]:
+    """The SHA ``commit_bare`` gives each tree's first commit (pinned identity and dates)."""
+    shas = {
+        name: commit_bare(directory / f"{name}.git", tree, tag=None) for name, tree in trees.items()
+    }
+    remove_tree(directory)
+    return shas
+
+
+def commit_bare(bare: Path, tree: Path, *, tag: str | None, advance: bool = False) -> str:
     """Create bare repository *bare* holding *tree* as one commit on main (+ *tag*).
 
-    Git runs with host configuration disabled, so the committed bytes and SHAs
-    do not depend on the machine (see ``_publish_env``).
+    ``advance`` adds a second commit on main, so the returned first commit
+    (and *tag*) is no longer the branch tip. Git runs with host configuration
+    disabled, so the committed bytes and SHAs do not depend on the machine
+    (see ``_publish_env``).
     """
     _git("init", "-q", "--bare", "--template=", "--initial-branch=main", str(bare), env={})
     index = {
@@ -509,9 +531,15 @@ def commit_bare(bare: Path, tree: Path, *, tag: str | None) -> str:
     }
     _git("add", "-A", "--force", "--", ".", env=index)
     tree_sha = _git("write-tree", env=index)
-    (bare / "perf-index").unlink()
     commit = _git("commit-tree", tree_sha, "-m", f"publish {tree.name}", env={"GIT_DIR": str(bare)})
-    _git("update-ref", "refs/heads/main", commit, env={"GIT_DIR": str(bare)})
+    tip = commit
+    if advance:
+        note = _git("hash-object", "-w", "--stdin", env={"GIT_DIR": str(bare)}, stdin="next\n")
+        _git("update-index", "--add", "--cacheinfo", f"100644,{note},NEXT.md", env=index)
+        next_tree = _git("write-tree", env=index)
+        tip = _git("commit-tree", next_tree, "-p", commit, "-m", "next", env={"GIT_DIR": str(bare)})
+    (bare / "perf-index").unlink()
+    _git("update-ref", "refs/heads/main", tip, env={"GIT_DIR": str(bare)})
     if tag is not None:
         _git("update-ref", f"refs/tags/{tag}", commit, env={"GIT_DIR": str(bare)})
     return commit
@@ -529,6 +557,6 @@ def publish_repositories(fixture: TreeFixture, directory: Path) -> dict[str, Pat
     served: dict[str, Path] = {}
     for name, tree in sorted(fixture.packages.items()):
         bare = root / f"{fixture.recipe.owner}__{name}.git"
-        commit_bare(bare, tree, tag=fixture.recipe.tag)
+        commit_bare(bare, tree, tag=fixture.recipe.tag, advance=fixture.recipe.pin == "sha")
         served[fixture.slug(name)] = bare
     return served
