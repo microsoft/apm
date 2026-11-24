@@ -169,6 +169,12 @@ def serve_offline(
             # Default mode: the runner's own Git for Windows TLS config (schannel),
             # the mirror CA in the Windows store and a CRL the leaf names, so the
             # default revocation check passes with no config change.
+            if not may_trust_mirror_ca():
+                raise RuntimeError(
+                    "skipped: the default Windows TLS mode adds the mirror CA to the machine "
+                    f"Root store, which runs only on an ephemeral GitHub-hosted runner or with "
+                    f"{TRUST_OPT_IN}=1; use an '-openssl' fixture otherwise"
+                )
             crl_url = stack.enter_context(_serve_crl(directory / "services" / "ca.crl"))
             tls = {"mode": "system", **carry_system_tls(env["GIT_CONFIG_GLOBAL"])}
         services = WorldServices(repositories).start(directory / "services", crl_url=crl_url)
@@ -180,6 +186,21 @@ def serve_offline(
 
 
 _SYSTEM_TLS_KEYS = ("http.sslBackend", "http.sslCAInfo")
+TRUST_OPT_IN = "APM_PERF_TRUST_MIRROR_CA"
+
+
+def may_trust_mirror_ca() -> bool:
+    """Whether this host may add a per-world mirror CA to the machine Root store.
+
+    Only an ephemeral GitHub-hosted runner, or an explicit opt-in; never a
+    developer's machine by default.
+    """
+    if os.environ.get(TRUST_OPT_IN) == "1":
+        return True
+    return (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
+    )
 
 
 def carry_system_tls(global_config: str) -> dict[str, str]:
@@ -249,7 +270,12 @@ def _certificate_serial(ca_pem: Path) -> str:
 
 @contextlib.contextmanager
 def _trusted_by_windows(ca_pem: Path) -> Iterator[None]:
-    """Add the mirror CA to the machine Root store (CI runners are admin)."""
+    """Add the per-world mirror CA to the machine Root store; always remove it.
+
+    The CA (and its key) is minted fresh for each world under the world's work
+    directory and never reused. Removal by serial runs on every exit, including
+    a failing world.
+    """
     serial = _certificate_serial(ca_pem)
     added = subprocess.run(
         ["certutil", "-addstore", "-f", "Root", str(ca_pem)],
