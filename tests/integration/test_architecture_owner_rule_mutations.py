@@ -971,7 +971,8 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)\n",
+            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write,"
+            " journal=token)\n",
             "            pass\n",
             id="transaction-not-listening",
         ),
@@ -5297,6 +5298,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
     MutationCase(
+        guard_id="install-deployment-deploy-write-seam",
+        rule_id="install-deployment-deploy-write-seam",
+        path="src/apm_cli/install/transaction.py",
+        old="self._seal_deploy_write, journal=token)",
+        new="self._seal_deploy_write, journal=None)",
+        intent="The install transaction listens at the write seam without its journal token.",
+    ),
+    MutationCase(
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/utils/git_env.py",
@@ -5496,7 +5505,7 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/install/deploy_snapshot.py",
-            "        return vouches_for_current_bytes(path, prior)",
+            "        return vouches_for_current_bytes(path, prior, journal=journal)",
             "        return True",
             id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
         ),
@@ -5678,7 +5687,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = list(decision.removed_paths)\n"
-            "        for package in installed_packages:\n"
+            "        for package in _scan_installed_packages(apm_modules_dir):\n"
             "            if package not in declared_deps:\n"
             "                orphaned_packages.append(package)\n",
             "Removal sites must not filter installed or locked sets",
@@ -5866,11 +5875,9 @@ def test_prune_hands_the_reachability_walk_to_the_orphan_owner() -> None:
     """Prune's retained keys still come from deps/reachability.py, via the owner (#3668)."""
     path = "src/apm_cli/commands/prune.py"
     source = _source(path)
-    old = "                reachability=ReachabilityProbe(\n"
+    old = "        reachability=ReachabilityProbe(\n"
     assert source.count(old) == 1
-    mutated = source.replace(
-        old, "                reachability=None if True else ReachabilityProbe(\n", 1
-    )
+    mutated = source.replace(old, "        reachability=None if True else ReachabilityProbe(\n", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-uninstall-reachability"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})

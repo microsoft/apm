@@ -660,6 +660,34 @@ def test_without_apm_modules_an_unreached_local_removal_still_runs(
     assert "Removed ./vendor/e" in result.stdout + result.stderr
 
 
+def test_without_apm_modules_a_replace_rule_only_in_apm_yml_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5031: a replace rule the lock does not yet record still makes the offline walk unproven.
+
+    The same unreached removal that runs above refuses once apm.yml carries a
+    ``replace`` block, as a lockfile-recorded rule already does.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "x", "x")
+    _manifest(world, ["./vendor/e", "./vendor/x"], [])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    manifest = load_yaml(world.project / "apm.yml")
+    manifest["$schema"] = _REPLACEMENTS_SCHEMA
+    manifest["replace"] = [
+        {"for": {"git": "https://github.com/test/r"}, "with": {"path": "./vendor/e"}}
+    ]
+    dump_yaml(manifest, world.project / "apm.yml")
+    assert "replacements" not in load_yaml(world.project / "apm.lock.yaml")
+    shutil.rmtree(world.project / "apm_modules")
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+    assert "_local/e" in _rows(world)
+
+
 def test_without_apm_modules_an_unreadable_survivor_source_refuses(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
