@@ -1988,3 +1988,30 @@ def test_a_file_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
 
     assert outside.stat().st_mode & 0o7777 == 0o400
     assert staged.is_symlink()
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_journal_path_through_a_junction_is_refused(tmp_path: Path, apm_home: Path) -> None:
+    """Replay treats a directory junction below the deploy root like a symbolic link (#5229)."""
+    import _winapi
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    claimed = project / ".kiro" / "claimed.md"
+    claimed.parent.mkdir(parents=True)
+    claimed.write_bytes(b"committed\n")
+    _winapi.CreateJunction(str(project / ".kiro"), str(project / "alias"))
+    store = _killed_journal(apm_home, project, project / "new.md")
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text().splitlines()]
+    lines[1]["path"] = "alias/claimed.md"
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: {".kiro/claimed.md": None})
+
+    assert "alias/claimed.md" in [path for path, _reason in kept.value.issues]
+    assert claimed.read_bytes() == b"committed\n"

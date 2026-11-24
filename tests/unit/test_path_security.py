@@ -6,6 +6,7 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
+import os
 import shutil  # noqa: F401
 from urllib.parse import urlparse
 
@@ -383,3 +384,39 @@ class TestFilesystemContainment:
 
         monkeypatch.setattr(os.path, "samefile", _unverifiable)
         assert filesystem_containment(variant / "bin", root) is None
+
+
+# ---------------------------------------------------------------------------
+# has_symlink_component(): a Windows junction below the base is a link (#5229)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junction_below_the_base_counts_as_a_link(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    base.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _winapi.CreateJunction(str(outside), str(base / "agents"))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is True
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junctioned_base_itself_is_not_flagged(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    real = tmp_path / "real"
+    (real / "agents").mkdir(parents=True)
+    base = tmp_path / "junction-base"
+    _winapi.CreateJunction(str(real), str(base))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is False

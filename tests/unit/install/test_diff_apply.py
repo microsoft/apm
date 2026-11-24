@@ -764,3 +764,20 @@ def test_a_fast_apply_config_write_is_sealed_at_the_write_seam(
     assert recorded == [config]
     assert config.read_text(encoding="utf-8") == "apm_modules/\n"
     assert write_seam._after is None, "the seam stops listening once the apply settles"
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junction_parent_of_a_deployed_path_declines(tmp_path: Path) -> None:
+    """The fast deploy refuses a path below a directory junction like one below a link (#5229)."""
+    import _winapi
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "file.md").write_text("outside\n", encoding="utf-8")
+    _winapi.CreateJunction(str(outside), str(tmp_path / "link"))
+
+    with pytest.raises(Decline, match="symlink"):
+        diff_apply._within(tmp_path, "link/file.md")
+
+    assert (outside / "file.md").read_text(encoding="utf-8") == "outside\n"
