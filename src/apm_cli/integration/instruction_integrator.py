@@ -761,7 +761,7 @@ class InstructionIntegrator(BaseIntegrator):
         return [source for source in instruction_files if source not in carried]
 
     def render_agents_md_routed_rules(
-        self, package_info, project_root: Path, source_plan
+        self, package_info, project_root: Path, source_plan, *, every_rule: bool = False
     ) -> dict[str, str]:
         """Render the ``.claude/rules/`` files Claude routing left undeployed.
 
@@ -769,7 +769,8 @@ class InstructionIntegrator(BaseIntegrator):
         not compile, so a pack still carries each instruction that #3939 routed
         to ``AGENTS.md`` as the rule a pre-#3939 install deployed. Routing and
         rendering reuse this integrator's install decision and projection.
-        Returns ``{project-relative rule path: content}``.
+        With *every_rule*, every Claude rule the package ships renders, routed
+        or not. Returns ``{project-relative rule path: content}``.
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -782,9 +783,20 @@ class InstructionIntegrator(BaseIntegrator):
             return {}
         self.init_link_resolver(package_info, project_root)
         prepared = {source: self._prepare_instruction(source) for source in sources}
-        kept = set(
-            self._claude_rule_sources(
-                target, sources, prepared, package_info, project_root, None, None, all_routed=True
+        kept = (
+            set()
+            if every_rule
+            else set(
+                self._claude_rule_sources(
+                    target,
+                    sources,
+                    prepared,
+                    package_info,
+                    project_root,
+                    None,
+                    None,
+                    all_routed=True,
+                )
             )
         )
         routed = [source for source in sources if source not in kept]
@@ -1164,8 +1176,12 @@ def routed_claude_rule_renders(
     include_local: bool,
     verified: bool = False,
     dependency_keys: Collection[str] | None = None,
+    every_rule: bool = False,
 ) -> dict[str, dict[str, str]]:
     """Return ``{dependency key: {rule path: content}}`` #3939 routed to AGENTS.md.
+
+    With *every_rule*, each dependency's every Claude rule renders, so pack can
+    find two dependencies whose same-named instructions collide (#5343).
 
     Each locked dependency installed under *modules_root* is rendered through
     :meth:`InstructionIntegrator.render_agents_md_routed_rules`: the
@@ -1235,7 +1251,7 @@ def routed_claude_rule_renders(
             skip_bin=True,
         )
         rendered = InstructionIntegrator().render_agents_md_routed_rules(
-            package_info, project_root, source_plan
+            package_info, project_root, source_plan, every_rule=every_rule
         )
         if verified:
             deployed = set(dep.deployed_files)
