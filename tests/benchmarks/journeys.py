@@ -63,6 +63,7 @@ from tests.fixtures.perf import (  # noqa: E402
     isolated_environment,
     serve_offline,
 )
+from tests.fixtures.perf.counters import read_spawn_log  # noqa: E402
 from tests.fixtures.perf.generator import consumer_manifest, remove_tree, write_lf  # noqa: E402
 from tests.fixtures.perf.offline import POLICY_ORG  # noqa: E402
 
@@ -475,6 +476,7 @@ class Context:
         return [self.project / root for root in self.fixture.roots]
 
     spawn_log: Path | None = None
+    count_fs: bool = False
     # Setup reuse: the installed state survives a no-op sample, and the
     # committed lockfiles are captured once per fixture (generation is seeded).
     is_installed: bool = False
@@ -502,6 +504,8 @@ class Context:
         if self.spawn_log is not None:
             env["APM_PERF_SPAWN_LOG"] = str(self.spawn_log)
             env["PYTHONPATH"] = str(_SPAWN_COUNTER_DIR)
+            if self.count_fs:
+                env["APM_PERF_COUNT_FS"] = "1"
         with (
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
@@ -753,21 +757,14 @@ class Sample:
     spawns: dict = field(default_factory=dict)
     modules: int = 0
     routes: dict = field(default_factory=dict)
+    git_verbs: dict = field(default_factory=dict)
+    fs: dict = field(default_factory=dict)
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
     """Spawns by executable summed over every Python process, plus the max module count."""
-    if path is None or not path.is_file():
-        return {}, 0
-    spawns: dict[str, int] = {}
-    modules = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        record = json.loads(line)
-        modules = max(modules, record["modules"])
-        for name, count in record["spawns"].items():
-            spawns[name] = spawns.get(name, 0) + count
-    path.unlink()
-    return dict(sorted(spawns.items())), modules
+    counters = read_spawn_log(path)
+    return counters["spawns"], counters["modules"]
 
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
@@ -787,9 +784,11 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
             output = f"$ apm {' '.join(argv)}\n{tail}"
             break
     wall = time.perf_counter() - start
-    spawns, modules = _read_spawn_log(ctx.spawn_log)
+    counters = read_spawn_log(ctx.spawn_log)
+    spawns, modules = counters["spawns"], counters["modules"]
     sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
+    sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
     return sample, output
 
@@ -867,6 +866,8 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "spawns": ok[-1].spawns if ok else {},
         "modules": ok[-1].modules if ok else 0,
         "routes": ok[-1].routes if ok else {},
+        "git_verbs": ok[-1].git_verbs if ok else {},
+        "fs": ok[-1].fs if ok else {},
         "samples": [asdict(s) for s in samples],
         "error": error,
     }
@@ -958,6 +959,7 @@ def run(args: argparse.Namespace) -> dict:
             ctx.work.mkdir(parents=True, exist_ok=True)
             if args.counts:
                 ctx.spawn_log = ctx.work / "spawns.jsonl"
+                ctx.count_fs = args.count_fs
             ctx.fresh_project()
             for rtt_index, rtt in enumerate(rtts):
                 world.rtt_ms = rtt
@@ -1245,6 +1247,12 @@ def main(argv: list[str] | None = None) -> int:
         "--counts",
         action="store_true",
         help="count subprocess spawns and imported modules of each apm child",
+    )
+    run_parser.add_argument(
+        "--count-fs",
+        action="store_true",
+        help="with --counts, also count files written, lockfile reads, realpath/stat "
+        "calls and hashing (adds CPU: counts only, never compare its timings)",
     )
     run_parser.add_argument(
         "--preset",
