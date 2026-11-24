@@ -59,6 +59,9 @@ _MAX_MISSING_DEPTH = 32
 _FILE_ATTRIBUTE_DIRECTORY = 0x10
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _FILE_READ_ATTRIBUTES = 0x80
+# Share access only counts opens with read, write or delete access: list
+# access makes the hold refuse every later open that asks for DELETE.
+_FILE_LIST_DIRECTORY = 0x1
 _FILE_SHARE_READ_WRITE = 0x1 | 0x2  # never FILE_SHARE_DELETE: the hold pins the name
 _OPEN_EXISTING = 3
 _FLAGS_DIR_NO_FOLLOW = 0x02000000 | 0x00200000  # BACKUP_SEMANTICS | OPEN_REPARSE_POINT
@@ -266,7 +269,7 @@ def _hold(directory: str) -> tuple[str, int] | None:
     ctypes, k32, _find, info_type, invalid = _kernel32()
     handle = k32.CreateFileW(
         directory,
-        _FILE_READ_ATTRIBUTES,
+        _FILE_READ_ATTRIBUTES | _FILE_LIST_DIRECTORY,
         _FILE_SHARE_READ_WRITE,
         None,
         _OPEN_EXISTING,
