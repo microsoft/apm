@@ -158,3 +158,21 @@ def test_a_handler_whose_cwd_differs_only_in_case_is_in_use_where_case_folds(
     cwd = _SCRIPT_DIR.replace(".github", ".GITHUB")
     project = tmp_path / "p"
     assert _user_hook_with_cwd(project, "./x.sh", cwd) == {".github/hooks/user.json"}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_handler_whose_cwd_links_outside_the_project_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: a cwd that escapes through a symlink cannot be cleared; fail closed."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    def link(project: Path) -> None:
+        (project / "external").symlink_to(outside, target_is_directory=True)
+
+    project = tmp_path / "p"
+    assert _user_hook_with_cwd(project, "./x.sh", "external", link) == {".github/hooks/user.json"}
+
+
+def test_a_handler_whose_cwd_holds_a_nul_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: an embedded NUL is no path; it refuses instead of crashing."""
+    assert _user_hook_with_cwd(tmp_path, "./x.sh", "tools\x00bad") == {".github/hooks/user.json"}
