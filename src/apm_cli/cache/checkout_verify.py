@@ -647,6 +647,24 @@ def require_verified_bytes(
         raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
 
 
+_INPROCESS: set[tuple[str, str]] = set()
+
+
+def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str, bool]]) -> None:
+    """PERF PROTOTYPE: record the verdict an in-process fetch reached while writing *repo*."""
+    key = _key(repo, sha)
+    with _MANIFEST_LOCK:
+        _MANIFESTS[key] = _Manifest(object_format(sha), dict(files))
+        _INPROCESS.add(key)
+
+
+def inprocess_verified(repo: Path, sha: str | None = None) -> bool:
+    """PERF PROTOTYPE: whether this process wrote and verified *repo* in-process."""
+    key = _key(repo, sha or Path(repo).parent.name)
+    with _MANIFEST_LOCK:
+        return key in _INPROCESS and key in _MANIFESTS
+
+
 def forget_verdicts() -> None:
     """Drop every record (an evicted or rebuilt checkout, or a new run)."""
     with _MANIFEST_LOCK:
