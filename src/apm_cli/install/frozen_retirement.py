@@ -100,9 +100,14 @@ def enforce_frozen_presence(
     Then each recorded ``exec_status`` must still be the gate's decision,
     through the staleness owner ``apm update`` and ``apm audit --ci`` use (#4053).
     """
-    from apm_cli.policy.ci_checks import find_missing_deployed_files, resolve_audit_scope
+    from apm_cli.policy.ci_checks import (
+        find_missing_deployed_files,
+        resolve_audit_scope,
+        resolve_claim_targets,
+    )
 
-    deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_dir, committed)
+    deploy_root, user_scope, targets = resolve_audit_scope(lockfile_dir, committed)
+    targets = resolve_claim_targets(lockfile_dir, committed, user_scope=user_scope, targets=targets)
     missing, _gitignored = find_missing_deployed_files(deploy_root, committed, targets)
     if missing := graph_claims(committed, missing, active_keys):
         raise frozen_missing_files_error(
