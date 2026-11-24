@@ -44,7 +44,7 @@ jobs:
       - name: Install side exactly as perf-bench.yml (main product, harness-only branch)
         run: |
           set -euo pipefail
-          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git c0296fab7f9
+          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git c0296fab7f9404a6b1f2fd3fffbee88584fe64cb
           git -C harness worktree add --quiet --detach ../side FETCH_HEAD
           (cd side && uv sync --frozen --no-editable --quiet)
           if [ "$RUNNER_OS" = Windows ]; then APM=side/.venv/Scripts/apm.exe; SP=side/.venv/Lib/site-packages; else APM=side/.venv/bin/apm; SP=$(ls -d side/.venv/lib/python3*/site-packages); fi
