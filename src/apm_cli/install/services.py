@@ -1158,6 +1158,7 @@ def integrate_local_bundle(
         )
 
     _record_md_hooks(scope, project_root, targets, str(slug), approval_key, deployed_files, dry_run)
+    from .local_bundle_hooks import hooks_denied_bundle as _hooks_denied_bundle
     from .local_bundle_hooks import integrate_local_bundle_hooks
 
     hook_result = integrate_local_bundle_hooks(
@@ -1199,13 +1200,3 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
-
-
-def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
-    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
-    if approval_key is None:
-        return False
-    from ..security.executables import EXEC_TYPE_HOOKS
-    from .local_bundle_handler import bundle_type_denied
-
-    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)
