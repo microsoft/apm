@@ -393,6 +393,7 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
     ),
     "src/apm_cli/install/services.py": (
         # Recording the canvas is an install write at the install's scope (#5042).
+        "        record_bundle_canvas(",
         "project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),

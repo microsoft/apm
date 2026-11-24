@@ -66,6 +66,10 @@ class CachePruneError(OSError):
         super().__init__(f"Pruned {pruned} SHA group(s); {len(failures)} failed.")
 
 
+class CachedCheckoutTamperedError(RuntimeError):
+    """A read-only cache holds a checkout that does not match its commit."""
+
+
 class IncompleteCheckoutError(RuntimeError):
     """A checkout exited 0 but left tracked files unmaterialized (#3071).
 
@@ -348,6 +352,7 @@ class GitCache:
         locked_sha: str | None = None,
         env: dict[str, str] | None = None,
         sparse_paths: list[str] | None = None,
+        label: str | None = None,
     ) -> Path:
         """Return path to a cached checkout for the given repo+ref.
 
@@ -361,12 +366,14 @@ class GitCache:
                 directories using ``git sparse-checkout --cone``. The
                 shard is keyed by ``(sha, sparse_paths_variant)`` so
                 full and sparse variants of the same SHA coexist.
+            label: The package name messages use for this checkout.
 
         Returns:
             Path to the checkout directory, verified against its commit
             (``cache/checkout_verify.py``). A checkout that fails is rebuilt
             once from a fresh fetch (its bare is discarded too, since the bare
-            may have supplied the bytes), then refused.
+            may have supplied the bytes), then refused. A read-only cache
+            never rebuilds: it raises :class:`CachedCheckoutTamperedError`.
         """
         from ..utils.git_env import git_subprocess_env
         from .checkout_verify import verify_checkout
@@ -380,13 +387,20 @@ class GitCache:
             cone = bool(sparse_paths)
             if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):
                 return checkout
+            copy = _cached_copy_name(label, url, sha)
             if self._read_only:
-                raise LookupError("cached checkout does not match its commit")
+                from ..core.remediation import CACHED_CHECKOUT_TAMPERED
+
+                # A read-only reader (audit) reports a tampered cache; it never repairs it.
+                raise CachedCheckoutTamperedError(
+                    f"Cached copy of {copy} does not match its commit; a read-only command "
+                    f"does not repair the cache. {CACHED_CHECKOUT_TAMPERED.sentence()}"
+                )
             if attempt == 0:
                 from ..utils.console import _rich_warning
 
                 _rich_warning(
-                    f"Cached copy of {_sanitize_url(url)} @ {sha[:12]} failed verification "
+                    f"Cached copy of {copy} failed verification "
                     "against its commit; rebuilding it from a fresh fetch.",
                     symbol="warning",
                 )
@@ -399,8 +413,8 @@ class GitCache:
                 ),
             )
         raise RuntimeError(
-            f"Cached checkout for {_sanitize_url(url)} @ {sha[:12]} does not match its commit "
-            "even after a fresh fetch; refusing it"
+            f"Cached checkout for {_cached_copy_name(label, url, sha)} does not match its "
+            "commit even after a fresh fetch; refusing it"
         )
 
     def _get_checkout(
@@ -1307,7 +1321,7 @@ class GitCache:
             for entry in os.scandir(str(self._db_root)):
                 if entry.is_dir(follow_symlinks=False) and not entry.name.endswith(".lock"):
                     db_count += 1
-                    total_size += _dir_size(Path(entry.path))
+                    total_size += dir_size(Path(entry.path))
                 elif entry.name.endswith(".ref") and entry.is_file(follow_symlinks=False):
                     total_size += entry.stat(follow_symlinks=False).st_size
 
@@ -1317,7 +1331,7 @@ class GitCache:
                     for sha_entry in os.scandir(shard_entry.path):
                         if sha_entry.is_dir(follow_symlinks=False):
                             checkout_count += 1
-                            total_size += _dir_size(Path(sha_entry.path))
+                            total_size += dir_size(Path(sha_entry.path))
 
         return {
             "db_count": db_count,
@@ -1398,7 +1412,7 @@ def _same_path(value: str, path: Path) -> bool:
         return False
 
 
-def _dir_size(path: Path) -> int:
+def dir_size(path: Path) -> int:
     """Calculate total size of a directory (non-recursive symlink-safe)."""
     total = 0
     try:
@@ -1413,6 +1427,27 @@ def _dir_size(path: Path) -> int:
     except OSError:
         pass
     return total
+
+
+def raise_if_tampered(exc: BaseException) -> None:
+    """Re-raise the read-only cache's tamper report found in *exc*'s chain (#5159).
+
+    A reader that falls back to a fresh clone on any cache failure calls this
+    first, so a tampered cache is reported instead of cloned past.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, CachedCheckoutTamperedError):
+            raise current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+
+
+def _cached_copy_name(label: str | None, url: str, sha: str) -> str:
+    """``<package> (<url> @ <sha12>)``, or ``<url> @ <sha12>`` without a package name."""
+    where = f"{_sanitize_url(url)} @ {sha[:12]}"
+    return f"{label} ({where})" if label else where
 
 
 def _sanitize_url(value: str) -> str:

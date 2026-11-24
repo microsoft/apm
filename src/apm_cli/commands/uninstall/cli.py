@@ -74,6 +74,7 @@ from .local_reanchor import (
     _refuse_unverifiable_local_survivors,
     _rename_reanchored_receipts,
     _undo_reanchor,
+    discard_set_aside_copies,
 )
 from .selection_shrink import (
     _shrink_surviving_selections,
@@ -560,6 +561,7 @@ def _persist_lock_then_resync_native(
     except BaseException as exc:
         _undo_reanchor(exc, moved, modules_dir, still_needed_repairs, logger)
         raise
+    discard_set_aside_copies(moved, modules_dir, logger)
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,
