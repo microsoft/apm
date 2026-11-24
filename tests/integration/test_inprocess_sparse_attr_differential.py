@@ -137,6 +137,20 @@ def _git_state(src: Path, files: list[str], ignorecase: bool) -> dict[str, dict[
     return states
 
 
+def _expect_agrees(engine, theirs: dict, files: list[str], case: tuple) -> None:
+    """Every path's state from the engine equals what ``git check-attr -a`` printed."""
+    checked = 0
+    for path in files:
+        if path.rpartition("/")[2] == ".gitattributes":
+            continue
+        state = engine.state(path)
+        assert state is not None, path
+        ours = {name: value for name, value in state.items() if value is not None}
+        assert ours == theirs[path], (*case, path)
+        checked += 1
+    assert checked >= 5
+
+
 @pytest.mark.parametrize("seed", range(40))
 @pytest.mark.parametrize("ignorecase", [False, True])
 def test_the_engine_agrees_with_git_check_attr(tmp_path: Path, seed: int, ignorecase: bool) -> None:
@@ -147,14 +161,4 @@ def test_the_engine_agrees_with_git_check_attr(tmp_path: Path, seed: int, ignore
     root = objects[sha][1].split(b"\n", 1)[0][5:].decode("ascii")
     engine_class = _FoldedAttributes if ignorecase else _Attributes
     engine = engine_class(_Tree(source, root, 20), source)
-    theirs = _git_state(src, files, ignorecase)
-    checked = 0
-    for path in files:
-        if path.rpartition("/")[2] == ".gitattributes":
-            continue
-        state = engine.state(path)
-        assert state is not None, path
-        ours = {name: value for name, value in state.items() if value is not None}
-        assert ours == theirs[path], (seed, ignorecase, path)
-        checked += 1
-    assert checked >= 5
+    _expect_agrees(engine, _git_state(src, files, ignorecase), files, (seed, ignorecase))

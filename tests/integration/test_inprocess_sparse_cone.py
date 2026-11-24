@@ -92,10 +92,7 @@ def test_the_cone_and_its_file_equal_git_sparse_checkout(tmp_path: Path, cone: s
     src, sha = _repo(tmp_path)
     objects = _objects(src, sha)
     files, trees = fetch._sparse_plan(objects, sha, (cone,))
-    ours = {rel: objects[oid][1] for rel, oid, _ in files}
-    theirs, cone_file = _git_sparse(src, tmp_path, cone)
-    assert ours == theirs
-    assert fetch.sparse_checkout_file((cone,)).encode() == cone_file
+    _expect_cone_as_git(src, tmp_path, cone, objects, files)
     assert all(objects[t][0] in ("tree", "commit") for t in trees)
 
 
@@ -106,8 +103,30 @@ def _plan_with(tmp_path: Path, extra: dict[str, bytes], cone: str = "packages/gu
     return src, sha, objects, files
 
 
-def _attributes_inert(objects, files, sha) -> bool:
-    return fetch._cone_attributes_ok(objects, sha, files)
+def _expect_engages(objects, files, sha, engages: bool) -> None:
+    """The dependency is fetched in process (True) or sent to git (False)."""
+    assert fetch._cone_attributes_ok(objects, sha, files) is engages
+
+
+def _expect_cone_as_git(src: Path, tmp_path: Path, cone: str, objects, files) -> None:
+    """The planned cone, written to disk, holds exactly the bytes git's sparse checkout writes."""
+    ours = tmp_path / "in-process"
+    for rel, oid, _ in files:
+        target = ours / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(objects[oid][1])
+    on_disk = {
+        p.relative_to(ours).as_posix(): p.read_bytes()
+        for p in sorted(ours.rglob("*"))
+        if p.is_file()
+    }
+    theirs, cone_file = _git_sparse(src, tmp_path, cone)
+    assert on_disk == theirs
+    assert fetch.sparse_checkout_file((cone,)).encode() == cone_file
+
+
+def _expect_planned(files, expected: list[str]) -> None:
+    assert [rel for rel, _, _ in files] == expected
 
 
 def test_a_crlf_blob_under_text_auto_eol_lf_is_written_as_git_writes_it(tmp_path: Path) -> None:
@@ -116,10 +135,8 @@ def test_a_crlf_blob_under_text_auto_eol_lf_is_written_as_git_writes_it(tmp_path
         "packages/guide/crlf.md": b"line one\r\nline two\r\n",
     }
     src, sha, objects, files = _plan_with(tmp_path, extra)
-    assert _attributes_inert(objects, files, sha)
-    ours = {rel: objects[oid][1] for rel, oid, _ in files}
-    theirs, _ = _git_sparse(src, tmp_path, "packages/guide")
-    assert ours == theirs
+    _expect_engages(objects, files, sha, True)
+    _expect_cone_as_git(src, tmp_path, "packages/guide", objects, files)
 
 
 @pytest.mark.parametrize(
@@ -138,7 +155,7 @@ def test_a_crlf_blob_under_text_auto_eol_lf_is_written_as_git_writes_it(tmp_path
 )
 def test_a_byte_changing_attribute_sends_the_dep_to_git(tmp_path: Path, attributes: bytes) -> None:
     _src, sha, objects, files = _plan_with(tmp_path, {".gitattributes": attributes})
-    assert not _attributes_inert(objects, files, sha)
+    _expect_engages(objects, files, sha, False)
 
 
 def test_a_nested_in_cone_eol_crlf_sends_the_dep_to_git(tmp_path: Path) -> None:
@@ -147,13 +164,13 @@ def test_a_nested_in_cone_eol_crlf_sends_the_dep_to_git(tmp_path: Path) -> None:
         "packages/guide/.gitattributes": b"*.md eol=crlf\n",
     }
     _src, sha, objects, files = _plan_with(tmp_path, extra)
-    assert not _attributes_inert(objects, files, sha)
+    _expect_engages(objects, files, sha, False)
 
 
 def test_an_out_of_cone_attributes_file_does_not_apply(tmp_path: Path) -> None:
     _src, sha, objects, files = _plan_with(tmp_path, {"docs/.gitattributes": b"* eol=crlf\n"})
     assert "docs/.gitattributes" not in {rel for rel, _, _ in files}
-    assert _attributes_inert(objects, files, sha)
+    _expect_engages(objects, files, sha, True)
 
 
 @pytest.mark.parametrize(
@@ -199,10 +216,8 @@ def test_a_link_in_the_cone_refuses_and_one_outside_is_ignored(tmp_path: Path) -
 def test_eol_crlf_for_a_pattern_no_written_file_matches_engages(tmp_path: Path) -> None:
     extra = {".gitattributes": b"* text=auto eol=lf\n*.bat text eol=crlf\n*.png binary\n"}
     src, sha, objects, files = _plan_with(tmp_path, extra)
-    assert _attributes_inert(objects, files, sha)
-    ours = {rel: objects[oid][1] for rel, oid, _ in files}
-    theirs, _ = _git_sparse(src, tmp_path, "packages/guide")
-    assert ours == theirs
+    _expect_engages(objects, files, sha, True)
+    _expect_cone_as_git(src, tmp_path, "packages/guide", objects, files)
 
 
 def test_a_written_file_the_crlf_pattern_matches_sends_the_dep_to_git(tmp_path: Path) -> None:
@@ -211,7 +226,7 @@ def test_a_written_file_the_crlf_pattern_matches_sends_the_dep_to_git(tmp_path: 
         "packages/guide/run.bat": b"@echo off\n",
     }
     _src, sha, objects, files = _plan_with(tmp_path, extra)
-    assert not _attributes_inert(objects, files, sha)
+    _expect_engages(objects, files, sha, False)
 
 
 def test_a_case_variant_matches_as_core_ignorecase_would(tmp_path: Path) -> None:
@@ -221,7 +236,7 @@ def test_a_case_variant_matches_as_core_ignorecase_would(tmp_path: Path) -> None
         "packages/guide/RUN.BAT": b"@echo off\n",
     }
     _src, sha, objects, files = _plan_with(tmp_path, extra)
-    assert not _attributes_inert(objects, files, sha)
+    _expect_engages(objects, files, sha, False)
 
 
 def test_a_deeper_override_is_evaluated_by_state(tmp_path: Path) -> None:
@@ -231,7 +246,7 @@ def test_a_deeper_override_is_evaluated_by_state(tmp_path: Path) -> None:
         "packages/guide/run.bat": b"@echo off\n",
     }
     _src, sha, objects, files = _plan_with(tmp_path, extra)
-    assert _attributes_inert(objects, files, sha)
+    _expect_engages(objects, files, sha, True)
 
 
 def _commit_tree(src: Path, entries: list[tuple[str, str, bytes]]) -> str:
@@ -310,4 +325,4 @@ def test_an_unsafe_name_outside_the_cone_does_not_matter(tmp_path: Path) -> None
         ],
     )
     files, _ = fetch._sparse_plan(_objects(src, sha), sha, ("packages/guide",))
-    assert [rel for rel, _, _ in files] == ["packages/guide/apm.yml"]
+    _expect_planned(files, ["packages/guide/apm.yml"])
