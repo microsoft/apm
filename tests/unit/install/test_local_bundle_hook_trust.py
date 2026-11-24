@@ -108,11 +108,7 @@ def test_a_handler_running_a_bundle_script_through_its_cwd_is_in_use(tmp_path: P
 
 
 def test_a_handler_whose_cwd_points_elsewhere_is_not_in_use(tmp_path: Path) -> None:
-    """#5281 control: the same command in an unrelated directory runs another script.
-
-    A bare ``./x.sh`` stays in use under #5106's default-deny, so the control
-    names a directory that certainly resolves elsewhere from every base.
-    """
+    """#5281 control: a script path in an unrelated directory runs another script."""
     assert _user_hook_with_cwd(tmp_path, "./scripts/x.sh", "tools") == set()
 
 
@@ -191,6 +187,66 @@ def test_a_handler_whose_cwd_climbs_out_of_a_link_is_in_use(tmp_path: Path) -> N
         (project / "lk").symlink_to(project / _SCRIPT_DIR / "child", target_is_directory=True)
 
     assert _user_hook_with_cwd(tmp_path, "./x.sh", "lk/..", link) == {".github/hooks/user.json"}
+
+
+@pytest.mark.parametrize(
+    ("command", "cwd"),
+    [
+        ("./x.sh", "tools"),
+        ("./prefix-x.sh", _SCRIPT_DIR),
+        ("./scripts/x.sh", _SCRIPT_DIR),
+    ],
+    ids=["bare-name-elsewhere", "longer-name-in-script-dir", "subdir-of-script-dir"],
+)
+def test_a_cwd_handler_running_another_script_is_not_in_use(
+    tmp_path: Path, command: str, cwd: str
+) -> None:
+    """#5332: the command resolves from its declared cwd, as a whole path, not as a substring."""
+    assert _user_hook_with_cwd(tmp_path, command, cwd) == set()
+
+
+def test_a_longer_name_through_a_linked_cwd_is_not_in_use(tmp_path: Path) -> None:
+    """#5332: the identity match resolves from the linked directory, not by substring."""
+
+    def link(project: Path) -> None:
+        (project / "lk").symlink_to(project / _SCRIPT_DIR, target_is_directory=True)
+
+    assert _user_hook_with_cwd(tmp_path, "./prefix-x.sh", "lk", link) == set()
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["x.sh", "sh x.sh", "cd .. && ./scripts/x.sh", "./$NAME", "./../scripts/x.sh"],
+    ids=["path-lookup", "bare-argument", "moves", "expansion", "climbs"],
+)
+def test_a_cwd_handler_that_may_still_run_the_script_is_in_use(
+    tmp_path: Path, command: str
+) -> None:
+    """#5332 fail closed: a known cwd clears only a command that certainly resolves elsewhere."""
+    assert _user_hook_with_cwd(tmp_path, command, _SCRIPT_DIR + "/sub") == {
+        ".github/hooks/user.json"
+    }
+
+
+def test_a_known_cwd_does_not_clear_a_sibling_handler_without_one(tmp_path: Path) -> None:
+    """#5332: a handler without a cwd keeps the default bases and default-deny."""
+    from apm_cli.install.local_bundle_hook_trust import _per_file_configs_running
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (tmp_path / _COPILOT_SCRIPT).parent.mkdir(parents=True)
+    (tmp_path / _COPILOT_SCRIPT).write_bytes(b"#!/bin/sh\n")
+    handlers = [
+        {"type": "command", "bash": "./x.sh", "cwd": "tools"},
+        {"type": "command", "bash": "./x.sh"},
+    ]
+    hook = tmp_path / ".github" / "hooks" / "user.json"
+    hook.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": handlers}}))
+
+    found = _per_file_configs_running(
+        tmp_path, [KNOWN_TARGETS["copilot"]], set(), {_COPILOT_SCRIPT}
+    )
+
+    assert found == {".github/hooks/user.json"}
 
 
 _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"

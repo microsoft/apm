@@ -1937,10 +1937,10 @@ def test_uninstall_bundle_with_an_unreadable_user_hook_naming_the_script_fails_c
 def test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#5281 control: a script path in an unrelated cwd runs another script; uninstall goes on.
+    """#5281 control: ``./x.sh`` in an unrelated cwd runs another script; uninstall goes on.
 
-    A bare ``./x.sh`` stays in use under #5106's default-deny, so the control
-    names a directory that certainly resolves elsewhere.
+    The command resolves from its declared cwd (#5332), so a bare ``./x.sh``
+    there is certainly not the bundle's script.
     """
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     consumer, hook = _copilot_bundle_consumer(world, tmp_path, "cwd-elsewhere-consumer")
@@ -1948,9 +1948,7 @@ def test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere(
         consumer,
         lambda path: {
             "version": 1,
-            "hooks": {
-                "preToolUse": [{"type": "command", "bash": "./scripts/x.sh", "cwd": "tools"}]
-            },
+            "hooks": {"preToolUse": [{"type": "command", "bash": "./x.sh", "cwd": "tools"}]},
         },
     )
 
