@@ -290,6 +290,10 @@ class BaseIntegrator:
     # it out of a hardcoded literal buried inside the predicate.
     _LF_NORMALIZED_DEPLOY = False
 
+    # How a path two packages deploy is settled, as this integrator applies it.
+    # ``None`` = not declared: a caller predicting the final writer refuses.
+    SHARED_PATH_RULE: str | None = None
+
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
 

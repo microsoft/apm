@@ -1,0 +1,22 @@
+{
+  "issue": 5048,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall re-anchored a still-needed local package that ships a skill another package also ships, but kept the old final writer: the re-anchor changes install order, so a following apm install --no-frozen flipped the skill's recorded owner (identical bytes) or rewrote its content (different bytes). The re-anchor now records the writer a fresh install would, and refuses before any write when that writer's bytes differ or no receipt proves them.",
+  "failure_modes": [
+    "ownership",
+    "transaction"
+  ],
+  "properties": [
+    "lockfile.frozen_preserves_bytes",
+    "ownership.preserve_unowned",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_records_the_shared_skill_writer_a_fresh_install_records",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_that_changes_a_shared_skill_writer_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_without_a_receipt_for_a_carried_shared_skill_refuses",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_ranks_shared_skill_writers_as_install_orders_them",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_refuses_a_shared_file_whose_owner_declares_no_rule",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_keeps_a_third_provider_that_still_writes_last"
+  ]
+}

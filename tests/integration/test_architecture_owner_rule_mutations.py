@@ -971,7 +971,8 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)\n",
+            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write,"
+            " journal=token)\n",
             "            pass\n",
             id="transaction-not-listening",
         ),
@@ -3152,6 +3153,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A re-anchored owner's receipts lose their hash history (#4889).",
     ),
     MutationCase(
+        guard_id="install-deployment-reanchor-writer-prediction",
+        rule_id="install-deployment-reanchor-writer-prediction",
+        path="src/apm_cli/commands/uninstall/local_reanchor_writers.py",
+        old="    ordered, _winners = _select_dependency_winners(nodes)\n",
+        new=(
+            "    ordered = sorted(nodes, key=lambda node: "
+            "(node.depth, node.dependency_ref.repo_url))\n"
+        ),
+        intent="A re-anchor orders shared-path writers by replay order, not install's (#5048).",
+    ),
+    MutationCase(
         guard_id="install-deployment-receipt-collection",
         rule_id="install-deployment-receipt-collection",
         path="src/apm_cli/install/pipeline.py",
@@ -5250,6 +5262,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
     MutationCase(
+        guard_id="install-deployment-deploy-write-seam",
+        rule_id="install-deployment-deploy-write-seam",
+        path="src/apm_cli/install/transaction.py",
+        old="self._seal_deploy_write, journal=token)",
+        new="self._seal_deploy_write, journal=None)",
+        intent="The install transaction listens at the write seam without its journal token.",
+    ),
+    MutationCase(
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/utils/git_env.py",
@@ -5441,7 +5461,7 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/install/deploy_snapshot.py",
-            "        return vouches_for_current_bytes(path, prior)",
+            "        return vouches_for_current_bytes(path, prior, journal=journal)",
             "        return True",
             id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
         ),
