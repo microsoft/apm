@@ -885,15 +885,56 @@ def test_an_unreadable_compiled_output_or_directory_refuses(
         blocked.write_text(_marked(AGENTS_MD_GENERATED_MARKER, "docs.md"), encoding="utf-8")
     else:
         blocked.mkdir()
+    before = (tree_digest(world.project), _modules(world.project))
+    # Unreadable only around the command: the snapshots read the tree themselves.
+    mode = blocked.stat().st_mode
     blocked.chmod(0)
     try:
-        before = (tree_digest(world.project), _modules(world.project))
         refused = world.apm("uninstall", "./vendor/e", expect=1)
-        after = (tree_digest(world.project), _modules(world.project))
     finally:
-        blocked.chmod(0o755)
+        blocked.chmod(mode)
+    after = (tree_digest(world.project), _modules(world.project))
 
     output = " ".join((refused.stdout + refused.stderr).split())
     name = "AGENTS.md" if what == "output" else "src"
     assert f"{name} links into its apm_modules copy" in output, output
     assert after == before
+
+
+def test_a_managed_section_agents_md_linking_into_the_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """managed_section mode: APM's section sits below authored text, past the header."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _docs_world(tmp_path, apm_binary_path)
+    authored = "".join(f"Team note {n}.\n" for n in range(8))
+    (world.project / "AGENTS.md").write_text(
+        f"# Team\n{authored}<!-- apm:start -->\nSee [ref]({_LINK}).\n<!-- apm:end -->\n",
+        encoding="utf-8",
+    )
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "AGENTS.md links into its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def test_an_agents_md_that_is_not_utf8_refuses_by_name(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A header that cannot be decoded is a named refusal, never a crash."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _docs_world(tmp_path, apm_binary_path)
+    (world.project / "AGENTS.md").write_bytes(b"\xff\xfe\xfd not utf-8\n")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "AGENTS.md links into its apm_modules copy" in output, output
+    assert "Traceback" not in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before

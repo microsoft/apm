@@ -891,6 +891,7 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
     )
 
     root = Path(project_root)
+    section = _managed_section_start(root).encode("utf-8")
 
     def refuse(error: OSError) -> None:
         raise _UnreadableDir(error.filename or root)
@@ -911,23 +912,43 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
             for name in sorted(_COMPILED_NAMES.intersection(files)):
                 path = here / name
                 try:
-                    data = _marked_regular_file(path, markers)
+                    data = _marked_regular_file(path, markers, section)
                     if data is not None and names(path, data):
                         return portable_relpath(path, root)
-                except OSError:
+                except (OSError, UnicodeDecodeError):
+                    # Unreadable or undecodable: named, never a crash or a skip.
                     return portable_relpath(path, root)
     except _UnreadableDir as unreadable:
         return portable_relpath(Path(unreadable.args[0]), root)
     return None
 
 
-def _marked_regular_file(path: Path, markers) -> bytes | None:
-    """The bytes of *path* when it is a regular file carrying an APM header, else ``None``.
+def _managed_section_start(project_root: Path) -> str:
+    """The managed-section begin marker the project's compile uses (#5097)."""
+    from ...compilation.agents_compiler import CompilationConfig
+    from ...core.scope import manifest_file
+    from ...utils.yaml_io import load_yaml
 
-    Opened without following a final link and without blocking, then checked
-    on the descriptor itself, so a link, FIFO or device swapped in is never
-    read (#5097). Only a 4 KiB prefix is read unless the header is APM's.
-    Windows has no ``O_NOFOLLOW``, so a link is refused there before opening.
+    try:
+        data = load_yaml(manifest_file(project_root)) or {}
+        agents_md = (data.get("compilation") or {}).get("agents_md") or {}
+        marker = agents_md.get("start_marker")
+    except (OSError, ValueError, AttributeError, TypeError):
+        marker = None
+    return (
+        marker if isinstance(marker, str) and marker else CompilationConfig.agents_md_start_marker
+    )
+
+
+def _marked_regular_file(path: Path, markers, section: bytes = b"") -> bytes | None:
+    """The bytes of *path* when it is an APM-written regular file, else ``None``.
+
+    APM-written means APM's header in the first 4 KiB, or a managed-section
+    begin marker (*section*) anywhere, streamed, since authored text may
+    precede the section. Opened without following a final link and without
+    blocking, then checked on the descriptor itself, so a link, FIFO or device
+    swapped in is never read (#5097). Windows has no ``O_NOFOLLOW``, so a link
+    is refused there before opening. An undecodable header raises.
     """
     from ...compilation.constants import decode_utf8_prefix, has_generated_marker_header
 
@@ -945,12 +966,16 @@ def _marked_regular_file(path: Path, markers) -> bytes | None:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
         head = os.read(fd, 4096)
-        if not has_generated_marker_header(decode_utf8_prefix(head), markers):
-            return None
+        marked = has_generated_marker_header(decode_utf8_prefix(head), markers)
         chunks = [head]
+        found = marked or (bool(section) and section in head)
+        tail = head[-len(section) :] if section else b""
         while chunk := os.read(fd, 1 << 16):
             chunks.append(chunk)
-        return b"".join(chunks)
+            if not found and section:
+                found = section in tail + chunk
+                tail = (tail + chunk)[-len(section) :]
+        return b"".join(chunks) if found else None
     finally:
         os.close(fd)
 
