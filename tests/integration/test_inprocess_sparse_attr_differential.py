@@ -21,7 +21,7 @@ import pytest
 from apm_cli.cache import inprocess_fetch as fetch
 from apm_cli.cache.checkout_verify import _Attributes, _FoldedAttributes, _Tree
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-git-transport-selection")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-transport-selection")]
 
 _DIRS = ["", "a", "a/b", "a/b/c", "docs", "Docs", "x/y"]
 _NAMES = [

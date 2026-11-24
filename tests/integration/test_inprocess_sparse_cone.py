@@ -15,7 +15,7 @@ import pytest
 
 from apm_cli.cache import inprocess_fetch as fetch
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-git-transport-selection")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-transport-selection")]
 
 _GIT = [
     "git",
