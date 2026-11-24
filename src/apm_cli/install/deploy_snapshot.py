@@ -406,7 +406,7 @@ def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
     """Parse ``journal.jsonl``; raise ``ValueError`` when it is not a journal."""
     _modes.require_private_store(store)  # the store is this user's alone (#5134)
     try:
-        text = (store / _MANIFEST).read_text(encoding="utf-8")
+        text = _modes.read_private_journal(store / _MANIFEST)
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"journal manifest unreadable: {exc}") from exc
     try:
@@ -920,8 +920,8 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     """``(deploy root, workspace)`` an abandoned store names, or ``None`` if unreadable."""
     # RecursionError: a deeply nested header is unreadable; replay keeps and names it.
     with contextlib.suppress(OSError, ValueError, UnicodeDecodeError, RecursionError):
-        with open(store / _MANIFEST, encoding="utf-8") as handle:
-            header = json.loads(handle.readline())
+        _modes.require_private_store(store)  # validated before any open (#5134)
+        header = json.loads(_modes.read_private_journal(store / _MANIFEST, first_line=True))
         if isinstance(header, dict):
             root, workspace = header.get("root"), header.get("workspace")
             if isinstance(root, str) and isinstance(workspace, str):

@@ -253,6 +253,29 @@ def require_private_store(store: Path) -> None:
             raise ValueError(NOT_PRIVATE)
 
 
+def read_private_journal(path: Path, *, first_line: bool = False) -> str:
+    """Read the journal *path* without following a link or blocking on a FIFO.
+
+    The opened file itself must be a regular file this user owns with no group or other
+    write; anything else raises ``ValueError(NOT_PRIVATE)`` before a byte is read.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags | getattr(os, "O_BINARY", 0))
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.EMLINK):  # a link (EMLINK on FreeBSD)
+            raise ValueError(NOT_PRIVATE) from None
+        raise
+    with os.fdopen(fd, "rb") as handle:
+        st = os.fstat(handle.fileno())
+        if not stat.S_ISREG(st.st_mode) or (
+            os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & 0o022)
+        ):
+            raise ValueError(NOT_PRIVATE)
+        data = handle.readline() if first_line else handle.read()
+    return data.decode("utf-8")
+
+
 def for_destination(path: Path, mode: int | dict[str, int], copy: Path) -> int | dict[str, int]:
     """The mode to give a restore: a path recreated from absence is capped by the umask."""
     if os.name == "nt" or os.path.lexists(path):
