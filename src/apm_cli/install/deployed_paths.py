@@ -64,13 +64,19 @@ def deployed_path_entry(
     target_path: Path,
     project_root: Path,
     targets: Any,
+    resolved_candidate: Path | None = None,
+    resolved_root: Path | None = None,
 ) -> str:
-    """Return the compatibility path view produced by the canonical codec."""
+    """Return the compatibility path view produced by the canonical codec.
+
+    A caller that resolved *target_path* and *project_root* within its own
+    call passes them so they are not resolved again.
+    """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
-    resolved: list[Path] = []
+    resolved: list[Path] = [] if resolved_candidate is None else [resolved_candidate]
 
     def _resolved_candidate() -> Path:
         # Resolved lazily, once per call (external-root targets never need it).
@@ -111,6 +117,7 @@ def deployed_path_entry(
                     target=_t,
                     scope=InstallScope.PROJECT,
                     candidate_resolved=True,
+                    resolved_root=resolved_root,
                 )
             except RuntimeError:
                 continue

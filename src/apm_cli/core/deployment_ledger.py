@@ -580,7 +580,7 @@ class DeploymentMaterializationSession:
                 (
                     DeploymentRecord(locator, (owner,), owner, content_hash),
                     resolve_path(path).as_posix(),
-                    deployed_path_entry(path, self.root, targets),
+                    deployed_path_entry(path, self.root, targets, candidate, roots(self.root)),
                 )
             )
         for record, physical, value in prepared:
