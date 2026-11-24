@@ -233,18 +233,21 @@ def append_private(path: Path, text: str) -> None:
 def require_private_store(store: Path) -> None:
     """Raise ``ValueError`` unless the store chain is private to this user.
 
-    APM_HOME, the install-snapshots directory, the store and its journal must each be
-    a real directory or regular file (never a link), and on POSIX owned by this user
-    with no group or other write. APM_HOME may be group writable (a user-private
-    group's umask), never other writable.
+    The install-snapshots directory and the store must each be a real directory and the
+    journal a regular file (never a link), on POSIX owned by this user with no group or
+    other write. APM_HOME may be a link (a dotfiles home): its target must be a directory
+    this user owns, which may be group writable (a user-private group's umask), never
+    other writable.
     """
-    chain = ((store.parent.parent, 0o002), (store.parent, 0o022), (store, 0o022))
-    for path, forbidden in (*chain, (store / _MANIFEST, 0o022)):
+    home = (store.parent.parent, os.stat, stat.S_ISDIR, 0o002)
+    dirs = [(path, os.lstat, stat.S_ISDIR, 0o022) for path in (store.parent, store)]
+    journal = (store / _MANIFEST, os.lstat, stat.S_ISREG, 0o022)
+    for path, read, is_kind, forbidden in (home, *dirs, journal):
         try:
-            st = os.lstat(path)
+            st = read(path)
         except FileNotFoundError:
             continue
-        if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+        if not is_kind(st.st_mode):
             raise ValueError(NOT_PRIVATE)
         if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & forbidden):
             raise ValueError(NOT_PRIVATE)
