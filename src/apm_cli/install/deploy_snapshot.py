@@ -119,6 +119,7 @@ class DeployJournal:
         # With a deploy root every unit is also written to the store's
         # manifest, so the next install can replay a journal a kill abandoned.
         self.root = Path(os.path.abspath(root)) if root is not None else None
+        self.contain = self.root  # rollback-only containment; a fast apply sets its project
         # The metadata workspace (lockfile directory) whose ledger vouches for it.
         self.workspace = Path(os.path.abspath(workspace or root or store_parent))
         self.store: Path | None = None
@@ -139,7 +140,7 @@ class DeployJournal:
 
     def _store(self) -> Path:
         if self.store is None:
-            self.store_parent.mkdir(parents=True, exist_ok=True)
+            _modes.private_dir(self.store_parent)
             self.store = Path(tempfile.mkdtemp(prefix=_STORE_PREFIX, dir=self.store_parent))
             if self.root is not None:
                 header = {
@@ -155,8 +156,7 @@ class DeployJournal:
     def _append_line(self, line: dict[str, Any]) -> None:
         if self.store is None:
             raise RuntimeError("no store to write the journal manifest to")
-        with open(self.store / _MANIFEST, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, sort_keys=True) + "\n")
+        _modes.append_private(self.store / _MANIFEST, json.dumps(line, sort_keys=True) + "\n")
 
     def _relative(self, path: Path) -> tuple[str, str]:
         """``(base, path)``: *path* as POSIX under APM home or the deploy root.
@@ -286,16 +286,28 @@ class DeployJournal:
         with self._lock:
             units = list(reversed(self._units))
         for unit in units:
+            if self._crosses_link(unit.path):
+                issues.append((unit.path, "kept: a parent directory is a symbolic link"))
+                continue
             try:
                 self._restore_unit(unit)
             except OSError as exc:
                 issues.append((unit.path, f"could not restore: {exc}"))
-        remove_empty_directories(a for unit in units for a in unit.absent_ancestors)
+        remove_empty_directories(
+            a for unit in units for a in unit.absent_ancestors if not self._crosses_link(a)
+        )
         if issues and self.store is not None:
             issues.append((self._retain(), "pre-install copies retained here for recovery"))
         else:
             self.discard()
         return issues
+
+    def _crosses_link(self, path: Path) -> bool:
+        """Whether a directory between *path* and its deploy root (or APM home) is a link."""
+        for base in (self.contain, self.store_parent.parent):
+            if base is not None and path.parent.is_relative_to(base):
+                return has_symlink_component(base, path.parent)
+        return False
 
     def _retain(self) -> Path:
         """Rename the store so no later install reaps the copies a user still needs."""
@@ -344,17 +356,17 @@ class DeployJournal:
 
 
 def lockfile_identity(text: str) -> str:
-    """Identify a lockfile document by its content, not its formatting.
-
-    A staged document the commit skipped as unchanged, or wrote with other
-    line endings, has the identity of the lockfile on disk.
-    """
+    """Identify a lockfile by content: other line endings keep the on-disk identity."""
     import yaml
 
+    from apm_cli.deps.lockfile_container import parse_lockfile_text
     from apm_cli.utils.yaml_io import load_yaml_str
 
     try:
-        canonical = json.dumps(load_yaml_str(text), sort_keys=True, default=str)
+        try:  # Owner's memoized parse; refused or non-JSON-native text keeps the old identity.
+            canonical = json.dumps(parse_lockfile_text(text), sort_keys=True)
+        except Exception:
+            canonical = json.dumps(load_yaml_str(text), sort_keys=True, default=str)
     except (yaml.YAMLError, ValueError, TypeError, RecursionError):
         canonical = text.replace("\r\n", "\n")
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -408,8 +420,9 @@ class _Replay:
 
 def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
     """Parse ``journal.jsonl``; raise ``ValueError`` when it is not a journal."""
+    _modes.require_private_store(store)  # the store is this user's alone (#5134)
     try:
-        text = (store / _MANIFEST).read_text(encoding="utf-8")
+        text = _modes.read_private_journal(store / _MANIFEST)
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"journal manifest unreadable: {exc}") from exc
     try:
@@ -700,15 +713,15 @@ def _apply(unit: _Replay) -> None:
     if unit.copy is None:
         raise OSError("no journal copy to restore from")
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Beside its destination, so it gets every recorded mode before the rename.
-    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"
+    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"  # moded before the rename
     try:
         _modes.stage_private(unit.copy, staged, unit.kind, _read_no_follow)
         written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
         if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
-        _modes.apply_entry_modes(staged, unit.mode)
-        _modes.apply_own_mode(staged, unit.mode)
+        mode = _modes.for_destination(path, unit.mode, unit.copy)  # umask if recreated
+        _modes.apply_entry_modes(staged, mode)
+        _modes.apply_own_mode(staged, mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)
@@ -906,8 +919,8 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     """``(deploy root, workspace)`` an abandoned store names, or ``None`` if unreadable."""
     # RecursionError: a deeply nested header is unreadable; replay keeps and names it.
     with contextlib.suppress(OSError, ValueError, UnicodeDecodeError, RecursionError):
-        with open(store / _MANIFEST, encoding="utf-8") as handle:
-            header = json.loads(handle.readline())
+        _modes.require_private_store(store)  # validated before any open (#5134)
+        header = json.loads(_modes.read_private_journal(store / _MANIFEST, first_line=True))
         if isinstance(header, dict):
             root, workspace = header.get("root"), header.get("workspace")
             if isinstance(root, str) and isinstance(workspace, str):

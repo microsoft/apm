@@ -1141,7 +1141,7 @@ from the following projects:
 
 ## Component. GitPython
 
-- Version requirement: `>=3.1.0`
+- Version requirement: `>=3.1.41`
 - Upstream: https://github.com/gitpython-developers/GitPython
 - SPDX: `BSD-3-Clause`
 

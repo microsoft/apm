@@ -298,7 +298,7 @@ def test_a_tampered_record_with_a_relative_or_traversing_path_is_ignored(
     config.parent.mkdir(parents=True)
     config.write_text(_SKELETON, encoding="utf-8")
     _apm_writes(config, _WITH_ENTRY, manifest_root=project)  # recorded as the user's
-    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store = _holding(apm_home, config)
     data = json.loads(store.read_text(encoding="utf-8"))
     created = {"origin": "created"}
     data["files"] += [
@@ -368,12 +368,12 @@ def test_a_converged_write_leaves_the_record_store_untouched(tmp_path, apm_home)
     project = tmp_path / "project"
     config = project / ".mcp.json"
     _apm_writes(config, _WITH_ENTRY, manifest_root=project)
-    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
-    before = (store.stat().st_ino, store.read_bytes())
+    before = _store_files(apm_home)
 
     _apm_writes(config, _WITH_ENTRY, manifest_root=project)
 
-    assert (store.stat().st_ino, store.read_bytes()) == before
+    assert _store_files(apm_home) == before
+    assert [path.read_bytes() for path in before] == [state[2] for state in before.values()]
     assert config_file_origin(config) is Origin.CREATED
 
 
@@ -602,7 +602,11 @@ def test_a_unc_record_survives_another_projects_save(tmp_path, apm_home) -> None
 
     _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)
 
-    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    rows = [
+        stored
+        for path in store.parent.glob("*.json")
+        for stored in json.loads(path.read_text(encoding="utf-8")).get("files", [])
+    ]
     assert row in rows, rows
 
 
@@ -741,3 +745,413 @@ def test_a_record_turned_into_a_symlink_loop_never_breaks_another_lookup(
 
     assert config_file_origin(other) is not Origin.CREATED
     assert recorded.is_symlink() and other.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_a_users_skeleton_reached_through_a_second_path_is_kept(tmp_path, apm_home) -> None:
+    """#5189: the record is found by the file's identity when its own path is gone.
+
+    A second mount path is modelled with a hard link: the file APM recorded under
+    one path is now reached only through another.
+    """
+    first, second = tmp_path / "mount-a" / "project", tmp_path / "mount-b" / "project"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    config = first / ".mcp.json"
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=first)
+    assert config_file_origin(config) is Origin.PREEXISTING
+    _apm_writes(config, _SKELETON, manifest_root=first)  # APM's cleanup removes its entry
+    try:
+        os.link(config, second / ".mcp.json")
+    except (OSError, NotImplementedError):
+        pytest.skip("hard links are unavailable")
+    config.unlink()
+    before = (second / ".mcp.json").read_bytes()
+
+    assert _apm_empties(second / ".mcp.json", root=second) is False
+    assert (second / ".mcp.json").read_bytes() == before
+
+
+def _store_files(apm_home: Path) -> dict[Path, tuple[int, int, bytes]]:
+    """Every file of the record store: identity, mtime and bytes."""
+    root = apm_home / "deployment-receipts" / "config-files"
+    found = sorted(p for p in root.rglob("*") if p.is_file()) if root.is_dir() else []
+    return {p: (p.stat().st_ino, p.stat().st_mtime_ns, p.read_bytes()) for p in found}
+
+
+def _holding(apm_home: Path, config: Path) -> Path:
+    """The one store file holding *config*'s record."""
+    key = config_file_key(config).encode()
+    found = [path for path, state in _store_files(apm_home).items() if key in state[2]]
+    assert len(found) == 1, found
+    return found[0]
+
+
+def test_a_write_does_not_rewrite_unrelated_records(tmp_path, apm_home) -> None:
+    """Project B's write leaves the store file holding project A's record untouched."""
+    a_config = tmp_path / "a" / ".mcp.json"
+    _apm_writes(a_config, _WITH_ENTRY)
+    a_key = config_file_key(a_config)
+    holding_a = {
+        path: state for path, state in _store_files(apm_home).items() if a_key.encode() in state[2]
+    }
+    assert holding_a, "no store file holds project A's record"
+
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)
+
+    after = _store_files(apm_home)
+    assert {path: after.get(path) for path in holding_a} == holding_a
+    assert all(path.read_bytes() == state[2] for path, state in holding_a.items())
+    assert config_file_origin(tmp_path / "b" / ".mcp.json") is Origin.CREATED
+    assert config_file_origin(a_config) is Origin.CREATED
+
+
+def _v1_reader(apm_home: Path) -> dict:
+    """The record store reader that shipped with layout version 1 (#4959), verbatim in
+    what it accepts: anything else is an unreadable store, which keeps every file."""
+    path = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("version") != 1 or not isinstance(data.get("files"), list):
+        raise ValueError("unknown version or layout")
+    return data
+
+
+def test_an_older_apm_fails_closed_on_the_indexed_store(tmp_path, apm_home) -> None:
+    """Downgrade safety: a version 1 reader never mis-reads the new store as empty or
+    partial (which could delete a user's file); it finds an unknown layout."""
+    _apm_writes(tmp_path / "a" / ".mcp.json", _WITH_ENTRY)
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)
+
+    with pytest.raises(ValueError, match="unknown version or layout"):
+        _v1_reader(apm_home)
+
+
+def test_a_version_1_store_is_read_without_losing_a_record(tmp_path, apm_home) -> None:
+    """Migration: every record of an existing store survives the first write."""
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    users = tmp_path / "users" / ".mcp.json"
+    users.parent.mkdir()
+    users.write_text(_SKELETON, encoding="utf-8")
+    rows = [
+        {"path": config_file_key(users), "origin": "preexisting", "hash": "sha256:" + "0" * 64},
+        {
+            "path": config_file_key(tmp_path / "gone" / ".mcp.json"),
+            "origin": "created",
+            "hash": "sha256:" + "1" * 64,
+        },
+    ]
+    store.write_text(json.dumps({"version": 1, "files": rows}), encoding="utf-8")
+
+    _apm_writes(tmp_path / "new" / ".mcp.json", _WITH_ENTRY)
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(tmp_path / "gone" / ".mcp.json") is Origin.CREATED
+    assert config_file_origin(tmp_path / "new" / ".mcp.json") is Origin.CREATED
+    assert _apm_empties(users, root=tmp_path / "users") is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
+
+
+@contextmanager
+def _killed_at_write(apm_home: Path, after: int) -> Iterator[None]:
+    """The process dies at record store replace number *after* + 1 (nothing of it lands)."""
+    real = os.replace
+    store = apm_home / "deployment-receipts" / "config-files"
+    calls = {"n": 0}
+
+    def replace(source, destination, *args, **kwargs):
+        if Path(destination).parent == store:
+            calls["n"] += 1
+            if calls["n"] > after:
+                raise OSError("killed")
+        return real(source, destination, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "replace", replace)
+        yield
+
+
+def test_a_kill_mid_write_loses_no_saved_record(tmp_path, apm_home) -> None:
+    """Per-write durability: a record already saved survives a kill in a later save."""
+    first = tmp_path / "project" / ".mcp.json"
+    _apm_writes(first, _WITH_ENTRY)
+    second = tmp_path / "project" / "other.json"
+    with _killed_at_write(apm_home, after=0):  # the config write lands, its record does not
+        _apm_writes(second, _WITH_ENTRY)
+
+    assert second.read_text(encoding="utf-8") == _WITH_ENTRY
+    assert config_file_origin(first) is Origin.CREATED
+    assert _apm_empties(first, root=tmp_path / "project") is True
+    assert not first.exists()
+
+
+def _version_1_store(tmp_path: Path, apm_home: Path) -> tuple[Path, Path]:
+    """A layout 1 store recording a user's file and an APM file in two projects."""
+    users = tmp_path / "users" / ".mcp.json"
+    apms = tmp_path / "apms" / ".mcp.json"
+    for config, text in ((users, _SKELETON), (apms, _WITH_ENTRY)):
+        config.parent.mkdir()
+        config.write_bytes(text.encode("utf-8"))  # the bytes the seeded digest names
+    rows = [
+        {"path": config_file_key(users), "origin": "preexisting", "hash": "sha256:" + "0" * 64},
+        {"path": config_file_key(apms), "origin": "created", "hash": _sha(_WITH_ENTRY)},
+    ]
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    store.write_text(json.dumps({"version": 1, "files": rows}), encoding="utf-8")
+    return users, apms
+
+
+def _sha(text: str) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize("after", [0, 1, 2, 3])
+def test_an_interrupted_migration_leaves_the_old_store_whole(tmp_path, apm_home, after) -> None:
+    """Killed after *after* store writes of the migration: the layout 1 store is still
+    the whole store (a version 1 reader reads it), and the next write migrates it."""
+    users, apms = _version_1_store(tmp_path, apm_home)
+    old = (apm_home / "deployment-receipts" / "config-files" / "records.json").read_bytes()
+    with _killed_at_write(apm_home, after=after):
+        _apm_writes(tmp_path / "new" / ".mcp.json", _WITH_ENTRY)
+
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    # Three record files, then the marker: every kill point lands before the marker.
+    assert store.read_bytes() == old
+    assert len(_v1_reader(apm_home)["files"]) == 2
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(apms) is Origin.CREATED
+
+    _apm_writes(tmp_path / "later" / ".mcp.json", _WITH_ENTRY)
+
+    with pytest.raises(ValueError, match="unknown version or layout"):
+        _v1_reader(apm_home)
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert _apm_empties(users, root=tmp_path / "users") is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
+    assert _apm_empties(apms, root=tmp_path / "apms") is True
+    assert not apms.exists()
+
+
+def test_a_malformed_record_file_keeps_the_file_and_vouches_for_nothing(tmp_path, apm_home) -> None:
+    """An unreadable directory record file fails closed like an unreadable store."""
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    held = config.read_bytes()
+    _holding(apm_home, config).write_text("{", encoding="utf-8")
+
+    assert _apm_empties(config, root=tmp_path / "project") is False
+    assert config.read_bytes() == held
+    assert vouches_for_current_bytes(config, b"") is False
+    assert config_file_origin(config) is None
+
+
+def test_a_lost_record_file_keeps_the_users_skeleton(tmp_path, apm_home) -> None:
+    """A listed directory record file that is gone fails closed: the user's empty
+    skeleton it vouched for is kept, never taken as unrecorded (#5037)."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)  # the index stays
+    _holding(apm_home, config).unlink()
+
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON
+    assert config_file_origin(config) is None
+
+
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="needs non-UTF-8 file names")
+def test_a_users_config_under_a_non_utf8_directory_name_keeps_its_record(
+    tmp_path, apm_home
+) -> None:
+    """A POSIX directory name that is not UTF-8 (surrogate-escaped) has a record file."""
+    project = tmp_path / os.fsdecode(b"project-\xff")
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_two_first_writers_keep_each_others_records(tmp_path, apm_home) -> None:
+    """Two installs that both find no store yet: neither drops the other's record file."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    first_config = tmp_path / "a" / ".mcp.json"
+    second_config = tmp_path / "b" / ".mcp.json"
+    first, second = _Store.load(), _Store.load()  # both see no store yet
+    first.files[config_file_key(first_config)] = {"origin": "preexisting", "hash": "sha256:1"}
+    first.save()
+    second.files[config_file_key(second_config)] = {"origin": "preexisting", "hash": "sha256:2"}
+    second.save()
+
+    assert config_file_origin(first_config) is Origin.PREEXISTING
+    assert config_file_origin(second_config) is Origin.PREEXISTING
+    held = [path.read_text(encoding="utf-8") for path in _store_files(apm_home)]
+    assert any(config_file_key(first_config) in text for text in held), held
+
+
+def test_record_files_left_by_a_removed_store_are_never_read(tmp_path, apm_home) -> None:
+    """A store removed by hand (its index gone) starts empty: leftover record files are
+    another generation's and prove nothing."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(config, _WITH_ENTRY, manifest_root=config.parent)
+    assert config_file_origin(config) is Origin.PREEXISTING
+    (apm_home / "deployment-receipts" / "config-files" / "records.json").unlink()
+
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)
+
+    assert config_file_origin(config) is None
+    assert config.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_two_migrations_of_one_layout_1_store_keep_every_record(tmp_path, apm_home) -> None:
+    """Two writers that both read the layout 1 store migrate it once: the second joins the
+    first's index, so neither's record files are hidden under another generation."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    users, apms = _version_1_store(tmp_path, apm_home)
+    first_config = tmp_path / "first" / ".mcp.json"
+    second_config = tmp_path / "second" / ".mcp.json"
+    first, second = _Store.load(), _Store.load()  # both read layout 1
+    first.files[config_file_key(first_config)] = {"origin": "preexisting", "hash": "sha256:1"}
+    first.save()
+    second.files[config_file_key(second_config)] = {"origin": "preexisting", "hash": "sha256:2"}
+    second.save()
+
+    assert config_file_origin(first_config) is Origin.PREEXISTING
+    assert config_file_origin(second_config) is Origin.PREEXISTING
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(apms) is Origin.CREATED
+    held = [path.read_text(encoding="utf-8") for path in _store_files(apm_home)]
+    assert any(config_file_key(first_config) in text for text in held), held
+
+
+def test_an_unfinished_index_never_blocks_later_writes(tmp_path, apm_home) -> None:
+    """A kill while the index is created leaves no empty index: the marker is published
+    whole or not at all, so the next write is recorded."""
+    real_dumps = json.dumps
+
+    def killed(obj, *args, **kwargs):
+        if isinstance(obj, dict) and "layout" in obj:
+            raise KeyboardInterrupt  # the process dies while it writes the index
+        return real_dumps(obj, *args, **kwargs)
+
+    first = tmp_path / "first" / ".mcp.json"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(json, "dumps", killed)
+        with pytest.raises(KeyboardInterrupt):
+            _apm_writes(first, _WITH_ENTRY)
+
+    second = tmp_path / "second" / ".mcp.json"
+    _apm_writes(second, _WITH_ENTRY)
+
+    assert config_file_origin(second) is Origin.CREATED
+    assert second.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_a_record_file_of_another_generation_is_never_deleted(tmp_path, apm_home) -> None:
+    """A lookup that reads another generation's record file and then saves other records
+    leaves that file in place."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    old = tmp_path / "old" / ".mcp.json"
+    _apm_writes(old, _WITH_ENTRY)
+    old_file = _holding(apm_home, old)
+    marker = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    data = json.loads(marker.read_text(encoding="utf-8"))
+    # Another generation's index never lists this generation's record files.
+    marker.write_text(json.dumps({**data, "generation": "another", "shards": []}), encoding="utf-8")
+
+    store = _Store.load()
+    store.lookup(old)  # reads the old generation's file, which proves nothing now
+    store.files[config_file_key(tmp_path / "new" / ".mcp.json")] = {"origin": "created"}
+    store.save()
+
+    assert old_file.is_file()
+    assert config_file_origin(old) is None
+
+
+def test_a_busy_apm_home_names_the_other_apm_and_leaves_the_users_file(
+    tmp_path, apm_home, monkeypatch
+) -> None:
+    """Another apm holding APM_HOME's lock: the write is refused with that reason, not a
+    request to remove the records."""
+    import filelock
+
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own file
+
+    def busy(self, *args, **kwargs):
+        raise filelock.Timeout(self.lock_file)
+
+    monkeypatch.setattr(filelock.FileLock, "acquire", busy)
+    with pytest.raises(OSError, match="another apm") as refused:
+        _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+
+    assert "remove the config file records" not in str(refused.value)
+    assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_a_journal_first_touch_entry_survives_migration_to_record_files(tmp_path, apm_home) -> None:
+    """#5051 x #5037: a layout 1 store's {"prior", "journal"} history entry is carried into
+    the record files, so replay of that journal still vouches for its first bytes."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(_WITH_ENTRY.encode("utf-8"))
+    first = b'{"mcpServers": {}}\n'
+    key = config_file_key(config)
+    v1 = {
+        "version": 1,
+        "files": [{"path": key, "origin": "created", "hash": _sha(_WITH_ENTRY)}],
+        "history": {
+            key: {
+                "prior": _sha(first.decode("utf-8")),
+                "journal": "install-1",
+            }
+        },
+    }
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    store.write_text(json.dumps(v1), encoding="utf-8")
+
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)  # migrates the store
+
+    assert json.loads(store.read_text(encoding="utf-8"))["version"] == 2
+    assert vouches_for_current_bytes(config, first, journal="install-1") is True
+    assert vouches_for_current_bytes(config, first, journal="install-2") is False
+
+
+def test_a_file_whose_identity_cannot_be_read_is_kept(
+    tmp_path, apm_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5189 review: a stat or read failure keeps the file; it never enables the fallback."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)  # a record store exists
+    real_read = Path.read_bytes
+
+    def unreadable(self: Path) -> bytes:
+        if self == config:
+            raise PermissionError("denied")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", unreadable)
+
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON

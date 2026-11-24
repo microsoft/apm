@@ -189,6 +189,12 @@ ORPHANED_PACKAGES = _entry(
     "orphaned-packages", "apm install", "remove packages apm.yml no longer declares"
 )
 RESYNC_DEPLOYED = _entry("drift-resync", "apm install", "re-sync deployed files with the lockfile")
+CLAUDE_MARKETPLACE_TRUST = _entry(
+    "claude-marketplace-trust",
+    "apm install",
+    "list the project's marketplace for Claude Code",
+    before="open the folder in Claude and accept the trust prompt",
+)
 RESYNC_UNRECORDED = _entry(
     "drift-unrecorded",
     "apm install",
@@ -438,7 +444,8 @@ MARKETPLACE_ORIGIN_RESTORE = _entry(
     "marketplace-origin-restore",
     "apm marketplace add {source} --name {name}",
     "keep the locked marketplace (add --ref or --path if the original registration used them)",
-    before="verify that source first",
+    # A rebound name may be credential-bound, so it is freed before the re-add (#5264).
+    before="verify that source first, then run 'apm marketplace remove {name} --yes'",
 )
 MARKETPLACE_ORIGIN_SWITCH = _entry(
     "marketplace-origin-switch",

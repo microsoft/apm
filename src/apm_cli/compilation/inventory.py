@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.paths import relative_to
 
 _UNIVERSALLY_SKIPPED_DIRS = frozenset(
     {
@@ -75,7 +76,7 @@ class CompileInventory:
                 and not should_exclude(path / name, root, safe_patterns)
             )
             child_dirs[:] = admitted_children
-            relative_path = path.relative_to(root)
+            relative_path = relative_to(path, root)
             directories.append(
                 InventoryDirectory(
                     path=path,
@@ -104,7 +105,7 @@ class CompileInventory:
         except OSError:
             resolved = path.absolute()
         try:
-            resolved.relative_to(self.root)
+            relative_to(resolved, self.root)
         except ValueError:
             return None
         current = resolved
@@ -129,7 +130,7 @@ class CompileInventory:
         """Return every recorded file beneath an inventory directory."""
         try:
             resolved_directory = directory.resolve()
-            relative_directory = resolved_directory.relative_to(self.root)
+            relative_directory = relative_to(resolved_directory, self.root)
         except (OSError, ValueError):
             return ()
         start = self._directory_positions.get(resolved_directory)

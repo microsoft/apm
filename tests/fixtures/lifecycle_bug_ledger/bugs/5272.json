@@ -1,0 +1,15 @@
+{
+  "issue": 5272,
+  "fixed_in": "Unreleased",
+  "summary": "When apm install failed in dependency resolution, the resolution error and its remedy printed twice: once as its own line, then again inside the 'Failed to install APM dependencies' summary.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_plugin_integration.py::TestPluginIntegration::test_install_fails_on_unresolvable_marketplace_dependency",
+    "tests/unit/install/test_errors.py::test_a_resolution_error_is_printed_once_with_its_remedy"
+  ]
+}

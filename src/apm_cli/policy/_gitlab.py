@@ -697,6 +697,9 @@ def _authenticated_gitlab_request(
     project_path: str,
 ) -> requests.Response:
     """Run the GitLab REST request through the selected AuthResolver credential."""
+    from ..core.policy_fetch_ledger import note_fetch_attempt
+
+    note_fetch_attempt("gitlab")  # before the credential lookup
     from ..core.auth import AuthResolver
     from ..core.auth_outcome import AuthAttemptFailed
 
