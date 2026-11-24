@@ -147,10 +147,28 @@ class FrozenInstallError(RuntimeError):
         self.tip = tip
 
 
+def symlinked_deploy_cause(error: BaseException) -> Exception | None:
+    """The symlinked-deploy refusal behind *error*, however it was wrapped (#5287)."""
+    from apm_cli.utils.path_security import SymlinkedDeployError
+
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, SymlinkedDeployError):
+            return current
+        seen.add(id(current))
+        # An implicit context counts only when not suppressed (``raise ... from None``).
+        context = None if current.__suppress_context__ else current.__context__
+        current = current.__cause__ or context
+    return None
+
+
 def install_failure_message(error: Exception) -> str:
     """Keep canonical lockfile guidance intact and frame other install failures."""
     from apm_cli.deps.lockfile import LockfileConflictError, LockfileRefusal
 
+    if (refusal := symlinked_deploy_cause(error)) is not None:
+        return str(refusal)
     return (
         str(error)
         if isinstance(error, (LockfileConflictError, LockfileRefusal))
@@ -187,6 +205,7 @@ def render_apm_dependency_failure(
     """
     from apm_cli.claude_plugins.admission import ClaudeNativePluginError
     from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+    from apm_cli.utils.path_security import SymlinkedDeployError
 
     if isinstance(error, AuthenticationError):
         log_authentication_error(error, logger)
@@ -194,7 +213,13 @@ def render_apm_dependency_failure(
     if isinstance(error, FrozenInstallError):
         log_frozen_install_error(error, logger)
         return InstallFailureAlreadyRendered(str(error))
-    verbatim = (CopilotSettingsCollisionError, ClaudeNativePluginError, RequiredIntegrationError)
+    error = symlinked_deploy_cause(error) or error
+    verbatim = (
+        CopilotSettingsCollisionError,
+        ClaudeNativePluginError,
+        RequiredIntegrationError,
+        SymlinkedDeployError,
+    )
     if isinstance(error, verbatim):
         logger.error(str(error))
         if detail := getattr(error, "detail", None):

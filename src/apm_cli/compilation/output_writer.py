@@ -38,7 +38,7 @@ from pathlib import Path
 
 from ..security.gate import BLOCK_POLICY, ScanVerdict, SecurityGate
 from ..utils.atomic_io import atomic_write_text, umask_file_mode
-from ..utils.path_security import has_symlink_component
+from ..utils.path_security import has_symlink_component, symlinked_deploy_refusal
 from .build_id import stabilize_build_id
 from .constants import BUILD_ID_PLACEHOLDER
 
@@ -82,10 +82,7 @@ def _reject_linked_parent(base_dir: Path, path: Path) -> None:
     if root is not None and has_symlink_component(root, target.parent):
         # Lexical relative path: resolving would follow the link being reported.
         shown = target.relative_to(root).as_posix()
-        raise CompiledOutputLinkError(
-            f"Refusing deployment through a symlinked path component: {shown}. "
-            "Replace the symlink with a regular directory or remove it, then retry."
-        )
+        raise CompiledOutputLinkError(symlinked_deploy_refusal(shown))
 
 
 class CompiledOutputWriter:
