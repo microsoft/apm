@@ -112,7 +112,7 @@ def _create_xdg_global(home: Path, env: dict[str, str]) -> None:
     ids=lambda fn: fn.__name__.lstrip("_"),
 )
 def test_a_config_change_mid_invocation_is_seen_like_a_fresh_probe(world, change) -> None:
-    home, env, probes, real_probe = world
+    home, env, _probes, real_probe = world
     (home / ".gitconfig").write_text(
         '[url "https://a.example/"]\n\tinsteadOf = gh:\n[include]\n\tpath = inc.cfg\n'
     )
@@ -121,7 +121,8 @@ def test_a_config_change_mid_invocation_is_seen_like_a_fresh_probe(world, change
         git_env._read_effective_git_config(env)  # the include is kept from here
         change(home, env)
         after = git_env._read_effective_git_config(env)
-    assert _rewrites(after) == _rewrites(_fresh(real_probe, env))
+    fresh = _rewrites(_fresh(real_probe, env))
+    assert _rewrites(after) == fresh
     assert _rewrites(after) != _rewrites(before)
 
 
@@ -149,7 +150,8 @@ def test_a_config_write_by_apm_is_seen_by_the_next_probe(world, tmp_path: Path) 
         probes.clear()
         after = git_env._read_effective_git_config(env, git_dir=repo)
     assert len(probes) == 1
-    assert _rewrites(after) == _rewrites(_fresh(real_probe, env, git_dir=repo))
+    fresh = _rewrites(_fresh(real_probe, env, git_dir=repo))
+    assert _rewrites(after) == fresh
     assert ("https://g.example/", "gg:") in _rewrites(after)
 
 
@@ -170,11 +172,12 @@ def test_killed_control_without_the_content_hash_a_same_size_edit_goes_stale(
         git_env._read_effective_git_config(env)
         _edit_global_same_size(home, env)
         stale = git_env._read_effective_git_config(env)
-    assert _rewrites(stale) != _rewrites(_fresh(real_probe, env))
+    fresh = _rewrites(_fresh(real_probe, env))
+    assert _rewrites(stale) != fresh
 
 
 def test_a_failed_probe_is_never_kept(world, monkeypatch: pytest.MonkeyPatch) -> None:
-    _home, env, probes, real_probe = world
+    _home, env, _probes, real_probe = world
     calls: list[int] = []
 
     def failing(*args, **kwargs):

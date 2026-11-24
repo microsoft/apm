@@ -147,7 +147,10 @@ def git_config_paths(env: Mapping[str, str]) -> tuple[str, ...] | None:
 
     git = get_git_executable()
     paths: list[str] = []
-    for name in ("GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL"):
+    # Git reads no system file under a true GIT_CONFIG_NOSYSTEM, and ``git var``
+    # then refuses to name one.
+    no_system = env.get("GIT_CONFIG_NOSYSTEM", "").strip().lower() in {"1", "true", "yes", "on"}
+    for name in ("GIT_CONFIG_GLOBAL",) if no_system else ("GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL"):
         try:
             result = _run_git_config_probe(
                 [git, "var", name],
