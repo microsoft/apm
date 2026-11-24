@@ -138,6 +138,22 @@ def _package_files(
     package_path: Path, *, native: bool = False, skip_roots: tuple[str, ...] = ()
 ) -> list[Path]:
     """Select canonical payload paths without following publisher symlinks."""
+    from apm_cli.utils import research_memo
+
+    if research_memo.eligible(Path(package_path) / "x"):
+        key = ("walk", str(package_path), native, skip_roots)
+        return list(
+            research_memo.memo_hash(
+                key,
+                lambda: _package_files_uncached(package_path, native=native, skip_roots=skip_roots),
+            )
+        )
+    return _package_files_uncached(package_path, native=native, skip_roots=skip_roots)
+
+
+def _package_files_uncached(
+    package_path: Path, *, native: bool = False, skip_roots: tuple[str, ...] = ()
+) -> list[Path]:
     regular_files: list[Path] = []
     excluded = {".git"} if native else _EXCLUDED_DIRS
     for item in package_path.rglob("*"):

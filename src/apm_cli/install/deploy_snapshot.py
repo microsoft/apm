@@ -319,6 +319,7 @@ class DeployJournal:
         )
         retained = self.store.with_name(_RETAINED_PREFIX + self.store.name[len(_STORE_PREFIX) :])
         try:
+            _modes.close_private_journals()
             self.store.rename(retained)
         except OSError:
             return self.store
@@ -350,6 +351,7 @@ class DeployJournal:
         store, self.store = self.store, None
         if store is None:
             return
+        _modes.close_private_journals()
         shutil.rmtree(store, ignore_errors=True)
         with contextlib.suppress(OSError):
             store.parent.rmdir()
@@ -739,6 +741,7 @@ def _keep(store: Path) -> Path:
         )
     retained = store.with_name(_RETAINED_PREFIX + store.name[len(_STORE_PREFIX) :])
     try:
+        _modes.close_private_journals()
         store.rename(retained)
     except OSError:
         return store
@@ -861,6 +864,7 @@ def _replay_store(
         raise JournalReplayError(_keep(store), [(str(store), str(exc))], applied=False) from None
     if commit is not None and commit == committed():
         # The killed install's lockfile reached disk: its deployment is committed.
+        _modes.close_private_journals()
         shutil.rmtree(store, ignore_errors=True)
         return ReplayOutcome()
     try:
@@ -884,6 +888,7 @@ def _replay_store(
     if kept:
         # The copies of what was kept stay available for recovery.
         return ReplayOutcome(len(apply), tuple(kept), (_keep(store),))
+    _modes.close_private_journals()
     shutil.rmtree(store, ignore_errors=True)
     return ReplayOutcome(len(apply))
 
@@ -985,6 +990,7 @@ def replay_abandoned_journals(
         if not os.path.lexists(store / _MANIFEST):
             # An in-memory journal (a fast apply, or an older APM) recorded
             # nothing replay can prove: reclaim it, as every install did before.
+            _modes.close_private_journals()
             shutil.rmtree(store, ignore_errors=True)
             continue
         if not _replays_for(store, root, workspace):

@@ -218,8 +218,30 @@ def private_dir(path: Path) -> None:
             os.chmod(path, stat.S_IMODE(st.st_mode) & ~0o022)
 
 
+_JOURNAL_FDS: dict[str, int] = {}
+
+
+def close_private_journals() -> None:
+    """RESEARCH ONLY: close the cached journal fds (before a store rename or delete)."""
+    while _JOURNAL_FDS:
+        _, fd = _JOURNAL_FDS.popitem()
+        os.close(fd)
+
+
 def append_private(path: Path, text: str) -> None:
     """Append *text* to the journal file *path*, which is only ever this user's to write."""
+    # RESEARCH ONLY: one fd per journal per invocation; each write is still immediate.
+    fd = _JOURNAL_FDS.get(str(path))
+    if fd is not None:
+        os.write(fd, text.encode("utf-8"))
+        return
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
+    if os.name != "nt" and os.fstat(fd).st_mode & 0o077:
+        os.fchmod(fd, 0o600)
+    os.write(fd, text.encode("utf-8"))
+    _JOURNAL_FDS[str(path)] = fd
+    return
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
     try:

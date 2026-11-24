@@ -647,6 +647,16 @@ _READ_FLAGS = (
 
 def _read_regular(rel: str, path: Path) -> tuple[bytes, os.stat_result]:
     """Read *path* only as a regular file: never through a link, a pipe or a device."""
+    from apm_cli.utils import research_memo
+
+    if research_memo.eligible(path):
+        return research_memo.memo_hash(
+            ("regular", str(path)), lambda: _read_regular_uncached(rel, path)
+        )
+    return _read_regular_uncached(rel, path)
+
+
+def _read_regular_uncached(rel: str, path: Path) -> tuple[bytes, os.stat_result]:
     info = os.lstat(path)
     if not stat.S_ISREG(info.st_mode):
         raise CheckoutVerificationError(f"{rel} is not a regular file")
