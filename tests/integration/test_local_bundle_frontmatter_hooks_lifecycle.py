@@ -182,3 +182,60 @@ def test_rendered_bundle_agent_frontmatter_is_judged_by_hooks_then_renderer(
         assert not rendered.exists()
         lock = world.lock(consumer) if (consumer / "apm.lock.yaml").exists() else {}
         assert ".codex/agents/helper.toml" not in ((lock or {}).get("local_deployed_files") or [])
+
+
+_RULE = "---\napplyTo: '**'\ndescription: Style\n---\nUse tabs.\n"
+_BAD_RULES = {
+    "bad-utf8": b"---\napplyTo: '**'\nnote: \xff\n---\nUse tabs.\n",
+    "bad-yaml": b"---\napplyTo: [unclosed\n---\nUse tabs.\n",
+}
+
+
+@pytest.mark.parametrize("approved", [False, True], ids=["unapproved", "approved"])
+@pytest.mark.parametrize("bad", sorted(_BAD_RULES))
+def test_converted_instruction_with_unreadable_frontmatter_deploys_nothing(
+    tmp_path: Path, apm_binary_path: Path, bad: str, approved: bool
+) -> None:
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer = world.isolated.work_root / "rulepkg"
+    write(
+        producer / "apm.yml",
+        "name: rulepkg\nversion: 1.0.0\ndescription: r\nlicense: MIT\ntargets: [claude]\n"
+        "dependencies:\n  apm: []\n",
+    )
+    write(producer / ".apm" / "instructions" / "style.instructions.md", _RULE)
+    (producer / ".claude").mkdir()
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / "out"))
+    bundle = tmp_path / "out" / "rulepkg-1.0.0"
+    (packed,) = [
+        rel
+        for rel in load_yaml(bundle / "apm.lock.yaml")["pack"]["bundle_files"]
+        if rel.endswith(".md")
+    ]
+    (bundle / packed).write_bytes(_BAD_RULES[bad])
+    lock = load_yaml(bundle / "apm.lock.yaml")
+    lock["pack"]["bundle_files"][packed] = hashlib.sha256(_BAD_RULES[bad]).hexdigest()
+    dump_yaml(lock, bundle / "apm.lock.yaml")
+    consumer = _consumer(world, "rule-consumer")
+    if approved:
+        info = detect_local_bundle(bundle)
+        key = local_bundle_approval_key(
+            info.package_id,
+            str(info.plugin_json.get("version") or ""),
+            info.source_dir,
+            info.lockfile,
+        )
+        manifest = load_yaml(consumer / "apm.yml")
+        manifest["executables"] = {"allow": {key: {"hooks": True}}}
+        dump_yaml(manifest, consumer / "apm.yml")
+
+    text = output(world.apm(consumer, "install", str(bundle), "--no-policy"))
+
+    assert "Skipped" in text and "style" in text, text
+    assert list((consumer / ".claude").rglob("style*")) == []
+    lock_path = consumer / "apm.lock.yaml"
+    rows = (
+        (load_yaml(lock_path) or {}).get("local_deployed_files") or [] if lock_path.exists() else []
+    )
+    assert not any("style" in str(row) for row in rows), rows
