@@ -91,6 +91,9 @@ def test_an_instruction_routed_to_agents_md_is_named_until_compiled(
     # A warning in 0.39.0: reported, never failing CI.
     assert audit.returncode == 0, _evidence(audit)
     assert "claude-instructions-compiled" in _text(audit), _evidence(audit)
+    # No policy here: a baseline warning, never "fail once the policy switches".
+    assert "audit --ci will fail on this in v0.40.0 (#5358)" in _text(audit), _evidence(audit)
+    assert "enforcement: warn" not in _text(audit), _evidence(audit)
     assert _NAME in _text(audit), _evidence(audit)
     assert _COPILOT_ONLY not in _text(install) + _text(audit), _evidence(audit)
 

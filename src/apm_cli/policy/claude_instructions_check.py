@@ -61,6 +61,7 @@ def check_claude_instructions_compiled(
         name=CHECK_NAME,
         passed=True,
         warned=True,
+        advisory=True,
         message=f"{len(names)} instruction(s) routed to AGENTS.md are not compiled",
         details=[uncompiled_instructions_warning(names)],
     )
