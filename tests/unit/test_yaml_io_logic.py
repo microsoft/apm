@@ -99,3 +99,28 @@ class TestBoundedMergeHappyPath:
         text = "a: &a\n  x: 1\nbad:\n  <<: [*a, plainscalar]\n"
         with pytest.raises(yaml.YAMLError):
             load_yaml_str(text)
+
+
+@pytest.mark.parametrize("key", ["content", "handler"])
+def test_a_reserved_frontmatter_key_is_a_named_yaml_error(key):
+    """A key that collides with Post's keyword arguments is reported, not a TypeError (#5224)."""
+    import yaml
+
+    from apm_cli.utils.yaml_io import loads_frontmatter
+
+    with pytest.raises(yaml.YAMLError, match=rf"reserved frontmatter key\(s\): '{key}'"):
+        loads_frontmatter(f"---\n{key}: x\nname: a\n---\nbody\n")
+
+
+def test_an_unrelated_frontmatter_type_error_is_re_raised(monkeypatch):
+    """Only the reserved-key collision becomes a YAML error (#5224)."""
+    import frontmatter
+
+    from apm_cli.utils.yaml_io import loads_frontmatter
+
+    def broken(*_args, **_kwargs):
+        raise TypeError("unrelated")
+
+    monkeypatch.setattr(frontmatter, "loads", broken)
+    with pytest.raises(TypeError, match="unrelated"):
+        loads_frontmatter("---\nname: a\n---\nbody\n")
