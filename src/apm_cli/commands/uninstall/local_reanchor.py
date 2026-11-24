@@ -800,14 +800,17 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
 
 
 def _manifest_declares_replacements(apm_yml_path) -> bool:
-    """Whether apm.yml declares a ``replace`` block; unreadable counts as declared."""
+    """Whether apm.yml declares a ``replace`` block.
+
+    An unreadable apm.yml, or one that is not a mapping, counts as declared (#5226).
+    """
     from ...utils.yaml_io import load_yaml
 
     try:
         data = load_yaml(Path(apm_yml_path))
     except Exception:
         return True
-    return bool(data.get("replace")) if isinstance(data, dict) else False
+    return bool(data.get("replace")) if isinstance(data, dict) else True
 
 
 def _refuse_unverifiable_local_survivors(
