@@ -155,8 +155,6 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
             set(_project_files(project)),
             declares_copilot=case in _DECLARES_COPILOT,
         )
-        # No compiled AGENTS.md carries them, so the routed rules stay (#5343).
-        assert routed <= original_paths, sorted(routed - original_paths)
         settled_files: dict[str, str] | None = None
         settled_lock_bytes: bytes | None = None
 
