@@ -76,11 +76,16 @@ def test_a_subclass_resolves_its_own_filesystem_path(tree: Path) -> None:
 
 
 @_LINKS
-def test_a_symlink_loop_still_raises_like_pathlib(tree: Path) -> None:
-    with pytest.raises(RuntimeError):
-        (tree / "loop_a").resolve()
-    with pytest.raises(RuntimeError):
-        resolve_path(tree / "loop_a")
+def test_a_symlink_loop_ends_as_pathlib_ends_it(tree: Path) -> None:
+    """Python 3.12 raises RuntimeError here; 3.13+ returns a path. Match either."""
+
+    def outcome(resolve):
+        try:
+            return resolve(tree / "loop_a")
+        except (OSError, RuntimeError) as exc:
+            return type(exc)
+
+    assert outcome(resolve_path) == outcome(Path.resolve)
 
 
 def test_a_relative_path_matches_pathlib(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
