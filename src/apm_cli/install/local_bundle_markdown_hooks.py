@@ -390,7 +390,7 @@ def retire_unadmitted_bundle_markdown(
     when its bytes match its lock hash exactly; a file with no hash, edited
     outside APM, or unreadable is kept and named.
     """
-    from ..core.remediation import BUNDLE_HOOKS_RETIRED
+    from ..core.remediation import BUNDLE_HOOKS_RETIRED, kept_note
     from ..core.scope import is_user_scope
     from ..deps.lockfile import LockFile, get_lockfile_path
     from .local_bundle_hook_trust import _drop_lock_rows, _relative_value, local_bundle_paths
@@ -401,12 +401,12 @@ def retire_unadmitted_bundle_markdown(
         return []  # the lockfile owner reports a missing or linked lockfile
     scanned = _scan_targets(targets, user_scope=scope is not None and is_user_scope(scope))
     lockfile = LockFile.read(lock_path)
-    recorded = {}
-    if lockfile is not None:
-        recorded = {
-            _relative_value(value, root): digest
-            for value, digest in lockfile.local_deployed_file_hashes.items()
-        }
+    if lockfile is None or not lockfile.local_deployed_files:
+        return []  # bundle Markdown is recorded there; no row, nothing to retire or read
+    recorded = {
+        _relative_value(value, root): digest
+        for value, digest in lockfile.local_deployed_file_hashes.items()
+    }
     lock_paths = local_bundle_paths(lock_dir)
     holdings = _unadmitted(root, scanned, allow_executables, lock_paths, recorded)
     if not holdings:
@@ -438,8 +438,11 @@ def retire_unadmitted_bundle_markdown(
             )
         if kept:
             logger.warning(
-                f"Kept {len(kept)} Markdown file(s) with frontmatter hooks from {label} "
-                f"({holding.reason}) that are edited, unreadable or have no recorded hash; "
-                f"review and remove them by hand: {', '.join(sorted(kept))}."
+                kept_note(
+                    f"{len(kept)} Markdown file(s) with frontmatter hooks from {label} "
+                    f"({holding.reason})",
+                    "they are edited, unreadable or have no recorded hash",
+                    f"Review and remove them by hand: {', '.join(sorted(kept))}.",
+                )
             )
     return retired

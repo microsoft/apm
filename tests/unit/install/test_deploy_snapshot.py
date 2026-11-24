@@ -2049,6 +2049,9 @@ def test_a_rollback_keeps_a_path_whose_parent_became_a_junction(
 
     assert (outside / "a.md").read_bytes() == b"outside\n"
     assert deployed in [path for path, _reason in issues]
+    # The junction itself survives, still naming the outside directory.
+    assert os.lstat(project / "agents").st_file_attributes & 0x400  # a reparse point
+    assert (project / "agents" / "a.md").read_bytes() == b"outside\n"
 
 
 def test_a_rollback_never_cleans_a_directory_through_a_linked_parent(
