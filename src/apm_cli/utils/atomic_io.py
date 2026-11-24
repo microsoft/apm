@@ -19,6 +19,11 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+# Name prefix of the staging file an atomic write creates beside its target.
+# A process killed before ``os.replace`` leaves it behind; deploy journal
+# replay recognizes it next to a write APM began and never sealed (#5395).
+STAGING_PREFIX = "apm-atomic-"
+
 
 def umask_file_mode(path: Path) -> int | None:
     """Return the mode a plain ``open()`` would give ``path`` if created now.
@@ -74,7 +79,7 @@ def atomic_copy(source: Path, destination: Path, *, metadata: bool = True) -> Pa
         mode: int | None = stat.S_IMODE(source_stat.st_mode)
     else:
         mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else umask_file_mode(target)
-    fd, tmp_name = tempfile.mkstemp(prefix="apm-atomic-", dir=str(target.parent))
+    fd, tmp_name = tempfile.mkstemp(prefix=STAGING_PREFIX, dir=str(target.parent))
     try:
         try:
             _stage_copy(source, fd)
@@ -159,7 +164,7 @@ def atomic_write_text(
     *,
     new_file_mode: int | None = None,
     normalize_line_endings: bool = True,
-    temp_prefix: str = "apm-atomic-",
+    temp_prefix: str = STAGING_PREFIX,
     temp_suffix: str = "",
     create_only: bool = False,
     before_publish: Callable[[], bool] | None = None,

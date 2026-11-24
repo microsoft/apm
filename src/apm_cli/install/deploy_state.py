@@ -8,7 +8,9 @@ byte-exact state (content, modes, entries) a seal records.
 from __future__ import annotations
 
 import os
+import posixpath
 import stat
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -101,3 +103,34 @@ def ensure_listable(path: Path) -> None:
 
     for _ in os.walk(path, onerror=fail):
         pass
+
+
+def entry_matches_expected(fingerprint: str, expected: str | None) -> bool:
+    """Whether an entry below a journaled directory holds a pending write's expected bytes."""
+    if expected is None:
+        return True
+    if expected == "dir":
+        return fingerprint.startswith("dir:")
+    return fingerprint.rsplit(":", 1)[0] == expected
+
+
+def interrupted_staging(events: Mapping[str, Any], entries: Mapping[str, str]) -> set[str]:
+    """Staging files an atomic write left when killed before its rename (#5395).
+
+    A regular file named with APM's staging prefix is APM's in-flight state
+    only beside a write APM began in this unit and never sealed (*events*
+    holds a pending tuple in the same directory). Anywhere else it is kept,
+    as any unknown file is.
+    """
+    from apm_cli.utils.atomic_io import STAGING_PREFIX
+
+    pending = {posixpath.dirname(rel) for rel, event in events.items() if isinstance(event, tuple)}
+    return {
+        rel
+        for rel, fingerprint in entries.items()
+        if posixpath.basename(rel).startswith(STAGING_PREFIX)
+        and posixpath.dirname(rel) in pending
+        # A regular file: "<hash>:<mode>", never a directory, link or other entry.
+        and ":" in fingerprint
+        and not fingerprint.startswith(("dir:", "link:"))
+    }
