@@ -118,10 +118,66 @@ def compute_package_hash(
     return framed_digest if framed else legacy
 
 
+# PERF PROTOTYPE (stat-cut): compute the original too and fail loudly on any difference.
+_STAT_DIFFERENTIAL = True
+
+
 def _package_files(
     package_path: Path, *, native: bool = False, skip_roots: tuple[str, ...] = ()
 ) -> list[Path]:
     """Select canonical payload paths without following publisher symlinks."""
+    fast = _package_files_scandir(package_path, native=native, skip_roots=skip_roots)
+    if _STAT_DIFFERENTIAL:
+        slow = _package_files_walk(package_path, native=native, skip_roots=skip_roots)
+        if slow != fast:
+            raise RuntimeError(f"PERF stat-cut differential: _package_files at {package_path}")
+    return fast
+
+
+def _package_files_scandir(
+    package_path: Path, *, native: bool, skip_roots: tuple[str, ...]
+) -> list[Path]:
+    """``_package_files_walk`` from one scandir walk (same order rules, same refusals).
+
+    Pruning an excluded directory (or a skipped root) yields the same set, since
+    every path below it is skipped anyway. Like ``Path.rglob`` (3.12
+    ``Path.walk(follow_symlinks=False)``), a directory link is not descended.
+    """
+    excluded = {".git"} if native else _EXCLUDED_DIRS
+    regular_files: list[Path] = []
+    stack: list[tuple[str, tuple[str, ...]]] = [(os.fspath(package_path), ())]
+    while stack:
+        directory, rel_parts = stack.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            continue  # rglob ignores unreadable directories
+        for entry in entries:
+            parts = (*rel_parts, entry.name)
+            if entry.name in excluded or (not rel_parts and entry.name in skip_roots):
+                continue
+            if entry.is_symlink():
+                if native:
+                    raise PathTraversalError(
+                        f"Native bundle integrity refuses symlink: {package_path.joinpath(*parts)}"
+                    )
+                continue
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+            if is_dir:
+                stack.append((entry.path, parts))
+                continue
+            if entry.is_file() and not (len(parts) == 1 and entry.name in _EXCLUDED_ROOT_FILES):
+                regular_files.append(Path(*parts))
+    return sorted(regular_files, key=lambda path: path.as_posix())
+
+
+def _package_files_walk(
+    package_path: Path, *, native: bool = False, skip_roots: tuple[str, ...] = ()
+) -> list[Path]:
+    """The original walk (kept for the differential)."""
     regular_files: list[Path] = []
     excluded = {".git"} if native else _EXCLUDED_DIRS
     for item in package_path.rglob("*"):

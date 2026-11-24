@@ -50,8 +50,41 @@ def path_state(path: Path) -> dict[str, Any]:
     return dict(OTHER) if os.path.lexists(path) else dict(ABSENT)
 
 
+# PERF PROTOTYPE (stat-cut): compute the original too and fail loudly on any difference.
+_STAT_DIFFERENTIAL = True
+_REPARSE_POINT = 0x400
+
+
 def entry_state(path: Path) -> str:
     """One entry below a journaled directory, as a seal and a fingerprint record it."""
+    fast = _entry_state_lstat(path)
+    if fast is None or _STAT_DIFFERENTIAL:
+        slow = _entry_state_walk(path)
+        if fast is not None and fast != slow:
+            raise RuntimeError(f"PERF stat-cut differential: entry_state at {path}")
+        return slow
+    return fast
+
+
+def _entry_state_lstat(path: Path) -> str | None:
+    """``entry_state`` from one ``lstat``; ``None`` when only the original can answer."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return "absent"
+    except OSError:
+        return None
+    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT:
+        return None  # links and junctions: the original follows them as before
+    if stat.S_ISREG(info.st_mode):
+        return f"{compute_exact_file_hash(path)}:{stat.S_IMODE(info.st_mode)}"
+    if stat.S_ISDIR(info.st_mode):
+        return f"dir:{stat.S_IMODE(info.st_mode)}"
+    return "other"
+
+
+def _entry_state_walk(path: Path) -> str:
+    """The original probe sequence (kept for links and the differential)."""
     if path.is_symlink():
         return f"link:{os.readlink(path)}"
     if path.is_file():
