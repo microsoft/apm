@@ -536,11 +536,9 @@ def _decide_installed_paths(
     for keys in path_keys.values():
         removed_keys.update(keys)
     reparented = _reparented_survivors(lockfile, removed_keys, retained, walk)
-    repaired = (
-        _repaired_survivors(lockfile, retained, walk, reparented)
-        if removed_keys and not unverified and not anchors
-        else []
-    )
+    settled = bool(removed_keys) and not unverified and not anchors
+    repaired = _repaired_survivors(lockfile, retained, walk, reparented) if settled else []
+    direct = _direct_rows(lockfile, walk, repaired) if settled else []
     return OrphanRemovalDecision(
         operation=operation,
         candidate_keys=frozenset(removed_keys),
@@ -560,7 +558,7 @@ def _decide_installed_paths(
             if walk
             else {}
         ),
-        rescued_dev=MappingProxyType({key: key in walk.dev_only for key in repaired}),
+        rescued_dev=MappingProxyType({key: key in walk.dev_only for key in (*repaired, *direct)}),
         reachability=walk,
     )
 
@@ -583,8 +581,36 @@ def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
         for key in retained
         if key in lockfile.dependencies
         and key in walk.reachable_via
-        and lockfile.dependencies[key].resolved_by in gone
+        and (
+            lockfile.dependencies[key].resolved_by in gone
+            or _stale_local_parent(lockfile, walk, key)
+        )
     )
+
+
+def _stale_local_parent(lockfile, walk, key) -> bool:
+    """A local survivor whose recorded parent no longer declares it (#5126).
+
+    Its surviving parent dropped the edge, or its declaring parent was pruned
+    while ``resolved_by`` still names a survivor. It is re-derived only when
+    the walk's nearest parent can record it (see ``reparent_blocker``).
+    """
+    from ..deps.reachability import reparent_blocker
+
+    row = lockfile.dependencies[key]
+    if row.source != "local" or row.replacement is not None or not row.depth or row.depth < 2:
+        return False
+    edges = walk.declaring_edges.get(key, {})
+    parents = {
+        lockfile_parent_identity(lockfile.dependencies[parent], lockfile.replacements)
+        for parent in edges
+        if parent in lockfile.dependencies
+    }
+    declared = {identity for identity, _ in edges.values()}
+    stale = row.resolved_by not in parents or (
+        row.declaring_parent is not None and row.declaring_parent not in declared
+    )
+    return stale and reparent_blocker(lockfile, walk, key) is None
 
 
 def _repaired_survivors(lockfile, retained, walk, reparented) -> list[str]:
@@ -608,6 +634,23 @@ def _repaired_survivors(lockfile, retained, walk, reparented) -> list[str]:
         ):
             repaired.append(key)
     return repaired
+
+
+def _direct_rows(lockfile, walk, repaired) -> list[str]:
+    """Declared rows the walk reached: their dev status is re-derived too (#5126).
+
+    A dev declaration that lost its last production path records ``is_dev``,
+    as a fresh install does. Only alongside a transitive repair's gate.
+    """
+    if walk is None or lockfile is None:
+        return []
+    return sorted(
+        key
+        for key in walk.reachable
+        if key in lockfile.dependencies
+        and key not in repaired
+        and (lockfile.dependencies[key].depth or 1) < 2
+    )
 
 
 def _lock_keys_by_install_path(

@@ -984,6 +984,17 @@ def _retain_alias_anchors(
     )
 
 
+def reparent_blocker(lockfile: LockFile, walk: ReachabilityResult, key: str) -> str | None:
+    """Why prune cannot re-derive *key*'s parent from *walk*, or None when it can (#5126)."""
+    depth = walk.depths.get(key)
+    nearest = [
+        parent
+        for parent in walk.declaring_edges.get(key, {})
+        if depth is not None and walk.depths.get(parent) == depth - 1
+    ]
+    return _anchor_reason(lockfile, walk, key, lockfile.dependencies[key].repo_url, nearest)
+
+
 def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
     """Why a survivor cannot be re-parented by prune, or None when it can.
 
