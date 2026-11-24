@@ -1187,3 +1187,34 @@ def test_a_resolved_tip_probe_carries_no_credential_and_runs_untranslated(
     assert len(envs) == 2
     assert not [e for e in envs if {"GITHUB_TOKEN", "GH_TOKEN"} & e.keys()]
     assert all(e.get("LC_ALL") == "C" and e.get("LANGUAGE") == "C" for e in envs)
+
+
+def test_a_rewrite_in_git_config_parameters_keys_the_tip_to_the_mirror(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """#5246: an insteadOf carried in GIT_CONFIG_PARAMETERS sends the probe to the mirror.
+
+    The tip the mirror served is recorded for the mirror, never as the
+    origin's own verdict.
+    """
+    from apm_cli.cache.commit_reachability import (
+        _url_only_env,
+        admit_pinned_commit,
+        effective_contact,
+    )
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    remote = "https://origin.invalid/acme/repo.git"
+    downloader = _RefDownloader(tmp_path / "cache", [remote], predicted=remote)
+    downloader.git_env = {"GIT_CONFIG_PARAMETERS": f"'url.{origin.url}.insteadof'='{remote}'"}
+    downloader._tiered_resolver = _RemotelyResolved()
+
+    probe_env = _url_only_env(downloader.git_env)
+    assert effective_contact(remote, probe_env) == normalize_repo_url(origin.url)
+
+    resolved = ResolvedReference("main", GitReferenceType.BRANCH, origin.m2, "main")
+    admit_pinned_commit(downloader, _ref("main"), "main", resolved=resolved)
+
+    markers = list((tmp_path / "cache" / "reachability").rglob("verified-v2/*"))
+    recorded = {m.read_text(encoding="utf-8").splitlines()[-1] for m in markers}
+    assert normalize_repo_url(remote) not in recorded, recorded
