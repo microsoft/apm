@@ -103,6 +103,25 @@ def test_lockfile_generator_refusal_message_stays_canonical():
     assert install_failure_message(error) == str(error)
 
 
+def test_symlinked_deploy_cause_follows_causes_but_not_a_suppressed_context():
+    """A wrapped refusal is found; ``raise ... from None`` hides it (#5287)."""
+    from apm_cli.install.errors import symlinked_deploy_cause
+    from apm_cli.utils.path_security import SymlinkedDeployError
+
+    refusal = SymlinkedDeployError("skills")
+    try:
+        raise RuntimeError("wrapped") from refusal
+    except RuntimeError as wrapped:
+        assert symlinked_deploy_cause(wrapped) is refusal
+    try:
+        try:
+            raise refusal
+        except SymlinkedDeployError:
+            raise RuntimeError("unrelated") from None
+    except RuntimeError as unrelated:
+        assert symlinked_deploy_cause(unrelated) is None
+
+
 def test_a_resolution_error_is_printed_once_with_its_remedy():
     """I9: the resolve phase and the install renderer must not both print the error."""
     cause = (

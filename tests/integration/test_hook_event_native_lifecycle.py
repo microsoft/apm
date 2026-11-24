@@ -109,7 +109,8 @@ def _assert_project_native_hooks(
     assert (project_root / _COPILOT_USER).read_bytes() == expected_user_bytes
 
     claude = _read_hooks(project_root / _CLAUDE_SETTINGS)
-    assert list(claude) == ["stop", "Stop", "SessionStart"]
+    # The user event keeps its slot; APM-only events sort by name (#5285).
+    assert list(claude) == ["stop", "SessionStart", "Stop"]
     assert _commands(claude["stop"]) == ["echo user-stop"]
     assert _commands(claude["Stop"]) == expected_agent_commands
     assert _commands(claude["SessionStart"]) == expected_session_commands
@@ -429,7 +430,8 @@ def test_global_hook_events_preserve_user_state(
     assert _commands(copilot["agentStop"]) == ["echo global-stop"]
     assert _commands(copilot["sessionStart"]) == ["echo global-start"]
     claude = _read_hooks(claude_root / "settings.json")
-    assert list(claude) == ["stop", "Stop", "SessionStart"]
+    # The user event keeps its slot; APM-only events sort by name (#5285).
+    assert list(claude) == ["stop", "SessionStart", "Stop"]
     assert _commands(claude["stop"]) == ["echo global-user-stop"]
     assert _commands(claude["Stop"]) == ["echo global-stop"]
     assert _commands(claude["SessionStart"]) == ["echo global-start"]

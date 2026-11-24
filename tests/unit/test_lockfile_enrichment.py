@@ -148,6 +148,37 @@ local_deployed_file_hashes: {{.agents/skills/review/SKILL.md: 'sha256:bb'}}
 
         assert lf.to_yaml() == original_yaml
 
+    @pytest.mark.parametrize(
+        ("deployed", "target", "packed"),
+        [
+            # A plugin deployed whole: the bundle carries none of its root (#5253).
+            ([], "all", []),
+            # A mixed row: its loose files pack, its native root still does not.
+            ([".claude/skills/demo/SKILL.md"], "claude", [".claude/skills/demo/SKILL.md"]),
+            # Loose files the target filter drops (commands never cross-map) pack nothing.
+            ([".github/commands/demo.md"], "claude", []),
+        ],
+    )
+    def test_a_bundle_lock_carries_no_native_plugin_record(self, deployed, target, packed):
+        from apm_cli.native_plugins.record import NativePluginRecord
+
+        record = NativePluginRecord("demo", "sha256:" + "0" * 64, "apm-p-0", "./.agents/plugins")
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/demo",
+                deployed_files=deployed,
+                native_plugin=record,
+                native_declared=["claude"],
+            )
+        )
+
+        (row,) = yaml.safe_load(enrich_lockfile_for_pack(lockfile, "apm", target))["dependencies"]
+
+        assert "native_plugin" not in row, row
+        assert "native_declared" not in row, row
+        assert row.get("deployed_files", []) == packed, row
+
     def test_filters_deployed_files_by_target(self):
         """Pack with --target copilot should exclude .claude/ files from lockfile."""
         lf = LockFile()
