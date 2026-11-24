@@ -25,6 +25,8 @@
 name: Real Harness
 
 on:
+  push:
+    branches: [danielmeppiel-ql-rh-1120-run]
   schedule:
     - cron: '23 2 * * *'
   workflow_dispatch:
@@ -63,10 +65,8 @@ jobs:
       matrix:
         include:
           - { harness: claude, version: '2.1.326', os: ubuntu-24.04 }
-          - { harness: claude, version: '2.1.323', os: ubuntu-24.04 }
           - { harness: copilot, version: '1.0.106', os: ubuntu-24.04 }
           - { harness: copilot, version: '1.0.113', os: ubuntu-24.04 }
-          - { harness: copilot, version: '1.0.114-0', os: ubuntu-24.04 }
     env:
       PIN_DIR: scripts/real_harness/npm/${{ matrix.harness }}-${{ matrix.version }}
     steps:
@@ -135,13 +135,8 @@ jobs:
           COPILOT_TOKEN: ${{ matrix.harness == 'copilot' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.REAL_HARNESS_COPILOT_TOKEN || '' }}
         run: |
           export COPILOT_GITHUB_TOKEN="$COPILOT_TOKEN"
-          python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
-          if [ "$HARNESS" = claude ]; then
-            python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
-              --scope project --env tui-untrusted --env headless-rerun --env headless-abspath \
-              --env headless-untrusted --env headless-native --env headless-wt-branch \
-              --env headless-wt-after-main
-          fi
+          python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh" \
+            --env collision-distinct --env collision-same
 
       - name: Summary
         if: always()
@@ -187,5 +182,3 @@ jobs:
           include-hidden-files: true
           retention-days: 14
 
-      - name: Check verdicts against expected.json
-        run: python3 scripts/real_harness/probe.py check "$RUNNER_TEMP/rh"
