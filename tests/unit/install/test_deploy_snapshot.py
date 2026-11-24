@@ -2391,3 +2391,27 @@ def test_a_shared_directory_swapped_for_a_link_is_journaled_and_never_followed(
 
     assert (outside / "keep.md").read_text(encoding="utf-8") == "not APM's\n"
     assert sorted(p.name for p in outside.iterdir()) == ["keep.md"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_child_recreated_in_a_partly_removed_directory_honors_the_umask(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5134: a kill partway through an rmtree; the removed child is recreated from absence."""
+    project = tmp_path / "project"
+    skill, ledger = _partial_skill(project)
+    skill.chmod(0o755)
+    for child in skill.iterdir():
+        child.chmod(0o644)
+    _kill_partway_through_rmtree(monkeypatch, apm_home, project, lambda: write_seam.rmtree(skill))
+
+    previous = _with_umask(0o077)
+    try:
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        _restore_umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
+    assert (skill / "reference.md").stat().st_mode & 0o7777 == 0o644
+    assert skill.stat().st_mode & 0o7777 == 0o755
