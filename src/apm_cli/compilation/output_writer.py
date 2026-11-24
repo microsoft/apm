@@ -190,6 +190,11 @@ class CompiledOutputWriter:
                 new_file_mode=umask_file_mode(path),
                 normalize_line_endings=not preserve,
             )
+        if self._base_dir is not None and prepared:
+            from ..core.agents_md_compile_record import record_compiled_outputs
+
+            # The re-anchor scan reads every written output, wherever --output put it (#5235).
+            record_compiled_outputs(self._base_dir, prepared)
         return verdict
 
     def write(

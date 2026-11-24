@@ -1104,6 +1104,29 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
                     return portable_relpath(path, root)
     except _UnreadableDir as unreadable:
         return portable_relpath(Path(unreadable.args[0]), root)
+    return _recorded_output_naming(root, names, markers_by_name, section)
+
+
+def _recorded_output_naming(root: Path, names, markers_by_name, section: bytes) -> str | None:
+    """A recorded compile output outside the default placement that names the copy (#5235).
+
+    ``apm compile --output`` can write into a directory placement prunes or
+    under a custom name; compile records every output it writes, so each one
+    still present is read like a placed output.
+    """
+    from ...core.agents_md_compile_record import read_compiled_outputs
+
+    markers = tuple(sorted({marker for found in markers_by_name.values() for marker in found}))
+    for relative in read_compiled_outputs(root):
+        path = root / relative
+        if not os.path.lexists(path):
+            continue
+        try:
+            data = _marked_regular_file(path, markers, section)
+            if data is not None and names(path, data):
+                return relative
+        except (OSError, UnicodeDecodeError):
+            return relative
     return None
 
 
