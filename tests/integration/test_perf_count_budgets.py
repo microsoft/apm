@@ -14,8 +14,8 @@ Over budget, or a counter with no row, fails with the diff; a counter well under
 its budget prints a "tighten" note. Set ``APM_PERF_COUNT_BUDGETS_MEASURE=1`` to
 print the measured counters instead (to write or re-measure the rows).
 
-The engine runs as ``python -m apm_cli.cli`` so the counting ``sitecustomize``
-loads; a frozen binary would not load it.
+The engine runs through the ``apm_engine_command`` fixture (the Python CLI) so the
+counting ``sitecustomize`` loads; a frozen binary would not load it.
 """
 
 from __future__ import annotations
@@ -50,11 +50,11 @@ class TightenNote(UserWarning):
 
 
 @pytest.fixture(scope="module")
-def journey_counts(tmp_path_factory) -> dict[str, dict[str, int]]:
+def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, int]]:
     """Run install cold, no-op and warm once; each journey's flattened counters."""
     work = tmp_path_factory.mktemp("perf-count-budgets")
     tree = build_tree(TREE_RECIPES[_TREE], work / "tree")
-    apm = [sys.executable, "-m", "apm_cli.cli"]
+    apm = list(apm_engine_command)
     observed: dict[str, dict[str, int]] = {}
     with serve_offline(tree, work / "world") as world:
         project = work / "project"
