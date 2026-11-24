@@ -36,7 +36,6 @@ _MAX_MISSING_DEPTH = 32
 _PROC_FD = "/proc/self/fd/"
 _STOCK_RESOLVE = Path.resolve
 _PROOFS = "realpath-link-free-directories"
-_LISTINGS = "realpath-directory-names"
 _WINDOWS = sys.platform == "win32"
 # Any reparse point (symbolic link, junction, mount point) leaves the fast form.
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
@@ -58,19 +57,24 @@ def _leaf_is_link(info: os.stat_result) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
-def _exact_name(head: str, name: str) -> bool:
-    """Windows: whether *head* holds *name* in exactly this case (resolve reports disk case)."""
-    listings = _memo(_LISTINGS)
-    if listings is None:
-        return False
-    names = listings.get(head)
-    if names is None:
-        try:
-            names = frozenset(os.listdir(head))
-        except OSError:
-            return False
-        listings[head] = names
-    return name in names
+def _windows_leaf(absolute: str, name: str) -> tuple[bool, bool] | None:
+    """Windows: ``(exists, is_directory)`` of the exact leaf name, ``None`` to resolve fully.
+
+    One ``FindFirstFileExW`` (E1 F2): the on-disk long name must equal *name*
+    exactly (``resolve()`` reports the disk case) and carry no reparse point.
+    Nothing is cached, so APM's own case-only renames are always seen.
+    """
+    from apm_cli.utils import realpath_win
+
+    entry = realpath_win._entry(absolute)
+    if entry is realpath_win._MISSING:
+        return False, False
+    if entry is None:
+        return None
+    attributes, disk_name = entry
+    if disk_name != name or attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
+        return None
+    return True, bool(attributes & 0x10)
 
 
 _VOLATILE_MARKERS = ("staging", ".inc.", ".tmp", "backup", "migration", "refresh")
@@ -93,20 +97,39 @@ def _proven_answer(text: str, proofs: dict) -> str | None:
     if ".." in _components(text):
         return None
     absolute = os.path.abspath(text)
+    if _WINDOWS and not _plain_windows(text, absolute):
+        return None
     head, name = os.path.split(absolute)
     if not name or head not in proofs or _volatile(name):
         return None
-    try:
-        info = os.lstat(absolute)
-    except FileNotFoundError:
-        return absolute
-    except OSError:
-        return None
-    if _leaf_is_link(info) or (_WINDOWS and not _exact_name(head, name)):
-        return None
-    if stat.S_ISDIR(info.st_mode):
+    if _WINDOWS:
+        leaf = _windows_leaf(absolute, name)
+        if leaf is None:
+            return None
+        exists, is_dir = leaf
+    else:
+        try:
+            info = os.lstat(absolute)
+        except FileNotFoundError:
+            return absolute
+        except OSError:
+            return None
+        if _leaf_is_link(info):
+            return None
+        exists, is_dir = True, stat.S_ISDIR(info.st_mode)
+    if exists and is_dir:
         proofs[absolute] = True  # an existing, non-link directory under a proven one
     return absolute
+
+
+def _plain_windows(text: str, absolute: str) -> bool:
+    """E1 F1: GetFullPathNameW must not have rewritten *text* (trailing dots or
+    spaces, device names, short names): absolute, plain Win32, normpath-equal."""
+    import ntpath
+
+    from apm_cli.utils.realpath_win import plain_win32
+
+    return plain_win32(absolute) and absolute == ntpath.normpath(text)
 
 
 def proven_link_free(directory: Path) -> bool:
@@ -207,7 +230,7 @@ def forget_proofs(under: object = None) -> None:
     APM calls this (through ``realpath_win.release_held``) before it renames,
     deletes or recreates a tree, so a proof never outlives the directory it saw.
     """
-    for name in (_PROOFS, _LISTINGS):
+    for name in (_PROOFS,):
         memo = _memo(name)
         if not memo:
             continue
@@ -219,7 +242,7 @@ def forget_proofs(under: object = None) -> None:
         except (TypeError, ValueError):
             memo.clear()
             continue
-        prefix = base.rstrip("/\\") + os.sep
+        prefix = base if base.endswith(os.sep) else base + os.sep
         for key in [k for k in list(memo) if k == base or k.startswith(prefix)]:
             memo.pop(key, None)
 
@@ -233,13 +256,14 @@ def _platform_resolve(path: Path, text: str) -> Path:
                 resolved = None
             if resolved is not None:
                 return type(path)(resolved)
-    if _WINDOWS:
-        fast = _resolve_windows(path)
-        if fast is not None:
-            return fast
     return path.resolve()
 
 
 if _WINDOWS:
-    # Bound once at import: other platforms never load the Windows forms.
+    # Bound once at import (E1 F3): other platforms never load the Windows forms,
+    # and the proofs above run first on every platform.
     from apm_cli.utils.realpath_win import resolve_windows as _resolve_windows
+
+    def _platform_resolve(path: Path, text: str) -> Path:
+        fast = _resolve_windows(path)
+        return fast if fast is not None else path.resolve()
