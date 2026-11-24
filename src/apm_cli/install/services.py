@@ -633,7 +633,10 @@ def integrate_package_primitives(  # noqa: PLR0913
         frozenset(native_target_names)
     )
     with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
-        skill_result = integrators.skill.integrate_package_skill(
+        from apm_cli.integration.skill_support import SkillIntegrationResult as _SIR
+
+        # RESEARCH: skills family deleted
+        skill_result = (lambda *_a, **_k: _SIR(False, False, True, None, 0, target_paths=[]))(
             package_info,
             project_root,
             diagnostics=diagnostics,
