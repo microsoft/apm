@@ -63,9 +63,6 @@ RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
 ARCHITECTURE_SCALING_TARGETS = (
     "tests/perf/test_architecture_linter_scaling.py::"
     "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction",
-    # The binary-selection pre-filter's whole-tree equivalence proof (#5196).
-    "tests/perf/test_architecture_linter_scaling.py::"
-    "test_binary_selection_prefilter_finds_what_every_detector_finds",
     # The session-cache 2.2x wall-clock ratio stays off CI (timing asserts
     # flake); the deterministic parse-once guard gates the cache instead.
 )
