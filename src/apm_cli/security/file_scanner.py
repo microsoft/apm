@@ -16,6 +16,8 @@ Two scopes, because the two signals need different ones:
 from __future__ import annotations
 
 import json
+import os
+import stat
 import tomllib
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -168,6 +170,27 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
+# A FIFO or device at a deployed path must read as not a primitive, never block (#5280).
+_REGULAR_OPEN = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+def _regular_bytes(path: Path) -> bytes:
+    """The bytes of *path*; ``OSError`` unless it is a regular file that is not a link."""
+    fd = os.open(path, _REGULAR_OPEN)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"not a regular file: {path}")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            return handle.read()
+    finally:
+        os.close(fd)
+
+
 def _content_entries(
     path: Path, surface: PrimitiveSurface, recorded_hash: str | None = None
 ) -> tuple[HookContentEntry, ...]:
@@ -181,7 +204,7 @@ def _content_entries(
     if surface.kind == "hooks":
         config = native_hook_config(surface.target)
         # Untranslated newlines: the canonical deployed-file hash alone normalizes them.
-        text = path.read_bytes().decode("utf-8")
+        text = _regular_bytes(path).decode("utf-8")
         document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
         if is_deployed_hook_module_metadata(
             path, text, target_name=surface.target, recorded_hash=recorded_hash
@@ -196,7 +219,8 @@ def _content_entries(
             shared=surface.shared,
             nested_handlers=config.nested_handlers if config else None,
         )
-    text = path.read_text(encoding="utf-8")
+    # Universal newlines, as read_text gave.
+    text = _regular_bytes(path).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if surface.prompt_fields:
         document = tomllib.loads(text)
         return tuple(

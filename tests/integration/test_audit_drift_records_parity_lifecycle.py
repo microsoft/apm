@@ -290,16 +290,7 @@ def test_an_edited_file_with_an_unusual_name_is_reported_on_one_ascii_line(
     assert not any(line.startswith("[+] all checks passed") for line in output.splitlines()), output
 
 
-_FIFO_BLOCKS_THE_AUDIT = KnownFailure(
-    "#5280",
-    "audit --ci blocks reading a FIFO at a deployed path",
-    r"timed out after",
-    raises=subprocess.TimeoutExpired,
-)
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFOs")
-@_FIFO_BLOCKS_THE_AUDIT.mark()
 def test_a_fifo_at_a_deployed_path_fails_the_audit_without_blocking(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
