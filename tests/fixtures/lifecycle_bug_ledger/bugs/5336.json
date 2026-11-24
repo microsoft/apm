@@ -1,0 +1,14 @@
+{
+  "issue": 5336,
+  "fixed_in": "Unreleased",
+  "summary": "On a fresh clone with a lockfile from an earlier APM, a .claude/rules row owned by the project itself made apm install fail with an empty local package path; the self entry is no longer rendered as a dependency.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_self_owner_fresh_clone_lifecycle.py::test_a_fresh_clone_installs_over_a_legacy_self_owned_rule_row"
+  ]
+}
