@@ -130,8 +130,9 @@ def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     Each path is still resolved at use; only the shared base is not
     resolved again per path within this call.
     """
-    # The kernel form where it applies (Linux); elsewhere Path.resolve() itself.
-    resolve = resolve_path if kernel_resolves() else _resolve_instance
+    # The fast forms where they apply (Linux kernel form; Windows via
+    # resolve_path); elsewhere each path's own resolve(), as portable_relpath.
+    resolve = resolve_path if (kernel_resolves() or os.name == "nt") else _resolve_instance
     try:
         resolved_base: Path | None = resolve(base)
     except (OSError, RuntimeError):
