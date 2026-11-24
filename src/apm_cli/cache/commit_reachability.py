@@ -417,7 +417,8 @@ def _url_only_env(env) -> dict[str, str]:
 
     scrubbed = {**os.environ, **(env or {}), "LC_ALL": "C", "LANGUAGE": "C"}
     clear_git_platform_token_env(scrubbed, remove=True)
-    clear_git_auth_env(scrubbed)
+    # A url rewrite carried in GIT_CONFIG_PARAMETERS still decides the server (#5246).
+    clear_git_auth_env(scrubbed, keep_url_rewrites=True)
     return scrubbed
 
 

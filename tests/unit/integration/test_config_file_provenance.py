@@ -747,6 +747,31 @@ def test_a_record_turned_into_a_symlink_loop_never_breaks_another_lookup(
     assert recorded.is_symlink() and other.read_text(encoding="utf-8") == _WITH_ENTRY
 
 
+def test_a_users_skeleton_reached_through_a_second_path_is_kept(tmp_path, apm_home) -> None:
+    """#5189: the record is found by the file's identity when its own path is gone.
+
+    A second mount path is modelled with a hard link: the file APM recorded under
+    one path is now reached only through another.
+    """
+    first, second = tmp_path / "mount-a" / "project", tmp_path / "mount-b" / "project"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    config = first / ".mcp.json"
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=first)
+    assert config_file_origin(config) is Origin.PREEXISTING
+    _apm_writes(config, _SKELETON, manifest_root=first)  # APM's cleanup removes its entry
+    try:
+        os.link(config, second / ".mcp.json")
+    except (OSError, NotImplementedError):
+        pytest.skip("hard links are unavailable")
+    config.unlink()
+    before = (second / ".mcp.json").read_bytes()
+
+    assert _apm_empties(second / ".mcp.json", root=second) is False
+    assert (second / ".mcp.json").read_bytes() == before
+
+
 def _store_files(apm_home: Path) -> dict[Path, tuple[int, int, bytes]]:
     """Every file of the record store: identity, mtime and bytes."""
     root = apm_home / "deployment-receipts" / "config-files"
@@ -1108,3 +1133,25 @@ def test_a_journal_first_touch_entry_survives_migration_to_record_files(tmp_path
     assert json.loads(store.read_text(encoding="utf-8"))["version"] == 2
     assert vouches_for_current_bytes(config, first, journal="install-1") is True
     assert vouches_for_current_bytes(config, first, journal="install-2") is False
+
+
+def test_a_file_whose_identity_cannot_be_read_is_kept(
+    tmp_path, apm_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5189 review: a stat or read failure keeps the file; it never enables the fallback."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)  # a record store exists
+    real_read = Path.read_bytes
+
+    def unreadable(self: Path) -> bytes:
+        if self == config:
+            raise PermissionError("denied")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", unreadable)
+
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON

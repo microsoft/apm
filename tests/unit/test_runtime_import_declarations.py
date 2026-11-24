@@ -15,6 +15,8 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 pytestmark = pytest.mark.component
 
@@ -49,6 +51,50 @@ _TRANSITIVE_IMPORT_ROOTS = {
     # Python < 3.8 fallback in version.py; unreachable under requires-python >= 3.11.
     "importlib_metadata": None,
 }
+
+
+# GitPython releases before 3.1.41 carry published Windows advisories
+# (CVE-2023-40590, CVE-2024-22190). The floor makes pip upgrade an older copy (#5005).
+_GITPYTHON_FLOOR = Version("3.1.41")
+
+
+def _declared_requirement(name: str) -> Requirement:
+    project = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    matches = [
+        Requirement(text)
+        for text in project["project"]["dependencies"]
+        if Requirement(text).name.lower() == name
+    ]
+    assert len(matches) == 1, f"expected one {name} requirement, got {matches}"
+    return matches[0]
+
+
+def _locked_version(name: str) -> Version:
+    lock = tomllib.loads((_REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
+    versions = [package["version"] for package in lock["package"] if package["name"] == name]
+    assert len(versions) == 1, f"expected one locked {name}, got {versions}"
+    return Version(versions[0])
+
+
+def _assert_gitpython_floor(specifier: str) -> None:
+    allowed = Requirement(f"GitPython{specifier}").specifier
+    assert not allowed.contains("3.1.40"), (
+        f"GitPython{specifier} admits 3.1.40, so pip keeps an installed copy with "
+        "published Windows advisories; keep the floor at >=3.1.41"
+    )
+    assert allowed.contains(str(_GITPYTHON_FLOOR))
+
+
+def test_gitpython_floor_excludes_releases_with_windows_advisories() -> None:
+    requirement = _declared_requirement("gitpython")
+    _assert_gitpython_floor(str(requirement.specifier))
+    assert requirement.specifier.contains(str(_locked_version("gitpython")))
+
+
+@pytest.mark.parametrize("specifier", [">=3.1.0", ">=3.1.40", ""])
+def test_gitpython_floor_below_the_advisory_fix_fails(specifier: str) -> None:
+    with pytest.raises(AssertionError):
+        _assert_gitpython_floor(specifier)
 
 
 def _declared_distributions() -> set[str]:

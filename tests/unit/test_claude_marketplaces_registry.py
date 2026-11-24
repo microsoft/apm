@@ -355,6 +355,22 @@ def test_trust_is_read_where_claude_config_dir_points(
     )
 
 
+def _write_before_second_read(monkeypatch: pytest.MonkeyPatch, path: Path, data: dict) -> None:
+    """Another writer replaces *path* right before APM's second read of it."""
+    original = os.open
+    seen = {"n": 0}
+
+    def open_(target, flags, *args, **kwargs):
+        if Path(os.fspath(target)) == path and not flags & os.O_CREAT:
+            seen["n"] += 1
+            if seen["n"] == 2:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(data), encoding="utf-8")
+        return original(target, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_)
+
+
 def test_an_entry_claude_adds_mid_merge_is_not_recorded_as_apms(
     env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -362,18 +378,7 @@ def test_an_entry_claude_adds_mid_merge_is_not_recorded_as_apms(
     no record, so uninstall leaves Claude's entry."""
     registry = _registry(tmp_path)
     claudes = {_NAME: {"source": {"source": "directory", "path": str(env)}, "installLocation": "c"}}
-    original = Path.read_bytes
-    seen = {"n": 0}
-
-    def read_bytes(path: Path) -> bytes:
-        if path == registry:
-            seen["n"] += 1
-            if seen["n"] == 2:
-                registry.parent.mkdir(parents=True, exist_ok=True)
-                registry.write_text(json.dumps(claudes), encoding="utf-8")
-        return original(path)
-
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    _write_before_second_read(monkeypatch, registry, claudes)
 
     assert _sync(env) == []
     assert _sync(env, declared=False) == []
@@ -442,18 +447,7 @@ def test_a_conflicting_entry_added_mid_merge_is_named(
     registry = _registry(tmp_path)
     other = tmp_path / "other-clone" / ".agents" / "plugins"
     theirs = {_NAME: {"source": {"source": "directory", "path": str(other)}}}
-    original = Path.read_bytes
-    seen = {"n": 0}
-
-    def read_bytes(path: Path) -> bytes:
-        if path == registry:
-            seen["n"] += 1
-            if seen["n"] == 2:
-                registry.parent.mkdir(parents=True, exist_ok=True)
-                registry.write_text(json.dumps(theirs), encoding="utf-8")
-        return original(path)
-
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    _write_before_second_read(monkeypatch, registry, theirs)
 
     warnings = _sync(env)
 
@@ -487,6 +481,25 @@ def test_a_fifo_claude_config_counts_as_untrusted_without_blocking(
     assert len(warnings) == 1 and _HINT in warnings[0]
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+@pytest.mark.parametrize("pipe", ["registry", "receipt"])
+def test_a_fifo_registry_or_receipt_never_blocks_install_or_uninstall(
+    env: Path, tmp_path: Path, pipe: str
+) -> None:
+    path = _registry(tmp_path) if pipe == "registry" else _receipt(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(path)
+
+    install_warnings = _sync(env)
+    uninstall_warnings = _sync(env, declared=False)
+
+    assert stat.S_ISFIFO(path.lstat().st_mode)
+    assert len(install_warnings) == 1 and "cannot be read" in install_warnings[0]
+    # No receipt was recorded beside a FIFO registry, so uninstall has nothing to remove.
+    assert len(uninstall_warnings) == (pipe == "receipt")
+    assert all("cannot be read" in warning for warning in uninstall_warnings)
+
+
 @pytest.mark.windows_compat
 def test_a_forward_slash_trust_key_is_trusted(env: Path, tmp_path: Path) -> None:
     """Claude Code keys projects with forward slashes on Windows."""
@@ -502,7 +515,14 @@ def test_a_forward_slash_trust_key_is_trusted(env: Path, tmp_path: Path) -> None
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
-def test_the_receipt_is_readable_by_its_owner_only(env: Path, tmp_path: Path) -> None:
+@pytest.mark.parametrize("existing", [None, 0o644], ids=["new", "existing-0644"])
+def test_the_receipt_is_readable_by_its_owner_only(
+    env: Path, tmp_path: Path, existing: int | None
+) -> None:
+    if existing is not None:
+        _seed(_receipt(tmp_path), '{"version": 3, "entries": {}}\n')
+        _receipt(tmp_path).chmod(existing)
+
     assert _sync(env) == []
 
     assert stat.S_IMODE(_receipt(tmp_path).stat().st_mode) == 0o600
