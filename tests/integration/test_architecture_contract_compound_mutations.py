@@ -36,6 +36,50 @@ MUTATIONS: tuple[ContractMutation, ...] = (
             '    return os.environ.get("APM_BINARY_PATH")\n'
         ),
     ),
+    # Split or propagated forms: the binary-selection pre-filter (#5196) must still
+    # route each to its detector, so a filter narrower than the detector fails here.
+    ContractMutation(
+        "binary-selection-implicit-concat",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=(
+            "\n\nimport os as _os\n\n\ndef _rogue_binary_selection():\n"
+            '    return _os.environ["APM_BINARY" "_PATH"]\n'
+        ),
+    ),
+    ContractMutation(
+        "binary-selection-aliased-which",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=(
+            "\n\nfrom shutil import which as _locate\n\n\ndef _rogue_binary_selection():\n"
+            '    return _locate("ap" "m")\n'
+        ),
+    ),
+    ContractMutation(
+        "binary-selection-propagated-venv",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=(
+            '\n\nfrom pathlib import Path as _P\n\n_ENV = ".v" "env"\n\n\n'
+            "def _rogue_binary_selection():\n"
+            '    folder = _ENV\n    return _P(folder) / "bin" / "apm"\n'
+        ),
+    ),
+    ContractMutation(
+        "binary-selection-interpreter-sibling",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=(
+            "\n\nimport sys as _s\nfrom pathlib import Path as _P\n\n\n"
+            "def _rogue_binary_selection():\n"
+            '    return _P(_s.executable).with_name("apm")\n'
+        ),
+    ),
+    ContractMutation(
+        "binary-selection-runner-module-alias",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=(
+            "\n\nimport tests.utils.apm_lifecycle_runner as _lr\n\n\n"
+            "def _rogue_binary_selection():\n    return _lr.ApmLifecycleRunner()\n"
+        ),
+    ),
     ContractMutation(
         "rendered-parity-owner",
         "scripts/check_cli_docs.py",
