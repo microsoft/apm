@@ -384,7 +384,7 @@ def _packed_commit(git_dir: Path, sha: str) -> bool | None:
 
 # PERF PROTOTYPE (lever 4): write the checkout's .git in process instead of
 # ``git clone --local --shared --no-checkout``; differential vs a real clone.
-_GITDIR_DIFFERENTIAL = False
+_GITDIR_DIFFERENTIAL = True
 _INIT_CONFIG: dict[tuple[str, int], str] = {}
 _GITDIR_WRITE_FLAGS = (
     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
@@ -472,7 +472,8 @@ def _write_shared_gitdir(git_exe: str, staged: Path, bare_dir: Path, env: dict[s
     allowlist, remote.origin.url, alternates) and integrity (HEAD, after the
     detached checkout). refs/remotes/* and branch.* are only read in temp clones.
     """
-    objects = os.path.abspath(bare_dir / "objects")
+    # Git writes alternates with forward slashes on every OS.
+    objects = os.path.abspath(bare_dir / "objects").replace(os.sep, "/")
     if any(ch in objects for ch in "\n\r\0"):
         raise ValueError("alternates path holds a line break or NUL")  # S3
     if any(staged.iterdir()):
@@ -502,6 +503,10 @@ def _write_shared_gitdir(git_exe: str, staged: Path, bare_dir: Path, env: dict[s
     _write_new(git_dir / "objects" / "info" / "alternates", objects + "\n")
 
 
+class _Lever4Failure(BaseException):
+    """PERF PROTOTYPE: differential mode aborts the command instead of a silent fallback."""
+
+
 def _gitdir_differential(
     git_exe: str, clone_args: list[str], staged: Path, bare_dir: Path, env: dict[str, str]
 ) -> None:
@@ -528,7 +533,7 @@ def _gitdir_differential(
         alt = "objects/info/alternates"
         a = (staged / ".git" / alt).read_text(encoding="utf-8")
         b = (twin / ".git" / alt).read_text(encoding="utf-8")
-        if mine != theirs or os.path.normcase(a.strip()) != os.path.normcase(b.strip()):
+        if mine != theirs or a != b:
             raise RuntimeError(
                 f"PERF lever 4 differential: in-process .git != clone --shared: "
                 f"{sorted(set(mine) ^ set(theirs))} | {a.strip()!r} vs {b.strip()!r}"
@@ -1264,21 +1269,28 @@ class GitCache:
                         extra_git_args=_safe_git_args(),
                     )
                 # Checkout the specific SHA.
-                checkout = run_git_text(
-                    [
-                        git_exe,
-                        *_safe_git_args(),
-                        "-C",
-                        str(staged),
-                        "checkout",
-                        sha,
-                    ],
-                    capture_output=True,
-                    timeout=60,
-                    env=subprocess_env,
-                    stdin=subprocess.DEVNULL,
-                    check=True,
-                )
+                try:
+                    checkout = run_git_text(
+                        [
+                            git_exe,
+                            *_safe_git_args(),
+                            "-C",
+                            str(staged),
+                            "checkout",
+                            sha,
+                        ],
+                        capture_output=True,
+                        timeout=60,
+                        env=subprocess_env,
+                        stdin=subprocess.DEVNULL,
+                        check=True,
+                    )
+                except subprocess.CalledProcessError as exc:
+                    if in_process and _GITDIR_DIFFERENTIAL:
+                        raise _Lever4Failure(
+                            f"PERF lever 4: checkout from the in-process .git failed: {exc.stderr}"
+                        ) from exc
+                    raise
                 # Old Git exits 0 when a promisor blob fetch fails, leaving
                 # an empty tree that would be cached as valid (#3071).
                 missing = (
