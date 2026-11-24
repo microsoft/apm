@@ -1637,6 +1637,27 @@ def test_executable_approval_cannot_leave_the_trust_owners(path: str, old: str, 
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_frontmatter_fences_stay_in_the_yaml_owner() -> None:
+    """Fence detection outside utils/yaml_io.py is a second frontmatter owner (#5248)."""
+    rule_id = "contracts-tooling-frontmatter-yaml"
+    path = "src/apm_cli/install/local_bundle_paths.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "def markdown_declares_hooks("
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old,
+        "def _fence(text):\n"
+        "    from frontmatter.default_handlers import YAMLHandler\n\n"
+        "    return YAMLHandler.FM_BOUNDARY.match(text)\n\n\n" + old,
+    )
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @pytest.mark.parametrize(
     ("path", "old", "new"),
     [

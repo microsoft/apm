@@ -239,3 +239,24 @@ def test_converted_instruction_with_unreadable_frontmatter_deploys_nothing(
         (load_yaml(lock_path) or {}).get("local_deployed_files") or [] if lock_path.exists() else []
     )
     assert not any("style" in str(row) for row in rows), rows
+
+
+def test_bundle_txt_command_with_frontmatter_hooks_is_parked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A packed command lowered to Markdown is checked whatever its packed suffix."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, _key = _bundle(world, tmp_path, None)
+    text_command = _COMMAND.format(hooks=_HOOKS).encode("utf-8")
+    (bundle / "commands" / "run.txt").write_bytes(text_command)
+    lock = load_yaml(bundle / "apm.lock.yaml")
+    lock["pack"]["bundle_files"]["commands/run.txt"] = hashlib.sha256(text_command).hexdigest()
+    dump_yaml(lock, bundle / "apm.lock.yaml")
+    consumer = _consumer(world, "txt-consumer")
+
+    text = output(world.apm(consumer, "install", str(bundle), "--no-policy"))
+
+    assert "Skipped packed bundle hooks file 'commands/run.txt'" in text, text
+    assert list((consumer / ".claude" / "commands").glob("run.txt*")) == []
+    rows = world.lock(consumer).get("local_deployed_files") or []
+    assert not any("run.txt" in str(row) for row in rows), rows
