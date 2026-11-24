@@ -238,6 +238,75 @@ class TestCatalogScopedRefPins:
         assert self._check("team", "v2", source) == "v1"
         assert json.loads(self.pins.read_text()) == {"team/tool/1.0.0": "v1"}
 
+    def test_legacy_pin_under_one_alias_is_honoured_when_resolving_through_another(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        source_team = MarketplaceSource(name="team", owner="a", repo="catalog")
+        source_other = MarketplaceSource(name="other", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source_team)
+        registry_mod.add_marketplace(source_other)
+
+        assert self._check("other", "v1", source_other) is None
+        assert self._check("other", "v2", source_other) == "v1"
+
+    def test_conflicting_legacy_pins_refuse_resolution_with_named_message_and_remedy(self):
+        from apm_cli.marketplace.version_pins import RefPinConflictError
+
+        self._write({"team/tool/1.0.0": "v1", "other/tool/1.0.0": "v2"})
+        source_team = MarketplaceSource(name="team", owner="a", repo="catalog")
+        source_other = MarketplaceSource(name="other", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source_team)
+        registry_mod.add_marketplace(source_other)
+
+        with pytest.raises(RefPinConflictError) as exc_info:
+            self._check("other", "v1", source_other)
+
+        message = str(exc_info.value)
+        assert "tool" in message
+        assert "team" in message and "v1" in message
+        assert "other" in message and "v2" in message
+        assert "apm update" in message
+
+    def test_conflicting_legacy_pins_can_be_resolved_by_accepting_change(self):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import (
+            enforce_ref_pin,
+            load_ref_pins,
+            open_ref_pin_stage,
+        )
+
+        self._write({"team/tool/1.0.0": "v1", "other/tool/1.0.0": "v2"})
+        source_team = MarketplaceSource(name="team", owner="a", repo="catalog")
+        source_other = MarketplaceSource(name="other", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source_team)
+        registry_mod.add_marketplace(source_other)
+
+        stage = open_ref_pin_stage()
+        try:
+            catalog = catalog_pin_identity(source_other)
+            enforce_ref_pin("other", "tool", "v3", "1.0.0", accept_change=True, catalog=catalog)
+            stage.commit()
+        finally:
+            stage.discard()
+
+        pins = load_ref_pins()
+        assert pins.get(f"{catalog}#tool/1.0.0") == "v3"
+        assert "team/tool/1.0.0" not in pins
+        assert "other/tool/1.0.0" not in pins
+
+    def test_a_pinned_version_is_never_replaced_by_an_unpinned_resolution(self):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import _put, load_ref_pins
+
+        self._write({"team/tool/1.0.0": "v1"})
+        source_team = MarketplaceSource(name="team", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source_team)
+        catalog = catalog_pin_identity(source_team)
+
+        pins = load_ref_pins()
+        _put(pins, "other", "tool", "1.0.0", catalog, "")
+        assert "team/tool/1.0.0" in pins
+        assert f"{catalog}#tool/1.0.0" not in pins
+
     def test_removing_an_alias_keeps_its_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1", "teams/tool/1.0.0": "v9"})
         source = MarketplaceSource(name="team", owner="a", repo="catalog")

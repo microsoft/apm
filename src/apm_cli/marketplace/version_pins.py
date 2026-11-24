@@ -86,6 +86,33 @@ class RefPinMismatchError(MarketplaceError):
         )
 
 
+class RefPinConflictError(MarketplaceError):
+    """Legacy ref pins from multiple aliases naming the same catalog conflict."""
+
+    def __init__(
+        self,
+        plugin: str,
+        catalog: str,
+        conflicting_pins: dict[str, str],
+        key: str,
+        version: str = "",
+    ):
+        self.plugin = plugin
+        self.catalog = catalog
+        self.conflicting_pins = conflicting_pins
+        self.key = key
+        self.version = version
+        details = ", ".join(
+            f"'{alias}' pinned '{ref}'" for alias, ref in sorted(conflicting_pins.items())
+        )
+        plugin_desc = f"{plugin}/{version}" if version else plugin
+        super().__init__(
+            f"Plugin {plugin_desc} has conflicting legacy ref pins across aliases "
+            f"naming catalog {catalog}: {details}. Refusing to resolve. "
+            f"{MARKETPLACE_REF_SWAP_ACCEPT.bind(key=key).sentence()}"
+        )
+
+
 # ------------------------------------------------------------------
 # Path helpers
 # ------------------------------------------------------------------
@@ -221,10 +248,21 @@ def check_ref_pin(
         plugin/version or the ref matches.
     """
     pins = load_ref_pins(pins_dir)
-    previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version, catalog))
-    if previous_ref is None and catalog and _owns_legacy_pins(marketplace_name, catalog):
-        # A legacy alias pin belongs to the catalog the alias's registration names.
-        previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version))
+    key = _pin_key(marketplace_name, plugin_name, version, catalog)
+    previous_ref = pins.get(key)
+    if previous_ref is None and catalog:
+        aliases = _aliases_naming_catalog(catalog)
+        legacy_pins: dict[str, str] = {}
+        for alias in aliases:
+            legacy_key = _pin_key(alias, plugin_name, version)
+            val = pins.get(legacy_key)
+            if isinstance(val, str):
+                legacy_pins[alias] = val
+        if legacy_pins:
+            unique_refs = set(legacy_pins.values())
+            if len(unique_refs) > 1:
+                raise RefPinConflictError(plugin_name, catalog, legacy_pins, key, version=version)
+            previous_ref = next(iter(unique_refs))
     if previous_ref is None:
         return None
     if not isinstance(previous_ref, str):
@@ -254,28 +292,45 @@ def record_ref_pin(
     save_ref_pins(pins, pins_dir)
 
 
+def _aliases_naming_catalog(catalog: str) -> list[str]:
+    """Return all registered marketplace aliases that name *catalog*."""
+    from .registry import get_registered_marketplaces
+    from .source_identity import catalog_pin_identity
+
+    seen: set[str] = set()
+    aliases: list[str] = []
+    for source in get_registered_marketplaces():
+        try:
+            if catalog_pin_identity(source) == catalog:
+                name = source.name
+                if name.lower() not in seen:
+                    seen.add(name.lower())
+                    aliases.append(name)
+        except ValueError:
+            continue
+    return aliases
+
+
 def _owns_legacy_pins(marketplace_name: str, catalog: str) -> bool:
     """Whether *marketplace_name*'s persisted registration names *catalog*.
 
     Legacy pins are keyed by the alias of a registration; a project map that
     shadows the alias with another catalog never reads or consumes them.
     """
-    from .registry import get_registered_marketplaces
-    from .source_identity import catalog_pin_identity
-
-    for source in get_registered_marketplaces():
-        if source.name.lower() == marketplace_name.lower():
-            try:
-                return catalog_pin_identity(source) == catalog
-            except ValueError:
-                return False
-    return False
+    return any(
+        alias.lower() == marketplace_name.lower() for alias in _aliases_naming_catalog(catalog)
+    )
 
 
 def _put(pins: dict, marketplace: str, plugin: str, version: str, catalog: str, ref: str) -> None:
+    if not ref:
+        return
     pins[_pin_key(marketplace, plugin, version, catalog)] = ref
-    if catalog and _owns_legacy_pins(marketplace, catalog):
-        pins.pop(_pin_key(marketplace, plugin, version), None)
+    if catalog:
+        for alias in _aliases_naming_catalog(catalog):
+            pins.pop(_pin_key(alias, plugin, version), None)
+        if _owns_legacy_pins(marketplace, catalog):
+            pins.pop(_pin_key(marketplace, plugin, version), None)
 
 
 def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) -> None:
@@ -405,9 +460,14 @@ def enforce_ref_pin(
     Returns:
         The previously pinned ref when an accepted change replaces it, else ``None``.
     """
-    previous_ref = check_ref_pin(
-        marketplace_name, plugin_name, ref, version, pins_dir, catalog=catalog
-    )
+    try:
+        previous_ref = check_ref_pin(
+            marketplace_name, plugin_name, ref, version, pins_dir, catalog=catalog
+        )
+    except RefPinConflictError:
+        if not accept_change:
+            raise
+        previous_ref = None
     if previous_ref is not None and not accept_change:
         key = _pin_key(marketplace_name, plugin_name, version, catalog)
         raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
