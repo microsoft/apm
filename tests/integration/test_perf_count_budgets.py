@@ -88,7 +88,9 @@ def _run_journeys(work: Path, apm: list[str]) -> dict[str, tuple]:
             result, counts = run_counted(
                 [*apm, *args],
                 cwd=project,
-                env={**world.env, **(env or {})},
+                # An inherited APM_GITHUB_AUTH_FIRST=1 would move the anonymous
+                # journeys onto the token-first path; only _AUTH turns it on.
+                env={**world.env, "APM_GITHUB_AUTH_FIRST": "0", **(env or {})},
                 log=work / f"{journey}.jsonl",
             )
             locked = (project / "apm.lock.yaml").is_file()
@@ -172,3 +174,18 @@ def test_authenticated_cold_install_clones_with_git(journey_runs) -> None:
     cold_run, _, cold = journey_runs["install-cold-auth"]
     assert cold_run.returncode == 0, cold_run.stderr
     assert cold.get("git.clone", 0) > 0 and cold["http.requests"] > 0, cold
+
+
+def test_outdated_and_auth_journeys_took_the_path_they_budget(journey_runs) -> None:
+    """Each journey measured the path it names, not a degraded one with lower counts.
+
+    ``outdated`` reports a failed comparison as an ``unknown`` row and still exits 0,
+    and a lost token-first selection runs the auth journeys anonymously; both only
+    lower counts, which the budgets report as tighten notes, not failures.
+    """
+    outdated_run, _, _ = journey_runs["outdated"]
+    assert "All dependencies are up-to-date" in outdated_run.stdout, outdated_run.stdout
+    for journey in ("install-cold-auth", "install-warm-auth"):
+        _, _, observed = journey_runs[journey]
+        # Token first: one ref probe per tree package before any fetch.
+        assert observed.get("git.ls-remote", 0) == 10, (journey, observed)
