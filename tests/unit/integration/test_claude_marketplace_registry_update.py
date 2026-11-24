@@ -20,18 +20,19 @@ pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-claude-native-pl
 
 
 def _racing(monkeypatch: pytest.MonkeyPatch, path: Path, edits: list[dict]) -> None:
-    """Another writer replaces *path* right after each of APM's first reads."""
-    original = registry._read
+    """Another writer replaces *path* right after each of APM's first reads of it."""
+    original = Path.read_bytes
     calls = {"n": 0}
 
-    def read(target: Path):
-        result = original(target)
-        calls["n"] += 1
-        if target == path and calls["n"] % 2 == 1 and edits:
-            target.write_text(json.dumps(edits.pop(0)), encoding="utf-8")
-        return result
+    def read_bytes(target: Path) -> bytes:
+        raw = original(target)
+        if target == path:
+            calls["n"] += 1
+            if calls["n"] % 2 == 1 and edits:
+                target.write_text(json.dumps(edits.pop(0)), encoding="utf-8")
+        return raw
 
-    monkeypatch.setattr(registry, "_read", read)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
 
 
 def _add_apm(data: dict) -> bool:

@@ -58,6 +58,7 @@ class _World:
         *,
         claude_config_dir: bool | str = False,
         project_dir: str = "project",
+        trusted: bool = True,
     ) -> None:
         # An inherited Claude profile must never be the one these cells inspect or write.
         base_env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
@@ -73,6 +74,12 @@ class _World:
         self.runner = ApmLifecycleRunner((str(binary),))
         self.project = self.isolated.work_root / project_dir
         (self.project / ".claude").mkdir(parents=True)
+        # Claude Code's user config (where its folder-trust record lives).
+        self.claude_json = (
+            self.claude_dir if claude_config_dir is True else self.isolated.home
+        ) / ".claude.json"
+        if trusted and not isinstance(claude_config_dir, str):
+            self.trust(self.project)
         plugin = self.isolated.work_root / "packages" / "kit"
         (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin/plugin.json").write_text(
@@ -93,6 +100,14 @@ class _World:
     @property
     def known(self) -> Path:
         return self.claude_dir / "plugins" / "known_marketplaces.json"
+
+    def trust(self, checkout: Path) -> None:
+        """Record Claude Code's accepted folder-trust prompt for *checkout*."""
+        data = json.loads(self.claude_json.read_text("utf-8")) if self.claude_json.exists() else {}
+        projects = data.setdefault("projects", {})
+        projects[str(checkout.resolve())] = {"hasTrustDialogAccepted": True}
+        self.claude_json.parent.mkdir(parents=True, exist_ok=True)
+        self.claude_json.write_text(json.dumps(data), encoding="utf-8")
 
     @property
     def receipt(self) -> Path:
@@ -199,6 +214,7 @@ def test_a_checkout_install_lists_its_own_plugin_root(
     if checkout == "worktree":
         target = world.isolated.work_root / "consumer-wt"
         world.git("worktree", "add", "-q", str(target), "-b", "wt")
+        world.trust(target)
 
     result = world.ok("install", "--no-policy", cwd=target)
 
@@ -265,6 +281,8 @@ def test_two_clones_of_one_project_never_overwrite_each_other(
     clone = world.isolated.work_root / "clone"
     (clone / ".claude").mkdir(parents=True)
     shutil.copy2(world.project / "apm.yml", clone / "apm.yml")
+
+    world.trust(clone)
 
     result = world.ok("install", "--no-policy", cwd=clone)
 
@@ -399,3 +417,53 @@ def test_a_unicode_and_space_root_is_recorded_as_is(tmp_path: Path, apm_binary_p
     assert world.known.read_bytes() == before
     world.ok("uninstall", world.plugin.as_posix())
     assert name not in _known(world)
+
+
+_TRUST_HINT = "Open the folder in Claude and accept the trust prompt, then run 'apm install'"
+
+
+def test_an_untrusted_checkout_is_not_listed_and_gets_the_trust_hint(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Trust scope: without Claude Code's folder trust, APM writes no registry entry."""
+    world = _World(tmp_path, apm_binary_path, trusted=False)
+
+    result = world.ok("install", "--no-policy")
+
+    assert (world.project / ".agents/plugins/kit").is_dir()
+    assert not world.known.exists()
+    assert not world.receipt.exists()
+    assert _TRUST_HINT in _text(result), _evidence(result)
+
+
+def test_trust_is_read_from_claude_config_dir_when_set(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Trust recorded in ~/.claude.json does not count while CLAUDE_CONFIG_DIR is set."""
+    world = _World(tmp_path, apm_binary_path, claude_config_dir=True, trusted=False)
+    home_config = world.isolated.home / ".claude.json"
+    home_config.write_text(
+        json.dumps({"projects": {str(world.project.resolve()): {"hasTrustDialogAccepted": True}}}),
+        encoding="utf-8",
+    )
+
+    untrusted = world.ok("install", "--no-policy")
+
+    assert not world.known.exists()
+    assert _TRUST_HINT in _text(untrusted), _evidence(untrusted)
+    world.trust(world.project)
+    world.ok("install", "--no-policy")
+    assert world.marketplace() in _known(world)
+
+
+def test_a_malformed_claude_config_counts_as_untrusted(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _World(tmp_path, apm_binary_path)
+    world.claude_json.write_text("{not json", encoding="utf-8")
+
+    result = world.ok("install", "--no-policy")
+
+    assert not world.known.exists()
+    assert world.claude_json.read_text("utf-8") == "{not json"
+    assert _TRUST_HINT in _text(result), _evidence(result)

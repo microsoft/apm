@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -150,6 +151,40 @@ def _record(owned: dict[str, dict[str, str]]) -> None:
         path.unlink()
 
 
+def _claude_trust_file() -> Path:
+    """Claude Code's user config: ``$CLAUDE_CONFIG_DIR/.claude.json``, else ``~/.claude.json``."""
+    from apm_cli.integration.targets import configured_user_root
+    from apm_cli.native_plugins.scopes import CLAUDE
+
+    configured = configured_user_root(CLAUDE)
+    return (configured if configured is not None else Path.home()) / ".claude.json"
+
+
+def claude_trusts(checkout: Path) -> bool:
+    """Whether Claude Code has recorded folder trust for exactly *checkout*.
+
+    Read only and never through a link: ``projects["<abs checkout>"]
+    .hasTrustDialogAccepted`` must be ``true``. A missing, unreadable or linked
+    file, or one in any other shape, counts as untrusted.
+    """
+    from apm_cli.utils.path_security import user_config_crosses_link
+
+    path = _claude_trust_file()
+    if user_config_crosses_link(path, path.parent):
+        return False
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            return False
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    projects = data.get("projects") if isinstance(data, dict) else None
+    entry = projects.get(str(checkout)) if isinstance(projects, dict) else None
+    return isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True
+
+
 def register_project_marketplace(name: str, root: Path, logger: Any = None) -> None:
     """List project marketplace *name* in Claude's registry at absolute *root*.
 
@@ -162,6 +197,17 @@ def register_project_marketplace(name: str, root: Path, logger: Any = None) -> N
     location = str(Path(root).absolute())
     if not _PROJECT_MARKETPLACE.match(name):
         raise _Skip(f"'{_text(name)}' is not an APM project marketplace name")
+    # The entry makes Claude Code load the plugins, so only a trusted folder gets one.
+    checkout = Path(location).parents[1]
+    if not claude_trusts(checkout):
+        from apm_cli.core.remediation import CLAUDE_MARKETPLACE_TRUST
+
+        _warn(
+            logger,
+            f"APM did not list marketplace '{_text(name)}' for Claude Code: Claude Code "
+            f"does not trust {_text(checkout)} yet. {CLAUDE_MARKETPLACE_TRUST.sentence()}",
+        )
+        return
     owned = _owned()
     target = _registry()
     known = _read(target)[1]

@@ -155,7 +155,14 @@ root from `apm_modules` to `.agents/plugins/<plugin>/`, generates
 `enabledPlugins["<plugin>@apm-p-<hash>"]` into `.claude/settings.json` (targets
 `claude`) and `.github/copilot/settings.json` (targets `copilot`). Commit
 `.agents/plugins/`, both settings files and `apm.lock.yaml`: a fresh clone
-loads the plugins without APM after folder trust. With `-g`, APM uses `~/.agents/plugins/`, an absolute path, `apm-u-<hash>`,
+loads the plugins without APM after folder trust. For a folder Claude Code
+already trusts (`hasTrustDialogAccepted` for the checkout in `.claude.json`),
+`apm install` also lists the marketplace with its absolute path in
+`~/.claude/plugins/known_marketplaces.json` (`CLAUDE_CONFIG_DIR`), so a first
+session loads skills and hooks; otherwise it writes nothing there and prints a
+trust hint. In CI or claude-code-action, an untrusted checkout does not
+auto-load project plugins. This is by design; use user scope or Claude's own
+trust setting. With `-g`, APM uses `~/.agents/plugins/`, an absolute path, `apm-u-<hash>`,
 `~/.claude/settings.json` (`CLAUDE_CONFIG_DIR`) for Claude plugins and
 `~/.copilot/settings.json` (`COPILOT_HOME`) for Agent Plugins. No `claude` or
 `copilot` CLI is needed. Copilot also reads `.claude/settings.json` (lower

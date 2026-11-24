@@ -33,12 +33,20 @@ class _Logger:
         self.warnings.append(message)
 
 
+def _trust(config_dir: Path, *checkouts: Path) -> None:
+    """Claude Code's record of folders whose trust prompt was accepted."""
+    config_dir.mkdir(parents=True, exist_ok=True)
+    projects = {str(checkout): {"hasTrustDialogAccepted": True} for checkout in checkouts}
+    (config_dir / ".claude.json").write_text(json.dumps({"projects": projects}), "utf-8")
+
+
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("APM_HOME", str(tmp_path / "apm"))
     root = tmp_path / "repo" / ".agents" / "plugins"
     root.mkdir(parents=True)
+    _trust(tmp_path / "claude", tmp_path / "repo")
     return root
 
 
@@ -89,9 +97,11 @@ def test_a_linked_registry_location_is_never_written(
     (real / "plugins" / "known_marketplaces.json").write_text("{}\n", encoding="utf-8")
     claude = tmp_path / "claude"
     if linked == "claude-dir":
+        # Claude's own trust record is then reached through the link too.
+        (claude / ".claude.json").replace(real / ".claude.json")
+        claude.rmdir()
         claude.symlink_to(real, target_is_directory=True)
     elif linked == "plugins-dir":
-        claude.mkdir()
         (claude / "plugins").symlink_to(real / "plugins", target_is_directory=True)
     else:
         (claude / "plugins").mkdir(parents=True)
@@ -102,7 +112,8 @@ def test_a_linked_registry_location_is_never_written(
     warnings = _sync(env)
 
     assert (real / "plugins" / "known_marketplaces.json").read_text("utf-8") == "{}\n"
-    assert len(warnings) == 1 and "symbolic link" in warnings[0]
+    expected = "does not trust" if linked == "claude-dir" else "symbolic link"
+    assert len(warnings) == 1 and expected in warnings[0]
 
 
 @pytest.mark.parametrize("text", ["// jsonc\n{}\n", "[1, 2]\n", "{not json"])
@@ -157,6 +168,7 @@ def test_a_unicode_root_with_spaces_is_recorded_verbatim(tmp_path: Path, monkeyp
     monkeypatch.setenv("APM_HOME", str(tmp_path / "apm"))
     root = tmp_path / "my r\u00e9po" / ".agents" / "plugins"
     root.mkdir(parents=True)
+    _trust(tmp_path / "claude", tmp_path / "my r\u00e9po")
 
     assert _sync(root) == []
 
@@ -232,3 +244,100 @@ def test_uninstall_under_another_claude_profile_leaves_that_profile_alone(
     assert other.read_bytes() == before
     assert _receipt(tmp_path).read_bytes() == receipt
     assert _NAME in json.loads(_registry(tmp_path).read_text("utf-8"))
+
+
+_HINT = "Open the folder in Claude and accept the trust prompt, then run 'apm install'"
+
+
+def test_an_untrusted_checkout_gets_no_entry_and_the_trust_hint(env: Path, tmp_path: Path) -> None:
+    (tmp_path / "claude" / ".claude.json").unlink()
+
+    warnings = _sync(env)
+
+    assert not _registry(tmp_path).exists()
+    assert not _receipt(tmp_path).exists()
+    assert len(warnings) == 1 and _HINT in warnings[0]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "{not json",
+        "[]",
+        "{}",
+        '{"projects": []}',
+        '{"projects": {"__CHECKOUT__": true}}',
+        '{"projects": {"__CHECKOUT__": {"hasTrustDialogAccepted": "true"}}}',
+        '{"projects": {"__CHECKOUT__": {"hasTrustDialogAccepted": 1}}}',
+    ],
+    ids=[
+        "malformed",
+        "top-level-list",
+        "projects-missing",
+        "projects-not-object",
+        "entry-not-object",
+        "flag-string",
+        "flag-number",
+    ],
+)
+def test_an_unrecognised_claude_config_counts_as_untrusted(
+    env: Path, tmp_path: Path, document: str
+) -> None:
+    checkout = json.dumps(str(tmp_path / "repo"))[1:-1]
+    _seed(tmp_path / "claude" / ".claude.json", document.replace("__CHECKOUT__", checkout))
+
+    warnings = _sync(env)
+
+    assert not _registry(tmp_path).exists()
+    assert len(warnings) == 1 and _HINT in warnings[0]
+
+
+@pytest.mark.parametrize("spelling", ["trailing-slash", "case"])
+def test_only_the_exact_checkout_key_is_trusted(env: Path, tmp_path: Path, spelling: str) -> None:
+    checkout = str(tmp_path / "repo")
+    key = f"{checkout}/" if spelling == "trailing-slash" else checkout.swapcase()
+    _seed(
+        tmp_path / "claude" / ".claude.json",
+        json.dumps({"projects": {key: {"hasTrustDialogAccepted": True}}}),
+    )
+
+    warnings = _sync(env)
+
+    assert not _registry(tmp_path).exists()
+    assert len(warnings) == 1 and _HINT in warnings[0]
+
+
+def test_a_linked_claude_config_counts_as_untrusted(env: Path, tmp_path: Path) -> None:
+    config = tmp_path / "claude" / ".claude.json"
+    elsewhere = tmp_path / "dotfiles.json"
+    config.replace(elsewhere)
+    try:
+        config.symlink_to(elsewhere)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    warnings = _sync(env)
+
+    assert not _registry(tmp_path).exists()
+    assert len(warnings) == 1 and _HINT in warnings[0]
+
+
+def test_trust_is_read_where_claude_config_dir_points(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Trust recorded in ~/.claude.json does not count while CLAUDE_CONFIG_DIR is set.
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (tmp_path / "claude" / ".claude.json").replace(tmp_path / "trust.json")
+    _seed(home / ".claude.json", (tmp_path / "trust.json").read_text("utf-8"))
+
+    assert _HINT in _sync(env)[0]
+    assert not _registry(tmp_path).exists()
+
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+
+    assert _sync(env) == []
+    assert _NAME in json.loads(
+        (home / ".claude/plugins/known_marketplaces.json").read_text("utf-8")
+    )
