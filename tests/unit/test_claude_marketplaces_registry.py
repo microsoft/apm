@@ -515,7 +515,14 @@ def test_a_forward_slash_trust_key_is_trusted(env: Path, tmp_path: Path) -> None
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
-def test_the_receipt_is_readable_by_its_owner_only(env: Path, tmp_path: Path) -> None:
+@pytest.mark.parametrize("existing", [None, 0o644], ids=["new", "existing-0644"])
+def test_the_receipt_is_readable_by_its_owner_only(
+    env: Path, tmp_path: Path, existing: int | None
+) -> None:
+    if existing is not None:
+        _seed(_receipt(tmp_path), '{"version": 3, "entries": {}}\n')
+        _receipt(tmp_path).chmod(existing)
+
     assert _sync(env) == []
 
     assert stat.S_IMODE(_receipt(tmp_path).stat().st_mode) == 0o600
