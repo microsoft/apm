@@ -380,6 +380,19 @@ def origin_bounded_request(
         current = target
 
 
+def credential_header_value(line: str) -> str:
+    """The value of one ``Authorization: <value>`` header line, as git's http.extraHeader holds it."""
+    name, separator, value = line.partition(":")
+    if not separator or name.strip().lower() != "authorization":
+        raise ValueError("not an Authorization header line")
+    return value.strip()
+
+
+def per_request_credential_headers(value: str) -> dict[str, str]:
+    """Headers carrying one credential *value* for ONE request, never set on a session."""
+    return {"Authorization": value}
+
+
 def split_url_credentials(url: str) -> tuple[str, dict[str, str]]:
     """Move userinfo out of *url* into an explicit HTTP Basic credential header.
 

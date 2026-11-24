@@ -903,7 +903,7 @@ def _post(
     proxy: str | None,
     trust: tuple[str, str],
     body: bytes,
-    authorization: str | None = None,
+    credential: str | None = None,
 ) -> bytes:
     from ..utils.http_credentials import origin_bounded_request
 
@@ -913,9 +913,14 @@ def _post(
         "Accept": "application/x-git-upload-pack-result",
         "Git-Protocol": "version=2",
     }
-    if authorization is not None:
+    if credential is not None:
+        from ..utils.http_credentials import (
+            credential_header_value,
+            per_request_credential_headers,
+        )
+
         # Per request only (never session.headers), exact origin, no redirect hop.
-        headers["Authorization"] = authorization[len("Authorization: ") :]
+        headers.update(per_request_credential_headers(credential_header_value(credential)))
     with origin_bounded_request(
         _session(trust),
         "POST",
@@ -964,7 +969,7 @@ def _admitted_post(
     proxy: str | None,
     trust: tuple[str, str],
     body: bytes,
-    authorization: str | None = None,
+    credential: str | None = None,
     *,
     post: Callable[..., bytes] | None = None,
 ) -> bytes:
@@ -986,12 +991,12 @@ def _admitted_post(
             if _rate_limited():
                 raise _Refuse("rate limited earlier in this command")
             if not settled.get("ok"):
-                answer = send(upload_url, proxy, trust, body, authorization)
+                answer = send(upload_url, proxy, trust, body, credential)
                 settled["ok"] = True
                 return answer
     if _rate_limited():  # another download tripped it while this one was gated or queued
         raise _Refuse("rate limited earlier in this command")
-    return send(upload_url, proxy, trust, body, authorization)
+    return send(upload_url, proxy, trust, body, credential)
 
 
 def _note(url: str, outcome: str) -> None:
@@ -1063,10 +1068,10 @@ def fetch_worktree(
         _log.debug("in-process fetch skipped: rate limited earlier in this command")
         return None
     try:
-        authorization, env = _split_managed_auth(env if env is not None else os.environ)
+        credential, env = _split_managed_auth(env if env is not None else os.environ)
         upload_url, proxy, trust = _gate(url, env)
-        body = _admitted_post(upload_url, proxy, trust, _request_body(sha), authorization)
-        del authorization
+        body = _admitted_post(upload_url, proxy, trust, _request_body(sha), credential)
+        del credential
         objects = parse_pack(_pack_from_response(body))
         files, reached = _plan(objects, sha)
         root = str(staged)

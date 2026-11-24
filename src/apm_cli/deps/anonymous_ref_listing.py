@@ -465,12 +465,15 @@ def parse_advertisement(data: bytes, prefixes: tuple[str, ...]) -> str:
 
 
 def _fetch(
-    refs_url: str, proxy: str | None, ca: str, holder: dict, authorization: str | None = None
+    refs_url: str, proxy: str | None, ca: str, holder: dict, credential: str | None = None
 ) -> bytes:
-    from apm_cli.utils.http_credentials import origin_bounded_request
+    from apm_cli.utils.http_credentials import (
+        origin_bounded_request,
+        per_request_credential_headers,
+    )
 
     # Per request only (never session.headers), exact origin, no redirect hop.
-    headers = {"Authorization": authorization} if authorization else None
+    headers = per_request_credential_headers(credential) if credential else None
 
     deadline = time.monotonic() + _DEADLINE_SECONDS
     # max_hops=0: any redirect raises RedirectRefusedError and falls back.
@@ -515,7 +518,7 @@ def _fetch_within_deadline(
     proxy: str | None,
     ca: str,
     budget: float = _DEADLINE_SECONDS,
-    authorization: str | None = None,
+    credential: str | None = None,
 ) -> bytes:
     """The advertisement body, or ``_Fallback`` on any error or past the budget.
 
@@ -527,7 +530,7 @@ def _fetch_within_deadline(
 
     def run() -> None:
         try:
-            holder["data"] = _fetch(refs_url, proxy, ca, holder, authorization)
+            holder["data"] = _fetch(refs_url, proxy, ca, holder, credential)
         except Exception as exc:
             holder["error"] = exc
 
@@ -562,21 +565,23 @@ def list_refs_authenticated(url: str, *, include_heads: bool, env: Mapping[str, 
     from apm_cli.cache.inprocess_fetch import _Refuse, _split_managed_auth
 
     try:
-        authorization, stripped = _split_managed_auth(env)
+        line, stripped = _split_managed_auth(env)
     except _Refuse as reason:
         _log.debug("authenticated ref listing falls back to git: %s", reason)
         return None
-    if authorization is None:
+    if line is None:
         return None
-    header = authorization[len("Authorization: ") :]
+    from apm_cli.utils.http_credentials import credential_header_value
+
+    value = credential_header_value(line)
     try:
-        return _list_refs(url, include_heads=include_heads, env=stripped, authorization=header)
+        return _list_refs(url, include_heads=include_heads, env=stripped, credential=value)
     finally:
-        del authorization, header
+        del line, value
 
 
 def _list_refs(
-    url: str, *, include_heads: bool, env: Mapping[str, str], authorization: str | None = None
+    url: str, *, include_heads: bool, env: Mapping[str, str], credential: str | None = None
 ) -> str | None:
     """``git ls-remote --tags [--heads] <url>`` stdout for an anonymous attempt, or ``None``.
 
@@ -605,7 +610,7 @@ def _list_refs(
         verify = _verify(child_env, config)
         prefixes = ("refs/tags/", "refs/heads/") if include_heads else ("refs/tags/",)
         refs_url = f"https://{_GITHUB_HOST}{path}/info/refs?service=git-upload-pack"
-        data = _fetch_within_deadline(refs_url, proxy, verify, authorization=authorization)
+        data = _fetch_within_deadline(refs_url, proxy, verify, credential=credential)
         return parse_advertisement(data, prefixes)
     except _Fallback as reason:
         _log.debug("anonymous ref listing falls back to git: %s", reason)
