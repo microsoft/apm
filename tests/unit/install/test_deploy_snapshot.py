@@ -2220,6 +2220,7 @@ def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
     monkeypatch.setattr(pwd, "getpwuid", lambda uid: me)
     monkeypatch.setattr(pwd, "getpwall", lambda: [me, other])
     monkeypatch.setattr(grp, "getgrgid", getgrgid)
+    _local_account_databases(tmp_path, monkeypatch, "files systemd")
 
     if private:
         outcome = _replay(apm_home, project, lambda: ledger)
@@ -2228,6 +2229,60 @@ def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
         return
     with pytest.raises(JournalReplayError) as kept:
         _replay(apm_home, project, lambda: ledger)
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+def _local_account_databases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sources) -> None:
+    """Point the name service switch at a file listing *sources* (``None``: no file)."""
+    nsswitch = tmp_path / "nsswitch.conf"
+    if sources is not None:
+        nsswitch.write_text(
+            f"passwd: {sources}\ngroup: {sources}\nhosts: files dns\n", encoding="utf-8"
+        )
+    monkeypatch.setattr("apm_cli.utils.name_service.NSSWITCH", nsswitch)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner, group and mode bits")
+@pytest.mark.parametrize(
+    ("accounts", "sources"),
+    [
+        ("empty", "files systemd"),
+        ("without-me", "files systemd"),
+        ("complete", "files sss"),
+        ("complete", "files [NOTFOUND=return] ldap"),
+        ("complete", None),
+    ],
+    ids=["empty-enumeration", "partial-enumeration", "sssd", "ldap", "no-nsswitch"],
+)
+def test_a_group_writable_apm_home_needs_a_complete_account_enumeration(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, accounts: str, sources
+) -> None:
+    """#5371: group privacy is trusted only when the account list is provably complete."""
+    import grp
+    import pwd
+    from types import SimpleNamespace
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o775)
+    gid = apm_home.stat().st_gid
+    me = SimpleNamespace(pw_name="me", pw_uid=os.geteuid(), pw_gid=gid)
+    stranger = SimpleNamespace(pw_name="stranger", pw_uid=os.geteuid() + 1, pw_gid=gid + 1)
+    listed = {"empty": [], "without-me": [stranger], "complete": [me, stranger]}[accounts]
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: me)
+    monkeypatch.setattr(pwd, "getpwall", lambda: listed)
+    monkeypatch.setattr(
+        grp, "getgrgid", lambda wanted: SimpleNamespace(gr_name="me", gr_gid=wanted, gr_mem=[])
+    )
+    _local_account_databases(tmp_path, monkeypatch, sources)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
     assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
     assert config.read_bytes() == b"killed\n"
 
