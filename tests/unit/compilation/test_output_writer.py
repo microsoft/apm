@@ -208,7 +208,9 @@ def test_batch_checks_each_directory_once(tmp_path: Path, monkeypatch):
 
     CompiledOutputWriter(base_dir=project).write_many(outputs)
 
-    assert checked == [(".", "a/b"), ("a", "a/c")]
+    preflight = [(".", "a/b"), ("a", "a/c")]
+    at_write = [(".", "a/b"), (".", "a/b"), (".", "a/c")]
+    assert checked == preflight + at_write
     assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
 
 
@@ -318,5 +320,6 @@ def test_dotdot_directories_are_checked_in_full_and_not_cached(tmp_path: Path, m
 
     CompiledOutputWriter(base_dir=project).write_many(outputs)
 
-    assert checked == [(".", "a/b"), (".", "a/b/../b"), (".", "a/b/../b")]
+    full_checks = [(".", "a/b"), (".", "a/b/../b"), (".", "a/b/../b")]
+    assert checked == full_checks + full_checks
     assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
