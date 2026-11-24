@@ -665,9 +665,8 @@ def _unit_paths(
 ) -> tuple[Path, tuple[Path, ...]]:
     """The unit's path and absent ancestors, each confined to its base directory.
 
-    APM-home units are confined to the deployment receipts directory, both as
-    written (canonical, no ``..``) and as resolved: no component from APM
-    home down may be a symbolic link.
+    APM-home units are confined to the deployment receipts directory, both as written
+    (canonical, no ``..``) and as resolved: no component from APM home down may be a link.
     """
     snapshots, rels = store.parent, [line.get("path")]
     ancestors = line.get("ancestors") or []

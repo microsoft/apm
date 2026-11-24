@@ -140,10 +140,23 @@ def _module_aliases(index: TreeIndex) -> tuple[frozenset[str], frozenset[str], f
     return frozenset(os_names), frozenset(shutil_names), frozenset(bare)
 
 
+def _is_path_mutation(call: ast.Call, func: ast.Attribute) -> bool:
+    """``<path>.rename(x)``/``.replace(x)``/``.rmdir()``/``.symlink_to(...)`` on a non-literal."""
+    if isinstance(func.value, ast.Constant | ast.JoinedStr):
+        return False
+    if func.attr == "symlink_to":
+        return True
+    if call.keywords:
+        return False
+    if func.attr in _PATH_RENAMES:
+        return len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)
+    return func.attr == "rmdir" and not call.args
+
+
 def _is_raw_mutation(
     call: ast.Call, aliases: tuple[frozenset[str], frozenset[str], frozenset[str]]
 ) -> bool:
-    """Whether *call* renames or deletes a directory without an APM helper."""
+    """Whether *call* renames or deletes a directory, or creates a link, without an APM helper."""
     os_names, shutil_names, bare = aliases
     func = call.func
     if isinstance(func, ast.Name):
@@ -155,15 +168,7 @@ def _is_raw_mutation(
         return func.attr in _OS_MUTATIONS
     if isinstance(receiver, ast.Name) and receiver.id in shutil_names:
         return func.attr in _SHUTIL_MUTATIONS
-    if isinstance(receiver, ast.Constant | ast.JoinedStr):
-        return False
-    if func.attr == "symlink_to":
-        return True
-    if call.keywords:
-        return False
-    if func.attr in _PATH_RENAMES:
-        return len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)
-    return func.attr == "rmdir" and not call.args
+    return _is_path_mutation(call, func)
 
 
 def _enclosing_functions(index: TreeIndex, node: ast.AST) -> list[ast.AST]:
