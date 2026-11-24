@@ -143,23 +143,24 @@ def _stderr_text(exc: subprocess.CalledProcessError) -> str:
 
 
 def _fetch_admitted_tip_by_name(
-    git_exe: str, path: Path, url: str, ref: str, sha: str, envs: tuple[dict, dict]
+    git_exe: str, path: Path, url: str, ref: str, sha: str, fetch_env: dict[str, str]
 ) -> bool:
     """Fetch *ref* by name when it still points at *sha*; ``False`` if unknown.
 
-    *envs* is the transport env and the validated clone env of *path*.
+    Both the listing and the fetch use *fetch_env*, the validated clone env of
+    *path*, so they reach the destination a clone would (a mirror rewrite).
 
     Raises:
         AdmittedCommitGoneError: *ref* no longer points at *sha*.
     """
     from ..cache.commit_reachability import admitted_tip_name
 
-    name = admitted_tip_name(url, ref, sha, envs[0])
+    name = admitted_tip_name(url, ref, sha, fetch_env)
     if name is None:
         return False
     subprocess.run(
         [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, name],
-        env={**envs[1], **_UNTRANSLATED},
+        env={**fetch_env, **_UNTRANSLATED},
         check=True,
         capture_output=True,
         timeout=300,
@@ -221,7 +222,7 @@ def fetch_commit_worktree(
             # missing commit or an auth failure fails here, at depth-1 cost.
             ref = getattr(dep_ref, "reference", None)
             if ref and _NOT_OUR_REF in _stderr_text(exc):
-                if not _fetch_admitted_tip_by_name(git_exe, path, url, ref, sha, (env, fetch_env)):
+                if not _fetch_admitted_tip_by_name(git_exe, path, url, ref, sha, fetch_env):
                     raise
                 checkout_git_worktree(path, sha, env=env)
                 return

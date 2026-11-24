@@ -653,3 +653,44 @@ def test_a_package_with_a_link_installs_from_a_host_that_will_not_serve_a_commit
     [deployed] = (project / "apm_modules").rglob("linked.instructions.md")
     assert not deployed.is_symlink()
     assert deployed.read_text(encoding="utf-8") == "m2"
+
+
+def test_a_mirror_alone_serves_the_by_name_fallback_of_a_remote_activated_rewrite(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: the ref listing of the fallback goes where the clone would, never the origin."""
+    from apm_cli.deps.bare_cache import fetch_commit_worktree
+
+    remote = "https://origin.invalid/acme/pkg.git"
+    mirror = tmp_path / "mirror.gitconfig"
+    mirror.write_text(f'[url "{origin.path.as_uri()}"]\n\tinsteadOf = {remote}\n', encoding="ascii")
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{remote}"]\n\tpath = {mirror.as_posix()}\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    listed = tmp_path / "listed"
+    _wrapped_git(
+        tmp_path,
+        monkeypatch,
+        _NOT_OUR_REF
+        + f"""
+if "ls-remote" in args:
+    url = next(a for a in args[args.index("ls-remote") + 1 :] if not a.startswith("-"))
+    where = subprocess.run([REAL, "ls-remote", "--get-url", url], capture_output=True, text=True)
+    with open({str(listed)!r}, "a") as log:
+        log.write(where.stdout)
+""",
+    )
+    target = tmp_path / "checkout"
+
+    def _plan(_base, path, *, dep_ref, clone_action, **_kwargs) -> None:
+        clone_action(remote, {"GIT_TERMINAL_PROMPT": "0"}, path)
+
+    fetch_commit_worktree(
+        _plan, "acme/pkg", target, dep_ref=SimpleNamespace(reference="main"), sha=origin.m2
+    )
+
+    assert listed.read_text(encoding="utf-8").split() == [origin.path.as_uri()]
+    assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m2"
