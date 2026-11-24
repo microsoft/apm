@@ -2117,3 +2117,76 @@ class TestWindsurfRulesIntegration:
                 windsurf, pkg_info, self.project_root, diagnostics=diag_quiet
             )
         assert not captured, f"unexpected output under quiet diagnostics: {captured}"
+
+
+def _style_package(root: Path, name: str, apply_to: str, body: str) -> Path:
+    package = root / name
+    sources = package / ".apm" / "instructions"
+    sources.mkdir(parents=True)
+    (sources / "style.instructions.md").write_text(
+        f"---\napplyTo: '{apply_to}'\n---\n\n{body}\n", encoding="utf-8"
+    )
+    return package
+
+
+def _collisions(diagnostics) -> list[str]:
+    return [
+        item.message
+        for items in diagnostics.by_category().values()
+        for item in items
+        if "both ship an instruction named 'style'" in item.message
+    ]
+
+
+@pytest.fixture
+def claude_rules(tmp_path: Path, monkeypatch):
+    """A Claude project, one integrator and one collector, as one install binds them."""
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    prove_overwrites(monkeypatch)
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    integrator = InstructionIntegrator()
+    diagnostics = DiagnosticCollector()
+
+    def integrate(package_info) -> str:
+        integrator.integrate_package_instructions_claude(
+            package_info,
+            project,
+            managed_files={".claude/rules/style.md"},
+            diagnostics=diagnostics,
+        )
+        return (project / ".claude" / "rules" / "style.md").read_text(encoding="utf-8")
+
+    return integrate, diagnostics
+
+
+def test_two_dependencies_sharing_a_display_name_still_collide(tmp_path: Path, claude_rules):
+    """The first-declared copy is kept by identity, not by manifest name (#5343)."""
+    integrate, diagnostics = claude_rules
+    integrate(_make_package_info(_style_package(tmp_path, "a", "**/*.py", "Use tabs."), "kit"))
+    rule = integrate(
+        _make_package_info(_style_package(tmp_path, "b", "**/*.ts", "Use spaces."), "kit")
+    )
+
+    assert "Use tabs." in rule and "Use spaces." not in rule
+    assert len(_collisions(diagnostics)) == 1
+
+
+@pytest.mark.parametrize("local_first", [False, True], ids=["install-order", "replay-order"])
+def test_the_project_s_own_instruction_overrides_a_dependency_rule(
+    tmp_path: Path, claude_rules, local_first: bool
+):
+    """A local instruction wins in install and replay alike, with no collision warning (#5343)."""
+    from apm_cli.install.project_package import build_project_local_package_info
+
+    integrate, diagnostics = claude_rules
+    dependency = _make_package_info(_style_package(tmp_path, "dep", "**/*.py", "Use tabs."))
+    local = build_project_local_package_info(
+        _style_package(tmp_path, "local", "**/*.ts", "Use spaces.")
+    )
+    order = [local, dependency] if local_first else [dependency, local]
+    rules = [integrate(package_info) for package_info in order]
+
+    assert "Use spaces." in rules[-1] and "Use tabs." not in rules[-1]
+    assert _collisions(diagnostics) == []
