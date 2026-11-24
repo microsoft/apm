@@ -312,13 +312,9 @@ def uninstall_local_bundles(
             )
         sys.exit(1)
     _refuse_unsafe_cleanup(bundle_scope, logger=logger, dry_run=dry_run)
-    if dry_run:
-        for slug in slugs:
-            logger.dry_run_notice(f"Would remove hooks from local bundle '{slug}'")
-        return
-
     # A hook still running a bundle's script refuses before the resume note is
-    # written, so a refused uninstall leaves every file as it was (#5291).
+    # written, so a refused uninstall leaves every file as it was (#5291);
+    # read-only, so a dry run refuses the same way.
     in_use = {
         slug: paths
         for slug in slugs
@@ -329,6 +325,10 @@ def uninstall_local_bundles(
         _report_kept_hooks(logger, slug, ", ".join(paths))
     if in_use:
         sys.exit(1)
+    if dry_run:
+        for slug in slugs:
+            logger.dry_run_notice(f"Would remove hooks from local bundle '{slug}'")
+        return
     try:
         for slug in slugs:
             mark_bundle_retiring(lock_dir, slug, "hooks")
