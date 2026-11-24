@@ -28,7 +28,9 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import warnings
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -47,6 +49,7 @@ pytestmark = [
 ]
 
 _TREE = "tree-10"
+_FIXED_ROOT = "/tmp"
 # A fixed placeholder token the offline mirror accepts; auth is tried first.
 _AUTH = {"GITHUB_APM_PAT": "ghp_" + "0" * 36, "APM_GITHUB_AUTH_FIRST": "1"}
 _MEASURE = os.environ.get("APM_PERF_COUNT_BUDGETS_MEASURE") == "1"
@@ -57,11 +60,20 @@ class TightenNote(UserWarning):
 
 
 @pytest.fixture(scope="module")
-def journey_runs(tmp_path_factory, apm_engine_command) -> dict[str, tuple]:
+def journey_runs(apm_engine_command) -> Iterator[dict[str, tuple]]:
     """Run every journey once, in order; each journey's result, lockfile and counters."""
-    work = tmp_path_factory.mktemp("perf-count-budgets")
+    # realpath lstat()s every path component, so the counts depend on how deep the world
+    # sits. pytest's basetemp depth differs between jobs (xdist adds popen-gwN/), so the
+    # world lives at a fixed depth instead: /tmp/apm-perf-<random>.
+    work = Path(tempfile.mkdtemp(prefix="apm-perf-", dir=_FIXED_ROOT))
+    try:
+        yield _run_journeys(work, list(apm_engine_command))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _run_journeys(work: Path, apm: list[str]) -> dict[str, tuple]:
     tree = build_tree(TREE_RECIPES[_TREE], work / "tree")
-    apm = list(apm_engine_command)
     runs: dict[str, tuple] = {}
     with serve_offline(tree, work / "world") as world:
         project = work / "project"
