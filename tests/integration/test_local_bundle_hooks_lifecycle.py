@@ -1877,3 +1877,28 @@ def test_uninstall_bundle_refuses_a_hook_shape_the_grammar_does_not_recognize(
 
     assert ".github/hooks/user.json" in text, text
     assert (consumer / script).is_file()
+
+
+@pytest.mark.parametrize("preview", [(), ("--dry-run",)], ids=["run", "dry-run"])
+def test_a_refused_bundle_uninstall_leaves_the_pending_record_untouched(
+    tmp_path: Path, apm_binary_path: Path, preview: tuple[str, ...]
+) -> None:
+    """#5291: the in-use refusal runs before the resume note, so it writes nothing.
+
+    The preview refuses the same way: it never promises a removal the run refuses.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "refused-note-consumer")
+    _user_hook_naming_the_script(
+        consumer,
+        lambda path: {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": path}]}},
+    )
+    before = tree_bytes(consumer)
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", *preview, expect=1))
+
+    assert ".github/hooks/user.json" in text, text
+    assert "Would remove hooks" not in text, text
+    after = tree_bytes(consumer)
+    changed = sorted(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
+    assert changed == [], changed
