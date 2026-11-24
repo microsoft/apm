@@ -45,7 +45,9 @@ class _World:
     project: Path
 
     def __init__(self, tmp_path: Path, binary: Path, *, claude_config_dir: bool = False) -> None:
-        self.isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+        # An inherited Claude profile must never be the one these cells inspect or write.
+        base_env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        self.isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=base_env)
         overrides = {"NO_COLOR": "1"}
         self.claude_dir = self.isolated.home / ".claude"
         if claude_config_dir:

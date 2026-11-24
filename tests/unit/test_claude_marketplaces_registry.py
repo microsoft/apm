@@ -194,3 +194,41 @@ def test_claudes_own_entry_for_this_root_is_kept_and_not_removed(env: Path, tmp_
     assert _sync(env, declared=False) == []
 
     assert _registry(tmp_path).read_bytes() == before
+
+
+def test_a_receipt_that_cannot_be_written_publishes_no_entry(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The receipt is recorded first: if it cannot be written, no entry is published."""
+    from apm_cli.native_plugins import claude_marketplaces
+
+    real_write = claude_marketplaces.atomic_write_text
+
+    def write(path, text, *args, **kwargs):
+        if Path(path) == _receipt(tmp_path):
+            raise OSError("disk full")
+        return real_write(path, text, *args, **kwargs)
+
+    monkeypatch.setattr(claude_marketplaces, "atomic_write_text", write)
+
+    warnings = _sync(env)
+
+    assert not _registry(tmp_path).exists()
+    assert len(warnings) == 1 and "disk full" in warnings[0]
+
+
+def test_uninstall_under_another_claude_profile_leaves_that_profile_alone(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _sync(env) == []
+    receipt = _receipt(tmp_path).read_bytes()
+    other = tmp_path / "claude-b" / "plugins" / "known_marketplaces.json"
+    entry = {"source": {"source": "directory", "path": str(env)}, "installLocation": str(env)}
+    before = _seed(other, json.dumps({_NAME: entry}) + "\n")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-b"))
+
+    assert _sync(env, declared=False) == []
+
+    assert other.read_bytes() == before
+    assert _receipt(tmp_path).read_bytes() == receipt
+    assert _NAME in json.loads(_registry(tmp_path).read_text("utf-8"))

@@ -129,19 +129,23 @@ def _registered_path(entry: Any) -> Any:
     return source.get("path") if isinstance(source, dict) else None
 
 
-def _owned() -> dict[str, str]:
-    """APM's receipt of the entries it wrote; ``_Skip`` when unreadable (never ``{}``)."""
+def _owned() -> dict[str, dict[str, str]]:
+    """APM's receipt of the entries it wrote; ``_Skip`` when unreadable (never ``{}``).
+
+    Each record names the root and the absolute registry file APM wrote it in,
+    so only that registry's entry counts as APM's.
+    """
     _raw, data = _read(_receipt_path())
     entries = data.get("entries", {})
     if not isinstance(entries, dict):
         raise _Skip(f"{_text(_receipt_path())} has no entries object")
-    return dict(entries)
+    return {k: v for k, v in entries.items() if isinstance(v, dict)}
 
 
-def _record(owned: dict[str, str]) -> None:
+def _record(owned: dict[str, dict[str, str]]) -> None:
     path = _receipt_path()
     if owned:
-        _write(path, {"version": 1, "entries": owned})
+        _write(path, {"version": 2, "entries": owned})
     elif path.exists():
         path.unlink()
 
@@ -151,19 +155,29 @@ def register_project_marketplace(name: str, root: Path, logger: Any = None) -> N
 
     Only adds an entry: one already under *name* (this checkout's, another
     clone's or worktree's, or Claude's own) is kept byte for byte, with a
-    warning when it names another root.
+    warning when it names another root. The receipt is recorded before the
+    entry is published and undone if publishing fails, so APM never leaves an
+    entry it wrote without a record of it.
     """
     location = str(Path(root).absolute())
     if not _PROJECT_MARKETPLACE.match(name):
         raise _Skip(f"'{_text(name)}' is not an APM project marketplace name")
     owned = _owned()
     target = _registry()
-    outcome: list[str] = []
+    known = _read(target)[1]
+    if name in known:
+        existing = _registered_path(known[name])
+        if existing != location:
+            _warn(
+                logger,
+                f"{_text(target)} already lists marketplace '{_text(name)}' at "
+                f"{_text(existing)}; APM only overwrites an entry it owns for this checkout, "
+                "so Claude Code may load this project's plugins from there.",
+            )
+        return
 
     def add(known: dict[str, Any]) -> bool:
-        existing = known.get(name)
-        if existing is not None:
-            outcome[:] = [str(_registered_path(existing))]
+        if name in known:
             return False
         now = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         known[name] = {
@@ -171,29 +185,33 @@ def register_project_marketplace(name: str, root: Path, logger: Any = None) -> N
             "installLocation": location,
             "lastUpdated": now,
         }
-        outcome[:] = []
         return True
 
-    _merge(target, add)
-    if outcome and outcome[0] != location:
-        _warn(
-            logger,
-            f"{_text(target)} already lists marketplace '{_text(name)}' at {_text(outcome[0])}; "
-            "APM only overwrites an entry it owns for this checkout, so Claude Code may load "
-            "this project's plugins from there.",
-        )
-    elif not outcome:
-        _record({**owned, name: location})
+    _record({**owned, name: {"root": location, "registry": str(target.absolute())}})
+    try:
+        _merge(target, add)
+    except BaseException:
+        _record(owned)
+        raise
+    if _registered_path(_read(target)[1].get(name)) != location:
+        _record(owned)
 
 
 def unregister_project_marketplace(name: str, root: Path, logger: Any = None) -> None:
-    """Remove APM's registry entry for *name* at *root*, and nothing else."""
+    """Remove APM's registry entry for *name* at *root*, and nothing else.
+
+    Only the registry the receipt names counts: with another
+    ``CLAUDE_CONFIG_DIR``, another profile's identical entry is left alone.
+    """
     del logger
     location = str(Path(root).absolute())
     owned = _owned()
-    if owned.get(name) != location:
+    record = owned.get(name, {})
+    if record.get("root") != location:
         return
     target = _registry()
+    if record.get("registry") != str(target.absolute()):
+        return
 
     def remove(known: dict[str, Any]) -> bool:
         if _registered_path(known.get(name)) != location:
