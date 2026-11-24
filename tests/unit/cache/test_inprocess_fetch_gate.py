@@ -95,6 +95,8 @@ def test_schannel_trusts_the_windows_store_and_other_backends_fall_back(monkeypa
         fetch._trust({}, {"http.sslbackend": "schannel"})
     monkeypatch.setattr("os.name", "nt")
     assert fetch._trust({}, {"http.sslbackend": "schannel"}) == ("file", OS_TRUST)
+    with pytest.raises(fetch._Refuse, match="not spelled 'schannel'"):
+        fetch._trust({}, {"http.sslbackend": "Schannel", "http.sslcainfo": "/ca.pem"})
 
 
 def test_openssl_trusts_exactly_gits_ca_file(tmp_path: Path) -> None:

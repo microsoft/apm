@@ -246,8 +246,13 @@ def _proxy(env: Mapping[str, str]) -> str | None:
 
 def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
     """The CA file git would trust (GIT_SSL_CAINFO > http.sslCAInfo > SSL_CERT_FILE)."""
-    backend = config.get(_BACKEND_KEY, "").lower()
+    raw_backend = config.get(_BACKEND_KEY, "")
+    backend = raw_backend.lower()
     if backend == "schannel":
+        # git tests strcmp("schannel") but curl matches any case: "Schannel" is
+        # schannel verifying against the CA file, which is git's to decide.
+        if raw_backend != "schannel":
+            raise _Fallback("http.sslBackend is not spelled 'schannel'")
         return _schannel_trust()
     if backend not in ("", "openssl"):
         raise _Fallback("non-default TLS backend")

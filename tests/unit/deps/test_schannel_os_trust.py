@@ -43,6 +43,12 @@ def test_schannel_ignores_ca_files_as_git_does(on_windows, env, config) -> None:
     assert arl._verify(env, {"http.sslbackend": "schannel", **config}) == arl.OS_TRUST
 
 
+def test_schannel_spelled_otherwise_falls_back(on_windows) -> None:
+    """git's strcmp is case-sensitive: "Schannel" keeps the CA file, so git decides."""
+    with pytest.raises(arl._Fallback, match="not spelled 'schannel'"):
+        arl._verify({}, {"http.sslbackend": "Schannel", "http.sslcainfo": "/ca.pem"})
+
+
 def test_schannel_off_windows_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("os.name", "posix")
     with pytest.raises(arl._Fallback, match="outside Windows"):
