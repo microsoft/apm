@@ -15,7 +15,10 @@ packages on github.com, real network). Enterprise shapes: ``tree-N-multi``
 ``tree-N-ghe`` / ``tree-N-gitlab`` (every package on one non-github.com host,
 so installs take the git path), ``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
 suffix on any offline fixture (the project's git remote points at an org
-whose blocking policy is served, so discovery and enforcement run). Offline fixtures are served by a local
+whose blocking policy is served, so discovery and enforcement run). On Windows,
+offline fixtures model the default Git for Windows TLS config (schannel, the
+mirror CA in the machine Root store, a served CRL); an ``-openssl`` suffix
+runs the secondary OpenSSL cell. Offline fixtures are served by a local
 mirror whose RTT is injected per round trip (``--rtt 0,30,100``).
 
 Examples::
@@ -127,13 +130,27 @@ class Fixture:
     real: bool = False
     stats: dict = field(default_factory=dict)
     policy: bool = False
+    # Windows git TLS for offline fixtures: "system" (default Git for Windows,
+    # schannel) or "openssl" (an ``-openssl`` suffix; a secondary cell).
+    tls_mode: str = "system"
 
 
 _POLICY_SUFFIX = "-policy"
+_OPENSSL_SUFFIX = "-openssl"
 
 
 def prepare_fixture(name: str, work: Path) -> Fixture:
-    """Fixture *name*; a ``-policy`` suffix puts the project under the served org policy."""
+    """Fixture *name*; a ``-policy`` suffix puts the project under the served org policy.
+
+    An ``-openssl`` suffix (last) runs Windows git over OpenSSL with the mirror CA
+    file instead of the default Git for Windows TLS config.
+    """
+    if name.endswith(_OPENSSL_SUFFIX) and name != _OPENSSL_SUFFIX:
+        fixture = prepare_fixture(name[: -len(_OPENSSL_SUFFIX)], work)
+        if fixture.real:
+            raise SystemExit(f"{name!r}: the openssl variant needs an offline fixture")
+        fixture.name, fixture.tls_mode = name, "openssl"
+        return fixture
     if name.endswith(_POLICY_SUFFIX) and name != _POLICY_SUFFIX:
         fixture = _prepare_fixture(name[: -len(_POLICY_SUFFIX)], work)
         if fixture.real:
@@ -233,7 +250,11 @@ def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
         with counting_tunnel() as tunnel:
             yield _RealWorld(isolated, env, tunnel)
         return
-    with serve_offline(fixture.trees, directory, policy=fixture.policy) as world:
+    with serve_offline(
+        fixture.trees, directory, policy=fixture.policy, tls_mode=fixture.tls_mode
+    ) as world:
+        if world.tls:
+            fixture.stats["git_tls"] = world.tls
         yield world
 
 
