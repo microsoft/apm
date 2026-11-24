@@ -434,11 +434,15 @@ def _build_real_catalog_repo(root: Path, count: int) -> Path:
     for index in range(count):
         (directory / f"test_module_{index}.py").write_text(
             "import pytest\n\n"
-            "pytestmark = pytest.mark.integration\n\n\n"
-            f"def helper_{index}(value):\n"
+            "pytestmark = pytest.mark.integration\n\n"
+            # Tokens that open every binary-selection gate (#5196) without forming a
+            # violation, so each detector still does its work at N and 10N.
+            '_GATE_TOKENS = ("apm/.venv", "APM_BINARY_PATH", "-m", "uv")\n\n\n'
+            f"def helper_{index}(value, apm_binary_path=None):\n"
+            "    which = executable = ApmLifecycleRunner = subprocess = None\n"
             "    if value:\n"
             "        return value\n"
-            "    return None\n",
+            "    return (which, executable, ApmLifecycleRunner, subprocess, apm_binary_path)\n",
             encoding="ascii",
         )
     return root
@@ -489,6 +493,19 @@ def test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtractio
     samples = {label: _catalog_sample(root, work_units) for label, root in roots.items()}
     for sample in samples.values():
         _assert_catalog_sample(sample)
+        assert sample.report.violations == ()
+    # Every corpus file opens every binary-selection gate, so the ratio below still
+    # bounds the detectors' own work, not only the pre-filter's (#5196).
+    from dataclasses import asdict
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_needs,
+    )
+
+    corpus_file = "tests/integration/perf_catalog/test_module_0.py"
+    provider = FactsProvider(roots["n"], (corpus_file,), registry=None)
+    needs = asdict(_binary_needs(provider.tree_index(corpus_file)))
+    assert all(needs.values()), needs
 
     fixed = samples["zero"].walk_work_units
     incremental_n = samples["n"].walk_work_units - fixed
@@ -671,3 +688,32 @@ def test_definition_index_answers_every_real_query_like_the_direct_scan() -> Non
     # Non-vacuous: real definers are found (an empty scan would agree with an empty index).
     assert "get_apm_home" in found and len(set(found)) >= 10, sorted(set(found))
     assert differing == [], differing
+
+
+def test_binary_selection_prefilter_finds_what_every_detector_finds() -> None:
+    """The binary-selection pre-filter (#5196) never hides a finding: on every
+    tracked Python file, the filtered detectors report exactly the unfiltered ones."""
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_subcheck_results,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+    from scripts.architecture_linter.inventory import build_inventory
+
+    root = Path(__file__).resolve().parents[2]
+    inventory = build_inventory(root)
+    provider = FactsProvider(root, inventory.files, registry=None)
+    differences: list[str] = []
+    hits = 0
+    for path in inventory.files:
+        if not path.endswith(".py"):
+            continue
+        index = provider.tree_index(path)
+        if index is None or index.root is None:
+            continue
+        filtered = [lines for lines, _ in _binary_subcheck_results(index)]
+        unfiltered = [lines for lines, _ in _binary_subcheck_results(index, prefilter=False)]
+        hits += sum(1 for lines in unfiltered if lines)
+        if filtered != unfiltered:
+            differences.append(path)
+    assert differences == [], f"the pre-filter hides findings in {differences[:5]}"
+    assert hits > 0, "no detector fired anywhere: the comparison proves nothing"
