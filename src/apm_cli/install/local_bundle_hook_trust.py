@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
-from apm_cli.install.hook_script_refs import runs_script, script_refs
+from apm_cli.install.hook_script_refs import hook_commands, runs_script, script_refs
 
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
@@ -546,39 +546,6 @@ def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str
     return tails
 
 
-def _hook_commands(document: Any) -> list[str]:
-    """Commands a per-file hook document runs, read from handler positions only (#5136).
-
-    The shared hook grammar locates the handlers, so metadata that merely names
-    a script (``env.command``) runs nothing. A shape the grammar does not
-    recognize (a Kiro action list, a malformed entry) is scanned whole, as
-    before, so it still fails closed.
-    """
-    from apm_cli.hook_contract import HookContractError, parse_hook_source
-
-    try:
-        commands = [declared.command for declared in parse_hook_source(document).commands]
-    except HookContractError:
-        commands = list(_every_command_field(document))
-    # Raw text: the matcher reads backslash escapes; only the tail match normalizes (#5106).
-    return commands
-
-
-def _every_command_field(node: Any) -> Iterator[str]:
-    """Every hook command field anywhere in a document the grammar cannot read."""
-    from apm_cli.hook_contract import HOOK_COMMAND_KEYS
-
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key in HOOK_COMMAND_KEYS and isinstance(value, str):
-                yield value
-            else:
-                yield from _every_command_field(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _every_command_field(item)
-
-
 def _per_file_configs_running(
     project_root: Path, targets: Any, owned: Collection[str], scripts: Collection[str]
 ) -> set[str]:
@@ -609,7 +576,7 @@ def _per_file_configs_running(
             except (OSError, ValueError, TypeError):
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
-            texts = list(_hook_commands(document))
+            texts = list(hook_commands(document))
             if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
                 runs_script(text, refs, (project_root, target_root), project_root) for text in texts
             ):
@@ -747,6 +714,37 @@ def _remove_unedited(
     return failed
 
 
+def _bundle_hook_inputs(project_root: Path, targets: Any, slug: str, lock_paths):
+    """``(state, hook files, script rows)`` one bundle's hook retirement acts on."""
+    state = deployed_bundle_hook_keys(project_root, targets, lock_paths).get(slug)
+    hook_files = {
+        _relative_value(value, project_root) for value in (state.hook_files if state else ())
+    }
+    return state, hook_files, _bundle_script_rows(lock_paths, targets, slug, project_root)
+
+
+def _still_running(project_root: Path, targets: Any, slug: str, hook_files, scripts) -> set[str]:
+    """Hook configs the bundle does not own that still run its scripts."""
+    return _configs_still_running(project_root, targets, slug, scripts) | (
+        _per_file_configs_running(project_root, targets, hook_files, scripts)
+    )
+
+
+def bundle_hooks_in_use(
+    project_root: Path, targets: Any, slug: str, *, lock_dir: Path | None
+) -> tuple[str, ...]:
+    """Hook configs that still run *slug*'s scripts, read before anything is written (#5291).
+
+    The same check :func:`retire_bundle_hooks` refuses on; a caller runs it
+    first so a refused uninstall writes nothing, not even its resume note.
+    """
+    project_root = Path(project_root)
+    _state, hook_files, scripts = _bundle_hook_inputs(
+        project_root, targets, slug, local_bundle_paths(lock_dir)
+    )
+    return tuple(sorted(_still_running(project_root, targets, slug, hook_files, scripts)))
+
+
 def retire_bundle_hooks(
     project_root: Path,
     targets: Any,
@@ -774,17 +772,11 @@ def retire_bundle_hooks(
     project_root = Path(project_root)
     lockfile = LockFile.read(get_lockfile_path(lock_dir)) if lock_dir is not None else None
     lock_paths = local_bundle_paths(lock_dir)
-    state = deployed_bundle_hook_keys(project_root, targets, lock_paths).get(slug)
-    hook_files = {
-        _relative_value(value, project_root) for value in (state.hook_files if state else ())
-    }
-    scripts = _bundle_script_rows(lock_paths, targets, slug, project_root)
+    state, hook_files, scripts = _bundle_hook_inputs(project_root, targets, slug, lock_paths)
     rows = scripts | {
         value for value in lock_paths if _relative_value(value, project_root) in hook_files
     }
-    still_running = _configs_still_running(
-        project_root, targets, slug, scripts
-    ) | _per_file_configs_running(project_root, targets, hook_files, scripts)
+    still_running = _still_running(project_root, targets, slug, hook_files, scripts)
     if still_running:
         # Nothing is retired: the bundle keeps the ownership trust checks read.
         return BundleHookRetirement(True, tuple(sorted(still_running)))
@@ -936,11 +928,26 @@ def reconcile_scope_bundle_hooks(
     # does not name: every hook target of the scope is re-checked.
     targets = bundle_hook_recheck_targets(targets, root=root, user_scope=is_user_scope(scope))
     lock_dir = get_apm_dir(scope)
+    from .local_bundle_markdown_hooks import preflight_bundle_markdown_records
+
+    # Every Markdown hook record is read before the first retirement (#5254).
+    preflight_bundle_markdown_records(root, targets, scope=scope, logger=logger)
     hooks = retire_unadmitted_bundle_hooks(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
     )
     retire_unadmitted_bundle_canvas(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
+    )
+    from .local_bundle_markdown_hooks import retire_unadmitted_bundle_markdown
+
+    retire_unadmitted_bundle_markdown(
+        root,
+        targets,
+        allow_provider,
+        lock_dir=lock_dir,
+        scope=scope,
+        logger=logger,
+        dry_run=dry_run,
     )
     return hooks
 
