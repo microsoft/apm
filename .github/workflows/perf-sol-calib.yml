@@ -1,0 +1,75 @@
+name: Perf SoL calibration (research)
+
+on:
+  push:
+    branches: [perf-research/arch-calib]
+
+permissions:
+  contents: read
+
+jobs:
+  calib:
+    name: calib ${{ matrix.os }} vm${{ matrix.rep }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        rep: [1, 2, 3, 4]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: false
+      - name: CPU model
+        run: |
+          mkdir -p out
+          if [ "$RUNNER_OS" = Windows ]; then
+            powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).Name" | tr -d '\r' > out/cpu.txt
+          else
+            grep -m1 "model name" /proc/cpuinfo | cut -d: -f2- > out/cpu.txt
+          fi
+          echo "cpus=$(nproc 2>/dev/null || echo $NUMBER_OF_PROCESSORS)" >> out/cpu.txt
+          cat out/cpu.txt
+      - name: Install side exactly as perf-bench.yml (main product, harness-only branch)
+        run: |
+          set -euo pipefail
+          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git c0296fab7f9
+          git -C harness worktree add --quiet --detach ../side FETCH_HEAD
+          (cd side && uv sync --frozen --no-editable --quiet)
+          if [ "$RUNNER_OS" = Windows ]; then APM=side/.venv/Scripts/apm.exe; SP=side/.venv/Lib/site-packages; else APM=side/.venv/bin/apm; SP=$(ls -d side/.venv/lib/python3*/site-packages); fi
+          echo "APM_ABS=$GITHUB_WORKSPACE/$APM" >> "$GITHUB_ENV"
+          echo "SP=$GITHUB_WORKSPACE/$SP" >> "$GITHUB_ENV"
+          echo "pyc_after_sync=$(find "$SP/apm_cli" -name '*.pyc' | wc -l) py=$(find "$SP/apm_cli" -name '*.py' | wc -l)" | tee -a out/cpu.txt
+          "$APM" --version
+          echo "pyc_after_version=$(find "$SP/apm_cli" -name '*.pyc' | wc -l)" | tee -a out/cpu.txt
+          env | grep -i "PYTHONDONTWRITE\|PYTHONPYCACHE" || echo "no pyc env" | tee -a out/cpu.txt
+          (cd harness && uv sync --frozen --extra dev --quiet)
+      - name: Yardstick
+        run: python harness/scripts/perf/yardstick.py | tee out/yardstick.json
+      - name: Direct journeys run (3) then bench path abab A/A (2 pairs), same VM
+        working-directory: harness
+        run: |
+          set -euo pipefail
+          uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 30 --rtt-journeys install-cold --runs 3 --counts --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/direct" --work "$GITHUB_WORKSPACE/work-direct"
+          uv run --frozen python -m tests.benchmarks.ci_bench abab --base-apm "$APM_ABS" --new-apm "$APM_ABS" --pairs 2 --fixtures tree-50 --journeys install-cold --rtt 30 --out "$GITHUB_WORKSPACE/out/bench"
+          echo "pyc_after_runs=$(find "$SP/apm_cli" -name '*.pyc' | wc -l)" | tee -a "$GITHUB_WORKSPACE/out/cpu.txt"
+          python "$GITHUB_WORKSPACE/harness/scripts/perf/yardstick.py" | tee "$GITHUB_WORKSPACE/out/yardstick-after.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: calib-${{ matrix.os }}-vm${{ matrix.rep }}
+          path: |
+            out/**/*.json
+            out/*.txt
+            out/**/*.md
