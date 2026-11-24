@@ -4492,8 +4492,8 @@ def test_main_push_cache_save_fails(mutation: str) -> None:
 # The tests/lifecycle/security cells (#5159 sat red on main for hours because
 # they ran only nightly): every main push through the main push gate, and pull
 # requests that touch any product code, the lifecycle harness or cells, the
-# receipt ratchet or the dependency set. Linux only; the nightly keeps the
-# Windows and macOS legs.
+# receipt ratchet or the dependency set. Linux only, as in the nightly
+# lifecycle-full job; Windows and macOS run only the nightly journeys.
 LIFECYCLE_SECURITY_JOB = "lifecycle-security"
 LIFECYCLE_SECURITY_ROOT = "tests/lifecycle/security"
 LIFECYCLE_SECURITY_PATHS = [

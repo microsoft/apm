@@ -9,7 +9,8 @@ name: Lifecycle Security
 # - Pull requests: when the diff touches product code, the lifecycle harness
 #   or cells, the receipt ratchet, or the dependency set. Not a required check.
 #
-# Windows and macOS legs stay in lifecycle-journeys.yml (nightly). The job
+# The security cells run on Linux only, here and in the nightly
+# lifecycle-full job; Windows and macOS run only the nightly journeys. The job
 # restores and saves no cache, so a main push adds no default-branch cache.
 # tests/quality/test_ci_topology.py pins the triggers, the paths, the selection
 # and the main push gate wiring.

@@ -679,8 +679,8 @@ never saves caches to the `main` scope.
 `lifecycle-security.yml` runs `tests/lifecycle/security` on Linux and then
 requires a receipt from every security witness. Pull requests run it when they
 touch `src/apm_cli/`, `tests/lifecycle/`, the receipt ratchet, `pyproject.toml`
-or `uv.lock`; it is not a required check. The Windows and macOS legs stay
-nightly.
+or `uv.lock`; it is not a required check. The security cells run on Linux
+only; Windows and macOS run only the nightly journeys.
 
 ### Merge-train proof
 
