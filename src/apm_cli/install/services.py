@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 from apm_cli.core.remediation import claude_native_switch_loose_hooks
 
+from .deployed_paths import bundle_entry_within
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
@@ -1047,11 +1048,7 @@ def integrate_local_bundle(
                 # target's default root.
                 deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
                 dest = deploy_root / _deploy_rel
-            try:
-                ensure_path_within(dest, deploy_root)
-            except PathTraversalError as exc:
-                if logger is not None:
-                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+            if not bundle_entry_within(dest, deploy_root, project_root, rel, logger):
                 skipped += 1
                 continue
             try:
