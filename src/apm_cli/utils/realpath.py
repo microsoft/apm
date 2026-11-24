@@ -106,6 +106,11 @@ def _missing_realpath(text: str, depth: int) -> str | None:
     return f"{resolved_parent.rstrip('/')}/{name}"
 
 
+def kernel_resolves() -> bool:
+    """Whether :func:`resolve_path` can take the kernel form in this process."""
+    return _FAST and not _proc_state["refused"]
+
+
 def resolve_path(path: Path) -> Path:
     """Return ``path.resolve()``, computed in the kernel when that is exact.
 
