@@ -318,6 +318,10 @@ def cached_repo_is_trusted(
 
 def validate_cached_links(repo: Path, paths: list[str] | None, env: dict[str, str]) -> None:
     """Validate the tracked links of a cached checkout, running Git inertly."""
+    from .checkout_verify import inprocess_verified
+
+    if not paths and inprocess_verified(repo, use="links"):
+        return  # Written in-process, which refuses every link.
     from ..utils.git_sparse import validate_materialized_symlinks
 
     validate_materialized_symlinks(

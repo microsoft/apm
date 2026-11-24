@@ -376,13 +376,16 @@ class GitCache:
             never rebuilds: it raises :class:`CachedCheckoutTamperedError`.
         """
         from ..utils.git_env import git_subprocess_env
-        from .checkout_verify import verify_checkout
+        from .checkout_verify import inprocess_verified, verify_checkout
 
         for attempt in range(2):
             checkout = self._get_checkout(
                 url, ref, locked_sha=locked_sha, env=env, sparse_paths=sparse_paths
             )
             sha = checkout.parent.name
+            if not sparse_paths and inprocess_verified(checkout, sha, use="verify"):
+                # The fresh landing: every byte was hashed to its object id as written.
+                return checkout
             verify_env = git_subprocess_env(env)
             cone = bool(sparse_paths)
             if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):
@@ -474,6 +477,10 @@ class GitCache:
         # so only the trees + the blobs reachable from the sparse cone are
         # downloaded. Full-tree callers keep the legacy non-partial bare.
         use_partial = bool(sparse_paths)
+        if not use_partial and not self._refresh:
+            landed = self._inprocess_checkout(url, shard_key, sha, env=env)
+            if landed is not None:
+                return landed
         self._ensure_bare_repo(url, shard_key, sha, env=env, partial=use_partial)
         return self._create_checkout(
             url,
@@ -483,6 +490,35 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _inprocess_checkout(
+        self, url: str, shard_key: str, sha: str, *, env: dict[str, str] | None
+    ) -> Path | None:
+        """Land a full checkout fetched in-process, or ``None`` to run git."""
+        from ..utils.file_ops import robust_rmtree
+        from .checkout_verify import register_inprocess_manifest
+        from .inprocess_fetch import fetch_worktree
+
+        sha_parent = self._checkouts_root / shard_key / sha
+        ensure_path_within(sha_parent, self._checkouts_root)
+        sha_parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(sha_parent), 0o700)
+        final_dir = sha_parent / _variant_key(None)
+        lock = shard_lock(final_dir)
+        with lock:
+            if final_dir.exists():
+                return None
+            staged = stage_path(final_dir)
+            ensure_path_within(staged, self._checkouts_root)
+            staged.mkdir(parents=True, exist_ok=True)
+            os.chmod(str(staged), 0o700)
+            files = fetch_worktree(url, sha, staged, env, _checkout_materialization_pins())
+            if files is None or not atomic_land(staged, final_dir, lock):
+                robust_rmtree(staged, ignore_errors=True)
+                return None
+        register_inprocess_manifest(final_dir, sha, files)
+        _log.debug("In-process fetch: %s @ %s", _sanitize_url(url), sha[:12])
+        return self._record_checkout_access(final_dir)
 
     def _read_only_checkout(
         self,
