@@ -971,7 +971,8 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)\n",
+            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write,"
+            " journal=token)\n",
             "            pass\n",
             id="transaction-not-listening",
         ),
@@ -1629,6 +1630,27 @@ def test_executable_approval_cannot_leave_the_trust_owners(path: str, old: str, 
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_frontmatter_fences_stay_in_the_yaml_owner() -> None:
+    """Fence detection outside utils/yaml_io.py is a second frontmatter owner (#5248)."""
+    rule_id = "contracts-tooling-frontmatter-yaml"
+    path = "src/apm_cli/install/local_bundle_paths.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "def markdown_declares_hooks("
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old,
+        "def _fence(text):\n"
+        "    from frontmatter.default_handlers import YAMLHandler\n\n"
+        "    return YAMLHandler.FM_BOUNDARY.match(text)\n\n\n" + old,
+    )
     ast.parse(mutated, filename=path)
 
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
@@ -3381,6 +3403,37 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger, kept_paths)\n",
         new="",
         intent="Uninstall stops refusing out-of-project paths before any change.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-consent-kept-link-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/integration/cleanup.py",
+        old="if not _consent_keeps_link(physical, lockfile_consent=self._lockfile_consent):",
+        new="if not (self._lockfile_consent and physical.is_symlink()):",
+        intent="Cleanup's consent link rule forks from the one the read-only hook decision asks.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-hook-sync-consent-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/integration/cleanup.py",
+        old=(
+            "        and not _consent_keeps_link(project_root / rel_path, "
+            "lockfile_consent=lockfile_consent)\n"
+        ),
+        new="",
+        intent="The read-only hook decision drops the consent link rule the hook sync applies.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-hook-sync-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/policy/allowlist_remedy.py",
+        old=(
+            "return hook_sync_unlinks(\n"
+            "                    path, root, recorded_hash=hashes.get(path), lockfile_consent=False\n"
+            "                )"
+        ),
+        new="return not hashes.get(path)",
+        intent="Audit's advice re-derives the hook sync's link decision beside its owner.",
     ),
     MutationCase(
         guard_id="install-deployment-uninstall-reachability",
@@ -5261,6 +5314,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
     MutationCase(
+        guard_id="install-deployment-deploy-write-seam",
+        rule_id="install-deployment-deploy-write-seam",
+        path="src/apm_cli/install/transaction.py",
+        old="self._seal_deploy_write, journal=token)",
+        new="self._seal_deploy_write, journal=None)",
+        intent="The install transaction listens at the write seam without its journal token.",
+    ),
+    MutationCase(
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/utils/git_env.py",
@@ -5460,7 +5521,7 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/install/deploy_snapshot.py",
-            "        return vouches_for_current_bytes(path, prior)",
+            "        return vouches_for_current_bytes(path, prior, journal=journal)",
             "        return True",
             id="crash-recovery-restores-a-shared-config-without-its-baseline-5009",
         ),
@@ -5642,7 +5703,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = list(decision.removed_paths)\n"
-            "        for package in installed_packages:\n"
+            "        for package in _scan_installed_packages(apm_modules_dir):\n"
             "            if package not in declared_deps:\n"
             "                orphaned_packages.append(package)\n",
             "Removal sites must not filter installed or locked sets",
@@ -5830,11 +5891,9 @@ def test_prune_hands_the_reachability_walk_to_the_orphan_owner() -> None:
     """Prune's retained keys still come from deps/reachability.py, via the owner (#3668)."""
     path = "src/apm_cli/commands/prune.py"
     source = _source(path)
-    old = "                reachability=ReachabilityProbe(\n"
+    old = "        reachability=ReachabilityProbe(\n"
     assert source.count(old) == 1
-    mutated = source.replace(
-        old, "                reachability=None if True else ReachabilityProbe(\n", 1
-    )
+    mutated = source.replace(old, "        reachability=None if True else ReachabilityProbe(\n", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-uninstall-reachability"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})

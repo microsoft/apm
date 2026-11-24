@@ -327,11 +327,16 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=(
         return
     for _display, failure in failures if ctx.logger else ():
         ctx.logger.verbose_detail(f"  {failure}")
-    for error in dependency_graph.resolution_errors:
+    from apm_cli.install.errors import DependencyResolutionError
+
+    errors = list(dependency_graph.resolution_errors)
+    unprinted = []
+    for error in errors:
         if ctx.logger and not error.startswith("Marketplace package materialization failed:"):
             ctx.logger.error(error)
-    joined_errors = "; ".join(dependency_graph.resolution_errors)
-    raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
+        else:
+            unprinted.append(error)
+    raise DependencyResolutionError(errors, unprinted=unprinted)
 
 
 def _judge_resolution(ctx: InstallContext, graph, failures, depth_policy, resolver) -> None:

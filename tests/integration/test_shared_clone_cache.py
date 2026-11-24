@@ -280,14 +280,12 @@ class TestDownloaderSharedCloneIntegration:
             {
                 "git": "gitlab.com/spiritt/tenants/spiritt/repo-a",
                 "path": "skills/tool",
-                "ref": "main",
             }
         )
         dep_b = DependencyReference.parse_from_dict(
             {
                 "git": "gitlab.com/spiritt/tenants/spiritt/repo-b",
                 "path": "skills/tool",
-                "ref": "main",
             }
         )
 
@@ -355,8 +353,8 @@ class TestDownloaderSharedCloneIntegration:
         from apm_cli.models.apm_package import DependencyReference
 
         # Build two subdir dep refs from same repo
-        dep_a = DependencyReference.parse("owner/repo/skills/X#main")
-        dep_b = DependencyReference.parse("owner/repo/agents/Y#main")
+        dep_a = DependencyReference.parse("owner/repo/skills/X")
+        dep_b = DependencyReference.parse("owner/repo/agents/Y")
 
         target_a = tmp_path / "modules" / "X"
         target_b = tmp_path / "modules" / "Y"
@@ -1143,9 +1141,7 @@ class TestInvalidSubdirErrorWording:
             (tmp_path / "cache").mkdir()
             downloader.shared_clone_cache = cache
 
-            dep = DependencyReference.parse(
-                "github/awesome-copilot/skills/DOES_NOT_EXIST_TYPO#main"
-            )
+            dep = DependencyReference.parse("github/awesome-copilot/skills/DOES_NOT_EXIST_TYPO")
             with patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone):
                 target_out = tmp_path / "out"
                 target_out.parent.mkdir(parents=True, exist_ok=True)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -35,6 +36,8 @@ _ABSENT, _DIR = "absent", "dir"
 _recorder: Recorder | None = None
 # Notified after each write completes: the journal seals what APM wrote (#4863).
 _after: Callable[[Path], None] | None = None
+# The listening journal's token, so the config file records can name it (#5051).
+_journal: str | None = None
 _planning = False
 _guard = threading.Lock()
 
@@ -60,22 +63,29 @@ def planning() -> Iterator[None]:
             _planning = False
 
 
-def listen(recorder: Recorder, after: Callable[[Path], None] | None = None) -> None:
+def listen(
+    recorder: Recorder, after: Callable[[Path], None] | None = None, journal: str | None = None
+) -> None:
     """Route every deploy write through *recorder*, and each finished one through *after*.
 
-    Only InstallTransaction listens.
+    Only InstallTransaction listens; *journal* is its deploy journal's token.
     """
-    global _recorder, _after
+    global _recorder, _after, _journal
     with _guard:
-        _recorder, _after = recorder, after
+        _recorder, _after, _journal = recorder, after, journal
 
 
 def stop_listening(recorder: Recorder) -> None:
     """Stop routing deploy writes to *recorder* if it is still the listener."""
-    global _recorder, _after
+    global _recorder, _after, _journal
     with _guard:
         if _recorder == recorder:
-            _recorder, _after = None, None
+            _recorder, _after, _journal = None, None, None
+
+
+def active_journal() -> str | None:
+    """The token of the deploy journal recording writes now, or ``None``."""
+    return _journal
 
 
 @contextmanager
@@ -134,12 +144,27 @@ def record_before_mkdir(path: str | os.PathLike[str]) -> None:
 
 
 def mkdir(path: Path, *, parents: bool = False, exist_ok: bool = False, mode: int = 0o777) -> None:
-    """Create the directory *path* through the seam (skipped while planning)."""
+    """Create the directory *path* through the seam (skipped while planning).
+
+    A directory that already exists (not a link) is left as it is and changes
+    nothing, so it is neither journaled nor sealed: sealing it would fingerprint
+    its whole tree, once per caller, though every write below it seals its own
+    entry.
+    """
     if _planning:
+        return
+    if exist_ok and _is_real_dir(path):
         return
     record_before_mkdir(path)
     path.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
     record_after_write(path)
+
+
+def _is_real_dir(path: Path) -> bool:
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
 
 
 def write_text_lf(path: Path, data: str) -> None:

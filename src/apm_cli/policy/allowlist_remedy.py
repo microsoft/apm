@@ -433,7 +433,10 @@ def _final_symlinks(
         def handled(path: str) -> bool:
             # The cleanup route decides first: the hook sync keeps its own absence rule.
             if path not in removed_paths and path.startswith(hook_prefixes):
-                return hook_sync_unlinks(path, root, recorded_hash=hashes.get(path))
+                # The advised uninstall carries no --trust-lockfile consent.
+                return hook_sync_unlinks(
+                    path, root, recorded_hash=hashes.get(path), lockfile_consent=False
+                )
             return final_link_handled(path, root)
 
         return [

@@ -593,6 +593,56 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+def _non_string_keys(text: str) -> str:
+    """Name the non-string keys of *text*'s frontmatter, or ``""`` when it has none."""
+    metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+    data = _BOUNDED_FRONTMATTER_HANDLER.load(metadata)
+    keys = [
+        _key_label(k) for k in (data if isinstance(data, dict) else {}) if not isinstance(k, str)
+    ]
+    return ", ".join(keys)
+
+
+def _key_label(key: Any) -> str:
+    """Name one repository-controlled key safely: printable ASCII, never a failing render."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    try:
+        text = repr(key)
+    except ValueError:  # an int past Python's digit limit
+        return f"<{type(key).__name__}>"
+    return printable_ascii_text(text) if len(text) <= 40 else f"<{type(key).__name__}>"
+
+
+def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
+    """Return *path*'s BOM-stripped frontmatter block, through its closing fence.
+
+    Only a *prefix_bytes* prefix is read, unless the fence is still open at
+    its end; then the whole file is. Bytes after the closing fence are never
+    decoded strictly. A file without frontmatter yields ``""``. Raises
+    ``OSError`` when the file cannot be read and ``UnicodeError`` when the
+    block is not UTF-8.
+    """
+    boundary = _BOUNDED_FRONTMATTER_HANDLER.FM_BOUNDARY
+    with Path(path).open("rb") as handle:
+        data = handle.read(prefix_bytes)
+        complete = len(data) < prefix_bytes
+        while True:
+            text = data.decode("utf-8", errors="surrogateescape").removeprefix("\ufeff")
+            if not boundary.match(text):
+                return ""
+            fences = boundary.finditer(text)
+            next(fences)
+            closing = next(fences, None)
+            if complete or (closing is not None and closing.end() < len(text)):
+                break
+            data += handle.read()
+            complete = True
+    block = text[: closing.end()] if closing is not None else text
+    block.encode("utf-8")  # an undecodable block raises UnicodeEncodeError
+    return block
+
+
 def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     """Parse Markdown text through the bounded handler.
 
@@ -611,6 +661,13 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
     except yaml.YAMLError:
         raise
+    except TypeError as exc:
+        # Post(**metadata) refuses a non-string key such as ``1:`` (#4922, #5028);
+        # any other TypeError is not a frontmatter fault and surfaces unchanged.
+        keys = _non_string_keys(text)
+        if not keys:
+            raise
+        raise yaml.YAMLError(f"non-string frontmatter key(s): {keys}") from exc
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:
