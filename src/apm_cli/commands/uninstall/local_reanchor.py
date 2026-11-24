@@ -70,6 +70,8 @@ class LocalReanchorPlan:
     visit_order: dict[str, int] = field(default_factory=dict)
     # Re-identified key -> the child keys it wins as nearest parent (#5091).
     children: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Deployed path -> the writer a fresh install records once re-ranked (#5048).
+    writers: dict[str, str] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.renames or self.declaring_parents)
@@ -578,7 +580,7 @@ def _rekey_requests(
     return True
 
 
-def _rename_ledger_owners(lockfile, renames: dict[str, str]) -> None:
+def _rename_ledger_owners(lockfile, renames: dict[str, str], writers=None) -> None:
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.deployment_state import DeploymentLedger
 
@@ -587,6 +589,9 @@ def _rename_ledger_owners(lockfile, renames: dict[str, str]) -> None:
     for key, record in ledger.records.items():
         owners = tuple(renames.get(owner, owner) for owner in record.owners)
         active = renames.get(record.active_owner, record.active_owner)
+        value = DeploymentLedgerCodec.legacy_value(record.locator).rstrip("/")
+        if writer := (writers or {}).get(value):
+            owners, active = (writer,), writer  # the writer a fresh install records (#5048)
         records[key] = (
             replace(record, owners=owners, active_owner=active)
             if owners != record.owners or active != record.active_owner
@@ -627,7 +632,7 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
         if key in lockfile.dependencies and parent is not None:
             lockfile.dependencies[key].resolved_by = parent
     if renames:
-        _rename_ledger_owners(lockfile, renames)
+        _rename_ledger_owners(lockfile, renames, plan.writers)
         rows = list(lockfile.dependencies.items())
         lockfile.dependencies.clear()
         for key, row in rows:
@@ -825,6 +830,7 @@ def _plan_reanchor_or_exit(
         refreshed_local_sources,
         snapshot_for_rollback,
     )
+    from .local_reanchor_writers import carried_writers
 
     project_root = apm_yml_path.parent
     labels = {_removed_lock_key(package, lockfile): package for package in still_needed}
@@ -834,9 +840,6 @@ def _plan_reanchor_or_exit(
 
     try:
         plan = plan_local_reanchor(lockfile, decision, project_root, frozenset(labels), label=label)
-        problems = reanchor_receipt_problems(
-            project_root, InstallScope.PROJECT, lockfile, plan.renames
-        )
         if plan.renames and (shrunk := sorted(shrinks())):
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but the remaining packages select "
@@ -869,6 +872,15 @@ def _plan_reanchor_or_exit(
                 f"{', '.join(_dependency_public_label(package) for package in others)} "
                 "in a separate command"
             )
+        if plan.renames:
+            # Last: it replays the lock offline, so cheaper refusals go first (#5048).
+            writers = carried_writers(
+                lockfile, plan, project_root, label, dict(decision.rescued_depths)
+            )
+            plan = replace(plan, writers=writers)
+        problems = reanchor_receipt_problems(
+            project_root, InstallScope.PROJECT, lockfile, plan.renames, plan.writers
+        )
         if problems:
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but APM cannot prove it wrote "
@@ -1095,7 +1107,7 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
         renamed = {new for old, new in plan.renames.items() if old != new}
         if committed is None or not renamed <= committed.dependencies.keys():
             return  # the lock was not committed; receipts still match it
-        rename_receipt_owners(deploy_root, scope, committed, plan.renames)
+        rename_receipt_owners(deploy_root, scope, committed, plan.renames, plan.writers)
     except Exception as exc:
         # One transaction: without its receipts the re-anchor does not stand.
         _roll_back_and_exit(

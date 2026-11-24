@@ -684,6 +684,7 @@ install-deployment-lockfile-required
 install-deployment-locked-source-cache
 install-deployment-package-content-hash
 install-deployment-reanchor-receipt-history
+install-deployment-reanchor-writer-prediction
 install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight

@@ -182,6 +182,10 @@ from scripts.architecture_linter.checks.install_reanchor_receipts import (
     GUARD_REANCHOR_RECEIPT_HISTORY,
     check_reanchor_receipt_history,
 )
+from scripts.architecture_linter.checks.install_reanchor_writers import (
+    GUARD_REANCHOR_WRITER_PREDICTION,
+    check_reanchor_writer_prediction,
+)
 from scripts.architecture_linter.checks.install_receipt_collection import (
     GUARD_RECEIPT_COLLECTION,
     check_receipt_collection,
@@ -319,6 +323,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_REANCHOR_RECEIPT_HISTORY,
         "A re-anchored local owner's receipts keep their hash history.",
         check_reanchor_receipt_history,
+    ),
+    _rule(
+        GUARD_REANCHOR_WRITER_PREDICTION,
+        "A re-anchor predicts a shared path's writer only through install's owners.",
+        check_reanchor_writer_prediction,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,
