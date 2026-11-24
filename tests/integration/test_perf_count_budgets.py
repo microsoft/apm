@@ -100,7 +100,7 @@ def test_install_stays_within_its_count_budget(journey: str, journey_runs) -> No
 def test_cold_install_fetches_while_noop_fetches_nothing(journey_runs) -> None:
     """The counters see the work: a cold install fetches over HTTP, a no-op does not.
 
-    A cold install may fetch in process (no ``git clone`` spawn), so the work
+    A cold install fetches in process (#5330): no ``git clone`` spawn, the work
     shows as HTTP requests; a no-op spawns no clone and sends no request.
     """
     (cold_run, _, cold), (noop_run, _, noop) = (
@@ -108,5 +108,6 @@ def test_cold_install_fetches_while_noop_fetches_nothing(journey_runs) -> None:
         journey_runs["install-noop"],
     )
     assert (cold_run.returncode, noop_run.returncode) == (0, 0), (cold_run.stderr, noop_run.stderr)
-    assert cold["http.requests"] > 0, cold
+    # Engagement oracle: if the in-process fetch stops engaging, clones come back.
+    assert cold.get("git.clone", 0) == 0 and cold["http.requests"] > 0, cold
     assert noop.get("git.clone", 0) == 0 and noop["http.requests"] == 0, noop
