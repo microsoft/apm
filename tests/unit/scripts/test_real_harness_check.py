@@ -45,14 +45,16 @@ def test_known_bug_cell_that_starts_loading_fails_until_flipped(tmp_path: Path) 
 
 def test_regression_and_unclassified_cells_fail(tmp_path: Path) -> None:
     out = tmp_path / "out"
+    _cell(out, "claude-headless-project", "ERROR")
     _cell(out, "claude-headless-user", "DOES NOT LOAD")
     _cell(out, "copilot-headless-user", "LOADS")
     problems = probe.check(out, _expected(tmp_path))
     assert [problem.split(":")[0] for problem in problems] == [
+        "claude-headless-project",
         "claude-headless-user",
         "copilot-headless-user",
     ]
-    assert "no expectation" in problems[1]
+    assert "no expectation" in problems[2]
 
 
 def test_committed_expectations_name_only_known_cells() -> None:

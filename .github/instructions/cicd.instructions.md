@@ -74,7 +74,7 @@ integration suite runs only at merge time via GitHub Merge Queue
    - No new default-branch cache saves: the setup-uv steps of ci.yml and ci-integration.yml set `save-cache` to `auto` only on pull_request and merge_group (`false` otherwise), setup-node sets `package-manager-cache: false`, and ci-integration.yml saves its APM fetch cache on no `push`. `tests/quality/test_ci_topology.py` fails if any step reachable from a main push would save a cache.
 10. **`real-harness.yml`** - nightly schedule, `workflow_dispatch`, and `pull_request` path-filtered to the native-plugin code (#5197)
    - Installs pinned Claude Code and Copilot CLI releases from npm and checks, with `scripts/real_harness/probe.py`, that they load a fixture plugin installed by the apm built from the SHA. Linux only; not a required check.
-   - `COPILOT_GITHUB_TOKEN` is passed only on schedule and dispatch, never on `pull_request`. Claude Code never reaches a model. No cache is saved. Never add `pull_request_target`.
+   - The Copilot token is the `REAL_HARNESS_COPILOT_TOKEN` secret of the `real-harness` environment (deployment branches: main only). Copilot jobs enter it only for schedule and dispatch on main, never on `pull_request` or another branch. Evidence is scanned for the token before upload. Harnesses install with `npm ci` from `scripts/real_harness/npm/<pin>/` lockfiles (sha512 integrity). Claude Code never reaches a model. No cache is saved. Never add `pull_request_target`.
    - The last step, `probe.py check`, fails when a cell's verdict diverges from `scripts/real_harness/expected.json` (BLOCKED is exempt). A fix for a known-bug cell flips its expectation in the same PR.
 
 ## Platform Testing Strategy

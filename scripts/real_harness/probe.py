@@ -261,7 +261,7 @@ class Cell:
                         MCP: {
                             "type": "stdio",
                             "command": "node",
-                            "args": [str(probe_js), str(self.mcp_marker)],
+                            "args": [str(self.deployed_probe()), str(self.mcp_marker)],
                         }
                     },
                 },
@@ -283,6 +283,10 @@ class Cell:
                 },
             )
         return source
+
+    def deployed_probe(self) -> Path:
+        """The MCP server script inside the plugin copy apm deploys at user scope."""
+        return self.home / ".agents" / "plugins" / PLUGIN / "mcp" / "probe.js"
 
     def seed_harness(self) -> None:
         trusted = [] if self.env.endswith("untrusted") else [str(self.project), str(self.worktree)]
@@ -431,32 +435,63 @@ class Cell:
             out[key] = _tail(_ANSI.sub("", proc.stdout + proc.stderr), 2500)
         self.evidence["lists"] = out
 
+    def wait_for(self, done, timeout: float) -> bool:
+        """Poll a marker predicate instead of sleeping a fixed time."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if done():
+                return True
+            time.sleep(1)
+        return done()
+
+    def mcp_methods(self) -> list[str]:
+        return _read(self.mcp_marker).split()
+
     def interactive(self, cwd: Path) -> None:
         """Start the TUI in a detached tmux pane (a real terminal emulator).
 
-        Claude gets no input. Copilot starts its session (and sessionStart hooks)
-        on the first prompt, so it gets one prompt asking for the plugin tool.
+        Waits on markers, not fixed sleeps: startup is done once the plugin's MCP
+        server has listed its tools (and, for a Claude plugin, the SessionStart
+        hook fired), or after SESSION_SECONDS. Claude then gets a typed (never
+        submitted) slash command so the TUI lists the plugin skill. Copilot
+        starts its session on the first prompt, so with a token it gets one
+        prompt asking for the plugin tool.
         """
-        if self.harness == "copilot" and not os.environ.get("COPILOT_GITHUB_TOKEN"):
+        token = os.environ.get("COPILOT_GITHUB_TOKEN")
+        if self.harness == "copilot" and not token:
             self.evidence["blocked"] = "no COPILOT_GITHUB_TOKEN for a Copilot session"
         tmux = ["tmux", "-L", self.id]
-        env = self.session_env()
         start = [*tmux, "new-session", "-d", "-x", "200", "-y", "50", self.harness]
-        self.run("tmux-start", start, cwd, extra_env=env, timeout=30)
-        time.sleep(15)
-        limit = SESSION_SECONDS
-        if self.harness == "copilot":
-            limit = SESSION_SECONDS * 2
+        self.run("tmux-start", start, cwd, extra_env=self.session_env(), timeout=30)
+
+        def pane() -> str:
+            return self.run("tmux-capture", [*tmux, "capture-pane", "-p"], cwd, timeout=30).stdout
+
+        def started() -> bool:
+            # Copilot fires sessionStart hooks on the first prompt, not at startup.
+            hook = self.harness == "copilot" or "SessionStart" in _read(self.hook_marker)
+            return hook and "tools/list" in self.mcp_methods()
+
+        self.evidence["startup_ready"] = self.wait_for(started, SESSION_SECONDS)
+        if self.harness == "claude":
+            self.run("tmux-slash", [*tmux, "send-keys", "-l", f"/{SKILL}"], cwd, timeout=30)
+            self.wait_for(lambda: pane().count(SKILL) > 1, 10)
+            self.evidence["slash_menu"] = _tail(pane(), 2000)
+            self.run("tmux-clear", [*tmux, "send-keys", "Escape", "C-u"], cwd, timeout=30)
+        elif token:
             self.run("tmux-prompt", [*tmux, "send-keys", "-l", TOOL_PROMPT], cwd, timeout=30)
             time.sleep(1)
             self.run("tmux-enter", [*tmux, "send-keys", "Enter"], cwd, timeout=30)
-        time.sleep(limit)
-        pane = self.run("tmux-capture", [*tmux, "capture-pane", "-p", "-S", "-300"], cwd)
+            self.wait_for(
+                lambda: "tools/call" in self.mcp_methods() and "RH_PROBE_TOOL_OK" in pane(),
+                SESSION_SECONDS * 3,
+            )
+        screen = self.run("tmux-final", [*tmux, "capture-pane", "-p", "-S", "-300"], cwd)
         self.run("tmux-kill", [*tmux, "kill-server"], cwd, timeout=30)
-        self.evidence["screen_tail"] = _tail(pane.stdout, 3000)
+        self.evidence["screen_tail"] = _tail(screen.stdout, 3000)
 
     def claude_session(self, label: str, cwd: Path) -> tuple[str, dict | None]:
-        """Run ``claude -p`` and stop it 10s after its init event.
+        """Run ``claude -p`` and stop it once the plugin MCP server lists tools after init.
 
         The model call can never succeed (closed ANTHROPIC_BASE_URL), so waiting
         for the client's retries only burns time; hooks and MCP start by then.
@@ -486,7 +521,9 @@ class Cell:
             while proc.poll() is None and time.monotonic() - started < SESSION_SECONDS + 30:
                 if seen is None and '"subtype":"init"' in _read(log):
                     seen = time.monotonic()
-                if seen is not None and time.monotonic() - seen > 10:
+                if seen is not None and (
+                    "tools/list" in self.mcp_methods() or time.monotonic() - seen > 10
+                ):
                     break
                 time.sleep(1)
             if proc.poll() is None:
@@ -572,6 +609,9 @@ class Cell:
         }
         if self.harness == "claude":
             sig["details_listed"] = SKILL in lists.get("plugin_details", "")
+            if "slash_menu" in self.evidence:
+                # One occurrence is the typed text; a loaded skill adds a menu entry.
+                sig["tui_skill"] = self.evidence["slash_menu"].count(SKILL) > 1
         if self.harness == "copilot":
             sig["skill_listed"] = SKILL in lists.get("skill_list", "")
             reply = self.evidence.get("headless_tail", "") + self.evidence.get("screen_tail", "")
@@ -591,12 +631,14 @@ class Cell:
 
     def verdict(self, sig: dict) -> tuple[str, str]:
         if self.evidence.get("apm_error"):
-            return "BLOCKED", "apm install: " + self.evidence["apm_error"].splitlines()[0][:160]
-        runtime = [sig["mcp_initialized"]]
+            return "ERROR", "apm install: " + self.evidence["apm_error"].splitlines()[0][:160]
+        runtime = [sig["mcp_initialized"], sig["mcp_tools_listed"]]
         if not self.agent_plugin:
             runtime.append(sig["hook_fired"])
         if self.env.startswith("headless") and self.harness == "claude":
             runtime.append(bool(sig.get("init_skill")))
+        if self.env in ("normal", "worktree") and self.harness == "claude":
+            runtime.append(bool(sig.get("tui_skill")))
         if self.env.startswith("headless-wt") and self.harness == "claude":
             runtime.append(bool(sig.get("init_path_in_cwd")))
         if self.harness == "copilot":
@@ -635,6 +677,7 @@ class Cell:
             self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             self.install_root = self.worktree
         if self.apm_install(plugin):
+            shutil.rmtree(plugin.parent)
             self.run("git-add", ["git", "add", "-A"], self.install_root)
             self.run("git-commit", ["git", "commit", "-q", "-m", "apm install"], self.install_root)
             if self.env in ("worktree", "headless-wt-after-main"):
