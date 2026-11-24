@@ -1006,6 +1006,12 @@
     "E3"
    ]
   },
+  "T3|OP=approve-deny|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=approve-deny|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
+   ]
+  },
   "T3|OP=approve-deny|SRC=local-path|PRIM=other-file": {
    "maps_to": "T3|OP=approve-deny|SRC=local-path|PRIM=skill",
    "rules": [
@@ -1058,6 +1064,12 @@
    "maps_to": "T3|OP=audit|SRC=local-bundle|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "T3|OP=audit|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=audit|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
    ]
   },
   "T3|OP=audit|SRC=local-path|PRIM=other-file": {
@@ -1136,6 +1148,12 @@
    "maps_to": "rule|U10|compile-validate-reads-mcp",
    "rules": [
     "U10"
+   ]
+  },
+  "T3|OP=compile|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=compile|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
    ]
   },
   "T3|OP=compile|SRC=local-path|PRIM=hook": {
@@ -1300,6 +1318,12 @@
     "U8"
    ]
   },
+  "T3|OP=install|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=install|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
+   ]
+  },
   "T3|OP=install|SRC=local-path|PRIM=other-file": {
    "maps_to": "T3|OP=install|SRC=local-path|PRIM=skill",
    "rules": [
@@ -1346,6 +1370,12 @@
    "maps_to": "T3|OP=lock|SRC=local-bundle|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "T3|OP=lock|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=lock|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
    ]
   },
   "T3|OP=lock|SRC=local-path|PRIM=other-file": {
@@ -1666,6 +1696,12 @@
     "U8"
    ]
   },
+  "T3|OP=prune|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=prune|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
+   ]
+  },
   "T3|OP=prune|SRC=local-path|PRIM=other-file": {
    "maps_to": "T3|OP=prune|SRC=local-path|PRIM=skill",
    "rules": [
@@ -1756,6 +1792,12 @@
     "U8"
    ]
   },
+  "T3|OP=uninstall|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=uninstall|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
+   ]
+  },
   "T3|OP=uninstall|SRC=local-path|PRIM=other-file": {
    "maps_to": "T3|OP=uninstall|SRC=local-path|PRIM=skill",
    "rules": [
@@ -1844,6 +1886,12 @@
    "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
    "rules": [
     "U8"
+   ]
+  },
+  "T3|OP=update|SRC=local-path|PRIM=bin": {
+   "maps_to": "T3|OP=update|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
    ]
   },
   "T3|OP=update|SRC=local-path|PRIM=other-file": {
@@ -2929,6 +2977,12 @@
    "rules": [
     "U8",
     "U1"
+   ]
+  },
+  "pair|SRC=local-path|PRIM=bin": {
+   "maps_to": "pair|SRC=native-plugin|PRIM=bin",
+   "rules": [
+    "U-BIN-SRC"
    ]
   },
   "pair|SRC=local-path|PRIM=other-file": {
@@ -6818,13 +6872,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=approve-deny|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=approve-deny|SRC=local-path|PRIM=canvas": {
    "family": "T3",
    "issue": "#4099",
@@ -7301,13 +7348,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T3|OP=audit|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-path|PRIM=canvas": {
    "family": "T3",
@@ -7818,13 +7858,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=compile|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=compile|SRC=local-path|PRIM=canvas": {
    "family": "T3",
    "issue": "#4099",
@@ -8118,13 +8151,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T3|OP=install|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=install|SRC=local-path|PRIM=canvas": {
    "family": "T3",
@@ -8613,13 +8639,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T3|OP=lock|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-path|PRIM=canvas": {
    "family": "T3",
@@ -9261,13 +9280,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=prune|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=prune|SRC=local-path|PRIM=canvas": {
    "family": "T3",
    "issue": "#4099",
@@ -9682,13 +9694,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
-  },
-  "T3|OP=uninstall|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=local-path|PRIM=canvas": {
    "family": "T3",
@@ -10107,13 +10112,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T3|OP=update|SRC=local-path|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=update|SRC=local-path|PRIM=canvas": {
    "family": "T3",
@@ -23369,13 +23367,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "pair|SRC=local-path|PRIM=bin": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|SRC=local-path|PRIM=canvas": {
    "family": "pair",
    "issue": "#4099",
@@ -28254,6 +28245,14 @@
     "src/apm_cli/install/exec_gate.py::plugin_bin_deployable"
    ],
    "text": "a gate level of PRIM=bin under pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): a loose bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form and write no plugin root, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). prune is not listed: it retires a trusted project-scope whole plugin's root, bin/ included (#4559, #4808); nor is audit: its drift replay fingerprints that root (drift.verify_claude_native_cache). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. Under marketplace that org-policy level is a real cell (#4894): a trusted project-scope plugin deploys whole, bin/ included, and the plugin bin spine checks that marketplace leaves that bin/ unchanged under the deny"
+  },
+  "U-BIN-SRC": {
+   "evidence": [
+    "src/apm_cli/install/exec_gate.py::plugin_bin_deployable",
+    "src/apm_cli/claude_plugins/admission.py::plan_native_claude_plugin",
+    "src/apm_cli/models/format_detection.py::NormalizationPlanner.plan"
+   ],
+   "text": "a local path whose package can deploy bin/ is a Claude plugin directory, which is the native-plugin source: bin/ deploys only for a MARKETPLACE_PLUGIN package, loose at user scope (exec_gate.plugin_bin_deployable) or whole at project scope (admission.plan_native_claude_plugin), and a local directory with an eligible apm.yml is an APM package (format_detection.NormalizationPlanner.plan), never a marketplace plugin. So OP x SRC=local-path x PRIM=bin maps to the same cell with SRC=native-plugin, which the M-SOURCE bin spine witnesses. Self-reinstating: the mapping holds only while the U-BIN pin holds (generator/bin_pin.py)"
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
