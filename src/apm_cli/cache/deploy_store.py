@@ -183,10 +183,6 @@ class DeployStore:
         entry = self._entry(key)
         if entry is None or len(data) > MAX_DEPLOY_ENTRY_BYTES or key != canonical_digest(data):
             return False
-        if not os.environ.get("APM_PERF_DEPLOY_STORE"):
-            # PERF CEILING HACK (row 4): no second copy of deployed bytes; the safe
-            # version is one hardlink of the just-written target per entry.
-            return False
         try:
             ready = self._prepare(entry, len(data))
             if ready is None:
@@ -238,8 +234,6 @@ class DeployStore:
         path = self._record_path(key)
         if path is None or _valid_record(record) is None:
             return False
-        if not os.environ.get("APM_PERF_DEPLOY_STORE"):
-            return False  # PERF CEILING HACK (row 4): no blobs stored, so no record either.
         data = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("ascii")
         try:
             for directory in (self._root, path.parent.parent, path.parent):
