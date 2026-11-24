@@ -44,6 +44,9 @@ def _script_dir(script: str) -> str:
 _REMOVED = r"uninstall removed a script a user hook runs"
 # Equivalent spellings and a `cd` prefix the in-use check does not normalize (#5106).
 _SPELLING = KnownFailure("#5106", "an equivalent script spelling is not recognized", _REMOVED)
+_REFUSED_WRITE = KnownFailure(
+    "#5291", "a refused bundle uninstall rewrites the pending record", r"refused uninstall wrote"
+)
 _CWD = KnownFailure("#5281", "a handler's cwd field is not applied to its command", _REMOVED)
 
 SPELLINGS = {
@@ -67,13 +70,14 @@ PENDING = "apm_modules/.local-bundle-pending.json"
 
 
 def _assert_refused_unchanged(consumer: Path, before: dict, script: str) -> None:
-    """Nothing changes except the #4987 resume note on the bundle's pending record."""
+    """Nothing changes but the pending record, whose write is #5291's (its own cell)."""
     after = tree_bytes(consumer)
     assert {k: v for k, v in after.items() if k != PENDING} == {
         k: v for k, v in before.items() if k != PENDING
     }
     entry = json.loads(after[PENDING])["bundles"]["hookpkg"]
-    assert entry == {**json.loads(before[PENDING])["bundles"]["hookpkg"], "retiring": ["hooks"]}
+    recorded = json.loads(before[PENDING])["bundles"]["hookpkg"]
+    assert {k: v for k, v in entry.items() if k != "retiring"} == recorded
     assert (consumer / script).is_file()
     assert script in _claims_of(consumer)
 
@@ -145,3 +149,22 @@ def test_uninstall_bundle_keeps_a_script_a_user_hook_in_another_target_runs(
     assert result.returncode == 1, text
     assert ".claude/settings.json" in text, text
     _assert_refused_unchanged(consumer, before, script)
+
+
+@_REFUSED_WRITE.mark()
+def test_a_refused_bundle_uninstall_writes_nothing(tmp_path: Path, apm_binary_path: Path) -> None:
+    """I7: the in-use refusal leaves every file byte-identical, the pending record too."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "refused-write")
+    (script,) = [c for c in _claims_of(consumer) if c.endswith("/x.sh")]
+    write(consumer / ".github" / "hooks" / "user.json", json.dumps(_handler(f"./{script}")))
+    before = tree_bytes(consumer)
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    changed = sorted(
+        k
+        for k in set(before) | set(tree_bytes(consumer))
+        if before.get(k) != tree_bytes(consumer).get(k)
+    )
+    assert not changed, f"refused uninstall wrote {changed}: {text}"
