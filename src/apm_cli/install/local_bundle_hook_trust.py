@@ -27,7 +27,6 @@ from apm_cli.install.hook_script_refs import (
     hook_commands,
     runs_script,
     script_refs,
-    script_tails,
 )
 from apm_cli.install.local_bundle_hook_cwd import commands_without_cwd, runs_through_cwd
 from apm_cli.install.local_bundle_hook_states import (
@@ -575,7 +574,6 @@ def _per_file_configs_running(
     refs = script_refs(project_root, scripts)
     for target in _per_file_targets(targets):
         target_root = project_root / target.root_dir
-        tails = script_tails(project_root, target_root, scripts)
         hooks_dir = target_root / "hooks"
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not hooks_dir.is_dir():
@@ -590,14 +588,10 @@ def _per_file_configs_running(
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
             texts = list(hook_commands(document))
-            if (
-                any(tail in text.replace("\\", "/") for text in texts for tail in tails)
-                or any(
-                    runs_script(text, refs, (project_root, target_root), project_root)
-                    for text in commands_without_cwd(document, texts)
-                )
-                or runs_through_cwd(document, project_root, scripts)
-            ):
+            if any(
+                runs_script(text, refs, (project_root, target_root), project_root)
+                for text in commands_without_cwd(document, texts)
+            ) or runs_through_cwd(document, project_root, scripts):
                 found.add(value)
     return found
 
@@ -642,7 +636,6 @@ def _configs_still_running(
         if config is None:
             continue
         target_root = project_root / target.root_dir
-        tails = script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not json_path.is_file():
@@ -664,7 +657,7 @@ def _configs_still_running(
             if not (isinstance(entry, dict) and entry.get("_apm_source") in markers)
         ]
         texts = [text for entry in foreign for text in commands(entry)]
-        if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
+        if any(
             runs_script(text, refs, (project_root, target_root), project_root) for text in texts
         ):
             found.add(_record_value(json_path, project_root))

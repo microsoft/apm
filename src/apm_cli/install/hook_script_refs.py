@@ -34,6 +34,13 @@ _DIRECTORY_CHANGES = frozenset({"cd", "pushd", "popd"})
 _HIDES_A_NAME = re.compile(r"[$`*?\[\\]|\{[^{}]*(?:,|\.\.)[^{}]*\}|%[A-Za-z_]\w*%|![A-Za-z_]\w*!")
 _QUOTING = re.compile(r"[\"'\\]")
 _HANDS_TO_SHELL = re.compile(r"^(?:-.*|/[A-Za-z]|eval|exec|source|\.|<+)$")
+# A POSIX shell run on a script file with only options that take no command
+# string (#5210): ``sh -e``, ``bash -eu``, ``sh -o errexit -x``. ``-c``, ``-s``,
+# long options and any other option keep the rescan (fail closed).
+_SHELLS = frozenset({"sh", "bash", "dash", "ksh", "zsh"})
+_SHELL_FLAGS = re.compile(r"^[-+][abCefhmnuvxBEHPT]+$")
+_SHELL_OPTION_NAME = re.compile(r"^[a-z][a-z-]*$")
+_SEPARATORS = frozenset({";", "&", "&&", "|", "||", "(", ")"})
 
 
 def script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozenset, frozenset]:
@@ -142,14 +149,19 @@ def _runs(
     if words is None:
         return True
     moved = moved or any(word in _DIRECTORY_CHANGES for word in words)
+    operands, options = _script_operands(words)
     # An option, ``eval`` or a redirection may hand a quoted word to a shell
     # (``sh -c``, ``cmd /c``, ``pwsh -Command``, ``bash <<<``): rescan it.
-    nested = any(_HANDS_TO_SHELL.match(word) for word in words)
-    named = [word for word in words if pattern.search(caseless(word))]
+    nested = any(_HANDS_TO_SHELL.match(w) for i, w in enumerate(words) if i not in options)
+    named = [(i, word) for i, word in enumerate(words) if pattern.search(caseless(word))]
     if not named:
         return True  # the name sits in syntax the words lost: fail closed
-    for word in named:
-        if nested and any(space in word for space in " \t"):
+    for index, word in named:
+        if index in operands:
+            # A shell's script operand is one path, judged whole (#5210).
+            if not _certainly_elsewhere(word, paths, bases, moved):
+                return True
+        elif nested and any(space in word for space in " \t"):
             # The intact word may itself be a script path with a space in it.
             if _names_a_script(word, paths, bases, moved) or _runs(
                 word, pattern, paths, bases, moved=moved, from_cwd=from_cwd
@@ -158,6 +170,40 @@ def _runs(
         elif not _certainly_elsewhere(word, paths, bases, moved, from_cwd):
             return True
     return False
+
+
+def _script_operands(words: list[str]) -> tuple[set[int], set[int]]:
+    """Indices of shell script operands and of the known options before them (#5210).
+
+    Only a shell word that starts a command, followed by at least one known option
+    and then a word that is no option or separator, counts; anything else is left
+    to the rescan.
+    """
+    operands: set[int] = set()
+    options: set[int] = set()
+    for start, word in enumerate(words):
+        if start and words[start - 1] not in _SEPARATORS:
+            continue
+        if posixpath.basename(word) not in _SHELLS:
+            continue
+        seen: list[int] = []
+        at = start + 1
+        while at < len(words):
+            if words[at] in ("-o", "+o") and at + 1 < len(words):
+                if not _SHELL_OPTION_NAME.match(words[at + 1]):
+                    break
+                seen += [at, at + 1]
+                at += 2
+            elif _SHELL_FLAGS.match(words[at]):
+                seen.append(at)
+                at += 1
+            else:
+                break
+        if seen and at < len(words) and not words[at].startswith(("-", "+")):
+            if words[at] not in _SEPARATORS:
+                operands.add(at)
+                options.update(seen)
+    return operands, options
 
 
 def _names_a_script(word: str, paths: frozenset, bases: tuple, moved: bool) -> bool:
@@ -185,16 +231,6 @@ def _certainly_elsewhere(
     return all(_normalized(f"{base.as_posix()}/{relative}") not in paths for base in bases)
 
 
-def script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
-    """Return each script row under *target_root*, spelled relative to it."""
-    tails = []
-    for value in scripts:
-        spelled = Path(value) if Path(value).is_absolute() else project_root / value
-        if spelled.is_relative_to(target_root):
-            tails.append(spelled.relative_to(target_root).as_posix())
-    return tails
-
-
 def hook_commands(document: Any) -> list[str]:
     """Commands a per-file hook document runs, read from handler positions only (#5136).
 
@@ -209,7 +245,7 @@ def hook_commands(document: Any) -> list[str]:
         commands = [declared.command for declared in parse_hook_source(document).commands]
     except HookContractError:
         commands = list(_every_command_field(document))
-    # Raw text: the matcher reads backslash escapes; only the tail match normalizes (#5106).
+    # Raw text: the matcher reads backslash escapes (#5106).
     return commands
 
 
