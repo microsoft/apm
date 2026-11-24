@@ -17,7 +17,7 @@ import pytest
 
 from apm_cli.cache import inprocess_fetch as fetch
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-checkout-commit-verification")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-git-transport-selection")]
 
 _TYPE = {"commit": 1, "tree": 2, "blob": 3}
 
@@ -55,7 +55,8 @@ def _repo(blob: bytes = b"# skill\n", name: bytes = b"SKILL.md"):
     tree = b"100644 " + name + b"\x00" + bytes.fromhex(blob_id)
     tree_id = _oid("tree", tree)
     commit = f"tree {tree_id}\nauthor a <a> 0 +0000\ncommitter a <a> 0 +0000\n\nm\n".encode()
-    return _oid("commit", commit), tree_id, blob_id, [("commit", commit), ("tree", tree), ("blob", blob)]
+    objects = [("commit", commit), ("tree", tree), ("blob", blob)]
+    return _oid("commit", commit), tree_id, blob_id, objects
 
 
 def test_a_clean_pack_plans_the_pinned_worktree() -> None:
