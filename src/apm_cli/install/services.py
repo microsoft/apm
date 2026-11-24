@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 from apm_cli.core.remediation import claude_native_switch_loose_hooks
 
+from .deployed_paths import bundle_entry_within
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
@@ -801,31 +802,6 @@ _plugin_bin_deployable = plugin_bin_deployable
 # ---------------------------------------------------------------------------
 
 
-def _bundle_entry_within(
-    dest: Path, deploy_root: Path, project_root: Path, rel: str, logger: Any
-) -> bool:
-    """Whether *dest* stays inside *deploy_root*; a skipped entry is warned about.
-
-    A link loop cannot be resolved, so it is refused like any linked parent (#5287).
-    """
-    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
-
-    try:
-        ensure_path_within(dest, deploy_root)
-    except PathTraversalError as exc:
-        if logger is not None:
-            logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
-        return False
-    except (OSError, RuntimeError):
-        from apm_cli.install.deployed_paths import refuse_symlinked_deploy
-
-        refuse_symlinked_deploy(
-            dest, project_root if dest.is_relative_to(project_root) else deploy_root
-        )
-        raise
-    return True
-
-
 def integrate_local_bundle(
     bundle_info: Any,
     project_root: Path,
@@ -1067,7 +1043,7 @@ def integrate_local_bundle(
                 # target's default root.
                 deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
                 dest = deploy_root / _deploy_rel
-            if not _bundle_entry_within(dest, deploy_root, project_root, rel, logger):
+            if not bundle_entry_within(dest, deploy_root, project_root, rel, logger):
                 skipped += 1
                 continue
             try:
