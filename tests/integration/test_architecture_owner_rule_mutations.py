@@ -1638,6 +1638,27 @@ def test_executable_approval_cannot_leave_the_trust_owners(path: str, old: str, 
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_frontmatter_fences_stay_in_the_yaml_owner() -> None:
+    """Fence detection outside utils/yaml_io.py is a second frontmatter owner (#5248)."""
+    rule_id = "contracts-tooling-frontmatter-yaml"
+    path = "src/apm_cli/install/local_bundle_paths.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "def markdown_declares_hooks("
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old,
+        "def _fence(text):\n"
+        "    from frontmatter.default_handlers import YAMLHandler\n\n"
+        "    return YAMLHandler.FM_BOUNDARY.match(text)\n\n\n" + old,
+    )
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @pytest.mark.parametrize(
     ("path", "old", "new"),
     [
@@ -5651,7 +5672,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = list(decision.removed_paths)\n"
-            "        for package in installed_packages:\n"
+            "        for package in _scan_installed_packages(apm_modules_dir):\n"
             "            if package not in declared_deps:\n"
             "                orphaned_packages.append(package)\n",
             "Removal sites must not filter installed or locked sets",
@@ -5839,11 +5860,9 @@ def test_prune_hands_the_reachability_walk_to_the_orphan_owner() -> None:
     """Prune's retained keys still come from deps/reachability.py, via the owner (#3668)."""
     path = "src/apm_cli/commands/prune.py"
     source = _source(path)
-    old = "                reachability=ReachabilityProbe(\n"
+    old = "        reachability=ReachabilityProbe(\n"
     assert source.count(old) == 1
-    mutated = source.replace(
-        old, "                reachability=None if True else ReachabilityProbe(\n", 1
-    )
+    mutated = source.replace(old, "        reachability=None if True else ReachabilityProbe(\n", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-uninstall-reachability"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
