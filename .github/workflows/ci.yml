@@ -395,6 +395,7 @@ jobs:
           tests/quality/test_generated_obligations.py \
           tests/quality/test_known_cells_cite_open_issues.py \
           tests/quality/test_known_cell_closing.py \
+          tests/quality/test_oracle_compile_record.py \
           tests/quality/test_oracle_user_writes.py \
           tests/quality/test_scenario_refusal_credit.py \
           tests/quality/test_cli_command_literals.py
@@ -402,7 +403,9 @@ jobs:
   test-architecture-scaling:
     name: Architecture Scaling (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # The job takes about 250 s at p50 and 296 s at p90 (2026-11-23), so a
+    # 5-minute cap cancelled it on slow runners; 10 minutes is headroom only.
+    timeout-minutes: 10
     permissions:
       contents: read
 

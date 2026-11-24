@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
+from apm_cli.core.remediation import ORPHANED_PACKAGES
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 from scripts.lifecycle_ledger import read_ledger
@@ -63,7 +64,10 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
     ),
     "I2": OracleLaw("a converged operation repeats as a byte no-op", ("idempotency.byte_stable",)),
     "I3": OracleLaw(
-        "install --frozen succeeds iff audit --ci is clean",
+        "install --frozen succeeds iff audit --ci is clean "
+        "(I3-X1: frozen keeps packages apm.yml no longer declares, #3662: it may exit 0 "
+        "while audit --ci fails ONLY no-orphaned-packages, if frozen names the kept "
+        "packages with their remediation; it earns no I3 receipt)",
         ("outcome.status_matches_state", "lockfile.frozen_preserves_bytes"),
     ),
     "I4": OracleLaw(
@@ -181,6 +185,9 @@ class Operation:
     scope: str = "project"
     # Modifier factors of the obligation vocabulary (FROZEN, DRYRUN, FORCE, ...).
     modifiers: tuple[str, ...] = ()
+    # compile only: ``--validate`` (renders nothing) and the ``--root DIR`` output root.
+    validate_only: bool = False
+    output_root: str = ""
 
     @property
     def family(self) -> str:
@@ -220,6 +227,10 @@ def operation_for(args: tuple[str, ...], *, scope: str = "project", **fields: ob
         "mutating": command in MUTATING_COMMANDS and "DRYRUN" not in modifiers,
         "json_output": json_output,
     }
+    if command == "compile":
+        defaults["validate_only"] = "--validate" in args
+        roots = [second for first, second in itertools.pairwise(args) if first == "--root"]
+        defaults["output_root"] = roots[-1] if roots else ""
     return Operation(
         name, command=command, scope=scope, modifiers=modifiers, **{**defaults, **fields}
     )
@@ -548,6 +559,9 @@ def _i3_frozen_audit(
         return None
     audit, frozen = op.paired["audit"], result.returncode
     found = []
+    retained = _i3_frozen_retention(audit, frozen, op.paired_output.get("audit"), result)
+    if retained is not None:
+        return retained or None
     if (audit == 0) != (frozen == 0):
         found.append(
             Violation("I3", f"audit --ci exited {audit} but install --frozen exited {frozen}")
@@ -561,6 +575,46 @@ def _i3_frozen_audit(
         if code != 0 and text is not None and not _REMEDIATION.search(" ".join(text.split())):
             found.append(Violation("I3", f"{label} exited {code} without a remediation"))
     return found
+
+
+# I3-X1: install --frozen never rewrites apm.lock.yaml, so it keeps (and names)
+# packages apm.yml no longer declares (#3662) while audit --ci reports them orphaned.
+_FROZEN_KEPT = re.compile(
+    r"Kept packages no longer in apm\.yml because --frozen does not change apm\.lock\.yaml"
+)
+_ORPHAN_CHECK = "no-orphaned-packages"
+# A failed check in the rich table ("| [x] | name |") or the plain fallback ("  [x] name: ...").
+_FAILED_ROW = re.compile(r"^(?:\|\s*\[x\]\s*\|\s*([a-z0-9-]+)\s*\||\s+\[x\] ([a-z0-9-]+): )", re.M)
+
+
+def _audit_failed_checks(text: str) -> frozenset[str]:
+    """The names of the checks a text or JSON ``audit --ci`` report marks failed."""
+    start = text.find("{")
+    if start != -1:
+        try:
+            report, _end = json.JSONDecoder().raw_decode(text, start)
+        except ValueError:
+            report = None
+        if isinstance(report, dict) and isinstance(report.get("checks"), list):
+            return frozenset(c["name"] for c in report["checks"] if not c.get("passed"))
+    return frozenset(table or plain for table, plain in _FAILED_ROW.findall(text))
+
+
+def _i3_frozen_retention(
+    audit: int, frozen: int, audit_text: str | None, result
+) -> list[Violation] | None:
+    """I3-X1: ``None`` unless this is the #3662 frozen keep; then the audit side's
+    remediation violations (an empty list when it names its repair)."""
+    if frozen != 0 or audit == 0 or audit_text is None:
+        return None
+    frozen_text = " ".join((result.stdout + result.stderr).split())
+    if not _FROZEN_KEPT.search(frozen_text) or ORPHANED_PACKAGES.sentence() not in frozen_text:
+        return None
+    if _audit_failed_checks(audit_text) != {_ORPHAN_CHECK}:
+        return None
+    if _REMEDIATION.search(" ".join(audit_text.split())):
+        return []
+    return [Violation("I3", f"audit --ci exited {audit} without a remediation")]
 
 
 # A remediation names an apm command line ("run 'apm install'", "apm approve <pkg>")
@@ -630,6 +684,30 @@ def _i4_keep_gap(surface: str, after: Observation, output: str) -> str | None:
     return None
 
 
+def compile_home_record(deploy_root: Path) -> str:
+    """The one APM-home file a compile of *deploy_root* may write (#4805).
+
+    Compile records which routed instructions each Claude AGENTS.md it wrote
+    carries, outside the repository, one file per output root keyed by its
+    path (core/agents_md_compile_record.py).
+    """
+    key = hashlib.sha256(deploy_root.resolve().as_posix().encode("utf-8")).hexdigest()[:32]
+    return f".apm/compiled-agents-md/{key}.json"
+
+
+def _exact_write(
+    path: str, exact: Collection[str], existed: Collection[str], kinds: Mapping[str, str]
+) -> bool:
+    """*path* is an exact allowed file written as a regular file, or a directory newly
+    created to hold one; never a path below it, a symlink or a replaced ancestor."""
+    for allowed in exact:
+        if path == allowed:
+            return kinds.get(path) == "file"
+        if allowed.startswith(path + "/"):
+            return kinds.get(path) == "directory" and path not in existed
+    return False
+
+
 def _i5_write_set(
     before: Observation, after: Observation, result, model, op: Operation
 ) -> list[Violation] | None:
@@ -638,13 +716,23 @@ def _i5_write_set(
         return None
     found = []
     for root_id, snapshot in before.artifacts.snapshots:
-        observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
+        later = after.artifacts.snapshot(root_id)
+        observed = _durable_changes(snapshot, later)
         allowed = op.allowed.get(root_id, ())
+        renders = not (op.read_only or op.validate_only or "DRYRUN" in op.modifiers)
+        exact: tuple[str, ...] = ()
+        if root_id == "home" and op.name == "compile" and renders:
+            # --root DIR writes (and keys its record by) DIR, resolved from the project.
+            output = after.deploy_root / op.output_root if op.output_root else after.deploy_root
+            exact = (compile_home_record(output),)
+        existed = {entry.relative_path for entry in snapshot.entries}
+        kinds = {entry.relative_path: entry.kind for entry in later.entries}
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {
             path
             for path in observed
             if any(_within(path, a) or a.startswith(path + "/") for a in allowed)
+            or _exact_write(path, exact, existed, kinds)
         }
         for prefix in op.forbidden.get(root_id, ()):
             hit = sorted(path for path in observed if _within(path, prefix))
@@ -1021,6 +1109,36 @@ def _artifacts(value: Observation | ArtifactSnapshotSet | None) -> ArtifactSnaps
     return value.artifacts if isinstance(value, Observation) else value
 
 
+# Gate-matrix steps whose admitted primitive must be deployed afterwards (t9, #4981).
+_RESOLVING_OPS = frozenset({"install", "install-frozen", "update"})
+_ADMITTING_GATES = frozenset({"none", "allowed"})
+
+
+def dimension_problems(
+    cell_id: str,
+    after: Observation | ArtifactSnapshotSet | None,
+    result: CommandResult | None,
+) -> list[str]:
+    """A resolving step that credits an admitted primitive must leave it deployed.
+
+    The witness then exercised the cell's PRIM, not just the command: a gate-matrix id
+    ``G1|<op>|<prim>|<gate>|<scope>`` whose gate admits the primitive, on a successful
+    install or update, needs that primitive among the deployed surfaces afterwards. A
+    withheld (parked, denied, revoked) primitive is exercised by the gate's decision.
+    """
+    parts = cell_id.split("|")
+    if parts[0] != "G1" or len(parts) < 5 or not isinstance(after, Observation):
+        return []
+    op, prim, gate = parts[1], parts[2], parts[3]
+    if op not in _RESOLVING_OPS or gate not in _ADMITTING_GATES:
+        return []
+    if result is None or result.returncode != 0:
+        return []
+    if any(cell.split("/")[1:2] == [prim] for cell in after.deployed):
+        return []
+    return [f"{cell_id}: the admitted {prim} is not deployed after {op}; nothing exercised it"]
+
+
 def check_obligation(
     cell_id: str,
     *,
@@ -1034,6 +1152,7 @@ def check_obligation(
     """Check *evidence* for generated obligation *cell_id*; emit its receipt if it holds."""
     problems = _strength_problems(strength, before, after, result, evidence)
     problems += _evidence_problems(_artifacts(before), _artifacts(after), result, evidence)
+    problems += dimension_problems(cell_id, after, result)
     assert not problems, f"{cell_id}:\n" + "\n".join(problems) + _evidence(result)
     pre, post = _artifacts(before), _artifacts(after)
     receipts.emit(

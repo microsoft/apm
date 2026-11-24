@@ -236,6 +236,44 @@ def from_lockfile_path(lockfile_path: str, cowork_root: Path) -> Path:
     return ensure_path_within(candidate, cowork_root)
 
 
+def cowork_locator(
+    lockfile_path: str, cowork_root: Path, *, reject_linked_ancestors: bool = False
+) -> Path:
+    """Decode a ``cowork://`` entry without following its final component.
+
+    Like :func:`from_lockfile_path`, but the named entry is returned, never
+    the file a final link points at: deletion decisions must judge, and
+    unlink, the locator the lockfile names (#4295). The full path is still
+    contained. With *reject_linked_ancestors* (the path gate's final-link
+    mode, #5022), a symlinked directory between *cowork_root* and the entry
+    is refused and a final link only needs its parent contained, as the
+    project-scope gate treats one under the deploy root.
+    """
+    from apm_cli.utils.path_security import (
+        PathTraversalError,
+        ensure_path_within,
+        has_symlink_component,
+        validate_path_segments,
+    )
+
+    if not lockfile_path.startswith(COWORK_URI_SCHEME):
+        raise ValueError(f"Not a cowork lockfile path: {lockfile_path!r}")
+    rel_posix = lockfile_path[len(COWORK_URI_SCHEME) :]
+    validate_path_segments(rel_posix, context="cowork lockfile path")
+    candidate = cowork_root / rel_posix.removeprefix("skills/")
+    if candidate == cowork_root or not candidate.name:
+        return from_lockfile_path(lockfile_path, cowork_root)
+    if reject_linked_ancestors and has_symlink_component(cowork_root, candidate.parent):
+        raise PathTraversalError(f"Refusing a symlinked ancestor of {lockfile_path}")
+    locator = ensure_path_within(candidate.parent, cowork_root) / candidate.name
+    # Only the ancestor-checked gate may accept an outward final link; every
+    # other caller keeps full containment. Either way the named entry is
+    # returned, never what from_lockfile_path resolves it to.
+    if not (reject_linked_ancestors and locator.is_symlink()):
+        from_lockfile_path(lockfile_path, cowork_root)
+    return locator
+
+
 def is_cowork_path(lockfile_path: str) -> bool:
     """Return ``True`` if *lockfile_path* uses the ``cowork://`` scheme."""
     return lockfile_path.startswith(COWORK_URI_SCHEME)

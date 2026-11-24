@@ -1,0 +1,19 @@
+{
+  "issue": 5126,
+  "fixed_in": "Unreleased",
+  "summary": "After apm prune removed a transitive local orphan, surviving rows kept a stale depth, dev status or parent, so a following apm install --no-frozen rewrote the lockfile; prune now walks dev-only roots after production ones and records the depth, dev status and parent a fresh resolve would, keeping the recorded chain when that parent cannot be recorded unambiguously.",
+  "failure_modes": [
+    "cleanup",
+    "idempotency"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "lockfile.frozen_preserves_bytes"
+  ],
+  "regression_tests": [
+    "tests/integration/test_prune_survivor_metadata_lifecycle.py::test_prune_recomputes_depth_and_dev_status_of_a_survivor_left_on_the_dev_chain",
+    "tests/integration/test_prune_survivor_metadata_lifecycle.py::test_prune_reparents_a_survivor_whose_declaring_parent_was_pruned",
+    "tests/integration/test_prune_survivor_metadata_lifecycle.py::test_prune_keeps_the_chain_when_the_new_parent_identity_is_ambiguous",
+    "tests/integration/test_prune_generated_local_graphs.py::test_prune_never_deletes_a_declared_package_on_generated_graphs"
+  ]
+}

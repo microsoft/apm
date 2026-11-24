@@ -11,6 +11,9 @@ Design
 * ``ensure_path_within`` is the single predicate for filesystem
   containment -- resolves both paths and asserts via
   ``Path.is_relative_to``.
+* ``filesystem_containment`` judges containment by directory identity
+  under the file system's case rules (case and Unicode spellings of one
+  directory agree); it reports, and leaves policy to the caller.
 * ``safe_rmtree`` wraps ``robust_rmtree`` with an ``ensure_path_within``
   check so callers get a drop-in replacement.
 * ``PathTraversalError`` is a ``ValueError`` subclass for clear error
@@ -19,11 +22,13 @@ Design
 
 from __future__ import annotations
 
+import os
 import urllib.parse as _up
 from pathlib import Path
 from stat import S_ISLNK
 
 from .file_ops import robust_rmtree
+from .paths import is_within, relative_posix, relative_to
 
 
 class PathTraversalError(ValueError):
@@ -232,9 +237,7 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
         _strip_extended_prefix(resolved_base),
     )
     try:
-        if not resolved.is_relative_to(resolved_base):
-            return None
-        return resolved.relative_to(resolved_base).as_posix()
+        return relative_posix(resolved, resolved_base)
     except (TypeError, ValueError):
         return None
 
@@ -244,7 +247,7 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     resolved = _strip_extended_prefix(path.resolve())
     resolved_base = _strip_extended_prefix(resolved_base)
     try:
-        if not resolved.is_relative_to(resolved_base):
+        if not is_within(resolved, resolved_base):
             raise PathTraversalError(
                 f"Path '{path}' resolves to '{resolved}' which is outside "
                 f"the allowed base directory '{resolved_base}'"
@@ -256,26 +259,120 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     return resolved
 
 
-def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
-    """Reject linked components, optionally preserving access errors for diagnostics."""
-    try:
-        relative = path.relative_to(base_dir)
-        current = base_dir
-        for part in relative.parts:
-            current /= part
+def _caseless(path: Path) -> str:
+    """Return *path* folded for a caseless compare (NFC and NFD spellings agree).
+
+    The shared key of :func:`apm_cli.utils.paths.caseless`.
+    """
+    from .paths import caseless
+
+    return caseless(str(path))
+
+
+def filesystem_containment(path: Path, root: Path) -> bool | None:
+    """Whether *path* is *root* or lies under it, under the file system's case rules.
+
+    ``True`` inside, ``False`` outside, ``None`` when the directory spelled
+    like *root* up to case and Unicode form can't be compared with it.
+    ``normcase`` folds case where the platform does (Windows); elsewhere a
+    case-insensitive volume (default macOS) gives one directory several
+    spellings, so that ancestor is asked whether it is the same directory.
+    """
+    if path == root or path.is_relative_to(root):
+        return True
+    folded, base = os.path.normcase(path), os.path.normcase(root)
+    if folded == base or folded.startswith(os.path.join(base, "")):
+        return True
+    spelled = _caseless(root)
+    for ancestor in (path, *path.parents):
+        if _caseless(ancestor) == spelled:
             try:
-                linked = S_ISLNK(current.lstat().st_mode)
-            except FileNotFoundError:
-                return False
-            if linked:
-                return True
-        return False
+                return os.path.samefile(ancestor, root)
+            except OSError:
+                return None
+    return False
+
+
+def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str] | None:
+    """Collapse ``..`` below *base_dir*; ``None`` when it escapes or steps back over a link."""
+    kept: list[str] = []
+    for part in parts:
+        if part == "..":
+            if not kept or base_dir.joinpath(*kept).is_symlink():
+                return None
+            kept.pop()
+        elif part != ".":
+            kept.append(part)
+    return kept
+
+
+def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
+    """Return the first symlinked component of *path* below *base_dir*, or ``None``.
+
+    ``..`` is collapsed first; the walk stops at the first missing component.
+    Raises ``ValueError`` when *path* is not under *base_dir* or a ``..``
+    escapes it or steps back over a link, and ``OSError`` when a component
+    cannot be inspected; :func:`has_symlink_component` turns both into a refusal.
+    """
+    parts = _collapse_relative_parts(base_dir, relative_to(path, base_dir).parts)
+    if parts is None:
+        raise ValueError(f"{path} leaves {base_dir} or steps back over a link")
+    current = base_dir
+    for part in parts:
+        current /= part
+        try:
+            linked = S_ISLNK(current.lstat().st_mode)
+        except FileNotFoundError:
+            return None
+        if linked:
+            return current
+    return None
+
+
+def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
+    """Reject linked components, optionally preserving access errors for diagnostics.
+
+    ``..`` is collapsed first, so a missing directory followed by ``..``
+    cannot hide a linked component after it.
+    """
+    try:
+        return first_symlink_component(base_dir, path) is not None
     except OSError:
         if raise_on_error:
             raise
         return True
     except ValueError:
         return True
+
+
+def _collapse_unlinked(path: Path) -> Path | None:
+    """Collapse ``..`` in *path*; ``None`` when a ``..`` steps back over a symlink."""
+    path = path if path.is_absolute() else Path.cwd() / path
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        if part == "..":
+            if current.is_symlink():
+                return None
+            current = current.parent
+        else:
+            current /= part
+    return current
+
+
+def user_config_crosses_link(path: Path, root: Path) -> bool:
+    """Whether a user config *path* is, or is reached through, a symlink.
+
+    Below ``$HOME`` every component counts; outside it, *root* and everything
+    below it. A ``..`` that steps back over a symlink counts too; otherwise the
+    path is checked in its collapsed form, so an equivalent spelling passes.
+    """
+    home = _collapse_unlinked(Path.home())
+    path, root = _collapse_unlinked(path), _collapse_unlinked(root)
+    if home is None or path is None or root is None:
+        return True
+    if path.is_relative_to(home):
+        return has_symlink_component(home, path)
+    return has_symlink_component(root.parent, path)
 
 
 def safe_rmtree(path: Path, base_dir: Path) -> None:

@@ -178,8 +178,13 @@ def record_bundle_canvas(
     slug: str,
     approval_key: str | None,
     deployed: Collection[str],
+    *,
+    user_scope: bool = False,
 ) -> None:
-    """Record the canvas files this install of bundle *slug* deployed, with its key."""
+    """Record the canvas files this install of bundle *slug* deployed, with its key.
+
+    An install write: the hook record file's write is classified at this scope.
+    """
     from ..integration.hook_ownership import BUNDLE_RECORD_CANVAS, write_per_file_bundle_record
 
     root = Path(project_root)
@@ -188,7 +193,13 @@ def record_bundle_canvas(
         sidecar = _sidecar(root, target)
         if files or sidecar.is_file():
             write_per_file_bundle_record(
-                sidecar, slug, approval_key, files, kind=BUNDLE_RECORD_CANVAS
+                sidecar,
+                slug,
+                approval_key,
+                files,
+                kind=BUNDLE_RECORD_CANVAS,
+                project_root=root,
+                user_scope=user_scope,
             )
 
 
@@ -308,10 +319,10 @@ def retire_unadmitted_bundle_canvas(
 ) -> list[UnadmittedBundleCanvas]:
     """Retire every local-bundle canvas extension trust no longer admits."""
     from ..core.remediation import BUNDLE_HOOKS_APPROVED
-    from .local_bundle_hook_trust import _lock_bundle_paths
+    from .local_bundle_hook_trust import local_bundle_paths
 
     unadmitted = _unadmitted(
-        project_root, targets, allow_executables, lambda: _lock_bundle_paths(lock_dir)
+        project_root, targets, allow_executables, lambda: local_bundle_paths(lock_dir)
     )
     for holding, reason in unadmitted:
         if not dry_run:
@@ -343,10 +354,10 @@ def retire_recorded_bundle_canvas(
     any lockfile row retired.
     """
     from ..core.scope import InstallScope, get_apm_dir
-    from .local_bundle_hook_trust import _lock_bundle_paths
+    from .local_bundle_hook_trust import local_bundle_paths
 
     lock_dir = get_apm_dir(InstallScope.USER) if user_scope else Path(project_root)
-    holdings = deployed_bundle_canvas(project_root, targets, _lock_bundle_paths(lock_dir))
+    holdings = deployed_bundle_canvas(project_root, targets, local_bundle_paths(lock_dir))
     holding = next((h for h in holdings if h.recorded and h.slug == slug), None)
     if holding is None:
         return False
@@ -368,14 +379,15 @@ def _retire(
     inside a canvas root are touched; the holding's record keeps the rest.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..integration import write_seam
     from ..integration.base_integrator import BaseIntegrator
     from ..integration.hook_ownership import BUNDLE_RECORD_CANVAS, write_per_file_bundle_record
     from ..utils.content_hash import compute_file_hash
     from .local_bundle_hook_trust import (
         _drop_lock_rows,
-        _lock_bundle_paths,
         _relative_value,
         contained_bundle_path,
+        local_bundle_paths,
     )
 
     root = Path(project_root)
@@ -391,13 +403,13 @@ def _retire(
     hashes = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
     dropped: set[str] = set()
     removed: list[Path] = []
-    for value in _lock_bundle_paths(lock_dir):
+    for value in local_bundle_paths(lock_dir):
         rel = _relative_value(value, root)
         path = contained_bundle_path(root, value, prefixes)
         if rel not in wanted or path is None or not hashes.get(value):
             continue
         if path.is_file() and compute_file_hash(path) == hashes[value]:
-            path.unlink()
+            write_seam.unlink(path)  # journaled like the deploy (#5130)
             removed.append(path)
         dropped.add(value)
     if dropped and lock_dir is not None:

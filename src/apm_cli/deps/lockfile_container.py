@@ -7,6 +7,7 @@ Checks the version and the shape of every top-level list and mapping before
 from __future__ import annotations
 
 import copy
+import re
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -33,24 +34,39 @@ _parsed_texts: OrderedDict[tuple[object, str], object] = OrderedDict()
 _parsed_texts_lock = threading.Lock()
 
 
-def parse_lockfile_text(yaml_str: str) -> object:
-    """Return a private copy of the bounded YAML parse of *yaml_str*.
+def parse_key(yaml_str: str) -> tuple[object, str]:
+    """The memo key of *yaml_str*: its loader and exact text.
 
-    Raises whatever ``load_yaml_str`` raises; failed parses are not memoized.
+    The one place the key is built, so anything that seeds the memo reads
+    back with the loader ``parse_lockfile_text`` uses (a substituted loader
+    never reads another loader's parse).
     """
     from ..utils import yaml_io
 
-    key = (yaml_io.load_yaml_str, yaml_str)
+    return (yaml_io.load_machine_yaml_str, yaml_str)
+
+
+def parse_lockfile_text(yaml_str: str) -> object:
+    """Return a private copy of the bounded YAML parse of *yaml_str*.
+
+    Raises whatever ``load_machine_yaml_str`` raises; failed parses are not memoized.
+    """
+    from ..utils import yaml_io
+
+    key = parse_key(yaml_str)
     with _parsed_texts_lock:
         parsed = _parsed_texts.get(key, _parsed_texts)
         if parsed is not _parsed_texts:
             _parsed_texts.move_to_end(key)
     if parsed is _parsed_texts:
-        parsed = yaml_io.load_yaml_str(yaml_str)
+        parsed = yaml_io.load_machine_yaml_str(yaml_str)
         with _parsed_texts_lock:
             _parsed_texts[key] = parsed
             while len(_parsed_texts) > _PARSED_TEXT_LIMIT:
                 _parsed_texts.popitem(last=False)
+    if "&" not in yaml_str and "*" not in yaml_str:
+        # No anchor or alias: the tree shares no node, so a plain copy equals deepcopy.
+        return yaml_io.copy_plain_tree(parsed)
     try:
         return copy.deepcopy(parsed)
     except RecursionError:
@@ -58,7 +74,66 @@ def parse_lockfile_text(yaml_str: str) -> object:
         # though the bounded loader accepted it; such text is parsed per read.
         with _parsed_texts_lock:
             _parsed_texts.pop(key, None)
-        return yaml_io.load_yaml_str(yaml_str)
+        return yaml_io.load_machine_yaml_str(yaml_str)
+
+
+_NOT_PLAIN = object()
+# Strings the safe dumper cannot round-trip: a raw NEL is normalized on load
+# (LS and PS are refused too, conservatively), and a lone surrogate is dumped
+# as an escape a fresh read refuses. Pinned by a code-point sweep cell.
+_UNSAFE_STR = re.compile("[\x85\u2028\u2029\ud800-\udfff]")
+_PLAIN_SCALARS = (str, int, bool, type(None))
+
+
+def _plain_copy(value: object) -> object:
+    """A private copy of *value* when it holds only what a safe dump round-trips.
+
+    Exact ``dict`` (``str`` keys), ``list``, ``str``, ``int``, ``bool`` and
+    ``None``; anything else (floats, subclasses, tuples, strings matching
+    ``_UNSAFE_STR``) is ``_NOT_PLAIN``.
+    """
+    kind = type(value)
+    if kind is str:
+        return _NOT_PLAIN if _UNSAFE_STR.search(value) else value
+    if kind in _PLAIN_SCALARS:
+        return value
+    if kind is list:
+        items = [_plain_copy(item) for item in value]
+        return _NOT_PLAIN if any(item is _NOT_PLAIN for item in items) else items
+    if kind is dict:
+        copied = {}
+        for key, item in value.items():
+            if type(key) is not str or _UNSAFE_STR.search(key):
+                return _NOT_PLAIN
+            item = _plain_copy(item)
+            if item is _NOT_PLAIN:
+                return _NOT_PLAIN
+            copied[key] = item
+        return copied
+    return _NOT_PLAIN
+
+
+def remember_lockfile_text(yaml_str: str, document: object) -> None:
+    """Record *document* as the parse of *yaml_str*, the text dumped from it.
+
+    ``LockFile.write`` serializes plain built-ins with the safe dumper, which
+    loads back to an equal document in the same key order, so a later read of
+    the text it staged or wrote needs no YAML parse. A document holding any
+    other type is not recorded and its text is parsed on first read.
+    """
+    from ..utils import yaml_io
+
+    if not yaml_io.machine_yaml_admits(yaml_str):
+        return  # a read must refuse it exactly as a fresh parse would
+    plain = _plain_copy(document)
+    if plain is _NOT_PLAIN:
+        return
+    key = parse_key(yaml_str)
+    with _parsed_texts_lock:
+        _parsed_texts[key] = plain
+        _parsed_texts.move_to_end(key)
+        while len(_parsed_texts) > _PARSED_TEXT_LIMIT:
+            _parsed_texts.popitem(last=False)
 
 
 def validate_lockfile_container(data: object) -> dict[str, Any]:

@@ -25,6 +25,7 @@ from tests.lifecycle.generator.factors import (
     PLAIN_PRIMS,
     TRIPLES,
     cell_id,
+    parse_cell,
     row_targets,
 )
 from tests.lifecycle.generator.rules import (
@@ -37,7 +38,7 @@ from tests.lifecycle.generator.rules import (
     UNINSTALL_MCP_REFUSALS,
 )
 from tests.lifecycle.generator.space import Entry
-from tests.lifecycle.generator.witnesses import implied
+from tests.lifecycle.generator.witnesses import credits_dimension, implied
 from tests.lifecycle.world.packages import GIT_PUBLISHED, INERT_COMMAND
 from tests.lifecycle.world.services import REGISTRY_SERVER
 
@@ -429,10 +430,14 @@ def simulate(plan: Plan, steps: Sequence[Step], targets: Sequence[str]) -> list[
 
 
 def _creditable(cells: set[str], step: Step, obligations: Mapping[str, Entry]) -> set[str]:
+    # A row credits only primitives it exercises (witnesses.credits_dimension): its
+    # p-exec loose bin/ never deploys at project scope, so it credits no bin cell (#4981).
     return {
         cell
         for cell in cells
-        if cell in obligations and (obligations[cell].strength != "e2e-evidence" or step.unchanged)
+        if cell in obligations
+        and (obligations[cell].strength != "e2e-evidence" or step.unchanged)
+        and credits_dimension("", parse_cell(cell)[1])
     }
 
 
@@ -601,9 +606,25 @@ def source_refusal_row(obligations: Mapping[str, Entry], index: int) -> Row:
     inline_cells = tuple(
         sorted(key for key in implied(inline) if key in obligations and "inline-mcp" in key)
     )
+    # The inline form's dry run previews the server and writes nothing (DRYRUN=on).
+    dry_cells = tuple(
+        sorted(
+            key
+            for key in implied({**inline, "DRYRUN": "on"})
+            if key in obligations and "inline-mcp" in key and "DRYRUN=on" in key
+        )
+    )
     steps = [
         _cmd("install", "install", "p-skill", mods={"SELECT"}, names=("p-skill",), essential=True),
         Step(f"apm install --mcp {REGISTRY_SERVER}", "mcp-install", essential=True),
+        Step(
+            f"apm install --mcp {INLINE_SERVER} --dry-run -- {INERT_COMMAND} --stdio",
+            "mcp-install",
+            frozenset({"DRYRUN"}),
+            essential=True,
+            unchanged=NON_MCP_SURFACES,
+            cells=dry_cells,
+        ),
         Step(INLINE_INSTALL, "mcp-install", essential=True, cells=inline_cells),
         _refusal(
             f"apm uninstall {REGISTRY_SERVER}", "uninstall", UNINSTALL_MCP_REFUSALS["mcp-registry"]

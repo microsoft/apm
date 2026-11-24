@@ -56,6 +56,33 @@ class _PreparedInstruction:
     body: str
 
 
+def _scannable_frontmatter(value):
+    """Return *value* as JSON-native data, for one sorted JSON scan.
+
+    YAML admits non-string keys (``{1: numeric, note: text}``), sets and
+    other types JSON cannot sort or serialize. Keys become text, keeping keys
+    that render alike as separate entries, and set members become a list, so
+    no decoded value reaches the scan only as a ``repr`` escape.
+    """
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        entries: dict[str, object] = {}
+        for key, item in value.items():
+            name = (
+                key
+                if isinstance(key, str)
+                else json.dumps(_scannable_frontmatter(key), ensure_ascii=False)
+            )
+            while name in entries:
+                name += "'"
+            entries[name] = _scannable_frontmatter(item)
+        return entries
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_scannable_frontmatter(item) for item in value]
+    return str(value)
+
+
 class InstructionIntegrator(BaseIntegrator):
     """Handles integration of APM package instructions.
 
@@ -163,17 +190,48 @@ class InstructionIntegrator(BaseIntegrator):
         package_name: str = "",
     ) -> _PreparedInstruction:
         """Read and validate one instruction without writing target files."""
-        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
-
         content = source.read_text(encoding="utf-8")
         try:
             metadata, body = self._parse_frontmatter(content)
         except yaml.YAMLError as exc:
             self._raise_frontmatter_error(source, exc)
-        decoded_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+        if self.decoded_frontmatter_blocked(
+            metadata,
+            str(source),
+            source.name,
+            force=force,
+            diagnostics=diagnostics,
+            package_name=package_name,
+        ):
+            raise yaml.YAMLError(
+                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
+            )
+        return _PreparedInstruction(content=content, body=body)
+
+    @staticmethod
+    def decoded_frontmatter_blocked(
+        metadata: dict,
+        label: str,
+        file_name: str,
+        *,
+        force: bool = False,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> bool:
+        """Scan decoded frontmatter values for critical hidden characters.
+
+        YAML escapes such as ``"\\u202e"`` decode to characters a byte scan of
+        the file never sees. Reports findings to *diagnostics* and returns
+        whether the instruction must be rejected (``force`` allows it).
+        """
+        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
+        decoded_metadata = json.dumps(
+            _scannable_frontmatter(metadata), ensure_ascii=False, sort_keys=True, default=str
+        )
         verdict = SecurityGate.scan_text(
             decoded_metadata,
-            f"{source}#decoded-frontmatter",
+            f"{label}#decoded-frontmatter",
             policy=BLOCK_POLICY,
             force=force,
         )
@@ -186,14 +244,10 @@ class InstructionIntegrator(BaseIntegrator):
                 force_action="Allowed by preflight",
                 force_detail=(
                     "Decoded frontmatter contains critical hidden characters; "
-                    f"edit the escaped value in {source.name}"
+                    f"edit the escaped value in {file_name}"
                 ),
             )
-        if verdict.should_block:
-            raise yaml.YAMLError(
-                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
-            )
-        return _PreparedInstruction(content=content, body=body)
+        return verdict.should_block
 
     def _render_instruction(
         self,
@@ -215,14 +269,40 @@ class InstructionIntegrator(BaseIntegrator):
         is copied verbatim (identity transform).
         """
         content = prepared.content if prepared is not None else source.read_text(encoding="utf-8")
-        if fmt in RULE_FORMATS:
-            converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
-            try:
-                content = converter(content)
-            except yaml.YAMLError as exc:
-                self._raise_frontmatter_error(source, exc)
+        try:
+            content = self.convert_rule_content(content, fmt)
+        except yaml.YAMLError as exc:
+            self._raise_frontmatter_error(source, exc)
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
+
+    # Scoping keys the rule converters emit; ``applyTo`` marks APM instructions.
+    _NATIVE_RULE_SCOPE_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"paths", "globs", "alwaysApply", "trigger", "inclusion", "fileMatchPattern"}
+    )
+
+    @classmethod
+    def is_native_rule(cls, content: str) -> bool:
+        """Return whether *content* is already a target rule, not an APM instruction.
+
+        A native rule scopes itself with a target key (Claude ``paths:``,
+        Cursor ``globs:``) and has no ``applyTo``; converting it again would
+        drop that scoping. Raises :class:`yaml.YAMLError` on malformed
+        frontmatter.
+        """
+        metadata, _body = cls._parse_frontmatter(content)
+        return "applyTo" not in metadata and bool(cls._NATIVE_RULE_SCOPE_KEYS & set(metadata))
+
+    @classmethod
+    def convert_rule_content(cls, content: str, fmt: str) -> str:
+        """Convert APM instruction *content* to rule format *fmt*.
+
+        Formats outside :data:`targets.RULE_FORMATS` are returned unchanged.
+        Raises :class:`yaml.YAMLError` on malformed frontmatter.
+        """
+        if fmt not in RULE_FORMATS:
+            return content
+        return getattr(cls, cls._FORMAT_CONVERTERS[fmt])(content)
 
     @staticmethod
     def _plan_key(
@@ -265,6 +345,31 @@ class InstructionIntegrator(BaseIntegrator):
             )
             plan[source_file] = (target_path, content, links_resolved)
         return plan
+
+    @staticmethod
+    def _deploy_dir(target: TargetProfile, mapping, project_root: Path) -> Path:
+        return project_root / (mapping.deploy_root or target.root_dir) / mapping.subdir
+
+    @staticmethod
+    def _verbatim_target(deploy_dir: Path, source_file: Path) -> Path:
+        return deploy_dir / source_file.name
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, target: TargetProfile, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """``{target_path: source}`` this integrator copies for *target*, or ``None`` if it renders.
+
+        The same directory and file name ``integrate_instructions_for_target``
+        uses; rule-dir formats transform their sources, so they are ``None``.
+        """
+        mapping = target.primitives.get("instructions")
+        if not mapping:
+            return {}
+        if mapping.output_compare:
+            return None
+        deploy_dir = self._deploy_dir(target, mapping, project_root)
+        files = self.find_instruction_files(Path(package_info.install_path), source_plan)
+        return self.unique_destinations((self._verbatim_target(deploy_dir, f), f) for f in files)
 
     def deployed_rule_matches(self, source: Path, target: TargetProfile, deploy_root: Path) -> bool:
         """Prove native delivery using the same filename and renderer as install.
@@ -385,8 +490,6 @@ class InstructionIntegrator(BaseIntegrator):
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
 
-        effective_root = mapping.deploy_root or target.root_dir
-        target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
@@ -423,7 +526,7 @@ class InstructionIntegrator(BaseIntegrator):
         if not instruction_files:
             return IntegrationResult(0, 0, 0, [])
 
-        deploy_dir = target_root / mapping.subdir
+        deploy_dir = self._deploy_dir(target, mapping, project_root)
         write_seam.mkdir(deploy_dir, parents=True, exist_ok=True)
 
         fmt = mapping.format_id
@@ -465,7 +568,7 @@ class InstructionIntegrator(BaseIntegrator):
             if rule_dir_format:
                 target_path, new_content, links_resolved = rendered_rules[source_file]
             else:
-                target_path = deploy_dir / source_file.name
+                target_path = self._verbatim_target(deploy_dir, source_file)
                 # source_file.name has no separators, so traversal via
                 # deploy_dir is impossible. Validate against deploy_dir (not
                 # project_root) so user-scope targets outside the workspace work.

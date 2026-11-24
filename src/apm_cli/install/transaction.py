@@ -7,11 +7,12 @@ import os
 import tempfile
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from apm_cli.cache.commit_reachability import open_verdict_stage
 from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
@@ -19,8 +20,122 @@ from apm_cli.marketplace.version_pins import open_ref_pin_stage
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
+    from apm_cli.cache.deploy_store import StagedEvidence
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
     from apm_cli.install.deploy_snapshot import DeployJournal
+
+
+class ApplyRestoreIncomplete(Exception):
+    """A failed fast apply could not put every path back; the full run must not start."""
+
+    def __init__(self, issues: list[tuple[Path, str]]) -> None:
+        self.issues = issues
+        super().__init__(
+            "Some deployed files could not be restored. Close programs using them, "
+            "then copy them back from the retained pre-install copies before retrying."
+        )
+
+
+@contextlib.contextmanager
+def journaled_apply(contain: Path) -> Iterator[DeployJournal]:
+    """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
+
+    The caller records each path it creates; every path written at the
+    integrator write seam inside the block is recorded, with its expected
+    bytes and its post-write seal, too. If the block raises, every recorded
+    path is restored before the exception propagates; a restore that leaves
+    any path behind raises :class:`ApplyRestoreIncomplete`. Call it under the
+    lifecycle lock, after the install entry replayed any journal a killed
+    install left (#4863).
+    """
+    from apm_cli.core.scope import get_apm_home
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration import write_seam
+
+    store_parent = get_apm_home() / "install-snapshots"
+    journal = DeployJournal(store_parent)
+    # *contain* (the project) bounds the rollback only; nothing is persisted for replay.
+    journal.contain = Path(os.path.abspath(contain))
+
+    def seam(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(seam, journal.after_write, journal=journal.token)
+    try:
+        yield journal
+    except BaseException as exc:
+        write_seam.stop_listening(seam)
+        if issues := journal.restore():
+            raise ApplyRestoreIncomplete(issues) from exc
+        raise
+    write_seam.stop_listening(seam)
+    journal.discard()
+
+
+def journaled_local_bundle(install: Callable[..., Any]) -> Callable[..., Any]:
+    """Journal a local-bundle install's deploy writes like a package install's (#5046).
+
+    The journal follows the bundle's lockfile: it names the staged lockfile
+    just before the commit and settles once it is on disk, or settles when
+    the command ends without one, so in process nothing is restored. Only a
+    process killed mid-deploy leaves it for the next install, which replays
+    it under the #4863 rules. Wrap the install inside its lockfile writer,
+    under the lifecycle lock; a dry run writes nothing and is not journaled.
+    """
+
+    @wraps(install)
+    def journaled(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("dry_run"):
+            return install(*args, **kwargs)
+        with _local_bundle_journal(user_scope=bool(kwargs.get("global_"))):
+            return install(*args, **kwargs)
+
+    return journaled
+
+
+@contextlib.contextmanager
+def _local_bundle_journal(*, user_scope: bool) -> Iterator[None]:
+    from apm_cli.core.scope import InstallScope, get_apm_home, get_modules_dir
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.deps.lockfile_write_authority import (
+        after_lockfile_commit,
+        before_lockfile_commit,
+        staged_lockfile_text,
+        unless_lockfile_commits,
+    )
+    from apm_cli.install.deploy_snapshot import DeployJournal, lockfile_identity
+    from apm_cli.integration import write_seam
+
+    apm_modules_dir = get_modules_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)
+    workspace = Path(os.path.abspath(apm_modules_dir)).parent
+    journal = DeployJournal(
+        get_apm_home() / "install-snapshots",
+        root=_deploy_root_of(apm_modules_dir),
+        workspace=workspace,
+    )
+
+    def seam(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    def mark() -> None:
+        text = staged_lockfile_text(get_lockfile_path(workspace))
+        if text is not None:
+            journal.mark_commit(lockfile_identity(text))
+
+    def settle() -> None:
+        committed = _committed_lockfile(workspace)
+        if journal.store is not None and committed is not None:
+            journal.mark_commit(committed)
+        journal.discard()
+
+    write_seam.listen(seam, journal.after_write)
+    try:
+        yield
+    finally:
+        write_seam.stop_listening(seam)
+        before_lockfile_commit(mark)
+        unless_lockfile_commits(journal.discard)
+        after_lockfile_commit(settle, first=True)
 
 
 def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
@@ -83,6 +198,131 @@ def _maybe_rollback_manifest(
             )
 
 
+def _deploy_root_of(apm_modules_dir: Path) -> Path:
+    """The deploy root of the workspace whose ``apm_modules`` is *apm_modules_dir*."""
+    from apm_cli.core.scope import get_workspace_deploy_root
+
+    return get_workspace_deploy_root(Path(os.path.abspath(apm_modules_dir)).parent)
+
+
+def _receipts_directory(root: Path) -> Path:
+    """The deployment receipts directory: the parent of every receipt file."""
+    from apm_cli.core.deployment_ledger import materialization_evidence_paths
+    from apm_cli.core.scope import InstallScope
+
+    return materialization_evidence_paths(root, InstallScope.PROJECT)[0].parent
+
+
+def _committed_lockfile(apm_dir: Path) -> str | None:
+    """The identity of the lockfile on disk in *apm_dir*, or ``None``."""
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    try:
+        return lockfile_identity(get_lockfile_path(apm_dir).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _ledger_hashes(apm_dir: Path) -> dict[str, str | None]:
+    """Each deployed path the lockfile in *apm_dir* claims, mapped to its recorded hash."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.install.deploy_snapshot import LedgerUnavailable
+
+    path = get_lockfile_path(apm_dir)
+    try:
+        lockfile = LockFile.read(path)
+    except Exception as exc:
+        # Unreadable evidence is not "nothing claimed": replay keeps the journal.
+        raise LedgerUnavailable(path, f"the lockfile cannot be read: {exc}") from None
+    if lockfile is None:
+        return {}
+    ledger: dict[str, str | None] = dict.fromkeys(
+        DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)
+    )
+    ledger.update(DeploymentLedgerCodec.deployed_file_hashes(lockfile))
+    return ledger
+
+
+def replay_abandoned_deploys(apm_modules_dir: Path, logger: Any) -> None:
+    """Replay the deploy journal a killed install left for this workspace (#4863).
+
+    The one recovery owner: every install entry that mutates deployed state
+    calls it under the lifecycle lock, before it changes anything. A journal
+    that cannot be proven against the deployment ledger, or a path that
+    cannot be restored, keeps the journal, names each path and raises
+    ``InstallFailureAlreadyRendered``.
+    """
+    from apm_cli.core.scope import get_apm_home
+    from apm_cli.install.deploy_snapshot import JournalReplayError, replay_abandoned_journals
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+
+    apm_dir = Path(os.path.abspath(apm_modules_dir)).parent
+    store_parent = get_apm_home() / "install-snapshots"
+    if not any(store_parent.glob("deploy-*")):
+        return
+    try:
+        root = _deploy_root_of(apm_modules_dir)
+        outcome = replay_abandoned_journals(
+            store_parent,
+            root,
+            lambda: _ledger_hashes(apm_dir),
+            receipts=_receipts_directory(root),
+            committed=lambda: _committed_lockfile(apm_dir),
+            workspace=apm_dir,
+        )
+    except JournalReplayError as exc:
+        _report_kept_journal(exc, logger)
+        raise InstallFailureAlreadyRendered(str(exc)) from None
+    if logger is None:
+        return
+    from apm_cli.core.remediation import kept_note
+
+    copies = ", ".join(str(store) for store in outcome.retained)
+    for path, reason in outcome.kept:
+        note = kept_note(
+            path,
+            f"{reason}, so it was not restored",
+            f"Review it; the pre-install copies are kept at {copies}.",
+        )
+        logger.warning(note)
+    if outcome.restored:
+        logger.progress(
+            f"Restored {outcome.restored} deployed path(s) left by an interrupted install."
+        )
+
+
+def replay_before_install_entry(scope: Any, *, dry_run: bool, logger: Any) -> None:
+    """Replay before any ``apm install`` entry writes; a dry run changes nothing.
+
+    The local-bundle and ``--mcp`` entries never open an install transaction.
+    """
+    if not dry_run:
+        from apm_cli.core.scope import get_modules_dir
+
+        replay_abandoned_deploys(get_modules_dir(scope), logger)
+
+
+def _report_kept_journal(exc: Any, logger: Any) -> None:
+    """Name each path of a journal replay kept, and where its copies are."""
+    if logger is None:
+        return
+    if exc.applied:
+        logger.error("An interrupted install left deployed files that could not all be restored:")
+    else:
+        logger.error(
+            "An interrupted install left a deploy journal that cannot be replayed "
+            "safely; nothing was restored:"
+        )
+    for path, reason in exc.issues:
+        logger.error(f"  {path}: {reason}")
+    logger.error(
+        f"The journal is kept at {exc.store}. Restore or remove the listed paths "
+        "by hand, then run the command again."
+    )
+
+
 class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
@@ -107,8 +347,17 @@ class InstallTransaction:
         validation: _ValidationOutcome | None,
         logger: InstallLogger,
         acquire_lock: bool = True,
+        recover_deploys: bool = True,
     ) -> None:
-        """Capture the manifest and create one resolution staging session."""
+        """Capture the manifest and create one resolution staging session.
+
+        *recover_deploys* is ``False`` for a lock-only run (``apm lock``) or a
+        dry run, which never change deployed files, not even to replay a journal.
+        """
+        from apm_cli.cache.deploy_store import process_umask
+
+        # Read the umask now, before the pipeline starts any worker thread.
+        process_umask()
         self.manifest_path = manifest_path
         self.apm_modules_dir = apm_modules_dir
         self._validation = validation
@@ -123,9 +372,14 @@ class InstallTransaction:
         try:
             self._manifest_existed = manifest_path.exists()
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
+            if self._workspace_lock is not None and recover_deploys:
+                # Under the lifecycle lock, before this attempt changes anything.
+                self._replay_abandoned_deploys()
             self._resolution = ResolutionStagingSession(apm_modules_dir)
             # Marketplace ref pins resolved by this attempt; written on commit only.
             self._ref_pins = open_ref_pin_stage()
+            # Commit reachability verdicts of this attempt; written on commit only.
+            self._verdicts = open_verdict_stage()
         except BaseException:
             self._release_workspace_lock()
             raise
@@ -138,6 +392,7 @@ class InstallTransaction:
         self.committed = False
         self._completed = False
         self._rolled_back = False
+        self._deploy_evidence: StagedEvidence = ([], [])
 
     @property
     def resolution(self) -> ResolutionStagingSession:
@@ -170,9 +425,11 @@ class InstallTransaction:
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
                     self._ref_pins.commit()
+                    self._verdicts.commit()
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
+                    self._publish_deploy_evidence()
                 if (
                     self._validation is not None
                     and self._validation.has_failures
@@ -187,6 +444,37 @@ class InstallTransaction:
             finally:
                 if self.committed:
                     self._release_workspace_lock()
+
+    def hold_deploy_evidence(self) -> None:
+        """Take what the pipeline staged for the deploy store into this attempt.
+
+        Called when the pipeline returns, before any post-install script runs:
+        a script resets the invocation memos the evidence was staged in.
+        """
+        from apm_cli.cache.deploy_store import take_staged
+
+        files, records = take_staged()
+        with self._lock:
+            self._deploy_evidence[0].extend(files)
+            self._deploy_evidence[1].extend(records)
+
+    def _publish_deploy_evidence(self) -> None:
+        """Store the deployed bytes and package records this committed attempt staged.
+
+        The store is a best-effort cache: failing to fill it never fails an install.
+        """
+        from apm_cli.cache.deploy_store import commit_staged
+
+        taken, self._deploy_evidence = self._deploy_evidence, ([], [])
+        with contextlib.suppress(Exception):
+            commit_staged(taken)
+
+    def _discard_deploy_evidence(self) -> None:
+        """Forget what an attempt that did not commit staged for the deploy store."""
+        from apm_cli.cache.deploy_store import discard_staged
+
+        self._deploy_evidence = ([], [])
+        discard_staged()
 
     def _report_resolution_cleanup_issues(self, issues: list[tuple[Path, str]]) -> None:
         """Report cleanup paths that require safe manual recovery."""
@@ -208,8 +496,10 @@ class InstallTransaction:
                     # A preview whose staging already rolled back changed nothing.
                     return result
                 try:
+                    self._discard_deploy_evidence()
                     self._settle_deploy_journal()
                     self._ref_pins.discard()
+                    self._verdicts.discard()
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)
                     self._completed = True
@@ -225,6 +515,10 @@ class InstallTransaction:
             return result
         return self.commit(result)
 
+    def _replay_abandoned_deploys(self) -> None:
+        """Replay the deploy journal a killed install left for this deploy root (#4863)."""
+        replay_abandoned_deploys(self.apm_modules_dir, self._logger)
+
     def journal_deploy_writes(self, ctx: Any = None) -> None:
         """Record, at the integrator write seam, the prior state of every path written from now on.
 
@@ -232,30 +526,52 @@ class InstallTransaction:
         the pipeline: the journal is then kept until this install commits and
         a refusal there rolls back every journaled path (#4638).
         """
+        from apm_cli.cache.deploy_store import discard_staged
         from apm_cli.core.scope import get_apm_home
-        from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
+        from apm_cli.install.deploy_snapshot import DeployJournal
         from apm_cli.integration import write_seam
 
         with self._lock:
             if self._deploy_journal is not None or self.committed or self._rolled_back:
                 return
+            # Deploy-store evidence counts only from this attempt's integrate phase on.
+            discard_staged()
             if ctx is not None:
                 from apm_cli.install.service import InstallService
 
                 frozen = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
                 self._journal_held_until_commit = frozen
             store_parent = get_apm_home() / "install-snapshots"
-            if self._workspace_lock is not None:
-                # Under the lifecycle lock no other install owns a journal here.
-                reap_abandoned_journals(store_parent)
-            self._deploy_journal = DeployJournal(store_parent)
-            write_seam.listen(self._record_deploy_write)
+            # The pipeline's write root; replay matches it to the workspace root.
+            root = getattr(ctx, "project_root", None) or _deploy_root_of(self.apm_modules_dir)
+            self._deploy_journal = DeployJournal(
+                store_parent, root=root, workspace=self.apm_modules_dir.parent
+            )
+            token = self._deploy_journal.token
+            write_seam.listen(self._record_deploy_write, self._seal_deploy_write, journal=token)
 
-    def _record_deploy_write(self, path: Path, contents: bool) -> None:
+    def _mark_deploy_commit(self) -> None:
+        """Seal the journal and name the staged lockfile it is about to commit."""
+        from apm_cli.deps.lockfile import get_lockfile_path
+        from apm_cli.deps.lockfile_write_authority import staged_lockfile_text
+        from apm_cli.install.deploy_snapshot import lockfile_identity
+
+        journal = self._deploy_journal
+        text = staged_lockfile_text(get_lockfile_path(self.apm_modules_dir.parent))
+        if journal is not None and text is not None:
+            journal.mark_commit(lockfile_identity(text))
+
+    def _record_deploy_write(self, path: Path, contents: bool, expected: str | None = None) -> None:
         """Keep *path*'s prior state the first time this attempt touches it."""
         journal = self._deploy_journal
         if journal is not None:
-            journal.record(path, contents=contents)
+            journal.record(path, contents=contents, expected=expected)
+
+    def _seal_deploy_write(self, path: Path) -> None:
+        """Seal what this attempt just wrote at *path* (#4863)."""
+        journal = self._deploy_journal
+        if journal is not None:
+            journal.after_write(path)
 
     def undo_lockfile_migration_on_rollback(self, apm_dir: Path) -> None:
         """A rollback moves the ``apm.lock.yaml`` just migrated back to ``apm.lock`` (#4826)."""
@@ -294,7 +610,10 @@ class InstallTransaction:
 
     def release_deploy_targets(self) -> None:
         """Every gate that scans deployed bytes passed: keep the journal until the lock commits."""
-        from apm_cli.deps.lockfile_write_authority import after_lockfile_commit
+        from apm_cli.deps.lockfile_write_authority import (
+            after_lockfile_commit,
+            before_lockfile_commit,
+        )
 
         with self._lock:
             if self._deploy_journal is None or self._journal_released:
@@ -302,6 +621,9 @@ class InstallTransaction:
             self._journal_released = True
             if self._journal_held_until_commit:
                 return
+        # Mark the journal with the lockfile about to commit, so a kill after
+        # the write settles it instead of rolling it back (#4863).
+        before_lockfile_commit(self._mark_deploy_commit)
         # Settle at the durable commit, before receipt binding or any other
         # fallible post-commit action: the lockfile then records the deploys.
         after_lockfile_commit(self._settle_deploy_journal, first=True)
@@ -339,10 +661,19 @@ class InstallTransaction:
         return journal
 
     def _settle_deploy_journal(self) -> None:
-        """The lockfile records what was written: drop the pre-write copies."""
+        """The lockfile records what was written: drop the pre-write copies.
+
+        The journal first names the lockfile on disk, so a kill before the
+        copies are gone settles it too (#4863).
+        """
         journal = self._take_deploy_journal()
-        if journal is not None:
-            journal.discard()
+        if journal is None:
+            return
+        if journal.store is not None:
+            committed = _committed_lockfile(self.apm_modules_dir.parent)
+            if committed is not None:
+                journal.mark_commit(committed)
+        journal.discard()
 
     def _restore_deploy_targets(self) -> None:
         """Put every journaled path back and discard the lockfile this attempt staged."""
@@ -376,8 +707,10 @@ class InstallTransaction:
             if self.committed or self._rolled_back:
                 return
             try:
+                self._discard_deploy_evidence()
                 self._ref_pins.discard()
                 try:
+                    self._verdicts.discard()
                     self._undo_deploys()
                 finally:
                     try:
@@ -462,6 +795,8 @@ def transactional_pipeline(
                 apm_modules_dir=modules_dir,
                 validation=None,
                 logger=kwargs.get("logger"),
+                # apm lock and a dry run never touch deployed files (#4863).
+                recover_deploys=not (kwargs.get("lockfile_only") or kwargs.get("dry_run")),
             )
             kwargs["transaction"] = transaction
         try:

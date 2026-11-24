@@ -1,0 +1,825 @@
+"""A failed ``dependency-allowlist`` audit check carries one runnable next step (#4570).
+
+The advice comes from the remediation catalog: ``apm uninstall`` naming the
+apm.yml entries whose removal provably drops every denied dependency, or
+asking the org admin to allow them, naming the policy source. When the
+uninstall cannot be proven to clear the failure the advice is admin-only.
+Text and SARIF output render it.
+"""
+
+from __future__ import annotations
+
+from itertools import pairwise
+from pathlib import Path
+
+import pytest
+import yaml
+
+from apm_cli.commands.audit import _render_ci_failures_to_stderr
+from apm_cli.core.remediation import catalog
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.models.apm_package import clear_apm_yml_cache
+from apm_cli.policy.models import CheckResult, CIAuditResult
+from apm_cli.policy.policy_checks import run_policy_checks
+from apm_cli.policy.schema import ApmPolicy, DependencyPolicy, ManifestPolicy
+
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-remediation-advice")]
+
+_SOURCE = "org:contoso/.github"
+_REPLACE_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
+_ADMIN_ONLY = "    Ask your org admin to allow them (policy source: org:contoso/.github)."
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    clear_apm_yml_cache()
+    yield
+    clear_apm_yml_cache()
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """The download boundary fails locally: evidence replays never reach the network."""
+
+    def _no_network(*_args, **_kwargs):
+        raise RuntimeError("offline: package downloads are disabled in this test")
+
+    monkeypatch.setattr(
+        "apm_cli.deps.github_downloader.GitHubPackageDownloader.download_package", _no_network
+    )
+
+
+def _locked(key: str, parent: str | None = None) -> LockedDependency:
+    return LockedDependency(repo_url=key, depth=2 if parent else 1, resolved_by=parent)
+
+
+def _project(
+    root: Path, deps: list[str], locked: list[LockedDependency], children=None, **manifest
+) -> Path:
+    """Write apm.yml, the lock and each locked package's own manifest under apm_modules/."""
+    children = children or {}
+    (root / "apm.yml").write_text(
+        yaml.safe_dump(
+            {"name": "demo", "version": "1.0.0", "dependencies": {"apm": deps}, **manifest}
+        ),
+        encoding="utf-8",
+    )
+    lock = LockFile()
+    for dep in locked:
+        lock.add_dependency(dep)
+        manifest = {"name": dep.repo_url.rsplit("/", 1)[-1], "version": "1.0.0"}
+        if dep.repo_url in children:
+            manifest["dependencies"] = {"apm": children[dep.repo_url]}
+        package = root / "apm_modules" / dep.repo_url
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    lock.write(root / "apm.lock.yaml")
+    return root
+
+
+def _allowlist(
+    root: Path,
+    *,
+    require: tuple[str, ...] = (),
+    modules_root: Path | None = None,
+    required_fields: tuple[str, ...] = (),
+) -> CheckResult:
+    policy = ApmPolicy(
+        enforcement="block",
+        dependencies=DependencyPolicy(allow=["github.com/contoso/**"], require=list(require)),
+        manifest=ManifestPolicy(required_fields=required_fields),
+    )
+    result = run_policy_checks(
+        root, policy, fail_fast=False, modules_root=modules_root, policy_source=_SOURCE
+    )
+    return next(c for c in result.checks if c.name == "dependency-allowlist")
+
+
+def _stderr(capsys, *checks: CheckResult) -> list[str]:
+    _render_ci_failures_to_stderr(CIAuditResult(checks=list(checks)))
+    return capsys.readouterr().err.splitlines()
+
+
+def _several(root: Path, deps: list[str], *extra: LockedDependency, children=None) -> Path:
+    locked = [
+        _locked("acme/evil-pkg"),
+        _locked("acme/other-pkg"),
+        _locked("contoso/parent"),
+        _locked("acme/hidden", parent="contoso/parent"),
+        *extra,
+    ]
+    return _project(root, deps, locked, {"contoso/parent": ["acme/hidden"], **(children or {})})
+
+
+def test_one_denied_dependency_names_it_and_the_policy_source(tmp_path: Path, capsys) -> None:
+    check = _allowlist(_project(tmp_path, ["acme/evil-pkg"], [_locked("acme/evil-pkg")]))
+
+    assert catalog()["dependency-not-allowed"].command == "apm uninstall {packages}"
+    assert _stderr(capsys, check)[2] == (
+        "    Run 'apm uninstall acme/evil-pkg' to remove the dependency outside the org "
+        "allow list, or ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert [r.to_json() for r in check.remediations] == [
+        {
+            "id": "dependency-not-allowed",
+            "command": "apm uninstall acme/evil-pkg",
+            "fixes": "remove the dependency outside the org allow list",
+        }
+    ]
+
+
+def test_several_denied_dependencies_name_each_entry_that_brings_them_in(
+    tmp_path: Path, capsys
+) -> None:
+    root = _several(tmp_path, ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"])
+
+    stderr = _stderr(capsys, _allowlist(root))
+
+    assert stderr[0] == "[x] dependency-allowlist: 3 dependency(ies) not in allow list"
+    assert stderr[4] == (
+        "    Run 'apm uninstall acme/evil-pkg acme/other-pkg contoso/parent' to remove the 3 "
+        "dependencies outside the org allow list, or ask your org admin to allow them "
+        "(policy source: org:contoso/.github)."
+    )
+
+
+@pytest.mark.parametrize(
+    ("deps", "extra", "children", "require"),
+    [
+        pytest.param(
+            ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"],
+            (),
+            {},
+            ("contoso/parent",),
+            id="removal-drops-a-required-package",
+        ),
+        pytest.param(
+            ["acme/evil-pkg", "acme/other-pkg", "contoso/parent", "contoso/sibling"],
+            (_locked("contoso/sibling"),),
+            {"contoso/sibling": ["acme/hidden"]},
+            (),
+            id="a-surviving-package-still-reaches-a-denied-one",
+        ),
+        pytest.param(
+            ["acme/evil-pkg", "acme/other-pkg", "contoso/parent", "acme/hidden"],
+            (),
+            {},
+            (),
+            id="a-declared-denied-package-the-lock-still-records-as-transitive",
+        ),
+    ],
+)
+def test_unproven_uninstall_falls_back_to_the_admin(
+    tmp_path: Path, capsys, deps, extra, children, require
+) -> None:
+    check = _allowlist(_several(tmp_path, deps, *extra, children=children), require=require)
+
+    assert _stderr(capsys, check)[4] == _ADMIN_ONLY
+    assert check.remediations == ()
+
+
+def test_sarif_carries_the_next_step_and_other_checks_are_unchanged(tmp_path: Path, capsys) -> None:
+    check = _allowlist(_project(tmp_path, ["acme/evil-pkg"], [_locked("acme/evil-pkg")]))
+    other = CheckResult(name="lockfile-exists", passed=False, message="m", details=["d"])
+    result = CIAuditResult(checks=[check, other])
+
+    sarif = result.to_sarif()["runs"][0]["results"]
+    stderr = _stderr(capsys, check, other)
+
+    assert [r["message"]["text"] for r in sarif] == [
+        f"github.com/acme/evil-pkg: not in allowed sources. {check.next_step}",
+        "d",
+    ]
+    assert stderr[3:6] == ["[x] lockfile-exists: m", "    - d", "[x] 2 of 2 check(s) failed"]
+
+
+def test_sarif_and_text_emit_the_next_step_once_per_check(tmp_path: Path, capsys) -> None:
+    root = _several(tmp_path, ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"])
+    check = _allowlist(root)
+
+    sarif = CIAuditResult(checks=[check]).to_sarif()["runs"][0]["results"]
+    texts = [r["message"]["text"] for r in sarif]
+    stderr = _stderr(capsys, check)
+
+    assert len(texts) == len(check.details) == 3
+    assert sum(check.next_step in text for text in texts) == 1
+    assert texts[-1].endswith(f". {check.next_step}")
+    assert sum(check.next_step in line for line in stderr) == 1
+
+
+def test_an_edited_deployed_file_uninstall_would_refuse_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [
+            LockedDependency(
+                repo_url="acme/evil-pkg",
+                depth=1,
+                deployed_files=[deployed],
+                deployed_file_hashes={deployed: "sha256:" + "0" * 64},
+            )
+        ],
+    )
+    (root / deployed).parent.mkdir(parents=True)
+    (root / deployed).write_text("# edited by the user\n", encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_removing_a_replaced_required_package_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    replace = [
+        {
+            "for": {"git": "https://github.com/contoso/original"},
+            "with": {"git": "https://github.com/contoso/fork", "ref": "v1.0.0"},
+        }
+    ]
+    root = _project(
+        tmp_path,
+        ["contoso/original"],
+        [_locked("contoso/original"), _locked("acme/hidden", parent="contoso/original")],
+        {"contoso/original": ["acme/hidden"]},
+        **{"$schema": _REPLACE_SCHEMA, "replace": replace},
+    )
+
+    check = _allowlist(root, require=("contoso/fork",))
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+
+
+def test_without_a_live_apm_modules_the_replay_tree_proves_nothing(tmp_path: Path, capsys) -> None:
+    root = _several(tmp_path, ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"])
+    replay = tmp_path.parent / f"{tmp_path.name}-replay"
+    (root / "apm_modules").rename(replay)
+
+    check = _allowlist(root, modules_root=replay)
+
+    assert _stderr(capsys, check)[4] == _ADMIN_ONLY
+    assert check.remediations == ()
+
+
+def test_a_survivor_shrink_that_retires_an_edited_skill_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    skills = [".agents/skills/alpha", ".agents/skills/beta"]
+    files = [f"{skill}/SKILL.md" for skill in skills]
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        skill_subset=["alpha", "beta"],
+        deployed_files=[*skills, *files],
+        deployed_file_hashes={path: "sha256:" + "0" * 64 for path in files},
+    )
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "skills": ["beta"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "skills": ["alpha"]}],
+        },
+    )
+    for path in files:
+        (root / path).parent.mkdir(parents=True)
+        (root / path).write_text("# edited by the user\n", encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_policy_uninstall_cannot_resolve_falls_back_to_the_admin(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+        policy={"fetch_failure_default": "block"},
+    )
+
+    def _outage(*_args, **_kwargs):
+        raise OSError("HTTP 503 fetching policy from contoso/.github")
+
+    # The network boundary: the policy repository is down for this run.
+    monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", _outage)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_the_advice_never_migrates_the_users_executable_consent(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    home = tmp_path / "apm-home"
+    home.mkdir()
+    legacy = home / "approvals.yml"
+    legacy.write_text("contoso/keep:\n  hook: true\n", encoding="utf-8")
+    config = home / "config.json"
+    monkeypatch.setenv("APM_HOME", str(home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(config))
+    project = tmp_path / "project"
+    project.mkdir()
+    root = _project(
+        project,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+    )
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'")
+    assert legacy.read_text(encoding="utf-8") == "contoso/keep:\n  hook: true\n"
+    assert not config.exists()
+
+
+def test_an_unmanaged_recorded_path_uninstall_would_refuse_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=["notes.txt"])],
+    )
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_symlinked_lockfile_uninstall_would_refuse_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    root = _project(tmp_path, ["acme/evil-pkg"], [_locked("acme/evil-pkg")])
+    real = tmp_path / "locks" / "apm.lock.yaml"
+    real.parent.mkdir()
+    (root / "apm.lock.yaml").rename(real)
+    (root / "apm.lock.yaml").symlink_to(real)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_checkout_outside_apm_modules_falls_back_to_the_admin(tmp_path: Path, capsys) -> None:
+    (tmp_path / "project").mkdir()
+    root = _project(tmp_path / "project", ["acme/evil-pkg"], [_locked("acme/evil-pkg")])
+    checkout = root / "apm_modules" / "acme" / "evil-pkg"
+    outside = tmp_path / "elsewhere"
+    checkout.rename(outside)
+    checkout.symlink_to(outside, target_is_directory=True)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_chain_deeper_than_the_recursion_limit_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    chain = [f"contoso/c{n}" for n in range(1200)]
+    locked = [_locked(chain[0])]
+    locked += [_locked(key, parent=parent) for parent, key in pairwise(chain)]
+    locked.append(_locked("acme/leaf", parent=chain[-1]))
+    root = _project(tmp_path, [chain[0]], locked)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_surviving_dev_dependency_that_reaches_the_denied_one_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    root = _several(
+        tmp_path,
+        ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"],
+        _locked("contoso/dev-tool"),
+        children={"contoso/dev-tool": ["acme/hidden"]},
+    )
+    manifest = yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))
+    manifest["devDependencies"] = {"apm": ["contoso/dev-tool"]}
+    (root / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[4] == _ADMIN_ONLY
+    assert check.remediations == ()
+
+
+def test_a_null_dev_dependencies_section_yields_advice_that_clears_the_failure(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+        devDependencies=None,
+    )
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'")
+
+    monkeypatch.chdir(root)
+    result = CliRunner().invoke(cli, ["uninstall", "acme/evil-pkg"])
+    clear_apm_yml_cache()
+
+    assert result.exit_code == 0, result.output
+    assert yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))["dependencies"] == {
+        "apm": ["contoso/keep"]
+    }
+    assert _allowlist(root).passed
+
+
+@pytest.mark.parametrize(
+    ("deps", "locked", "children"),
+    [
+        pytest.param(
+            ["acme/evil-pkg", "contoso/keep"],
+            [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+            {"contoso/keep": ["acme/evil-pkg"]},
+            id="a-surviving-package-rescues-the-denied-root",
+        ),
+        pytest.param(
+            ["contoso/parent", "contoso/keep"],
+            [
+                _locked("contoso/parent"),
+                _locked("contoso/keep"),
+                _locked("acme/hidden", parent="contoso/parent"),
+            ],
+            {"contoso/parent": ["acme/hidden"], "contoso/keep": ["contoso/parent"]},
+            id="a-surviving-package-rescues-the-allowed-parent-of-a-denied-descendant",
+        ),
+    ],
+)
+def test_a_rescued_removal_root_falls_back_to_the_admin(
+    tmp_path: Path, capsys, deps, locked, children
+) -> None:
+    check = _allowlist(_project(tmp_path, deps, locked, children))
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+@pytest.mark.parametrize(
+    ("dev_section", "advised"),
+    [
+        pytest.param({"apm": ["acme/evil-pkg"]}, False, id="uninstall-empties-required-dev"),
+        pytest.param(
+            {"apm": ["acme/evil-pkg"], "mcp": ["contoso/server"]},
+            True,
+            id="another-dev-key-keeps-it-non-empty",
+        ),
+    ],
+)
+def test_emptying_a_required_dev_dependencies_field_falls_back_to_the_admin(
+    tmp_path: Path, capsys, dev_section, advised
+) -> None:
+    root = _project(
+        tmp_path,
+        ["contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+        devDependencies=dev_section,
+    )
+
+    check = _allowlist(root, required_fields=("devDependencies",))
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'") is advised
+    assert bool(check.remediations) is advised
+
+
+def test_the_selector_follows_the_manifest_default_host(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """#5007: under default_host gitlab.com a bare acme/evil-pkg is not the GitHub entry."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    declared = "https://github.com/acme/evil-pkg"
+    root = _project(
+        tmp_path,
+        [declared],
+        [LockedDependency(repo_url="acme/evil-pkg", host="github.com", depth=1)],
+        default_host="gitlab.com",
+    )
+
+    check = _allowlist(root)
+
+    assert [r.to_json()["command"] for r in check.remediations] == [f"apm uninstall {declared}"]
+    monkeypatch.chdir(root)
+    removed = CliRunner().invoke(cli, ["uninstall", declared], catch_exceptions=False)
+    assert removed.exit_code == 0, removed.output
+    assert yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))["dependencies"] == {
+        "apm": []
+    }
+
+
+@pytest.mark.parametrize("linked", [True, False], ids=["final-symlink", "regular-file"])
+def test_a_final_symlink_uninstall_would_keep_withholds_the_advice_and_names_it(
+    tmp_path: Path, capsys, linked: bool
+) -> None:
+    """#5008: target cleanup refuses a final symlink, so uninstall is not suggested."""
+    import hashlib
+
+    deployed = ".github/instructions/evil.instructions.md"
+    content = b"---\napplyTo: '**'\n---\n# evil rules\n"
+    project = tmp_path / "proj"
+    project.mkdir()
+    target = project / deployed
+    target.parent.mkdir(parents=True)
+    if linked:
+        outside = tmp_path / "outside.md"
+        outside.write_bytes(content)
+        target.symlink_to(outside)
+    else:
+        target.write_bytes(content)
+    root = _project(
+        project,
+        ["acme/evil-pkg"],
+        [
+            LockedDependency(
+                repo_url="acme/evil-pkg",
+                depth=1,
+                deployed_files=[deployed],
+                deployed_file_hashes={deployed: "sha256:" + hashlib.sha256(content).hexdigest()},
+            )
+        ],
+    )
+    if not linked:
+        from tests.utils.deployment_evidence import seed_receipts
+
+        # The receipt install would have written: the regular file is provably APM's.
+        seed_receipts(root, [target], target="copilot", owner="acme/evil-pkg")
+
+    check = _allowlist(root)
+
+    line = _stderr(capsys, check)[2]
+    if linked:
+        assert check.remediations == ()
+        assert line.startswith("    Ask your org admin to allow it"), line
+        assert f"{deployed} is a symbolic link" in line, line
+    else:
+        assert [r.to_json()["command"] for r in check.remediations] == [
+            "apm uninstall acme/evil-pkg"
+        ], line
+
+
+def _symlinked_claim(root: Path, deployed: str, link_to: Path) -> None:
+    target = root / deployed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    link_to.parent.mkdir(parents=True, exist_ok=True)
+    link_to.write_text("# rules\n", encoding="utf-8")
+    target.symlink_to(link_to)
+
+
+def test_a_final_symlink_inside_the_project_also_withholds_the_advice(
+    tmp_path: Path, capsys
+) -> None:
+    """#5008: cleanup keeps an in-project link it holds no evidence for, so no uninstall."""
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+    )
+    _symlinked_claim(root, deployed, root / "docs" / "rules.md")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert f"{deployed} is a symbolic link" in _stderr(capsys, check)[2]
+
+
+def test_a_final_symlink_a_survivor_still_claims_keeps_the_advice(tmp_path: Path, capsys) -> None:
+    """#5008: a path a surviving dependency also claims is kept, not deleted."""
+    deployed = ".github/instructions/shared.instructions.md"
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [
+            LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed]),
+            LockedDependency(repo_url="contoso/keep", depth=1, deployed_files=[deployed]),
+        ],
+    )
+    _symlinked_claim(root, deployed, tmp_path / "outside.md")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg' to remove")
+
+
+def _uninstall_exit_code(root: Path, monkeypatch) -> int:
+    """Run the advised ``apm uninstall`` for real, so the advice is checked against it."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    monkeypatch.chdir(root)
+    return CliRunner().invoke(cli, ["uninstall", "acme/evil-pkg"]).exit_code
+
+
+@pytest.mark.parametrize(
+    ("deployed", "dangling", "exit_code"),
+    [
+        (".github/instructions/evil.instructions.md", True, 0),
+        (".github/hooks/evil.json", False, 1),
+    ],
+    ids=["dangling-in-project-link-keeps-advice", "hook-link-withholds-advice"],
+)
+def test_the_advice_follows_whether_uninstall_removes_a_final_symlink(
+    tmp_path: Path, capsys, monkeypatch, deployed: str, dangling: bool, exit_code: int
+) -> None:
+    """#5035: cleanup counts a dangling in-project link as gone, but keeps a live hook link."""
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+        targets=["copilot"],
+    )
+    if dangling:
+        (root / deployed).parent.mkdir(parents=True)
+        (root / deployed).symlink_to(root / "docs" / "missing.md")
+    else:
+        _symlinked_claim(root, deployed, tmp_path / "outside.json")
+
+    check = _allowlist(root)
+
+    advised = [r.to_json()["command"] for r in check.remediations]
+    assert advised == (["apm uninstall acme/evil-pkg"] if exit_code == 0 else [])
+    if exit_code:
+        assert f"{deployed} is a symbolic link" in _stderr(capsys, check)[2]
+    assert _uninstall_exit_code(root, monkeypatch) == exit_code
+
+
+def test_a_final_symlink_a_survivor_shrink_retires_withholds_the_advice_and_names_it(
+    tmp_path: Path, capsys
+) -> None:
+    """#5035: a link at a path a shrinking survivor selection retires is checked too."""
+    skills = [".agents/skills/alpha", ".agents/skills/beta"]
+    files = [f"{skill}/SKILL.md" for skill in skills]
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        skill_subset=["alpha", "beta"],
+        deployed_files=[*skills, *files],
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "skills": ["beta"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "skills": ["alpha"]}],
+        },
+    )
+    (root / skills[0]).mkdir(parents=True)
+    (root / files[0]).write_text("# alpha\n", encoding="utf-8")
+    _symlinked_claim(root, files[1], tmp_path / "outside.md")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert f"{files[1]} is a symbolic link" in _stderr(capsys, check)[2]
+
+
+def test_a_looping_final_symlink_falls_back_to_the_admin(tmp_path: Path, capsys) -> None:
+    """#5035: a link that points at itself cannot be proven handled; the audit still reports."""
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+    )
+    (root / deployed).parent.mkdir(parents=True)
+    (root / deployed).symlink_to(root / deployed)
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+
+
+def test_a_hook_link_a_survivor_target_shrink_retires_keeps_the_advice(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """#5035: the hook sync unlinks an unhashed hook link a shrinking survivor retires."""
+    deployed = ".github/hooks/bundle.json"
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        target_subset=["claude", "copilot"],
+        deployed_files=[deployed],
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "targets": ["copilot"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "targets": ["claude"]}],
+        },
+        targets=["copilot", "claude"],
+    )
+    _symlinked_claim(root, deployed, tmp_path / "outside.json")
+    for survivor in ("contoso/keep", "contoso/bundle"):
+        rules = root / "apm_modules" / survivor / ".apm/instructions/x.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text("---\napplyTo: '**'\n---\n# x\n", encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert [r.to_json()["command"] for r in check.remediations] == ["apm uninstall acme/evil-pkg"]
+    assert _uninstall_exit_code(root, monkeypatch) == 0
+    assert not (root / deployed).is_symlink()
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["live-link", "dangling-link"])
+def test_a_retired_hook_link_with_only_a_ledger_hash_withholds_the_advice(
+    tmp_path: Path, dangling: bool
+) -> None:
+    """#5035: the hook sync keeps a link whose canonical ledger row records a hash,
+    dangling or not: it never counts a hook link as already gone."""
+    deployed = ".github/hooks/bundle.json"
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        target_subset=["claude", "copilot"],
+        deployed_files=[deployed],
+        deployed_file_hashes={deployed: "sha256:" + "0" * 64},
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "targets": ["copilot"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "targets": ["claude"]}],
+        },
+        targets=["copilot", "claude"],
+    )
+    lock_path = root / "apm.lock.yaml"
+    data = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    assert any(row.get("content_hash") for row in data["deployments"]), data
+    for row in data["dependencies"]:
+        row.pop("deployed_file_hashes", None)
+    lock_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    if dangling:
+        (root / deployed).parent.mkdir(parents=True)
+        (root / deployed).symlink_to(root / "docs" / "missing.json")
+    else:
+        _symlinked_claim(root, deployed, tmp_path / "outside.json")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()

@@ -198,6 +198,14 @@ class HermesClientAdapter(CopilotClientAdapter):
         untouched (returns ``False``) rather than overwritten.
         """
         path = self._config_path()
+        from ...integration.targets import resolve_user_root
+        from .base import _warn_symlinked_mcp_config
+
+        # Check the configured path: resolving it first would erase the link.
+        user_root = resolve_user_root("hermes")
+        if self._is_linked_config(user_root / "config.yaml", user_root=user_root):
+            _warn_symlinked_mcp_config(path)
+            return False
         try:
             data = self._load_document()
         except _MalformedHermesConfig:
@@ -213,15 +221,16 @@ class HermesClientAdapter(CopilotClientAdapter):
             for name, cfg in config_updates.items():
                 servers[name] = self._to_hermes_format(cfg, enabled=enabled)
             data[self.mcp_servers_key] = servers
-            from .base import journal_config_write
+            from .config_journal import journal_config_write, journal_config_written
 
-            journal_config_write(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, yaml_to_str(data), new_file_mode=_CONFIG_FILE_MODE)
+            text = yaml_to_str(data)
+            journal_config_write(path, text, lf=True)
+            atomic_write_text(path, text, new_file_mode=_CONFIG_FILE_MODE)
             # Tighten perms even when the file pre-existed with a looser mode
             # (atomic_write_text only applies new_file_mode on first create).
             with contextlib.suppress(OSError, NotImplementedError):
                 os.chmod(path, _CONFIG_FILE_MODE)
+            journal_config_written(path)
             return True
         except OSError:
             return False

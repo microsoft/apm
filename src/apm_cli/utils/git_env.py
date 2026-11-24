@@ -27,11 +27,12 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.utils.path_security import filesystem_containment
 from apm_cli.utils.subprocess_env import external_process_env
 
 # Module-level cached git executable path (successful resolutions only).
@@ -294,6 +295,11 @@ def _executable_exclusion_root() -> Path:
     return cwd
 
 
+def _inside_project(path: Path, root: Path) -> bool:
+    """Exclusion policy: a path whose containment can't be verified counts as inside."""
+    return filesystem_containment(path, root) is not False
+
+
 def _resolve_trusted_executable(name: str) -> str:
     """Resolve an executable from PATH directories outside the project."""
     exclusion_root = _executable_exclusion_root()
@@ -302,7 +308,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         directory = Path(entry).expanduser().resolve()
         try:
-            if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+            if _inside_project(directory, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -323,12 +329,130 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         resolved = Path(candidate).resolve()
         try:
-            if resolved == exclusion_root or resolved.is_relative_to(exclusion_root):
+            if _inside_project(resolved, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
         return str(resolved)
     raise FileNotFoundError(f"{name} executable not found on trusted PATH directories")
+
+
+_NO_CWD_SEARCH = "NoDefaultCurrentDirectoryInExePath"
+_UNSET = object()
+_user_no_cwd_search: object = _UNSET
+
+
+def disable_implicit_cwd_search() -> None:
+    """On Windows, stop bare program names resolving from the working directory.
+
+    Called once at CLI start, before any subprocess. The user's own value is
+    remembered so :func:`user_script_environment` can hand it back to scripts
+    the user wrote.
+    """
+    global _user_no_cwd_search
+    if sys.platform != "win32":
+        return
+    if _user_no_cwd_search is _UNSET:
+        _user_no_cwd_search = os.environ.get(_NO_CWD_SEARCH)
+    os.environ[_NO_CWD_SEARCH] = "1"
+
+
+def user_script_environment(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* for a user-authored script, with the user's own cwd-search setting.
+
+    APM's helper launches keep the setting :func:`disable_implicit_cwd_search`
+    applied; scripts the user wrote (``apm run``, lifecycle and package
+    scripts) see the value the user started with, so a project-local tool they
+    call by name still resolves as before.
+    """
+    if _user_no_cwd_search is _UNSET:
+        return env
+    restored = {key: value for key, value in env.items() if key.upper() != _NO_CWD_SEARCH.upper()}
+    if isinstance(_user_no_cwd_search, str):
+        restored[_NO_CWD_SEARCH] = _user_no_cwd_search
+    return restored
+
+
+def _links_into(directory: Path, root: Path) -> bool:
+    """Whether *directory* may hold a symlink whose resolved target lies inside *root*.
+
+    A directory that cannot be listed may still be searched by the shell, so it
+    counts as linking in: unchecked links never serve an APM-authored script.
+    """
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return True
+    for entry in entries:
+        if not entry.is_symlink():
+            continue
+        try:
+            target = entry.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if _inside_project(target, root):
+            return True
+    return False
+
+
+def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* with PATH limited to directories outside the project.
+
+    For scripts APM itself authors and launches (runtime setup, self-update):
+    the programs they call by name resolve the way :func:`trusted_executable`
+    resolves APM's own helpers. ``.``, empty, relative and unresolvable entries
+    and every entry inside the project are dropped, as is any directory holding
+    a link whose target lies inside the project (the target check
+    :func:`trusted_executable` applies). Each kept entry is the resolved
+    directory that passed the check. User-authored scripts never use this.
+    Raises ``FileNotFoundError`` when no entry remains, rather than launching
+    with an empty PATH.
+    """
+    exclusion_root = _executable_exclusion_root()
+    result = dict(env)
+    # A missing PATH counts as empty: the child shell's built-in default search
+    # path has not passed the project check, so the refusal below applies.
+    keys = [key for key in env if key.upper() == "PATH"] or ["PATH"]
+    for key in keys:
+        kept = []
+        for entry in env.get(key, "").split(os.pathsep):
+            expanded = Path(entry).expanduser() if entry else None
+            if expanded is None or not expanded.is_absolute():
+                continue
+            try:
+                directory = expanded.resolve(strict=True)
+                if _inside_project(directory, exclusion_root):
+                    continue
+                if _links_into(directory, exclusion_root):
+                    continue
+            except (OSError, RuntimeError, ValueError):
+                continue
+            # Hand on the directory that passed the check: a ``~`` or a link in
+            # the written spelling would be read again when the shell searches.
+            kept.append(str(directory))
+        if not kept:
+            # An empty PATH makes POSIX shells search the working directory.
+            raise FileNotFoundError(
+                "No PATH directory outside the project remains for APM's setup scripts. "
+                "Add the directory holding your installed tools to PATH and retry."
+            )
+        result[key] = os.pathsep.join(kept)
+    return result
+
+
+def trusted_executable(name: str) -> str | None:
+    """Return the absolute path of helper *name*, or ``None`` if it is not installed.
+
+    The single owner for locating a helper program APM launches or probes
+    (git, az, npm, codex, PowerShell, ...). It searches only PATH directories
+    outside the current project, never the working directory, so a program
+    shipped inside a checkout cannot stand in for the real tool. Launch the
+    returned path; never pass a bare helper name to ``subprocess``.
+    """
+    try:
+        return _resolve_trusted_executable(name)
+    except FileNotFoundError:
+        return None
 
 
 def get_git_executable() -> str:
@@ -618,16 +742,16 @@ class GitConfigEntry:
 
     scope: str
     key: str
-    value: str
+    value: str = field(repr=False)  # may carry an extraheader credential
 
 
 @dataclass(frozen=True)
 class _GitConfigSnapshot:
     """Configuration facts validated for one Git child."""
 
-    entries: tuple[GitConfigEntry, ...]
-    rewrites: tuple[tuple[str, str], ...]
-    http_headers: tuple[GitConfigEntry, ...]
+    entries: tuple[GitConfigEntry, ...] = field(repr=False)
+    rewrites: tuple[tuple[str, str], ...] = field(repr=False)
+    http_headers: tuple[GitConfigEntry, ...] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -647,7 +771,26 @@ def _read_effective_git_config(
     git_dir: Path | None = None,
     worktree: Path | None = None,
 ) -> _GitConfigSnapshot:
-    """Return the flattened config visible to one Git child."""
+    """Return the flattened config visible to one Git child, probed once per invocation."""
+    from apm_cli.utils import git_config_memo
+
+    return git_config_memo.read(
+        lambda: _probe_effective_git_config(env, git_dir=git_dir, worktree=worktree),
+        env,
+        git=get_git_executable(),
+        git_dir=git_dir,
+        worktree=worktree,
+        config_paths=git_config_memo.git_config_paths,
+    )
+
+
+def _probe_effective_git_config(
+    env: dict[str, str],
+    *,
+    git_dir: Path | None = None,
+    worktree: Path | None = None,
+) -> _GitConfigSnapshot:
+    """Spawn ``git config --list`` for the flattened config visible to one Git child."""
     if git_dir is not None and worktree is not None:
         raise ValueError("git_dir and worktree are mutually exclusive")
     command = [get_git_executable()]
@@ -1098,6 +1241,20 @@ def validate_git_url_rewrite_safety(
         worktree=worktree,
     )
     return effective_url
+
+
+def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
+    """Return the URL git contacts for *remote_url* after ``insteadOf`` rewrites.
+
+    Identification only (for example keying a cached verdict to the server
+    contacted); it never authorizes a contact. Use
+    :func:`validate_git_url_rewrite_safety` before contacting a remote.
+    """
+    child = git_subprocess_env(env)
+    # Merge the parent process config exactly as git_network_env does.
+    _append_parent_git_config(child)
+    snapshot = _read_effective_git_config(child)
+    return resolve_git_url_rewrite(remote_url, snapshot.rewrites) or remote_url
 
 
 def _append_git_url_rewrites(
@@ -1798,22 +1955,96 @@ def git_resolve_commit(
     env: dict[str, object] | None = None,
     bare: bool = False,
 ) -> str:
-    """Resolve a ref in a worktree or an explicitly selected bare repository."""
+    """Resolve a ref in a worktree or an explicitly selected bare repository.
+
+    ``HEAD`` and a full ``refs/`` name resolve as written; any other name
+    resolves exactly (see :func:`exact_named_commit`), never by a rev-parse
+    name expansion into another namespace.
+
+    Raises:
+        subprocess.CalledProcessError: Nothing in the repository has that name.
+    """
+    git = (get_git_executable(), "--git-dir" if bare else "-C", str(worktree))
+    child_env = git_subprocess_env(env)
+    if ref == "HEAD":
+        commit = _peeled_commit(git, child_env, ref)
+    elif ref.startswith("refs/") and not ref.startswith(("refs/heads/", "refs/tags/")):
+        commit = _listed_commit(git, (ref,), child_env)
+    else:
+        commit = exact_named_commit(git, ref, child_env)
+    if commit is None:
+        raise subprocess.CalledProcessError(128, [*git, "rev-parse", "--verify", ref])
+    return commit
+
+
+def git_exact_ref_commit(
+    worktree: Path,
+    refname: str,
+    *,
+    env: dict[str, object] | None = None,
+) -> str | None:
+    """The commit the full *refname* names, or ``None``; never a rev-parse name expansion."""
+    git = (get_git_executable(), "-C", str(worktree))
+    return _listed_commit(git, (refname,), git_subprocess_env(env))
+
+
+_HEX_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _git_out(git: Sequence[str], env: dict[str, str], *args: str) -> str:
     result = run_git_text(
-        [
-            get_git_executable(),
-            "--git-dir" if bare else "-C",
-            str(worktree),
-            "rev-parse",
-            "--verify",
-            f"{ref}^{{commit}}",
-        ],
-        check=True,
+        [*git, *args],
         capture_output=True,
         timeout=30,
-        env=git_subprocess_env(env),
+        env=env,
+        stdin=subprocess.DEVNULL,
     )
-    return result.stdout.strip()
+    return (result.stdout or "").strip() if result.returncode == 0 else ""
+
+
+def _peeled_commit(git: Sequence[str], env: dict[str, str], oid: str) -> str | None:
+    sha = _git_out(git, env, "rev-parse", "--verify", "--quiet", f"{oid}^{{commit}}").lower()
+    return sha if _FULL_SHA_RE.match(sha) else None
+
+
+def _listed_commit(git: Sequence[str], names: Sequence[str], env: dict[str, str]) -> str | None:
+    """The commit of the first of *names* that exists exactly as a ref."""
+    listing = _git_out(git, env, "for-each-ref", "--format=%(objectname) %(refname)", *names)
+    found = {}
+    for line in listing.splitlines():
+        oid, _, refname = line.partition(" ")
+        found[refname] = oid
+    for name in names:
+        if name in found:
+            return _peeled_commit(git, env, found[name])
+    return None
+
+
+def exact_named_commit(git: Sequence[str], ref: str, env: dict[str, str]) -> str | None:
+    """Resolve *ref* exactly in the repository *git* (a command prefix) addresses.
+
+    A full commit resolves as itself. Any other name resolves as
+    ``refs/heads/<ref>`` then ``refs/tags/<ref>`` (or a fully spelled
+    ``refs/heads/`` or ``refs/tags/`` name), as Git prefers a ref; only when
+    no such ref exists does a hex name expand as a unique commit
+    abbreviation. Never a ``rev-parse`` name expansion, so a ref in another
+    namespace cannot answer for *ref*.
+    """
+    if not ref:
+        return None
+    if _HEX_RE.match(ref) and len(ref) == 40:
+        return _peeled_commit(git, env, ref.lower())
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        return _listed_commit(git, (ref,), env)
+    if ref.startswith("refs/"):
+        return None
+    commit = _listed_commit(git, (f"refs/heads/{ref}", f"refs/tags/{ref}"), env)
+    if commit is not None or not _HEX_RE.match(ref):
+        return commit
+    matches = _git_out(git, env, "rev-parse", f"--disambiguate={ref.lower()}").split()
+    commits = [oid for oid in matches if _git_out(git, env, "cat-file", "-t", oid) == "commit"]
+    return commits[0].lower() if len(commits) == 1 else None
 
 
 def git_current_branch(
@@ -1838,6 +2069,9 @@ def reset_git_cache() -> None:
     _git_executable = None
     _gh_executable = None
     _real_git_tls_config_cache = None
+    from apm_cli.utils import git_config_memo
+
+    git_config_memo.forget()
 
 
 def git_long_paths_args() -> list[str]:

@@ -27,11 +27,17 @@ from .exec_gate import plugin_bin_deployable, resolve_bin_skip
 from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
-from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
+from .local_bundle_paths import bundle_rendering_extensions as _bundle_renderings
+from .local_bundle_paths import bundle_rule_format_id as _bundle_rule_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
+from .local_bundle_paths import deployable_bundle_pack_files as _deployable_pack_files
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
+from .local_bundle_paths import superseded_bundle_renderings as _superseded_renderings
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
+from .local_bundle_renderings import normalized_bundle_text as _normalized_bundle_text
+from .local_bundle_renderings import render_bundle_rule as _render_bundle_rule
+from .local_bundle_renderings import warn_superseded_renderings as _warn_superseded
 from .project_package import build_project_local_package_info
 from .target_filter import announced_reconcile
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
@@ -395,6 +401,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+    from apm_cli.install.deployment_plan import keep_loose_for_parked_native
+
+    keep_loose_for_parked_native(
+        deployment_plan, ctx, package_name, diagnostics=diagnostics, logger=logger
+    )
+    # Drift replay asks the same plan which locked loose values it keeps (#5036).
+    result["deployment_plan"] = deployment_plan
     if native_claude_plugin is not None:
         result["native_plugin"] = True
         result["native_claude_plugin"] = True
@@ -613,6 +626,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
+    getattr(integrators.skill, "serve_natively", lambda _harnesses: None)(
+        frozenset(native_target_names)
+    )
     with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
         skill_result = integrators.skill.integrate_package_skill(
             package_info,
@@ -842,9 +858,8 @@ def integrate_local_bundle(
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
     import hashlib
-    import shutil
 
-    from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+    from apm_cli.integration import write_seam
     from apm_cli.utils.content_hash import compute_file_hash
 
     from ..core.scope import InstallScope
@@ -855,43 +870,7 @@ def integrate_local_bundle(
     )
 
     bundle_dir: Path = bundle_info.source_dir
-    bundle_metadata_files = {
-        "plugin.json",
-        ".mcp.json",
-        "mcp.json",
-        ".lsp.json",
-        "lsp.json",
-        "com.microsoft.apm/mcp.json",
-        "com.microsoft.apm/lsp.json",
-    }
-    pack_files = _bundle_pack_files(bundle_info)
-
-    if not pack_files:
-        # Fallback: walk bundle and hash everything except apm.lock.yaml
-        # and plugin.json.  Prevents zero-deploy when an older bundle
-        # without bundle_files lands.
-        for fp in bundle_dir.rglob("*"):
-            if not fp.is_file() or fp.is_symlink():
-                continue
-            rel = fp.relative_to(bundle_dir).as_posix()
-            # Issue #1207 D2.a: case-insensitive ``plugin.json`` and
-            # ``.mcp.json`` skip -- bundle metadata must never deploy to
-            # consumer projects.  Match the deploy-loop semantics so
-            # case-folding filesystems do not let a renamed file slip
-            # into pack_files unnecessarily.
-            if rel.lower() == "apm.lock.yaml" or rel.lower() in bundle_metadata_files:
-                continue
-            pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
-
-    text_bundle_suffixes = {".json", ".md", ".toml", ".txt", ".yaml", ".yml"}
-
-    def _normalized_bundle_text(path: Path) -> str | None:
-        if path.suffix.lower() not in text_bundle_suffixes:
-            return None
-        try:
-            return normalize_crlf_to_lf(path.read_bytes().decode("utf-8"))
-        except UnicodeDecodeError:
-            return None
+    pack_files = _deployable_pack_files(bundle_info)
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
@@ -901,20 +880,8 @@ def integrate_local_bundle(
     staged_fallback_hashes: dict[str, str] = {}
     skipped = 0
 
-    # py-arch-2: Filter bundle-metadata files (plugin.json, .mcp.json) out of
-    # pack_files BEFORE the per-target loop.  These are never deployable in
-    # any target, so iterating per-target inflated the skip counter
-    # (e.g. one plugin.json on a 2-target install bumped skipped by 2).
-    # The case-insensitive match here mirrors the fallback walk above and
-    # the previously-inline guards in the deploy loop.
-    _filtered_pack_files: dict[str, str] = {}
-    for _rel, _hash in pack_files.items():
-        if _rel.lower() in bundle_metadata_files:
-            continue
-        _filtered_pack_files[_rel] = _hash
-    pack_files = _filtered_pack_files
-
     slug = alias or bundle_info.package_id
+    _renderings = _bundle_renderings(bundle_info)  # #3686: rendering provenance
     _known_deploy_prefixes = _known_bundle_prefixes()
 
     # Canvas extensions are executable: gated and retired like hooks and MCP.
@@ -976,7 +943,18 @@ def integrate_local_bundle(
             if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
                 _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
 
-        for rel, expected_hash in sorted(pack_files.items()):
+        # #3686: an older bundle may hold several renderings of one primitive.
+        _superseded = _superseded_renderings(
+            list(pack_files),
+            _allowed_deploy_prefixes,
+            _known_deploy_prefixes,
+            target=target,
+            renderings=_renderings,
+        )
+        _warn_superseded(target.name, _superseded, diagnostics=diagnostics, logger=logger)
+        skipped += len(_superseded)
+        for rel in sorted(pack_files.keys() - _superseded.keys()):
+            expected_hash = pack_files[rel]
             # CR1: bundle_files keys come from untrusted lockfile YAML
             # inside the bundle.  Reject traversal sequences before
             # constructing any filesystem path, then assert the resolved
@@ -1004,6 +982,8 @@ def integrate_local_bundle(
                 target=target,
                 hooks_approved=_hooks_approved_bundle,
                 canvas_approved=_canvas_ok,
+                rendering_extension=_renderings.get(_rel_norm),
+                source=src,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -1013,6 +993,7 @@ def integrate_local_bundle(
                     target=target,
                     hooks_approved=_hooks_approved_bundle,
                     canvas_approved=_canvas_ok,
+                    source=src,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))
@@ -1104,7 +1085,20 @@ def integrate_local_bundle(
                 )
                 continue
 
-            normalized_text = _normalized_bundle_text(src)
+            normalized_text, _unrenderable = _render_bundle_rule(
+                _normalized_bundle_text(src),
+                _bundle_rule_format(
+                    _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+                ),
+                record=record,
+                force=force,
+                package_name=str(slug),
+                diagnostics=diagnostics,
+                logger=logger,
+            )
+            if _unrenderable:
+                skipped += 1
+                continue
             if normalized_text is None:
                 desired_hash = expected_hash
             else:
@@ -1130,11 +1124,12 @@ def integrate_local_bundle(
                         logger.warning(msg)
                     continue
             if not dry_run:
-                dest.parent.mkdir(parents=True, exist_ok=True)
+                # Through the write seam: the install journals each write (#5046).
+                write_seam.mkdir(dest.parent, parents=True, exist_ok=True)
                 if normalized_text is None:
-                    shutil.copy2(src, dest, follow_symlinks=False)
+                    write_seam.copy2(src, dest)
                 else:
-                    write_text_lf(dest, normalized_text)
+                    write_seam.write_text_lf(dest, normalized_text)
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
@@ -1152,7 +1147,10 @@ def integrate_local_bundle(
     if _canvas_ok and not dry_run:
         from .local_bundle_canvas import record_bundle_canvas
 
-        record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)
+        user_scope = scope is InstallScope.USER
+        record_bundle_canvas(
+            project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope
+        )
 
     from .local_bundle_hooks import integrate_local_bundle_hooks
 

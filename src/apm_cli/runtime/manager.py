@@ -16,10 +16,20 @@ from colorama import Fore, Style
 from ..core.remediation import LLM_TLS_BOOTSTRAP_MISSING
 from ..core.tls_trust import build_child_tls_env, ensure_child_tls_bootstrap
 from ..core.token_manager import setup_runtime_environment
+from ..utils import git_env
 from ..utils.subprocess_env import external_process_env
 from .registry import get_runtime_descriptor, runtime_descriptors
 
 logger = logging.getLogger(__name__)
+
+
+def _required_helper(*names: str) -> str:
+    """Return the first of *names* installed outside the project, or raise."""
+    for name in names:
+        path = git_env.trusted_executable(name)
+        if path is not None:
+            return path
+    raise FileNotFoundError(f"{names[0]} executable not found on PATH")
 
 
 class RuntimeManager:
@@ -153,7 +163,7 @@ class RuntimeManager:
             # Execute script with environment that includes npm authentication
             try:
                 if self._is_windows:
-                    ps_cmd = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+                    ps_cmd = _required_helper("pwsh", "powershell")
                     cmd = [  # noqa: RUF005
                         ps_cmd,
                         "-NoProfile",
@@ -163,7 +173,7 @@ class RuntimeManager:
                         str(main_script),
                     ] + script_args
                 else:
-                    cmd = ["bash", str(main_script)] + script_args  # noqa: RUF005
+                    cmd = [_required_helper("bash"), str(main_script)] + script_args  # noqa: RUF005
 
                 # Prepare environment with GitHub tokens for all authentication needs
                 # Restore the caller's loader paths so a frozen binary's bundled
@@ -181,6 +191,8 @@ class RuntimeManager:
                 # Wire OS-trust child shim so the setup subprocess (and any
                 # Python runtime it spawns) verifies HTTPS against the OS store.
                 env = build_child_tls_env(env)
+                # APM authored this script: what it calls resolves outside the project.
+                env = git_env.trusted_path_environment(env)
 
                 result = subprocess.run(
                     cmd,
@@ -302,14 +314,8 @@ class RuntimeManager:
 
             # Check different installation paths based on runtime type
             # For all runtimes, check APM runtime directory first, then system PATH
-            binary_path = self.runtime_dir / binary_name
-            if binary_path.exists():
-                installed = True
-                path = str(binary_path)
-            else:
-                # Fallback to system PATH
-                installed = shutil.which(binary_name) is not None
-                path = shutil.which(binary_name) if installed else None
+            path = self._managed_binary(binary_name) or git_env.trusted_executable(binary_name)
+            installed = path is not None
 
             runtime_status = {
                 "description": info["description"],
@@ -320,7 +326,7 @@ class RuntimeManager:
             # Try to get version if installed
             if runtime_status["installed"]:
                 try:
-                    version_cmd = [binary_name, "--version"]
+                    version_cmd = [path, "--version"]
                     result = subprocess.run(
                         version_cmd,
                         capture_output=True,
@@ -346,12 +352,24 @@ class RuntimeManager:
         binary_name = self.supported_runtimes[runtime_name]["binary"]
 
         # For all runtimes, check APM runtime directory first, then system PATH
-        apm_binary = self.runtime_dir / binary_name
-        if apm_binary.exists() and apm_binary.is_file():
+        if self._managed_binary(binary_name) is not None:
             return True
 
         # Check in system PATH as fallback
-        return shutil.which(binary_name) is not None
+        return git_env.trusted_executable(binary_name) is not None
+
+    def _managed_binary(self, binary_name: str) -> str | None:
+        """Return the APM-managed *binary_name* only while it stays inside the runtime dir."""
+        from ..utils.path_security import PathTraversalError, ensure_path_within
+
+        candidate = self.runtime_dir / binary_name
+        if not candidate.is_file():
+            return None
+        try:
+            ensure_path_within(candidate, self.runtime_dir)
+        except PathTraversalError:
+            return None
+        return str(candidate)
 
     def remove_runtime(self, runtime_name: str) -> bool:
         """Remove an installed runtime."""
@@ -363,7 +381,7 @@ class RuntimeManager:
         if descriptor.npm_package:
             try:
                 result = subprocess.run(
-                    ["npm", "uninstall", "-g", descriptor.npm_package],
+                    [_required_helper("npm"), "uninstall", "-g", descriptor.npm_package],
                     capture_output=True,
                     text=True,
                     encoding="utf-8",

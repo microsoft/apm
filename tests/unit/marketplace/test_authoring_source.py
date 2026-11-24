@@ -52,7 +52,7 @@ def test_invalid_declaration_keeps_existing_registration(tmp_path, monkeypatch, 
     registry.add_marketplace(original)
     path = tmp_path / "apm.yml"
     path.write_text(content, encoding="utf-8")
-    result = CliRunner().invoke(marketplace, ["add", str(path), "--name", "preview"])
+    result = CliRunner().invoke(marketplace, ["add", str(path), "--name", "preview", "--yes"])
     assert result.exit_code == 1
     assert "marketplace declaration" in result.output
     assert registry.get_marketplace_by_name("preview") == original
@@ -190,7 +190,10 @@ def test_missing_authoring_file_reports_missing_path(tmp_path, monkeypatch):
     _isolated_registry(tmp_path, monkeypatch)
     path = tmp_path / "apm.yml"
     write_catalog(path)
-    assert CliRunner().invoke(marketplace, ["add", str(path), "--name", "preview"]).exit_code == 0
+    assert (
+        CliRunner().invoke(marketplace, ["add", str(path), "--name", "preview", "--yes"]).exit_code
+        == 0
+    )
     path.unlink()
     result = CliRunner().invoke(marketplace, ["browse", "preview", "--offline"])
     assert result.exit_code == 1

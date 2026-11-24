@@ -16,22 +16,28 @@ keep its bytes (I1-X2).
 
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
 
+from tests.lifecycle import driver
 from tests.lifecycle.scenarios._kit import (
-    PROJECT_HOME_ALLOWED,
     Known,
     Scenario,
     assert_changes,
     credits,
     known_defect,
 )
-from tests.lifecycle.world import use_policy, use_registry
+from tests.lifecycle.scenarios._sources import (
+    MARKETPLACES,
+    SOURCES,
+    from_source,
+    source_fields,
+)
+from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.packages import INERT_COMMAND
 from tests.lifecycle.world.services import REGISTRY_SERVER
+from tests.utils.artifact_snapshot import ArtifactSnapshotSet, assert_snapshot_set_unchanged
 
 pytestmark = [
     pytest.mark.e2e,
@@ -131,13 +137,25 @@ def test_no_policy_installs_a_denied_dependency_and_says_so(lifecycle_world) -> 
 # -- the user's bytes under a denied dependency or --no-policy ------------------------
 
 _DEPLOYED = ("clean", "edited", "present-provenance-unknown", "unowned")
+# The lockfile each deployed state leaves: a converged install, or none at all.
+_LOCK_OF = {
+    "clean": "consistent",
+    "edited": "consistent",
+    "present-provenance-unknown": "absent",
+    "unowned": "absent",
+}
+
+
+def _kept_credit(deployed: str) -> list[dict[str, str]]:
+    return [_pair(DEPLOYED=deployed, GATE=_DD), _pair(LOCK=_LOCK_OF[deployed], GATE=_DD)]
 
 
 @pytest.mark.parametrize("deployed", _DEPLOYED)
 def test_a_denied_dependency_keeps_the_deployed_skill(lifecycle_world, deployed) -> None:
     scenario = _skill(lifecycle_world, deployed)
     line = "install p-skill" if deployed == "unowned" else "install"
-    step = scenario.run(line, credit=[_pair(DEPLOYED=deployed, GATE=_DD)], keep=_KEEP, refusal=True)
+    assert scenario.lock_path.exists() == (_LOCK_OF[deployed] == "consistent")
+    step = scenario.run(line, credit=_kept_credit(deployed), keep=_KEEP, refusal=True)
     assert "Nothing was changed" in " ".join(step.output.split()), step.output
     scenario.finish()
 
@@ -202,76 +220,28 @@ def test_a_target_change_with_no_policy_installs_and_says_so(lifecycle_world, ch
 
 # -- each package source ---------------------------------------------------------
 
-_SOURCES = {
-    "git": ("p-skill", "p-skill:git"),
-    "marketplace-git": ("p-skill", "p-skill:marketplace"),
-    "marketplace-local": ("p-skill", "p-skill@lifecycle-local"),
-    "marketplace-file": ("p-skill", "p-skill@lifecycle-file"),
-    "pkg-registry": ("p-skill", "p-skill:registry"),
-    "native-plugin": ("p-native-claude", "p-native-claude"),
-}
-_MARKETPLACES = ("marketplace-git", "marketplace-local", "marketplace-file")
-# A marketplace install may refresh the catalog cache under HOME.
-_MARKET_HOME = {"home": (*PROJECT_HOME_ALLOWED, ".apm/cache/marketplace")}
 
-
-def _local_catalog(world, src: str) -> str:
-    """A marketplace on disk: a catalog directory, or one ``marketplace.json`` file."""
-    name = "lifecycle-local" if src == "marketplace-local" else "lifecycle-file"
-    plugin = {
-        "name": "p-skill",
-        "description": "Lifecycle world package p-skill",
-        "source": {"source": "github", "repo": "lifecycle/p-skill", "ref": "v1.0.0"},
-    }
-    document = {"name": name, "owner": {"name": "APM Lifecycle"}, "plugins": [plugin]}
-    root = world.root / name
-    catalog = root / ".claude-plugin" / "marketplace.json"
-    catalog.parent.mkdir(parents=True)
-    catalog.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
-    return str(root if src == "marketplace-local" else catalog)
-
-
-def _from_source(world, src: str) -> tuple[Scenario, str]:
-    """(scenario, package name) with *src* reachable and nothing installed yet."""
-    use_policy(world, "allow")
-    if src == "pkg-registry":
-        use_registry(world)
-    name, spec = _SOURCES[src]
-    spec = world.packages[spec].spec if spec in world.packages else spec
-    targets = ("claude",) if src == "native-plugin" else ("copilot",)
-    scenario = Scenario(world, {name: spec}, policy="allow", targets=targets)
-    if src in _MARKETPLACES:
-        catalog = world.services.marketplace_url if src == "marketplace-git" else None
-        catalog = catalog or _local_catalog(world, src)
-        scenario.run(f"marketplace add {catalog}", forbidden={"project": ("*",)}, allowed={})
-    return scenario, name
-
-
-def _fields(src: str) -> dict[str, object]:
-    return {"allowed": _MARKET_HOME} if src in _MARKETPLACES else {}
-
-
-@pytest.mark.parametrize("src", sorted(_SOURCES))
+@pytest.mark.parametrize("src", sorted(SOURCES))
 def test_a_denied_package_from_each_source_is_refused(lifecycle_world, src) -> None:
-    scenario, name = _from_source(lifecycle_world, src)
+    scenario, name = from_source(lifecycle_world, src)
     variant = "deny-native" if src == "native-plugin" else _DENY
-    if src in _MARKETPLACES:
+    if src in MARKETPLACES:
         # Resolve once while allowed, so the refused install finds the catalog current.
-        scenario.run(f"install --dry-run {name}", **_fields(src))
+        scenario.run(f"install --dry-run {name}", **source_fields(src))
     _deny(scenario, name, variant=variant)
     step = scenario.run(
         f"install {name}",
         credit=[_pair(SRC=src, GATE=_DD)],
         refusal=True,
-        **_fields(src),
+        **source_fields(src),
     )
     assert "Blocked by org policy" in " ".join(step.output.split()), step.output
     scenario.finish()
 
 
-@pytest.mark.parametrize("src", sorted(_SOURCES))
+@pytest.mark.parametrize("src", sorted(SOURCES))
 def test_no_policy_installs_from_each_source_and_says_so(lifecycle_world, src) -> None:
-    scenario, name = _from_source(lifecycle_world, src)
+    scenario, name = from_source(lifecycle_world, src)
     variant = "deny-native" if src == "native-plugin" else _DENY
     use_policy(lifecycle_world, variant)
     scenario.source_moved()
@@ -279,7 +249,7 @@ def test_no_policy_installs_from_each_source_and_says_so(lifecycle_world, src) -
         f"install --no-policy {name}",
         credit=[_pair(SRC=src, NOPOLICY="on")],
         says=[_NO_POLICY_SAYS],
-        **_fields(src),
+        **source_fields(src),
     )
     assert step.result.returncode == 0, step.output
     scenario.finish()
@@ -296,7 +266,7 @@ def _offline(world) -> None:
 
 
 def test_a_denied_git_package_is_refused_online(lifecycle_world) -> None:
-    scenario, name = _from_source(lifecycle_world, "git")
+    scenario, name = from_source(lifecycle_world, "git")
     _deny(scenario, name)
     lifecycle_world.services.reset()
     step = scenario.run(
@@ -363,6 +333,36 @@ def test_no_policy_installs_a_local_bundle(lifecycle_world) -> None:
         says=[_NO_POLICY_SAYS],
     )
     assert step.result.returncode == 0, step.output
+    scenario.finish()
+
+
+def test_a_denied_local_bundle_is_refused_before_any_write(lifecycle_world) -> None:
+    """A local bundle meets dependencies.deny by its name and its recorded packages (#4646)."""
+    world = lifecycle_world
+    use_policy(world, "allow")
+    specs = {"p-exec-bundle": world.packages["p-exec:bundle"].spec}
+    kinds = {"p-exec-bundle": ("hook", "mcp", "bin")}
+    scenario = Scenario(world, specs, policy="allow", kinds=kinds)
+    _deny(scenario, "p-exec-bundle")
+    # Warm the policy cache first, so the refusal itself may change no cache byte.
+    warmed = driver.run(world, ["policy", "status"])
+    assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+    roots = dict(scenario.snapshot_roots())
+    cache = world.cache_root
+    if cache is not None and not any(cache.is_relative_to(r) for r in roots.values()):
+        roots["cache"] = cache
+    before = ArtifactSnapshotSet.capture(roots)
+    step = scenario.run(
+        "install p-exec-bundle",
+        credit=[
+            _pair(OP="bundle-install", GATE=_DD),
+            _pair(SRC="local-bundle", GATE=_DD),
+        ],
+        refusal=True,
+    )
+    # Project, lock, ledger, APM_HOME and cache are byte-identical after the refusal.
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(roots))
+    assert "denied by pattern" in " ".join(step.output.split()), step.output
     scenario.finish()
 
 
@@ -433,7 +433,7 @@ CREDITS = credits(
         "test_a_dry_run_says_what_the_policy_would_block": [_pair(GATE=_DD, DRYRUN="on")],
         "test_no_policy_installs_a_denied_dependency_and_says_so": [_pair(GATE=_DD, NOPOLICY="on")],
         **{
-            f"test_a_denied_dependency_keeps_the_deployed_skill[{d}]": [_pair(DEPLOYED=d, GATE=_DD)]
+            f"test_a_denied_dependency_keeps_the_deployed_skill[{d}]": _kept_credit(d)
             for d in _DEPLOYED
         },
         **{
@@ -454,18 +454,22 @@ CREDITS = credits(
         },
         **{
             f"test_a_denied_package_from_each_source_is_refused[{src}]": [_pair(SRC=src, GATE=_DD)]
-            for src in _SOURCES
+            for src in SOURCES
         },
         **{
             f"test_no_policy_installs_from_each_source_and_says_so[{src}]": [
                 _pair(SRC=src, NOPOLICY="on")
             ]
-            for src in _SOURCES
+            for src in SOURCES
         },
         "test_a_denied_git_package_is_refused_online": [_pair(GATE=_DD, NET="online", SRC="git")],
         "test_a_denied_package_is_refused_offline": [_pair(GATE=_DD, NET="offline")],
         "test_no_policy_installs_offline": [_pair(NET="offline", NOPOLICY="on")],
         "test_marketplace_add_beside_a_denied_dependency": [_pair(OP="marketplace", GATE=_DD)],
+        "test_a_denied_local_bundle_is_refused_before_any_write": [
+            _pair(OP="bundle-install", GATE=_DD),
+            _pair(SRC="local-bundle", GATE=_DD),
+        ],
         "test_no_policy_installs_a_local_bundle": [
             _pair(OP="bundle-install", SRC="local-bundle", NOPOLICY="on")
         ],

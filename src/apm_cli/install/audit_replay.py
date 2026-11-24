@@ -77,9 +77,11 @@ class CiAuditMaterialization:
 
 def _git_tracked_files(project_root: Path) -> frozenset[str] | None:
     """Return tracked repository paths, or ``None`` outside a git worktree."""
+    from apm_cli.utils.git_env import get_git_executable
+
     try:
         completed = subprocess.run(
-            ("git", "-C", str(project_root), "ls-files", "-z", "--full-name"),
+            (get_git_executable(), "-C", str(project_root), "ls-files", "-z", "--full-name"),
             capture_output=True,
             check=False,
         )
@@ -98,6 +100,7 @@ def prepare_ci_audit_replay(
     *,
     verbose: bool = False,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> PreparedCiAuditReplay:
     """Prepare one lock-pinned scratch replay for ``apm audit --ci`` consumers."""
     project_root = project_root.resolve()
@@ -149,6 +152,7 @@ def prepare_ci_audit_replay(
         modules_root=modules_root,
         user_scope=user_scope,
         policy_provider=policy_provider,
+        policy_fetch=policy_fetch,
     )
     stderr_context = (
         contextlib.nullcontext() if verbose else contextlib.redirect_stderr(io.StringIO())
@@ -215,6 +219,7 @@ def resolve_ci_audit_materialization(
     *,
     verbose: bool = False,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> CiAuditMaterialization:
     """Decide how ``apm audit --ci`` reaches installed package materialization.
 
@@ -271,6 +276,7 @@ def resolve_ci_audit_materialization(
             project_root,
             verbose=verbose,
             policy_provider=policy_provider,
+            policy_fetch=policy_fetch,
         )
     except CiAuditReplayError as exc:
         # One finding, said once: the replay error already names a mismatch it hit.

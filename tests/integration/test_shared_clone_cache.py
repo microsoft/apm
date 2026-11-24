@@ -280,14 +280,12 @@ class TestDownloaderSharedCloneIntegration:
             {
                 "git": "gitlab.com/spiritt/tenants/spiritt/repo-a",
                 "path": "skills/tool",
-                "ref": "main",
             }
         )
         dep_b = DependencyReference.parse_from_dict(
             {
                 "git": "gitlab.com/spiritt/tenants/spiritt/repo-b",
                 "path": "skills/tool",
-                "ref": "main",
             }
         )
 
@@ -355,8 +353,8 @@ class TestDownloaderSharedCloneIntegration:
         from apm_cli.models.apm_package import DependencyReference
 
         # Build two subdir dep refs from same repo
-        dep_a = DependencyReference.parse("owner/repo/skills/X#main")
-        dep_b = DependencyReference.parse("owner/repo/agents/Y#main")
+        dep_a = DependencyReference.parse("owner/repo/skills/X")
+        dep_b = DependencyReference.parse("owner/repo/agents/Y")
 
         target_a = tmp_path / "modules" / "X"
         target_b = tmp_path / "modules" / "Y"
@@ -709,8 +707,9 @@ class TestBareCloneFallback:
     def test_short_sha_skips_tier1_and_resolves_via_tier2(self, tmp_path: Path) -> None:
         """Copilot review #1135: short SHA must skip tier 1 (which requires
         full SHA for `git fetch <sha>`) and resolve to a 40-char SHA via
-        tier-2 `rev-parse --verify <short>^{commit}`. The resolved 40-char
-        SHA is what gets passed to `update-ref HEAD`, not the abbreviation.
+        tier 2, which expands the abbreviation to its unique commit when no
+        branch or tag holds that name. The resolved 40-char SHA is what gets
+        passed to `update-ref HEAD`, not the abbreviation.
         """
         from apm_cli.models.dependency.reference import DependencyReference
 
@@ -724,8 +723,10 @@ class TestBareCloneFallback:
         def fake_run(args, **kwargs):
             captured.append(list(args))
             cmd_str = " ".join(args)
-            if "rev-parse --verify" in cmd_str:
+            if "rev-parse --verify" in cmd_str or "rev-parse --disambiguate" in cmd_str:
                 return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
+            if "cat-file -t" in cmd_str:
+                return MagicMock(returncode=0, stdout="commit\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run):
@@ -1077,7 +1078,8 @@ class TestBareCloneRetryRmtree:
             strict=False,
         )
         d._transport_selector.select = MagicMock(return_value=plan)
-        dep = DependencyReference.parse("o/r/skills/X#abc1234567890abcdef1234567890abcdef12345678")
+        sha = "abc1234567890abcdef1234567890abcdef12345"
+        dep = DependencyReference.parse(f"o/r/skills/X#{sha}")
 
         # Pre-create the target with stale content; verify it gets wiped.
         bare = tmp_path / "bare"
@@ -1091,6 +1093,8 @@ class TestBareCloneRetryRmtree:
             # init must see clean target
             if args[1] == "init" and args[2] == "--bare":
                 assert not (bare / "stale_file").exists(), "rmtree did not run before init"
+            if "rev-parse" in args:
+                return MagicMock(returncode=0, stdout=sha + "\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run):
@@ -1098,7 +1102,7 @@ class TestBareCloneRetryRmtree:
                 "https://example/o/r",
                 bare,
                 dep_ref=dep,
-                ref="abc1234567890abcdef1234567890abcdef12345678",
+                ref=sha,
                 is_commit_sha=True,
             )
 
@@ -1137,9 +1141,7 @@ class TestInvalidSubdirErrorWording:
             (tmp_path / "cache").mkdir()
             downloader.shared_clone_cache = cache
 
-            dep = DependencyReference.parse(
-                "github/awesome-copilot/skills/DOES_NOT_EXIST_TYPO#main"
-            )
+            dep = DependencyReference.parse("github/awesome-copilot/skills/DOES_NOT_EXIST_TYPO")
             with patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone):
                 target_out = tmp_path / "out"
                 target_out.parent.mkdir(parents=True, exist_ok=True)

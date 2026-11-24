@@ -24,7 +24,11 @@ Safety gates, in order:
    deletion (#3663, #3701): it proves content, not that APM wrote it. A
    file that differs from its evidence is user-edited and kept; a file
    without evidence is kept with a warning naming it and the manual fix.
-   ``cowork://`` rows follow the same rule.
+   ``cowork://`` rows follow the same rule. The one exception is explicit
+   per-invocation consent (``apm uninstall --trust-lockfile``, #4295, the
+   req-lk-024 consent exception): a file with no receipt and no producible
+   render may be deleted when its bytes equal the single hash apm.lock.yaml
+   records for it; it never overrides evidence that a file differs.
 
 The helper records cleanup diagnostics via *diagnostics* (collect-then-
 render) and returns a :class:`CleanupResult` summarizing deleted, failed,
@@ -37,7 +41,11 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import errno
 import io
+import os
+import posixpath
+import shlex
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,8 +53,11 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import (
     COWORK_SKILLS_DIR_UNDETECTED,
+    KEPT_DELETE_MANUALLY,
     UNINSTALL_EVIDENCE_REINSTALL,
     UNINSTALL_EVIDENCE_REMOVE,
+    UNINSTALL_EVIDENCE_TRUST_LOCKFILE,
+    kept_note,
 )
 from apm_cli.integration import write_seam
 from apm_cli.security.gate import is_python_bytecode_cache_path
@@ -64,6 +75,16 @@ UNPROVEN = "unproven"
 UNREADABLE = "unreadable"
 # A member of a claimed directory replaced by a symlink: cleanup keeps the directory (#4451).
 SYMLINKED = "symlinked"
+
+# Reasons a path-safety gate refuses a path at cleanup time (#4815).
+REJECTED_TRAVERSAL = "its path contains a '..' component"
+REJECTED_PREFIX = "it is not under a known integration prefix"
+REJECTED_UNSAFE_PATH = (
+    "it failed the path safety check: it escapes the deploy root, is not under "
+    "a managed prefix, or is reached through a symbolic link"
+)
+REJECTED_DIRECTORY = "it is a directory entry, and APM only deletes individual files"
+REJECTED_REPLACED = "it was replaced or moved since APM checked it"
 
 
 class DeploymentEvidence:
@@ -86,12 +107,16 @@ class DeploymentEvidence:
         receipts: Mapping[str, str],
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
+        default_owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
         kept: Iterable[str],
+        recorded_hashes: Mapping[str, frozenset[str]] | None = None,
+        receipts_readable: bool = True,
         locked: LockFile | None = None,
         owned_receipts: Callable[[str], Mapping[str, str]] | None = None,
     ) -> None:
         self._deploy_root = deploy_root
+        self._roots = tuple(dict.fromkeys((deploy_root, deploy_root.resolve())))
         self._locked = locked
         self._legacy_claude_rules: dict[Path, dict[str, str]] = {}
         self._owned_receipts = owned_receipts
@@ -101,9 +126,30 @@ class DeploymentEvidence:
         self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
-        self._owners = dict(owners or {})
+        # The no-flag render lookup stays the first claimed owner up the tree;
+        # only consent eligibility pools every owner (#4295).
+        self._default_owners = dict((owners if default_owners is None else default_owners) or {})
+        # One spelling per path, as claims are looked up; spellings of one
+        # path pool their owners so none is dropped (#4295).
+        self._owners: dict[str, tuple[str, ...]] = {}
+        for path, keys in (owners or {}).items():
+            key = self._key(path)
+            self._owners[key] = tuple(dict.fromkeys((*self._owners.get(key, ()), *keys)))
         self._renders: dict[str | None, Path | None] = {}
         self._rendered_now: dict[str, str] = {}
+        self._recorded_hashes: dict[str, frozenset[str]] = {}
+        for path, values in (recorded_hashes or {}).items():
+            key = self._key(path)
+            self._recorded_hashes[key] = self._recorded_hashes.get(key, frozenset()) | values
+        self._receipts_readable = receipts_readable
+        self._lockfile_consent = False
+        self._consented: dict[str, None] = {}
+        self._spellings: SpellingAliasIndex | None = None
+        # Cowork claims by their path under the resolved Cowork root (#4815).
+        self._cowork_spellings: tuple[SpellingAliasIndex, dict[str, str], Path] | None = None
+        self._receipt_spellings: SpellingAliasIndex | None = None
+        self._consent_refused: dict[str, None] = {}
+        self._reported: set[str] = set()
 
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
@@ -128,18 +174,25 @@ class DeploymentEvidence:
         Invalid receipt state authorizes nothing and is reported. *kept* names
         the members this install declared but left on disk; they are retained.
         """
-        from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+        from apm_cli.core.deployment_ledger import (
+            DeploymentLedgerCodec,
+            DeploymentMaterializationSession,
+        )
         from apm_cli.core.scope import InstallScope
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+        receipts_readable = True
         owned_receipts = None
         try:
             session = DeploymentMaterializationSession(deploy_root, scope, None)
             receipts = session.receipt_hashes()
             owned_receipts = session.receipt_hashes
+            # A store no installation marker binds went unread: never empty (#4295).
+            receipts_readable = session.identity_path.exists() or not session.state_path.exists()
         except (OSError, ValueError) as exc:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}
+            receipts_readable = False
         if lockfile is None or not lockfile.dependencies:
             return cls(
                 deploy_root=deploy_root,
@@ -147,6 +200,7 @@ class DeploymentEvidence:
                 render=None,
                 user_scope=user_scope,
                 kept=kept,
+                receipts_readable=receipts_readable,
                 owned_receipts=owned_receipts,
             )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
@@ -155,6 +209,12 @@ class DeploymentEvidence:
         for key, dependency in locked.dependencies.items():
             for path in dependency.deployed_files:
                 owners.setdefault(path.rstrip("/"), []).append(key)
+        default_owners = {path: tuple(keys) for path, keys in owners.items()}
+        # Canonical deployment rows name owners the legacy lists may omit.
+        for record in DeploymentLedgerCodec.from_lockfile(locked).records.values():
+            for key in record.owners:
+                if key in locked.dependencies:
+                    owners.setdefault(record.locator.value, []).append(key)
 
         def render(owner: str | None) -> Path | None:
             return _render_locked(locked, owner, lockfile_root, user_scope, diagnostics)
@@ -164,8 +224,11 @@ class DeploymentEvidence:
             receipts=receipts,
             render=render,
             owners={path: tuple(keys) for path, keys in owners.items()},
+            default_owners=default_owners,
             user_scope=user_scope,
             kept=kept,
+            recorded_hashes=_recorded_owner_hashes(locked),
+            receipts_readable=receipts_readable,
             locked=locked,
             owned_receipts=owned_receipts,
         )
@@ -259,7 +322,7 @@ class DeploymentEvidence:
                 continue
             unproven.append(claim)
         for claim in unproven:
-            self._rendered_roots(claim)
+            self._rendered_roots(claim, pooled=True)
 
     def refusals(self, claims: Iterable[str]) -> list[tuple[str, str]]:
         """Return ``(claim, verdict)`` for each claimed file deletion would keep.
@@ -283,9 +346,14 @@ class DeploymentEvidence:
                 continue
             if physical.is_symlink():
                 # Only a member of a claimed directory: managed final symlinks
-                # elsewhere keep their own unlink rule (#4451).
-                if any(claim.startswith(f"{directory}/") for directory in directories):
+                # elsewhere keep their own unlink rule (#4451). Under consent the
+                # exception never covers a link, so it is kept and named (#4295).
+                if self._lockfile_consent or any(
+                    claim.startswith(f"{directory}/") for directory in directories
+                ):
                     refused.append((claim, SYMLINKED))
+                    if self._lockfile_consent:
+                        self._consent_refused[_claim_key(claim)] = None
                 continue
             if not physical.is_file():
                 continue
@@ -297,14 +365,15 @@ class DeploymentEvidence:
     def _physical(self, claim: str) -> Path | None:
         from .copilot_cowork_paths import (
             COWORK_URI_SCHEME,
-            from_lockfile_path,
+            cowork_locator,
             resolve_copilot_cowork_skills_dir,
         )
 
         if claim.startswith(COWORK_URI_SCHEME):
             try:
                 root = resolve_copilot_cowork_skills_dir()
-                return from_lockfile_path(claim, root) if root is not None else None
+                # The locator itself: a final symlink is judged as a link.
+                return cowork_locator(claim, root) if root is not None else None
             except Exception:
                 return None
         if "://" in claim:
@@ -317,24 +386,114 @@ class DeploymentEvidence:
             self._renders[owner] = self._render(owner) if self._render is not None else None
         return self._renders[owner]
 
+    def _key(self, path: str) -> str:
+        """The consent lookup key for *path*: one spelling, root-relative (#4295).
+
+        A user-scope lock may spell a file relative to the deploy root or as
+        an absolute path under it; both name one file and share one key.
+        """
+        from .copilot_cowork_paths import COWORK_URI_SCHEME
+
+        key = _claim_key(path)
+        if key.startswith(COWORK_URI_SCHEME):
+            # A Cowork root inside the deploy root names the same files twice.
+            physical = self._physical(key)
+            if physical is None:
+                return key
+            candidate = physical
+        elif "://" in key or not Path(key).is_absolute():
+            return key
+        else:
+            candidate = Path(key)
+        for root in self._roots:
+            try:
+                return _claim_key(candidate.relative_to(root).as_posix())
+            except ValueError:
+                continue
+        return key
+
+    def _equivalent_keys(self, key: str) -> tuple[str, ...]:
+        """*key* and every recorded key naming the same file on this filesystem (#4295).
+
+        Case- or normalization-insensitive filesystems make ``A.md`` and
+        ``a.md`` one file; case-sensitive ones never alias.
+        """
+        from .copilot_cowork_paths import COWORK_URI_SCHEME
+
+        if key.startswith(COWORK_URI_SCHEME):
+            return (key, *self._cowork_aliases(key))
+        if self._spellings is None:
+            self._spellings = SpellingAliasIndex({*self._recorded_hashes, *self._owners})
+        return (key, *self._spellings.aliases(key, self._deploy_root))
+
+    def _cowork_aliases(self, key: str) -> tuple[str, ...]:
+        """Recorded ``cowork://`` keys naming the same file as *key* under the Cowork root."""
+        from .copilot_cowork_paths import COWORK_URI_SCHEME, resolve_copilot_cowork_skills_dir
+
+        if self._cowork_spellings is None:
+            try:
+                root = resolve_copilot_cowork_skills_dir()
+            except Exception:
+                root = None
+            if root is None:
+                return ()
+            claims = {
+                claim[len(COWORK_URI_SCHEME) :].removeprefix("skills/"): claim
+                for claim in {*self._recorded_hashes, *self._owners}
+                if claim.startswith(COWORK_URI_SCHEME)
+            }
+            self._cowork_spellings = (SpellingAliasIndex(claims), claims, root)
+        index, claims, root = self._cowork_spellings
+        relative = key[len(COWORK_URI_SCHEME) :].removeprefix("skills/")
+        return tuple(claims[alias] for alias in index.aliases(relative, root))
+
     def _owners_of(self, claim: str) -> tuple[str, ...]:
+        """Return the locked owners of *claim* and of every claimed enclosing directory.
+
+        A member claim never hides its skill directory's owners: each render
+        that can show the file is checked before consent falls back (#4295).
+        """
+        owners: dict[str, None] = {}
+        path = self._key(claim)
+        while path:
+            for key in self._equivalent_keys(path):
+                owners.update(dict.fromkeys(self._owners.get(key, ())))
+            path = path.rpartition("/")[0]
+        return tuple(owners)
+
+    def _default_owners_of(self, claim: str) -> tuple[str, ...]:
         """Return the locked owners of *claim* or of its claimed skill directory."""
         path = claim.rstrip("/")
         while path:
-            if path in self._owners:
-                return self._owners[path]
+            if path in self._default_owners:
+                return self._default_owners[path]
             path = path.rpartition("/")[0]
         return ()
 
-    def _rendered_roots(self, claim: str) -> list[Path]:
-        """Return the render trees that can show *claim*: the whole lock, else its owners."""
+    def _rendered_roots(self, claim: str, *, pooled: bool = False) -> list[Path]:
+        """Return the render trees that can show *claim*: the whole lock, else its owners.
+
+        The deletion verdict reads the first claimed owner up the tree;
+        *pooled* (consent eligibility) reads every owner of every spelling.
+        """
         if self._render is None:
             return []
         whole = self._render_root(None)
         if whole is not None:
             return [whole]
-        roots = (self._render_root(owner) for owner in self._owners_of(claim))
+        owners = self._owners_of(claim) if pooled else self._default_owners_of(claim)
+        roots = (self._render_root(owner) for owner in owners)
         return [root for root in roots if root is not None]
+
+    def _has_receipt(self, physical: Path) -> bool:
+        """Whether a receipt names *physical* under any spelling of it (#4295)."""
+        key = physical.resolve().as_posix()
+        if key in self._receipts:
+            return True
+        if self._receipt_spellings is None:
+            self._receipt_spellings = SpellingAliasIndex(self._receipts)
+        # Receipt keys are absolute, so the join root is ignored.
+        return bool(self._receipt_spellings.aliases(key, Path("/")))
 
     def _receipt_match(self, physical: Path) -> bool | None:
         from apm_cli.utils.content_hash import compute_file_hash
@@ -365,12 +524,108 @@ class DeploymentEvidence:
                 return []
         return [root / relative for root in self._rendered_roots(owner_claim)]
 
+    def consent_to_lockfile_hashes(self) -> None:
+        """Accept, for this uninstall only, the req-lk-024 consent exception (#4295)."""
+        self._lockfile_consent = True
+
+    @property
+    def lockfile_consent(self) -> bool:
+        """Whether this uninstall carries ``--trust-lockfile`` consent (#4295)."""
+        return self._lockfile_consent
+
+    def consented_deletions(self) -> list[str]:
+        """Claims ``--trust-lockfile`` consent authorized that are now gone from disk."""
+        return [
+            claim
+            for claim in self._consented
+            if (physical := self._physical(claim)) is not None and not os.path.lexists(physical)
+        ]
+
+    def take_consented_deletions(self) -> list[str]:
+        """Return the consented deletions not yet reported, and mark them reported."""
+        fresh = [claim for claim in self.consented_deletions() if claim not in self._reported]
+        self._reported.update(fresh)
+        return fresh
+
+    def consent_kept_link(self, claim: str, physical: Path) -> bool:
+        """Whether consent keeps *physical* because it is now a symbolic link (#4295).
+
+        Judged on the current file kind, whatever the earlier verdict: a file
+        replaced by a link after preflight is kept too (#4815), and recorded as
+        kept so the uninstall does not report it as a failure.
+        """
+        if not _consent_keeps_link(physical, lockfile_consent=self._lockfile_consent):
+            return False
+        self._consent_refused[_claim_key(claim)] = None
+        return True
+
+    def consent_keep_noncanonical(self, claim: str) -> bool:
+        """Whether consent keeps a claim recorded with a ``.`` segment (#5096).
+
+        Nothing is written or removed through a non-canonical spelling, so
+        under ``--trust-lockfile`` the file stays and is recorded as kept.
+        """
+        if not self._lockfile_consent:
+            return False
+        self._consent_refused[_claim_key(claim)] = None
+        return True
+
+    def kept_under_consent(self) -> frozenset[str]:
+        """Claims a deletion decision kept, despite ``--trust-lockfile`` consent, for their evidence."""
+        return frozenset(self._consent_refused)
+
+    def lockfile_consentable(self, claim: str, physical: Path) -> bool:
+        """Return whether ``--trust-lockfile`` consent may delete *physical* (#4295).
+
+        The single consent decision: receipt state was read without error and
+        holds no receipt for the file, no render of its owning locked package
+        could be produced, and its bytes equal the one distinct hash
+        apm.lock.yaml records for *claim* across its owners (bare hex reads as
+        ``sha256``, req-lk-016). Any contrary or missing evidence (a differing
+        receipt or render, a render lacking the path, no or conflicting
+        recorded hashes, unreadable, not a regular file, symlinked) keeps it.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        recorded = {
+            _hash_envelope(value)
+            for key in self._equivalent_keys(self._key(claim))
+            for value in self._recorded_hashes.get(key, frozenset())
+        }
+        if not self._receipts_readable or len(recorded) != 1:
+            return False
+        try:
+            if physical.is_symlink() or not physical.is_file():
+                return False
+            if self._has_receipt(physical) or self._rendered_roots(claim, pooled=True):
+                return False
+            return compute_file_hash(physical) in recorded
+        except OSError:
+            return False
+
+    def consent_preview(self, claims: Iterable[str]) -> frozenset[str]:
+        """Return the *claims* ``--trust-lockfile`` consent would delete (#4295)."""
+        return frozenset(
+            claim
+            for claim in claims
+            if (physical := self._physical(claim)) is not None
+            and self.lockfile_consentable(claim, physical)
+        )
+
     def verdict(self, claim: str, physical: Path, *, rendered_as: str | None = None) -> str:
         """Classify deleting *physical* (lockfile *claim*) as authorized or kept.
 
         *rendered_as* names where the locked render may place the same member
-        instead (skill path migration renders the converged layout).
+        instead (skill path migration renders the converged layout). Under
+        ``--trust-lockfile`` consent every kept claim is recorded, so the
+        command fails only for deletions that were authorized but failed.
         """
+        verdict = self._verdict(claim, physical, rendered_as=rendered_as)
+        if verdict != AUTHORIZED and self._lockfile_consent:
+            self._consent_refused[_claim_key(claim)] = None
+        return verdict
+
+    def _verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
         try:
             receipt = self._receipt_match(physical)
             if receipt is True:
@@ -382,6 +637,14 @@ class DeploymentEvidence:
         rendered = self.render_verdict(claim, physical, rendered_as=rendered_as)
         if rendered == UNPROVEN and receipt is False:
             return EDITED
+        # Rechecked at each decision, so the bytes removed are the bytes consented.
+        if (
+            rendered == UNPROVEN
+            and self._lockfile_consent
+            and self.lockfile_consentable(claim, physical)
+        ):
+            self._consented[self._key(claim)] = None
+            return AUTHORIZED
         return rendered
 
     def render_verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
@@ -459,6 +722,67 @@ class DeploymentEvidence:
         return True
 
 
+def unconsented(retained: Iterable[str], evidence: DeploymentEvidence | None) -> list[str]:
+    """Drop from *retained* what --trust-lockfile consent kept for its evidence (#4295).
+
+    A file consent keeps is not a cleanup failure; every other retained path is.
+    Callers must not pass a path-safety rejection here: see :func:`consent_outcome`.
+    """
+    kept = evidence.kept_under_consent() if evidence is not None else frozenset()
+    return [path for path in retained if _claim_key(path) not in kept]
+
+
+def consent_outcome(
+    cleanup: CleanupResult, evidence: DeploymentEvidence | None
+) -> tuple[list[str], list[str]]:
+    """Split *cleanup* into its failures and its path-safety refusals (#4295).
+
+    Consent waives only evidence-based retention: a deletion that was
+    authorized but failed stays a failure even for a claim consent kept
+    earlier (for example in the uninstall preflight), and a file consent kept
+    for its evidence is not a path-safety refusal. A path this cleanup's
+    safety gates rejected is always both, whatever consent kept earlier (#4815).
+    """
+    rejected = list(cleanup.rejected)
+    failures = [*cleanup.failed, *rejected, *unconsented(cleanup.retained, evidence)]
+    unsafe = [*rejected, *unconsented(cleanup.skipped_unmanaged, evidence)]
+    return list(dict.fromkeys(failures)), list(dict.fromkeys(unsafe))
+
+
+def _hash_envelope(value: str) -> str:
+    """Return *value* as an ``<algo>:<hex>`` envelope; bare hex reads as sha256 (req-lk-016)."""
+    value = value.strip().lower()
+    return value if ":" in value else f"sha256:{value}"
+
+
+def _claim_key(path: str) -> str:
+    """One spelling per claimed file for consent's hash, owner and refusal keys (#4295).
+
+    Backslashes become ``/`` and ``.`` segments and trailing slashes go, so
+    every spelling the cleanup validation accepts for a file shares one key.
+    """
+    scheme, sep, rest = path.replace("\\", "/").rpartition("://")
+    normalized = posixpath.normpath(rest) if rest else rest
+    return f"{scheme}{sep}{'' if normalized == '.' else normalized}"
+
+
+def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
+    """Map each owned path to every hash apm.lock.yaml records for it under its owners."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    owners = set(lockfile.dependencies)
+    hashes: dict[str, set[str]] = {}
+    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+        if record.content_hash and owners.intersection(record.owners):
+            hashes.setdefault(_claim_key(record.locator.value), set()).add(record.content_hash)
+    for dependency in lockfile.dependencies.values():
+        for path, content_hash in dependency.deployed_file_hashes.items():
+            if content_hash:
+                # One spelling per file, as cleanup looks it up (#4295).
+                hashes.setdefault(_claim_key(path), set()).add(content_hash)
+    return {path: frozenset(values) for path, values in hashes.items()}
+
+
 def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
     """Return *lockfile* narrowed to *owner* and the local parents anchoring it."""
     subset = copy.deepcopy(lockfile)
@@ -475,12 +799,22 @@ def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
 
 
 def _render_locked(
-    lockfile: LockFile, owner: str | None, lockfile_root: Path, user_scope: bool, diagnostics
+    lockfile: LockFile,
+    owner: str | None,
+    lockfile_root: Path,
+    user_scope: bool,
+    diagnostics,
+    *,
+    cache_only: bool = False,
+    on_package=None,
+    records: bool = True,
 ) -> Path | None:
     """Render the locked packages (or only *owner*) into a private scratch tree.
 
     The replay uses every target the lock recorded as well as the current
     manifest's, so files of a target the manifest just dropped stay provable.
+    *cache_only* never fetches; *on_package* is the replay's per-package hook,
+    which needs *records* off so every package renders live.
     """
     from apm_cli.install.drift import (
         CheckLogger,
@@ -498,7 +832,9 @@ def _render_locked(
     config = ReplayConfig(
         project_root=lockfile_root,
         lockfile_path=snapshot,
-        cache_only=False,
+        cache_only=cache_only,
+        records=records,
+        on_package=on_package,
         scratch_root=scratch,
         modules_root=scratch / "apm_modules",
         user_scope=user_scope,
@@ -545,6 +881,11 @@ class CleanupResult:
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
 
+    rejected: dict[str, str] = field(default_factory=dict)
+    """Paths a path-safety gate refused during this cleanup, mapped to the
+    reason; also listed in ``skipped_unmanaged``. A current safety rejection
+    is always a failure: consent never waives it (#4815)."""
+
     unproven: list[str] = field(default_factory=list)
     """Files kept because no deployment evidence proves APM wrote them (#3701);
     also listed in ``skipped_unmanaged``. Callers name them to the user."""
@@ -570,6 +911,11 @@ class CleanupResult:
 
     user_scope: bool = False
     """Whether paths are relative to the user's home (shown with ``~/``)."""
+
+    def reject(self, rel_path: str, reason: str) -> None:
+        """Record that a path-safety gate refused *rel_path* for *reason*."""
+        self.skipped_unmanaged.append(rel_path)
+        self.rejected[rel_path] = reason
 
     @property
     def announced_paths(self) -> list[str]:
@@ -648,6 +994,7 @@ def _safe_remove_skill_directory(
     dep_key: str,
     failed_path_retained: bool,
     protected: Callable[[str], bool] = lambda _rel: False,
+    path_gate: Callable[[str, bool], bool] = lambda _rel, _final_link: False,
 ) -> None:
     """Attempt safe removal of an APM-deployed skill directory.
 
@@ -728,11 +1075,16 @@ def _safe_remove_skill_directory(
         else:
             proven.append((child_rel, child))
 
+    if blocking and evidence.lockfile_consent:
+        # Consent decides per file (#4295): proven members go, the rest stay named.
+        _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key, path_gate)
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
         # prevented cleanup (reviewer feedback on PR #1767).
-        preview = blocking[:5]
-        suffix = f" (and {len(blocking) - 5} more)" if len(blocking) > 5 else ""
+        # Under consent every kept member is named: it decides per file (#4815).
+        cap = len(blocking) if evidence.lockfile_consent else 5
+        preview = blocking[:cap]
+        suffix = f" (and {len(blocking) - cap} more)" if len(blocking) > cap else ""
         file_list = ", ".join(preview) + suffix
         release = user_content_only and not failed_path_retained
         if release:
@@ -756,10 +1108,24 @@ def _safe_remove_skill_directory(
 
     if shared:
         # The survivor's members stay; this owner's proven members go one by one.
-        if _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key):
+        if _remove_proven_members(
+            skill_dir, proven, evidence, result, diagnostics, dep_key, path_gate
+        ):
             result.released.append(rel_path)
         else:
             result.skipped_unmanaged.append(rel_path)
+        return
+
+    if evidence.lockfile_consent:
+        _remove_consented_skill_directory(
+            skill_dir,
+            rel_path,
+            proven,
+            (evidence, result, diagnostics),
+            dep_key=dep_key,
+            failed_path_retained=failed_path_retained,
+            path_gate=path_gate,
+        )
         return
 
     # All remaining files are APM-tracked with matching hashes -- safe
@@ -774,6 +1140,141 @@ def _safe_remove_skill_directory(
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
 
 
+def _remove_consented_skill_directory(
+    skill_dir: Path,
+    rel_path: str,
+    proven: list[tuple[str, Path]],
+    context: tuple[DeploymentEvidence, CleanupResult, object],
+    *,
+    dep_key: str,
+    failed_path_retained: bool,
+    path_gate: Callable[[str, bool], bool] = lambda _rel, _final_link: False,
+) -> None:
+    """Consent decides per file (#4295).
+
+    Each member is rechecked right before its unlink, and only a directory
+    left holding no file is removed, bottom-up and never recursively, so a
+    file that appears after the scan keeps its directory.
+    """
+    evidence, result, diagnostics = context
+    if not _remove_proven_members(
+        skill_dir, proven, evidence, result, diagnostics, dep_key, path_gate
+    ) or any(
+        child.is_symlink()
+        or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
+        for child in skill_dir.rglob("*")
+    ):
+        result.skipped_unmanaged.append(rel_path)
+        return
+    try:
+        emptied = _remove_emptied_tree(skill_dir)
+    except OSError as exc:
+        result.failed.append(rel_path)
+        _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+        return
+    if not emptied:
+        result.skipped_unmanaged.append(rel_path)
+        return
+    result.deleted.append(rel_path)
+    result.deleted_targets.append(skill_dir)
+    result.deleted_directories.append(rel_path)
+
+
+def _remove_emptied_tree(root: Path) -> bool:
+    """Remove *root* bottom-up, deleting only bytecode caches and empty directories.
+
+    Returns False, leaving the rest in place, at the first entry that is a
+    symlink, another file, or a directory that is no longer empty.
+    """
+    for current, directories, files in os.walk(root, topdown=False):
+        base = Path(current)
+        for name in files:
+            path = base / name
+            if path.is_symlink() or not is_python_bytecode_cache_path(path.relative_to(root)):
+                return False
+            write_seam.unlink(path)
+        for name in directories:
+            if not _remove_empty_directory(base / name):
+                return False
+    return _remove_empty_directory(root)
+
+
+def _remove_empty_directory(path: Path) -> bool:
+    if path.is_symlink():
+        return False
+    try:
+        write_seam.rmdir(path)
+    except OSError as exc:
+        if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+            return False
+        raise
+    return True
+
+
+def _keep_consent_link(result: CleanupResult, diagnostics, stale_path: str, dep_key: str) -> None:
+    """Keep a final symbolic link under ``--trust-lockfile`` and name it (#4295)."""
+    result.skipped_unmanaged.append(stale_path)
+    diagnostics.warn(
+        kept_note(
+            stale_path,
+            "it is a symbolic link, which --trust-lockfile never removes",
+            KEPT_DELETE_MANUALLY,
+        ),
+        package=dep_key,
+    )
+
+
+def _consent_kept_noncanonical(
+    stale_path: str, project_root: Path, evidence: DeploymentEvidence, *, targets, user_scope: bool
+) -> bool:
+    """Whether a path the gate refused only for a ``.`` segment is consent-kept (#5096).
+
+    Its canonical spelling must pass the same gate; anything else stays a
+    safety rejection, and nothing is ever removed through the claim.
+    """
+    segments = stale_path.replace("\\", "/").split("/")
+    # Only a pure "." spelling qualifies: ".." is traversal and is never kept.
+    if not evidence.lockfile_consent or "." not in segments or ".." in segments:
+        return False
+    return BaseIntegrator.validate_deploy_path(
+        _claim_key(stale_path), project_root, targets=targets, user_scope=user_scope
+    ) and evidence.consent_keep_noncanonical(stale_path)
+
+
+def _keep_noncanonical(result: CleanupResult, diagnostics, stale_path: str, dep_key: str) -> None:
+    """Keep a claim recorded with a ``.`` segment under ``--trust-lockfile`` and name it."""
+    result.skipped_unmanaged.append(stale_path)
+    diagnostics.warn(
+        kept_note(
+            stale_path,
+            "it is recorded with a '.' path segment, which APM never removes through",
+            KEPT_DELETE_MANUALLY,
+        ),
+        package=dep_key,
+    )
+
+
+def _consent_kept_final_link(
+    stale_path: str, project_root: Path, evidence: DeploymentEvidence, *, targets, user_scope: bool
+) -> bool:
+    """Whether a path that failed the strict gate is only a consent-kept final link (#4815).
+
+    Its parent must pass the same gate with a final link allowed: a symlinked
+    ancestor stays a safety rejection.
+    """
+    return (
+        evidence.lockfile_consent
+        and BaseIntegrator.validate_deploy_path(
+            stale_path,
+            project_root,
+            targets=targets,
+            user_scope=user_scope,
+            allow_final_symlink=True,
+        )
+        and evidence.consent_kept_link(stale_path, project_root / stale_path)
+    )
+
+
 def _remove_proven_members(
     skill_dir: Path,
     proven: list[tuple[str, Path]],
@@ -781,19 +1282,30 @@ def _remove_proven_members(
     result: CleanupResult,
     diagnostics,
     dep_key: str,
+    path_gate: Callable[[str, bool], bool] = lambda _rel, _final_link: False,
 ) -> bool:
     """Remove each proven member of a skill directory that must itself stay.
 
     The deletion gates run again immediately before each unlink, so a file
     changed since the directory scan is kept and named, never removed: the
     member must still be a regular file, reached through no symlinked
-    directory and contained in *skill_dir*, and its evidence must still
+    directory from the deploy root (*path_gate*, the canonical path gate) and
+    contained in *skill_dir*, and its evidence must still
     authorize its bytes. Returns whether every member was removed.
     """
     complete = True
     for member_rel, member in proven:
-        if not _member_still_safe(skill_dir, member):
-            result.skipped_unmanaged.append(member_rel)
+        if not (_member_still_safe(skill_dir, member) and path_gate(member_rel, False)):
+            if (
+                _member_parents_safe(skill_dir, member)
+                and path_gate(member_rel, True)
+                and evidence.consent_kept_link(member_rel, member)
+            ):
+                # A final link whose every ancestor is safe is consent retention (#4815).
+                _keep_consent_link(result, diagnostics, member_rel, dep_key)
+                complete = False
+                continue
+            result.reject(member_rel, REJECTED_REPLACED)
             diagnostics.warn(
                 f"Skipped removing {member_rel}: it was replaced or moved since APM "
                 "checked it. Inspect it and delete it manually if no longer needed.",
@@ -825,15 +1337,27 @@ def _member_still_safe(skill_dir: Path, member: Path) -> bool:
     from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
     try:
-        if skill_dir.is_symlink() or member.is_symlink() or not member.is_file():
+        if member.is_symlink() or not member.is_file():
+            return False
+        if not _member_parents_safe(skill_dir, member):
+            return False
+        ensure_path_within(member, skill_dir)
+    except (OSError, PathTraversalError):
+        return False
+    return True
+
+
+def _member_parents_safe(skill_dir: Path, member: Path) -> bool:
+    """Return whether *member* is reached from *skill_dir* through no symlinked directory."""
+    try:
+        if skill_dir.is_symlink():
             return False
         parent = member.parent
         while parent != skill_dir:
             if parent.is_symlink() or parent == parent.parent:
                 return False
             parent = parent.parent
-        ensure_path_within(member, skill_dir)
-    except (OSError, PathTraversalError):
+    except OSError:
         return False
     return True
 
@@ -873,15 +1397,26 @@ def refusal_reason(verdict: str) -> str:
     return _REFUSAL_REASONS.get(verdict, _REFUSAL_REASONS[UNPROVEN])
 
 
-def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
-    """Return the two runnable remedies when uninstall lacks deletion evidence."""
+def uninstall_evidence_remedies(
+    *, user_scope: bool, trust_lockfile: bool = False, packages: Iterable[str] = ()
+) -> tuple[str, ...]:
+    """Return the runnable remedies when uninstall lacks deletion evidence.
+
+    The ``--trust-lockfile`` remedy is offered only when *trust_lockfile*: at
+    least one refused file is deletable under that consent (#4295). It reruns
+    the uninstall of *packages*, the identifiers the user passed.
+    """
     remove = UNINSTALL_EVIDENCE_REMOVE
     reinstall = UNINSTALL_EVIDENCE_REINSTALL
+    trust = UNINSTALL_EVIDENCE_TRUST_LOCKFILE
     if user_scope:
         reinstall = reinstall.with_command("apm install -g")
         remove = remove.with_command("apm uninstall -g")
+        trust = trust.with_command("apm uninstall -g {packages} --trust-lockfile")
+    trust = trust.bind(packages=" ".join(shlex.quote(package) for package in packages))
     reinstall = reinstall.bind(uninstall=remove.command)
-    return reinstall.sentence(), remove.sentence()
+    remedies = (reinstall.sentence(), remove.sentence())
+    return (*remedies, trust.sentence()) if trust_lockfile else remedies
 
 
 def _keep_without_evidence(
@@ -1005,6 +1540,16 @@ def remove_stale_deployed_files(
     live_index = SpellingAliasIndex(live_paths)
     live_set = frozenset(path.replace("\\", "/").rstrip("/") for path in live_paths)
 
+    def path_gate(rel_path: str, final_link: bool) -> bool:
+        # The canonical gate from the deploy root, rechecked before each member unlink (#4815).
+        return BaseIntegrator.validate_deploy_path(
+            rel_path,
+            project_root,
+            targets=targets,
+            user_scope=user_scope,
+            allow_final_symlink=final_link,
+        )
+
     def protected(rel_path: str) -> bool:
         # A survivor's claim may spell the same file differently on this filesystem.
         return rel_path in live_set or live_index.alias(rel_path, project_root) is not None
@@ -1033,13 +1578,13 @@ def remove_stale_deployed_files(
         if stale_path.startswith(COWORK_URI_SCHEME):
             # Basic security: reject path-traversal components.
             if ".." in stale_path:
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_TRAVERSAL)
                 continue
             # Verify the path starts with a known integration prefix.
             from .targets import get_integration_prefixes
 
             if not stale_path.startswith(get_integration_prefixes(targets=targets)):
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_PREFIX)
                 continue
             # Resolve the cowork:// URI to a real filesystem path.
             try:
@@ -1056,9 +1601,10 @@ def remove_stale_deployed_files(
                     _cowork_orphans_skipped += 1
                     result.failed.append(stale_path)
                     continue
-                from .copilot_cowork_paths import from_lockfile_path
+                from .copilot_cowork_paths import cowork_locator
 
-                stale_target = from_lockfile_path(stale_path, _cowork_root_cached)
+                # Never follow a final symlink to the file it points at.
+                stale_target = cowork_locator(stale_path, _cowork_root_cached)
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -1068,18 +1614,28 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not BaseIntegrator.validate_deploy_path(
+            if not _stale_gate_passes(
                 stale_path,
                 project_root,
                 targets=targets,
                 user_scope=user_scope,
                 allow_final_symlink=allow_final_symlink,
             ):
-                result.skipped_unmanaged.append(stale_path)
+                if not allow_final_symlink and _consent_kept_final_link(
+                    stale_path, project_root, evidence, targets=targets, user_scope=user_scope
+                ):
+                    _keep_consent_link(result, diagnostics, stale_path, dep_key)
+                    continue
+                if _consent_kept_noncanonical(
+                    stale_path, project_root, evidence, targets=targets, user_scope=user_scope
+                ):
+                    _keep_noncanonical(result, diagnostics, stale_path, dep_key)
+                    continue
+                result.reject(stale_path, REJECTED_UNSAFE_PATH)
                 continue
             stale_target = project_root / stale_path
 
-        if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
+        if _stale_target_absent(stale_target, allow_final_symlink=allow_final_symlink):
             # File already gone -- treat as cleaned (no-op success).
             absent_targets.append(stale_target)
             continue
@@ -1112,7 +1668,7 @@ def remove_stale_deployed_files(
             if _is_skill_directory_entry(stale_path):
                 _deferred_dirs.append((stale_path, stale_target))
             else:
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_DIRECTORY)
                 diagnostics.warn(
                     (
                         f"Refused to remove directory entry {stale_path}: APM "
@@ -1128,10 +1684,13 @@ def remove_stale_deployed_files(
         # or byte equality with the locked render proves APM deployed these
         # bytes; a lockfile hash alone never authorizes deletion. Fails
         # CLOSED: edited, unproven or unreadable files are kept with a warning.
+        if evidence.consent_kept_link(stale_path, stale_target):
+            _keep_consent_link(result, diagnostics, stale_path, dep_key)
+            continue
         # Unlinking a managed final symlink removes no file content, so it
         # keeps its own rule (callers opt in via allow_final_symlink).
         if allow_final_symlink and stale_target.is_symlink():
-            if recorded_hashes.get(stale_path.replace("\\", "/")):
+            if not _managed_link_unlinkable(recorded_hashes.get(stale_path.replace("\\", "/"))):
                 result.skipped_user_edit.append(stale_path)
                 diagnostics.warn(
                     (
@@ -1189,6 +1748,7 @@ def remove_stale_deployed_files(
             dep_key,
             failed_path_retained,
             protected,
+            path_gate,
         )
 
     # One-time warnings for cowork edge cases (mirrors sync_remove_files).
@@ -1268,3 +1828,98 @@ def remove_synced_files(
     )
     diagnostics.render_summary()
     return result
+
+
+def _stale_gate_passes(
+    stale_path: str, project_root: Path, *, targets, user_scope: bool, allow_final_symlink: bool
+) -> bool:
+    """Stale cleanup's path gate (traversal, allowed prefix, in-tree)."""
+    return BaseIntegrator.validate_deploy_path(
+        stale_path,
+        project_root,
+        targets=targets,
+        user_scope=user_scope,
+        allow_final_symlink=allow_final_symlink,
+    )
+
+
+def _stale_target_absent(stale_target: Path, *, allow_final_symlink: bool) -> bool:
+    """Whether stale cleanup counts a gated path as already gone."""
+    return not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink())
+
+
+def _managed_link_unlinkable(recorded_hash: str | None) -> bool:
+    """Whether a gated managed final symlink is unlinked: only one that replaced no hashed file."""
+    return not recorded_hash
+
+
+def managed_hook_prefixes(targets=None) -> tuple[str, ...]:
+    """Deployed-path prefixes whose files uninstall's hook sync removes (#5035)."""
+    from .targets import KNOWN_TARGETS
+
+    return tuple(
+        dict.fromkeys(
+            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
+            for t in (*KNOWN_TARGETS.values(), *(targets or ()))
+            if t.supports("hooks")
+        )
+    )
+
+
+def _consent_keeps_link(physical: Path, *, lockfile_consent: bool) -> bool:
+    """Whether ``--trust-lockfile`` consent keeps *physical* because it is a link (#4295, #5139)."""
+    return lockfile_consent and physical.is_symlink()
+
+
+def hook_sync_unlinks(
+    rel_path: str,
+    project_root: Path,
+    *,
+    recorded_hash: str | None,
+    lockfile_consent: bool = False,
+) -> bool:
+    """Whether uninstall's hook sync removes a managed hook final symlink (#5035).
+
+    Read-only, through the same prefix, gate, consent and link decisions the
+    hook sync applies with ``allow_final_symlink=True``. Audit's advice offers
+    an uninstall without ``--trust-lockfile``, so it passes no consent (#5139).
+    """
+    from .targets import KNOWN_TARGETS
+
+    return (
+        rel_path.replace("\\", "/").startswith(managed_hook_prefixes())
+        and _stale_gate_passes(
+            rel_path,
+            project_root,
+            targets=list(KNOWN_TARGETS.values()),
+            user_scope=False,
+            allow_final_symlink=True,
+        )
+        and (project_root / rel_path).is_symlink()
+        and not _consent_keeps_link(project_root / rel_path, lockfile_consent=lockfile_consent)
+        and _managed_link_unlinkable(recorded_hash)
+    )
+
+
+def final_link_handled(
+    rel_path: str,
+    project_root: Path,
+    *,
+    targets=None,
+    user_scope: bool = False,
+    allow_final_symlink: bool = False,
+) -> bool:
+    """Whether stale cleanup finishes a final-symlink claim instead of keeping it (#5035).
+
+    Read-only, through the same gate and absence decisions as
+    :func:`remove_stale_deployed_files`: a dangling link the path gate accepts
+    counts as already gone. Any other final link is rejected or kept, so the
+    uninstall stops. The defaults match uninstall's selected-owner cleanup.
+    """
+    return _stale_gate_passes(
+        rel_path,
+        project_root,
+        targets=targets,
+        user_scope=user_scope,
+        allow_final_symlink=allow_final_symlink,
+    ) and _stale_target_absent(project_root / rel_path, allow_final_symlink=allow_final_symlink)

@@ -15,7 +15,7 @@ from ..constants import DEFAULT_SKIP_DIRS
 from ..utils import perf_stats
 from ..utils.exclude import should_exclude, validate_exclude_patterns
 from ..utils.path_security import ensure_path_within
-from ..utils.paths import portable_relpath
+from ..utils.paths import portable_relpath, relative_to
 from .models import PrimitiveCollection
 from .parser import parse_primitive_file, parse_skill_file
 
@@ -416,7 +416,7 @@ def _scan_patterns(
     files = inventory.files_within(base_dir)
 
     for file_path in files:
-        rel_path = file_path.relative_to(base_dir).as_posix()
+        rel_path = relative_to(file_path, base_dir).as_posix()
         if not _matches_any_pattern(rel_path, all_patterns):
             continue
         if not file_path.is_symlink() and file_path.is_file() and _is_readable(file_path):

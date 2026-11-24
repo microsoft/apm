@@ -24,11 +24,15 @@
     {
       "id": "marketplace-catalog-origin",
       "decision": "Which catalog a marketplace alias names: canonical origin recorded as lock source_url/source_digest for every remote catalog kind, fail-closed alias rebind against the lock, and duplicate-origin registration warning",
-      "owner": "marketplace/source_identity.py (marketplace_origin, same_marketplace_origin) owns the origin key; marketplace/models.py (catalog_digest), applied for Git kinds by marketplace/client.py _parse_catalog, owns the Git catalog digest; deps/lockfile.py (marketplace_rows) selects the locked rows for an alias/plugin pair; marketplace/catalog_origin.py (require_locked_catalog_origin, require_locked_row_origin, registrations_sharing_origin) compares lock and registrations, and reverify_locked_provenance re-verifies every locked row against its catalog before apm update plans (#4228); every marketplace resolution entry point checks the origin before catalog I/O (deps/apm_resolver.py _resolve_marketplace_dep, commands/install.py plugin@alias intercept, commands/outdated.py, uninstall registry fallback; apm view is a listed read-only exemption); also marketplace/resolver.py, apm marketplace add, user-manifest reconcile",
+      "owner": "marketplace/source_identity.py (marketplace_origin, same_marketplace_origin) owns the origin key; marketplace/catalog_ref_pins.py (check_catalog_ref, require_origin_pin, origin_ref_tips) keeps a catalog ref on the origin's own branches and tags, checked by marketplace/registration.py parse_registration_source and before every catalog contents request in marketplace/client.py _fetch_file; marketplace/models.py (catalog_digest), applied for Git kinds by marketplace/client.py _parse_catalog, owns the Git catalog digest; deps/lockfile.py (marketplace_rows) selects the locked rows for an alias/plugin pair; marketplace/catalog_origin.py (require_locked_catalog_origin, require_locked_row_origin, registrations_sharing_origin) compares lock and registrations, and reverify_locked_provenance re-verifies every locked row against its catalog before apm update plans (#4228); every marketplace resolution entry point checks the origin before catalog I/O (deps/apm_resolver.py _resolve_marketplace_dep, commands/install.py plugin@alias intercept, commands/outdated.py, uninstall registry fallback; apm view is a listed read-only exemption); also marketplace/resolver.py, apm marketplace add, user-manifest reconcile",
       "selectors": [
-        "src/apm_cli/marketplace/catalog_origin.py"
+        "src/apm_cli/marketplace/catalog_origin.py",
+        "src/apm_cli/marketplace/catalog_ref_pins.py"
       ],
       "guards": [
+        "marketplace-catalog-origin-fetch-pin",
+        "marketplace-catalog-origin-pin-tips",
+        "marketplace-catalog-origin-registration-pin",
         "marketplace-integrations-catalog-origin"
       ]
     },
@@ -179,7 +183,8 @@
       "owner": "deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources, resolve_plugin_root_placeholders)",
       "selectors": [
         "src/apm_cli/deps/plugin_parser.py",
-        "src/apm_cli/integration/skill_integrator.py"
+        "src/apm_cli/integration/skill_integrator.py",
+        "src/apm_cli/integration/skill_bundle_routes.py"
       ],
       "guards": ["marketplace-integrations-legacy-skill-membership"]
     },
@@ -198,6 +203,7 @@
         "src/apm_cli/claude_plugins/admission.py",
         "src/apm_cli/claude_plugins/registrar.py",
         "src/apm_cli/native_plugins/carry.py",
+        "src/apm_cli/native_plugins/claude_marketplaces.py",
         "src/apm_cli/native_plugins/layout.py",
         "src/apm_cli/native_plugins/record.py",
         "src/apm_cli/native_plugins/scopes.py",

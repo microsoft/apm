@@ -360,19 +360,24 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "def local_bundle_hook_source_marker(bundle_id: str, approval_key: str | None = None)",
         "def parse_local_bundle_hook_source(",
         "def write_per_file_bundle_record(",
+        # The bundle record's sidecar write keeps the config file records current (#5039).
+        "write_hook_sidecar(sidecar_path, data, project_root, user_scope)",
     ),
     _HOOK_INTEGRATOR: (
         "local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
         "LocalBundleMarkers(bundle_id)",
+        # One script layout: the rewrite and bundle hook cleanup both delegate to it.
+        "scripts_base = hook_scripts_parent(target, root_dir or default_root) + package_name",
     ),
     _BUNDLE_HOOK_TRUST: (
         "parse_local_bundle_hook_source(",
         "package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS)",
         "if None in keys:",
         "HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)",
-        '_retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))',
+        "hook_scripts_parent(target.name, target.root_dir)",
+        "kept, unwritten = _retire_per_file(project_root, targets, item)",
         "_drop_lock_rows(lock_dir, rows)",
-        "            retire_bundle_hooks(",
+        "            retired = retire_bundle_hooks(",
         # The scope re-check retires bundle canvas through the same pass.
         "    retire_unadmitted_bundle_canvas(",
         # Committed records and rows are acted on only inside a target root.
@@ -387,7 +392,9 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "path = contained_bundle_path(root, value, prefixes)",
     ),
     "src/apm_cli/install/services.py": (
-        "record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)",
+        # Recording the canvas is an install write at the install's scope (#5042).
+        "        record_bundle_canvas(",
+        "project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
@@ -635,7 +642,7 @@ def check_local_bundle_hook_retirement(provider: FactsProvider) -> tuple[Violati
     findings: list[Violation] = []
     facts, failures = _facts_for(provider, _BUNDLE_HOOKS, GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT)
     findings.extend(failures)
-    if not failures and not _present(facts, "return retire_bundle_hooks("):
+    if not failures and not _present(facts, "retired = retire_bundle_hooks("):
         findings.append(
             _summary(
                 GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,

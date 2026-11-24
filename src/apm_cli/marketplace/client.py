@@ -26,6 +26,7 @@ trusting that TTL and never falls back to stale data (#3279).
 """
 
 import contextlib
+import dataclasses
 import hashlib
 import json
 import logging
@@ -362,7 +363,6 @@ def _fetch_url_direct(
     credential: "CatalogCredential",
     etag: str = "",
     last_modified: str = "",
-    expected_digest: str = "",
 ) -> FetchResult | None:
     """Fetch a remote marketplace.json URL over HTTPS.
 
@@ -394,6 +394,9 @@ def _fetch_url_direct(
             base_url=credential.scope_url if credential.presented else None,
             bind_query=credential.presented,
             ambient_credentials=False,
+            # The allow-list judged this URL: a hop outside the registered
+            # origin (or a bound credential's scope) is refused, never followed.
+            follow_cross_origin_without_credentials=False,
             timeout=30,
             stream=True,
         )
@@ -431,10 +434,6 @@ def _fetch_url_direct(
                 close()
 
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-    if expected_digest and digest != expected_digest:
-        raise MarketplaceFetchError(
-            url, f"digest mismatch: expected {expected_digest}, got {digest}"
-        )
 
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -578,7 +577,14 @@ def _fetch_via_api(
     url = url_builder(source, file_path, host_info)
 
     def _do_fetch(token, _git_env):
-        resp = _http_get(url, headers=header_builder(token), timeout=30, stream=True)
+        # The allow-list judged this origin: a redirect elsewhere is refused.
+        resp = _http_get(
+            url,
+            headers=header_builder(token),
+            follow_cross_origin_without_credentials=False,
+            timeout=30,
+            stream=True,
+        )
         try:
             if resp.status_code == 404:
                 return None
@@ -1243,6 +1249,13 @@ def _fetch_file(
     fetcher = _FETCHERS.get(kind)
     if fetcher is None:
         raise MarketplaceFetchError(source.name, f"Unsupported marketplace source kind: {kind!r}")
+    if kind in ("github", "gitlab", "git", "ado"):
+        from .catalog_ref_pins import require_origin_pin
+
+        bound = require_origin_pin(source)
+        if bound != (source.ref or ""):
+            # Fetch by the verified commit, never by an ambiguous short name.
+            source = dataclasses.replace(source, ref=bound)
 
     # Proxy-aware path for github/gitlab kinds: try registry proxy first, then
     # honour PROXY_REGISTRY_ONLY enforcement.

@@ -65,7 +65,7 @@ Say hello to ${input:name}!
             mock_run.return_value.returncode = 0
 
             # Mock runtime detection to return copilot
-            with patch("shutil.which") as mock_which:
+            with patch("apm_cli.utils.git_env.trusted_executable") as mock_which:
                 mock_which.side_effect = lambda cmd: (
                     "/usr/bin/copilot" if cmd == "copilot" else None
                 )
@@ -194,7 +194,7 @@ scripts:
         runner = ScriptRunner()
 
         # Mock runtime detection
-        with patch("shutil.which") as mock_which:
+        with patch("apm_cli.utils.git_env.trusted_executable") as mock_which:
             mock_which.side_effect = lambda cmd: "/usr/bin/copilot" if cmd == "copilot" else None
 
             # Get the generated command
@@ -246,7 +246,7 @@ scripts:
         runner = ScriptRunner()
 
         # Mock no runtimes installed
-        with patch("shutil.which") as mock_which:
+        with patch("apm_cli.utils.git_env.trusted_executable") as mock_which:
             mock_which.return_value = None
 
             # Try to run script
@@ -300,7 +300,7 @@ Create a comprehensive architecture blueprint for this project.
         assert discovered.name == "architecture-blueprint-generator.prompt.md"
 
         # Mock execution to verify command generation
-        with patch("shutil.which") as mock_which:
+        with patch("apm_cli.utils.git_env.trusted_executable") as mock_which:
             mock_which.side_effect = lambda cmd: "/usr/bin/copilot" if cmd == "copilot" else None
 
             command = runner._generate_runtime_command("copilot", discovered)

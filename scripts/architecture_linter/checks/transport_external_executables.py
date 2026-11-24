@@ -1,0 +1,480 @@
+"""Ownership check for locating helper programs APM launches or probes.
+
+``utils/git_env.trusted_executable`` is the one owner: it resolves a helper
+from PATH directories outside the project (reusing
+``_resolve_trusted_executable``), never from the working directory. No other
+product module calls ``shutil.which``, and no ``subprocess`` launch passes a
+literal program name as its first argument.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from scripts.architecture_linter.checks.transport_platform_shared import (
+    GROUP,
+    _count_checks,
+    _src_python,
+)
+from scripts.architecture_linter.checks.tree_index import TreeIndex
+from scripts.architecture_linter.facts import FactsProvider
+from scripts.architecture_linter.groups.common import violation
+from scripts.architecture_linter.models import Rule, Violation
+
+_RULE_ID = "transport-platform-external-executable-owner"
+_OWNER = "src/apm_cli/utils/git_env.py"
+_LAUNCHERS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
+_LAUNCH_MODULES = frozenset({"subprocess", "os", "asyncio", "shutil"})
+
+
+def _is_literal_argv(node: ast.AST | None) -> bool:
+    """Whether *node* is a list or tuple whose first element is a string literal."""
+    if not isinstance(node, (ast.List, ast.Tuple)) or not node.elts:
+        return False
+    first = node.elts[0]
+    return isinstance(first, ast.Constant) and isinstance(first.value, str)
+
+
+def _is_literal(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+_ASYNC_LAUNCHERS = frozenset({"create_subprocess_exec", "create_subprocess_shell"})
+_BINDERS = frozenset({"partial", "partialmethod"})
+_PROGRAM_KEYWORDS = frozenset({"args", "program", "cmd"})
+# An os launcher named without being called, e.g. ``launch = os.execv``.
+_OS_LAUNCHER_REF = re.compile(r"\.(?:exec|spawn)[lv]p?e?\b|\bposix_spawnp?\b")
+
+
+def _dotted(node: ast.AST) -> str | None:
+    """Return ``a.b.c`` for a Name/Attribute chain, else ``None``."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _os_program_index(attr: str) -> int | None:
+    """Return the program argument index of ``os.<attr>``, if it launches one."""
+    if attr.startswith("spawn"):
+        return 1
+    if attr.startswith(("exec", "posix_spawn")):
+        return 0
+    return None
+
+
+@dataclass(frozen=True)
+class _Modules:
+    """File-wide spellings of the launch modules and of the functools binders."""
+
+    subprocess: frozenset[str]
+    os: frozenset[str]
+    asyncio: frozenset[str]
+    binders: frozenset[str]
+
+
+def _modules(nodes: tuple[ast.AST, ...]) -> _Modules:
+    """Collect every local spelling of subprocess, os, asyncio(.subprocess) and the binders."""
+    spellings: dict[str, set[str]] = {
+        "subprocess": {"subprocess"},
+        "os": {"os"},
+        "asyncio": {"asyncio", "asyncio.subprocess"},
+        "binders": set(),
+    }
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name in {"subprocess", "os"}:
+                    spellings[alias.name].add(local)
+                elif alias.name == "asyncio":
+                    spellings["asyncio"].update({local, f"{local}.subprocess"})
+                elif alias.name == "asyncio.subprocess":
+                    spellings["asyncio"].add(local)
+                elif alias.name == "functools":
+                    spellings["binders"].update(f"{local}.{name}" for name in _BINDERS)
+        elif isinstance(node, ast.ImportFrom) and node.module in {"asyncio", "functools"}:
+            for alias in node.names:
+                if node.module == "asyncio" and alias.name == "subprocess":
+                    spellings["asyncio"].add(alias.asname or alias.name)
+                elif node.module == "functools" and alias.name in _BINDERS:
+                    spellings["binders"].add(alias.asname or alias.name)
+    return _Modules(**{key: frozenset(value) for key, value in spellings.items()})
+
+
+def _imported_program_index(module: str | None, name: str) -> int | None:
+    """Return the program argument index of ``from <module> import <name>``."""
+    if module == "subprocess" and name in _LAUNCHERS:
+        return 0
+    if module in {"asyncio", "asyncio.subprocess"} and name in _ASYNC_LAUNCHERS:
+        return 0
+    if module == "os":
+        return _os_program_index(name)
+    return None
+
+
+_NONE: frozenset[int] = frozenset()
+
+
+class _Aliases:
+    """Launcher aliases per lexical scope, each keeping its launchers' program arguments.
+
+    Names bind in their function, class or module scope (or the scope a
+    ``global``/``nonlocal`` declaration names) and resolve through enclosing
+    functions to the module, as Python resolves them; comprehension variables
+    and parameters never shadow. Attribute targets (``self.run = ...``) bind
+    per owning class. Where the scoped binding is no launcher, any launcher
+    binding of the same name or attribute spelling in the file applies.
+    A binding maps to every program argument index its launchers use, empty
+    when it is no launcher, so reassignment never drops one.
+    """
+
+    def __init__(self, index: TreeIndex | None, nodes: tuple[ast.AST, ...], modules: _Modules):
+        self._index = index
+        self._modules = modules
+        self._names: dict[tuple[int, str], frozenset[int]] = {}
+        self._attributes: dict[tuple[int, str], frozenset[int]] = {}
+        self._attribute_spellings: dict[str, frozenset[int]] = {}
+        self._name_spellings: dict[str, frozenset[int]] = {}
+        self._classes: dict[int, int] = {}
+        self._declared: dict[tuple[int, str], int] = {}
+        nonlocals: list[tuple[ast.AST | None, str]] = []
+        for node in nodes:
+            if isinstance(node, ast.Global):
+                scope = self._anchor(node)
+                for name in node.names:
+                    self._declared[(id(scope) if scope is not None else 0, name)] = 0
+            elif isinstance(node, ast.Nonlocal):
+                nonlocals.extend((self._anchor(node), name) for name in node.names)
+        assignments: list[tuple[ast.AST, list[ast.expr], ast.expr]] = []
+        for node in nodes:
+            self._bind(node)
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                assignments.append((node, targets, node.value))
+        for scope, name in nonlocals:
+            self._route_nonlocal(scope, name)
+        # Aliases may chain through each other in any order: resolve to a fixpoint.
+        changed = True
+        while changed:
+            changed = False
+            for node, targets, value in assignments:
+                program = self.program_indices(value, node)
+                if program:
+                    for target in targets:
+                        changed = self._set(target, node, program) or changed
+
+    def _anchor(self, node: ast.AST | None) -> ast.AST | None:
+        return None if node is None or self._index is None else self._index.definition_anchor(node)
+
+    def _enclosing_function(self, scope: ast.AST | None) -> ast.AST | None:
+        scope = self._anchor(scope)
+        while isinstance(scope, ast.ClassDef):
+            scope = self._anchor(scope)
+        return scope
+
+    def _route_nonlocal(self, scope: ast.AST | None, name: str) -> None:
+        """Send a ``nonlocal`` name to the nearest enclosing function that binds it.
+
+        Declarations arrive outermost first, so a middle function's own
+        ``nonlocal`` has already moved its binding outward.
+        """
+        outer = self._enclosing_function(scope)
+        while outer is not None and (id(outer), name) not in self._names:
+            outer = self._enclosing_function(outer)
+        key = (id(scope) if scope is not None else 0, name)
+        target = id(outer) if outer is not None else 0
+        self._declared[key] = target
+        moved = self._names.pop(key, None)
+        if moved is not None:
+            self._names[(target, name)] = self._names.get((target, name), _NONE) | moved
+
+    def _owning_class(self, node: ast.AST) -> int:
+        """Return the id of the nearest class enclosing *node*, or 0 at module level."""
+        anchor = self._anchor(node)
+        key = id(anchor)
+        if key not in self._classes:
+            scope = anchor
+            while scope is not None and not isinstance(scope, ast.ClassDef):
+                scope = self._anchor(scope)
+            self._classes[key] = id(scope) if scope is not None else 0
+        return self._classes[key]
+
+    def _name_key(self, node: ast.AST, name: str) -> tuple[int, str]:
+        """Return the binding key for *name* bound at *node*, honouring declarations."""
+        anchor = self._anchor(node)
+        scope = id(anchor) if anchor is not None else 0
+        return self._declared.get((scope, name), scope), name
+
+    def _in_comprehension_target(self, node: ast.AST) -> bool:
+        if self._index is None:
+            return False
+        parent = self._index.parent(node)
+        while isinstance(parent, (ast.Tuple, ast.List, ast.Starred)):
+            parent = self._index.parent(parent)
+        return isinstance(parent, ast.comprehension)
+
+    def _bind(self, node: ast.AST) -> None:
+        """Record every name or attribute *node* binds, as not (yet) a launcher."""
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            if not self._in_comprehension_target(node):
+                self._names.setdefault(self._name_key(node, node.id), _NONE)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            self._names.setdefault(self._name_key(node, node.name), _NONE)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+            spelled = _dotted(node)
+            if spelled is not None:
+                self._attributes.setdefault((self._owning_class(node), spelled), _NONE)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            module = node.module if isinstance(node, ast.ImportFrom) else None
+            for alias in node.names:
+                key = self._name_key(node, (alias.asname or alias.name).split(".")[0])
+                program = None
+                if isinstance(node, ast.ImportFrom):
+                    program = _imported_program_index(module, alias.name)
+                indices = frozenset({program}) if program is not None else _NONE
+                self._names[key] = self._names.get(key, _NONE) | indices
+                self._spell(False, key[1], indices)
+
+    def _set(self, target: ast.AST, at: ast.AST, program: frozenset[int]) -> bool:
+        """Add *program* to *target*'s launcher indices; return whether any is new."""
+        if isinstance(target, ast.Name):
+            table, key = self._names, self._name_key(at, target.id)
+        else:
+            spelled = _dotted(target)
+            if spelled is None:
+                return False
+            table, key = self._attributes, (self._owning_class(at), spelled)
+        known = table.get(key, _NONE)
+        if program <= known:
+            return False
+        table[key] = known | program
+        self._spell(table is self._attributes, key[1], program)
+        return True
+
+    def _spell(self, attribute: bool, spelled: str, program: frozenset[int]) -> None:
+        """Record a launcher binding of *spelled* for the file-wide fallback."""
+        spellings = self._attribute_spellings if attribute else self._name_spellings
+        spellings[spelled] = spellings.get(spelled, _NONE) | program
+
+    def _name_program(self, name: str, at: ast.AST) -> frozenset[int]:
+        """Resolve *name* used at *at* through its enclosing scopes, skipping class bodies."""
+        scope = self._anchor(at)
+        innermost = True
+        while True:
+            if innermost or not isinstance(scope, ast.ClassDef):
+                key = (id(scope) if scope is not None else 0, name)
+                if key in self._declared:
+                    return self._names.get((self._declared[key], name), _NONE)
+                if key in self._names:
+                    return self._names[key]
+            if scope is None:
+                return _NONE
+            scope, innermost = self._anchor(scope), False
+
+    def program_indices(self, expr: ast.AST, at: ast.AST) -> frozenset[int]:
+        """Return the program argument indices if *expr* names a launcher at *at*."""
+        if isinstance(expr, ast.Name):
+            # Fail closed: where the scoped binding is no launcher, any launcher
+            # binding of the name elsewhere in the file still counts.
+            return self._name_program(expr.id, at) or self._name_spellings.get(expr.id, _NONE)
+        if not isinstance(expr, ast.Attribute):
+            return _NONE
+        spelled = _dotted(expr)
+        if spelled is not None:
+            # Fail closed: where the owning class binds no launcher, any class
+            # or module launcher binding of that spelling still counts.
+            own = self._attributes.get((self._owning_class(at), spelled))
+            inherited = own or self._attribute_spellings.get(spelled, _NONE)
+            if inherited:
+                return inherited
+        owner, attr = _dotted(expr.value), expr.attr
+        if (owner in self._modules.subprocess and attr in _LAUNCHERS) or (
+            owner in self._modules.asyncio and attr in _ASYNC_LAUNCHERS
+        ):
+            return frozenset({0})
+        if owner in self._modules.os:
+            program = _os_program_index(attr)
+            return frozenset({program}) if program is not None else _NONE
+        return _NONE
+
+
+def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
+    """Lines calling ``shutil.which`` under any import spelling."""
+    modules = {"shutil"}
+    functions: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            modules.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "shutil"
+            )
+        elif isinstance(node, ast.ImportFrom) and node.module == "shutil":
+            functions.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "which"
+            )
+    lines: list[int] = []
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (isinstance(func, ast.Name) and func.id in functions) or (
+            isinstance(func, ast.Attribute)
+            and func.attr == "which"
+            and isinstance(func.value, ast.Name)
+            and func.value.id in modules
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
+def _launch_program(
+    node: ast.Call, aliases: _Aliases, binders: frozenset[str]
+) -> tuple[bool, list[ast.AST]]:
+    """Return whether *node* launches a program, and every argument that may name it.
+
+    A functools ``partial(<launcher>, ...)`` or ``partialmethod(...)`` counts
+    as a launch with its bound arguments.
+    """
+    func, args = node.func, list(node.args)
+    if args and _dotted(func) in binders:
+        func, args = args[0], args[1:]
+    indices = aliases.program_indices(func, node)
+    if not indices:
+        return False, []
+    programs = [args[index] for index in sorted(indices) if len(args) > index]
+    if not args:
+        programs.extend(kw.value for kw in node.keywords if kw.arg in _PROGRAM_KEYWORDS)
+    return True, programs
+
+
+def _bare_launch_lines(index: TreeIndex | None, nodes: tuple[ast.AST, ...]) -> list[int]:
+    """Lines launching a program by literal name, directly or through a local name."""
+    modules = _modules(nodes)
+    aliases = _Aliases(index, nodes, modules)
+    literal_names = {
+        target.id
+        for node in nodes
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and _is_literal_argv(node.value)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    lines: list[int] = []
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        # A literal ``executable=`` counts on any call: a wrapper, possibly from
+        # another module, can forward it to a launcher.
+        launches, programs = _launch_program(node, aliases, modules.binders)
+        if not launches and not any(keyword.arg == "executable" for keyword in node.keywords):
+            continue
+        bare = any(
+            _is_literal_argv(program)
+            or _is_literal(program)
+            or (isinstance(program, ast.Name) and program.id in literal_names)
+            for program in programs
+        ) or any(
+            keyword.arg == "executable" and _is_literal(keyword.value) for keyword in node.keywords
+        )
+        if bare:
+            lines.append(node.lineno)
+    return lines
+
+
+def _may_launch(facts: object, text: Callable[[], str | None]) -> bool:
+    """Cheap fact prefilter: only files that can launch or look up a program get a tree scan.
+
+    Call facts keep the written spelling, so any call whose final attribute is
+    a launcher, ``which`` or a ``partial`` binder qualifies whatever its module
+    alias; a ``from`` import of a launch module covers bare-name calls. A file
+    importing only ``os`` qualifies when its text names an os launcher it may
+    alias without calling it.
+    """
+    for call in getattr(facts, "calls", ()):
+        attr = call.qualname.rpartition(".")[2]
+        if attr in _LAUNCHERS or attr in _ASYNC_LAUNCHERS or attr in _BINDERS or attr == "which":
+            return True
+        if attr.startswith(("exec", "spawn", "posix_spawn")):
+            return True
+    # A plain ``import subprocess`` / ``import asyncio`` can feed a local
+    # launcher alias whose calls carry no launcher fact. Nearly every module
+    # imports ``os``, so those files are read for an os launcher name instead.
+    imports = getattr(facts, "imports", ())
+    if any(
+        (fact.module is not None and fact.module.split(".")[0] in _LAUNCH_MODULES)
+        or (
+            fact.module is None
+            and any(name.split(".")[0] in {"subprocess", "asyncio"} for name in fact.names)
+        )
+        for fact in imports
+    ):
+        return True
+    if not any(fact.module is None and "os" in fact.names for fact in imports):
+        return False
+    source = text()
+    return source is not None and _OS_LAUNCHER_REF.search(source) is not None
+
+
+def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every helper lookup and launch resolves through trusted_executable."""
+    inventory = frozenset(provider.inventory)
+    findings: list[Violation] = list(
+        _count_checks(
+            provider,
+            inventory,
+            _RULE_ID,
+            _OWNER,
+            (
+                ("re", r"^def trusted_executable\(", 1, "eq"),
+                ("sub", "return _resolve_trusted_executable(name)", 1, "eq"),
+            ),
+            "helper programs must resolve through utils/git_env.trusted_executable",
+        )
+    )
+    for path in _src_python(provider):
+        facts = provider.file_facts(path)
+        if not _may_launch(facts, lambda path=path: provider.source_cache.read(path)[0]):
+            continue
+        index = provider.tree_index(path)
+        nodes = tuple(index.nodes) if index is not None else ()
+        if path != _OWNER:
+            findings.extend(
+                violation(
+                    _RULE_ID,
+                    path,
+                    "Locate helper programs with trusted_executable, not shutil.which",
+                    line=line,
+                )
+                for line in _which_lines(nodes)
+            )
+        for line in _bare_launch_lines(index, nodes):
+            findings.append(
+                violation(
+                    _RULE_ID,
+                    path,
+                    "Launch the path trusted_executable returns, never a bare program name",
+                    line=line,
+                )
+            )
+    return tuple(findings)
+
+
+RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RULE_ID,
+        group=GROUP,
+        guard_ids=(_RULE_ID,),
+        description="Helper programs resolve on PATH outside the project, through one owner.",
+        check=_check_external_executable_owner,
+    ),
+)
+
+COLLECTORS: tuple[object, ...] = ()
+
+__all__ = ["COLLECTORS", "RULES"]

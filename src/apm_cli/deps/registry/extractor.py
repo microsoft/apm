@@ -30,7 +30,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from apm_cli.utils.archive import safe_extract_tar, safe_extract_zip
+from apm_cli.utils.archive import open_tar_gz, safe_extract_tar, safe_extract_zip
 
 
 class HashMismatchError(Exception):
@@ -142,7 +142,7 @@ def extract_tarball(
     actual = verify_sha256(data, expected_digest)
     import io  # local import — only needed on the install path
 
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+    with open_tar_gz(fileobj=io.BytesIO(data), error_type=UnsafeTarballError) as tar:
         _safe_extract(tar, Path(dest_root))
     return actual
 

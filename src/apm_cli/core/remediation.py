@@ -18,7 +18,7 @@ anywhere else under ``src/apm_cli``.
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
@@ -125,6 +125,28 @@ def kept_file_message(
     return kept_note(path, reason, either_sentence(remedy, *alternatives))
 
 
+def dependency_not_allowed_advice(
+    packages: Sequence[str], denied: int, policy_source: str | None, withheld: str | None = None
+) -> tuple[Remediation | None, str]:
+    """Render the next step for *denied* dependencies outside the org allow list (#4570).
+
+    *packages* are the apm.yml entries whose removal drops every denied
+    dependency (a transitive one goes with the entry that brings it in).
+    Returns the bound :data:`DEPENDENCY_NOT_ALLOWED` remediation, or ``None``
+    when no entry is known, and the sentence ``apm audit --ci`` prints.
+    *withheld* names why an uninstall is not suggested, when one is known (#5008).
+    """
+    them = "it" if denied == 1 else "them"
+    source = f" (policy source: {policy_source})" if policy_source else ""
+    ask = f"ask your org admin to allow {them}{source}"
+    if not packages:
+        reason = f"; an uninstall is not suggested because {withheld}" if withheld else ""
+        return None, _sentence(ask + reason)
+    subject = "the dependency" if denied == 1 else f"the {denied} dependencies"
+    remedy = DEPENDENCY_NOT_ALLOWED.bind(packages=" ".join(packages), subject=subject)
+    return remedy, _sentence(f"{remedy.clause()}, or {ask}")
+
+
 # A file whose deployment no receipt or locked render proves (#4360).
 KEPT_UNPROVEN_REASON = (
     "no local deployment receipt or render of the locked package version proves APM deployed it"
@@ -167,6 +189,12 @@ ORPHANED_PACKAGES = _entry(
     "orphaned-packages", "apm install", "remove packages apm.yml no longer declares"
 )
 RESYNC_DEPLOYED = _entry("drift-resync", "apm install", "re-sync deployed files with the lockfile")
+CLAUDE_MARKETPLACE_TRUST = _entry(
+    "claude-marketplace-trust",
+    "apm install",
+    "list the project's marketplace for Claude Code",
+    before="open the folder in Claude and accept the trust prompt",
+)
 RESYNC_UNRECORDED = _entry(
     "drift-unrecorded",
     "apm install",
@@ -231,6 +259,12 @@ HOOK_PLUGIN_ROOT_UNRESOLVED = _entry(
     "redeploy the hook with the resolved path",
     before="ensure the quote marks match and wrap the complete reference and path in "
     "balanced double quotes",
+)
+HOOK_EVENT_MALFORMED = _entry(
+    "hook-event-malformed",
+    "apm install",
+    "merge the package's hooks into it",
+    before="fix or remove the event",
 )
 HOOK_PATH_ESCAPES_PACKAGE = _entry(
     "hook-path-escapes-package",
@@ -357,6 +391,20 @@ UNINSTALL_EVIDENCE_REMOVE = _entry(
     "apm uninstall",
     "finish the uninstall",
     before="if the source is unreachable, move each listed file aside or delete it",
+)
+UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
+    "uninstall-evidence-trust-lockfile",
+    "apm uninstall {packages} --trust-lockfile",
+    "delete the files marked deletable and keep the rest",
+    before="if the source is gone for good",
+)
+# A kept local descendant whose source changed since install refuses the
+# re-anchor (#5058); reinstalling recopies it, then the uninstall can proceed.
+UNINSTALL_REANCHOR_STALE_COPY = _entry(
+    "uninstall-reanchor-stale-copy",
+    "apm install --no-frozen",
+    "recopy the edited local source into apm_modules",
+    then="retry the uninstall",
 )
 # -- end W2 integration --
 # -- W2 marketplace --
@@ -698,6 +746,14 @@ PRUNE_PARTIAL = _entry(
     "apm prune",
     "finish the filesystem cleanup",
     then="run 'apm audit'",
+)
+PRUNE_REPLACED_PARENT = _entry(
+    "prune-replaced-parent",
+    "apm install",
+    "rebuild the lockfile",
+    before="remove the replaced dependency's replace entry from apm.yml, or keep the "
+    "package that declares it",
+    then="run 'apm prune'",
 )
 PRUNE_NATIVE_GATE_UNCHECKED = _entry(
     "prune-native-gate-unchecked",
@@ -1270,6 +1326,13 @@ UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "trac
 CONTENT_HASHES_MISSING = _entry(
     "content-hashes-missing", "apm install", "regenerate the missing content hashes"
 )
+# {packages}: the apm.yml entries that bring in the denied dependencies;
+# {subject}: "the dependency" or "the N dependencies" (#4570).
+DEPENDENCY_NOT_ALLOWED = _entry(
+    "dependency-not-allowed",
+    "apm uninstall {packages}",
+    "remove {subject} outside the org allow list",
+)
 FROZEN_HOOK_PINS_STALE = _entry(
     "frozen-hook-pins-stale",
     "apm install",
@@ -1335,7 +1398,10 @@ KEPT_MCP_ENTRIES = _entry(
     "kept-mcp-entries",
     "apm install",
     "forget the record of each kept MCP entry",
-    before="remove each kept entry you no longer use, or declare its server again",
+    before=(
+        "remove each kept entry you no longer use, or declare its server or target its "
+        "runtime again"
+    ),
 )
 WITHHELD_HOOK_FILE_UNRECORDED = _entry(
     "withheld-hook-file-unrecorded",
@@ -1396,6 +1462,11 @@ REPLAY_CACHE_CONTENT_STALE = _entry(
     "replay-cache-content-stale",
     "apm install",
     "refresh the apm_modules cache to the locked content",
+)
+CACHED_CHECKOUT_TAMPERED = _entry(
+    "cached-checkout-tampered",
+    "apm install",
+    "rebuild the cached copy from the locked commit",
 )
 HOOKS_UNAPPROVED = _entry(
     "hooks-unapproved",
@@ -1641,6 +1712,18 @@ REPOSITORY_NOT_FOUND = _entry(
 )
 LOCAL_BUNDLE_UPDATE = _entry(
     "local-bundle-update", "apm install <newer-bundle-file>", "update a bundle"
+)
+# A local bundle is not in apm.yml, so it is uninstalled apart from packages (#3700).
+LOCAL_BUNDLE_UNINSTALL_APART = _entry(
+    "local-bundle-uninstall-apart",
+    "apm uninstall <bundle>",
+    "remove a local bundle's hooks",
+    then="uninstall the other packages in a separate command",
+)
+LOCAL_BUNDLE_UNINSTALL_BY_NAME = _entry(
+    "local-bundle-uninstall-by-name",
+    "apm uninstall <installed-name>",
+    "remove one installed local bundle's hooks",
 )
 NATIVE_PLUGIN_UPDATE_HELD = _entry(
     "native-plugin-update-held", "apm install", "update it", before="drop --target"

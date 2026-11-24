@@ -2,7 +2,6 @@
 
 import os
 import shlex
-import shutil
 import sys
 from functools import wraps
 from pathlib import Path
@@ -55,7 +54,9 @@ def _detect_agentrc(project_root: Path) -> tuple[bool, bool]:
     under project_root, meaning the user already has instructions and does not
     need a suggestion.
     """
-    installed = shutil.which("agentrc") is not None
+    from apm_cli.utils.git_env import trusted_executable
+
+    installed = trusted_executable("agentrc") is not None
     has_instructions = any(
         (
             (project_root / ".github" / "copilot-instructions.md").exists(),

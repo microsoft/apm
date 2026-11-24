@@ -228,5 +228,16 @@ class TestCacheAtomicity(unittest.TestCase):
             self.assertEqual(entry.policy.name, "writer-1")
 
 
+def test_a_read_only_decision_never_writes_the_policy_cache(tmp_path: Path) -> None:
+    from apm_cli.cache.paths import read_only_caches
+
+    with patch.dict("os.environ", {"APM_CACHE_DIR": str(tmp_path / "cache")}):
+        with read_only_caches():
+            _write_cache("contoso/.github", _make_policy(1), tmp_path, chain_refs=[])
+        assert not (tmp_path / "cache").exists()
+        _write_cache("contoso/.github", _make_policy(1), tmp_path, chain_refs=[])
+        assert (_get_cache_dir(tmp_path) / f"{_cache_key('contoso/.github')}.yml").is_file()
+
+
 if __name__ == "__main__":
     unittest.main()

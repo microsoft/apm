@@ -29,10 +29,13 @@ command fails the cell even at main.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import os
 import re
-import shutil
-from collections.abc import Callable
+import signal
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,11 +49,12 @@ from tests.lifecycle.scenarios._deploy_diff import (
     HOME_CACHES,
     comparable,
     diff,
-    digest,
     revoke_user_approval,
+    rooted,
 )
 from tests.lifecycle.world import World
-from tests.lifecycle.world.clone import clone
+from tests.lifecycle.world.clone import clone, remove_tree
+from tests.lifecycle.world.packages import MCP_SERVER
 from tests.lifecycle.world.scopes import use_policy, use_registry
 from tests.lifecycle.world.services import (
     ORG,
@@ -180,7 +184,7 @@ def _normalized(world: World, text: str) -> list[str]:
     Dependencies resolve in parallel, so each run of consecutive progress lines
     ("[>] Resolving ...") is compared as a sorted block; all other order counts.
     """
-    text = _POLICY_AGE.sub("", _DECISION.sub("", text)).replace(str(world.root), "<ROOT>")
+    text = rooted(_POLICY_AGE.sub("", _DECISION.sub("", text)), str(world.root))
     text = _ELAPSED.sub("<T>", text)
     lines: list[str] = []
     block: list[str] = []
@@ -332,10 +336,19 @@ def _publish_skill(twin: Twin, body: str, tag: str) -> None:
     twin.fast.services.publish_revision(f"{ORG}/p-skill", {skill: text}, tag=tag)
 
 
+def _rmtree(path: Path) -> None:
+    """Remove *path* completely, or fail: a partial delete would differ between twins.
+
+    remove_tree clears the read-only bit git sets on pack files, which Windows
+    would otherwise refuse to delete.
+    """
+    remove_tree(path, missing_ok=True)
+
+
 def _remove_deployed(world: World) -> None:
     for path in _deployed(world):
         path.unlink()
-    shutil.rmtree(world.project / "apm_modules", ignore_errors=True)
+    _rmtree(world.project / "apm_modules")
 
 
 def _checkout(world: World, files: dict[str, bytes]) -> None:
@@ -392,7 +405,7 @@ def _cache_roots(world: World) -> list[Path]:
 def _empty_store(world: World) -> None:
     _remove_deployed(world)
     for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree(root)
 
 
 def _tamper_store(world: World) -> None:
@@ -453,7 +466,7 @@ SOURCES: dict[str, Callable[[Twin], None]] = {
 
 def _clear_policy_cache(world: World) -> None:
     for root in _cache_roots(world):
-        shutil.rmtree(root / POLICY_CACHE, ignore_errors=True)
+        _rmtree(root / POLICY_CACHE)
 
 
 def _deny_executables_at_the_same_origin(twin: Twin) -> None:
@@ -486,18 +499,18 @@ def _fresh_checkout(world: World) -> None:
     """
     _remove_deployed(world)
     (world.project / "apm.lock.yaml").unlink()
-    shutil.rmtree(world.project / ".apm-local", ignore_errors=True)
+    _rmtree(world.project / ".apm-local")
     for folder in {
         world.home / ".apm" / "deployment-receipts",
         world.apm_home / "deployment-receipts",
     }:
-        shutil.rmtree(folder, ignore_errors=True)
+        _rmtree(folder)
 
 
 def _fresh_store_miss(world: World) -> None:
     _fresh_checkout(world)
     for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree(root)
 
 
 def _fresh_tampered_store(world: World) -> None:
@@ -535,26 +548,95 @@ def _raw_state(world: World) -> dict[str, dict[str, str]]:
     """
     roots = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
     roots.update({f"cache:{root}": root for root in _cache_roots(world)})
-    return {name: digest(root, _RAW_SKIP, world) for name, root in roots.items()}
+    return {name: _raw_digest(root) for name, root in roots.items()}
+
+
+def _raw_digest(root: Path) -> dict[str, str]:
+    """No normalization: raw bytes, raw symlink targets, directories and full lstat modes."""
+    entries: dict[str, str] = {}
+    for path in sorted(root.rglob("*")) if root.exists() else ():
+        rel = path.relative_to(root).as_posix()
+        if any(rel == s or rel.startswith(s + "/") for s in _RAW_SKIP):
+            continue
+        mode = oct(path.lstat().st_mode)
+        if path.is_symlink():
+            entries[rel] = f"{mode}:link:{path.readlink()}"
+        elif path.is_dir():
+            entries[rel] = f"{mode}:dir"
+        else:
+            entries[rel] = f"{mode}:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    return entries
 
 
 DECIDE_EXIT = 3
 
 
-def _decide(world: World, argv: tuple[str, ...]):
-    """Run *argv* in decide mode through the driver's entry point.
+def _run_outside_contract(world: World, argv: tuple[str, ...], env: dict[str, str], why: str):
+    """Run *argv* through the driver's entry point with I8 suspended for this run only.
 
-    The decide seam is a test-only exit, outside every command's user exit contract,
-    so I8 is suspended (the driver hook and the runner's output oracle); this cell
-    asserts the exit, ASCII and the empty stdout itself.
+    For test-only exits outside every command's user exit contract (the decide seam,
+    a killed process); the calling cell asserts the exit itself.
     """
     args = driver.command_args(argv, scope="project")
     runner = ApmLifecycleRunner(driver.driver_command(), timeout_seconds=driver.TIMEOUT_SECONDS)
-    env = {**world.env, FAST_ENV: "decide"}
     cwd = driver.command_cwd(world, "project")
-    reason = f"the decide seam exits DECIDE_EXIT={DECIDE_EXIT} by design; the cell asserts it"
-    with expect_output_violation("I8", reason=reason):
-        return runner.run(args, cwd=cwd, env=env, scenario_id="lifecycle-decide")
+    with expect_output_violation("I8", reason=why):
+        return runner.run(args, cwd=cwd, env={**world.env, **env}, scenario_id="lifecycle-seam")
+
+
+def _decide(world: World, argv: tuple[str, ...]):
+    """Run *argv* in decide mode; this cell asserts the exit, ASCII and stdout itself."""
+    why = f"the decide seam exits DECIDE_EXIT={DECIDE_EXIT} by design; the cell asserts it"
+    return _run_outside_contract(world, argv, {FAST_ENV: "decide"}, why)
+
+
+def _cache_stats(world: World) -> dict[str, str]:
+    """``(size, mtime_ns)`` of every cache path, directories and roots included.
+
+    Content digests miss a utime, an eviction-and-refill or a created root; the
+    stat view sees them (cache_root, APM_CACHE_DIR and the APM_HOME cache).
+    """
+    roots = {*(_cache_roots(world)), world.apm_home / "cache"}
+    stats: dict[str, str] = {}
+    for root in sorted(roots):
+        if not root.exists():
+            stats[str(root)] = "<absent>"
+            continue
+        for path in [root, *sorted(root.rglob("*"))]:
+            info = path.lstat()
+            size = info.st_size if path.is_file() else "-"
+            stats[str(path)] = f"{size}:{info.st_mtime_ns}:{oct(info.st_mode & 0o7777)}"
+    return stats
+
+
+@contextmanager
+def _read_only_caches(world: World) -> Iterator[None]:
+    """Drop every write bit on the cache trees for the block, then restore the modes."""
+    roots = [r for r in {*(_cache_roots(world)), world.apm_home / "cache"} if r.exists()]
+    saved = {
+        path: path.lstat().st_mode & 0o7777
+        for root in roots
+        for path in [root, *root.rglob("*")]
+        if not path.is_symlink()
+    }
+    try:
+        for path, mode in saved.items():
+            path.chmod(mode & ~0o222)
+        yield
+    finally:
+        for path, mode in saved.items():
+            path.chmod(mode)
+
+
+def _assert_caches_untouched(before: dict[str, str], after: dict[str, str], label: str) -> None:
+    moved = [p for p in sorted(before.keys() | after.keys()) if before.get(p) != after.get(p)]
+    assert not moved, f"{label}: decide mode touched the caches: {moved}"
+
+
+DECIDE_HITS = {
+    "noop": (BOTH, _nothing, NOOP, NEEDS_NOOP.marks),
+    "warm-locked": (BOTH, _remove_deployed, DIFF, NEEDS_DIFF.marks),
+}
 
 
 _WRITE_FAULT = """import os
@@ -578,6 +660,25 @@ if _at:
 """
 
 
+def _install_hook(world: World, source: str) -> None:
+    """Put a ``sitecustomize`` running *source* first on *world*'s PYTHONPATH.
+
+    Python loads only the first sitecustomize, so the world's network guard runs first.
+    """
+    hook = world.root / "fault-hook"
+    hook.mkdir()
+    existing = world.env.get("PYTHONPATH", "")
+    guards = [
+        Path(entry) / "sitecustomize.py"
+        for entry in existing.split(os.pathsep)
+        if entry and (Path(entry) / "sitecustomize.py").is_file()
+    ]
+    assert guards, "the world's network guard sitecustomize is missing"
+    guard = guards[0].read_text(encoding="utf-8")
+    (hook / "sitecustomize.py").write_text(guard + "\n\n" + source, encoding="utf-8")
+    world.env["PYTHONPATH"] = os.pathsep.join(p for p in (str(hook), existing) if p)
+
+
 def _lifecycle_scripts(world: World, tier: str) -> None:
     manifest = (world.project if tier == "project" else world.apm_home) / "apm.yml"
     exists = manifest.is_file()
@@ -590,3 +691,108 @@ def _lifecycle_scripts(world: World, tier: str) -> None:
     }
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+_KILL = """import os
+import signal
+
+_spec = os.environ.get("APM_TEST_KILL_AT", "")
+if _spec:
+    _module, _attrs, _nth, _when = _spec.split(":")
+    try:
+        import importlib
+
+        _engine = importlib.import_module(_module)
+    except Exception:
+        _engine = None
+    _names = [n for n in _attrs.split("|") if _engine is not None and hasattr(_engine, n)]
+    if _names:
+        _attr = _names[0]
+        _original, _calls = getattr(_engine, _attr), [0]
+
+        def _killing(*args, **kwargs):
+            _calls[0] += 1
+            hit = _calls[0] == int(_nth)
+            if hit and _when == "before":
+                os.kill(os.getpid(), signal.SIGKILL)
+            result = _original(*args, **kwargs)
+            if hit and _when == "after":
+                os.kill(os.getpid(), signal.SIGKILL)
+            return result
+
+        setattr(_engine, _attr, _killing)
+
+# Crash inside service reconciliation, after its first durable write: count the
+# write seam's records while run_services runs and die before the Nth one.
+_svc = int(os.environ.get("APM_TEST_KILL_IN_SERVICES", "0"))
+if _svc:
+    try:
+        import apm_cli.install.fast_output as _output
+        import apm_cli.integration.write_seam as _seam
+    except Exception:
+        _output = _seam = None
+    if _output is not None and hasattr(_output, "run_services"):
+        _state = {"active": False, "writes": 0}
+        _run, _record = _output.run_services, _seam.record_before_write
+
+        def run_services(*args, **kwargs):
+            _state["active"] = True
+            try:
+                return _run(*args, **kwargs)
+            finally:
+                _state["active"] = False
+
+        def record_before_write(path, *args, **kwargs):
+            if _state["active"]:
+                _state["writes"] += 1
+                if _state["writes"] == _svc:
+                    os.kill(os.getpid(), signal.SIGKILL)
+            return _record(path, *args, **kwargs)
+
+        _output.run_services = run_services
+        _seam.record_before_write = record_before_write
+"""
+
+
+_ENGINE_MODULE = "apm_cli.install.diff_apply"
+
+
+KILL_POINTS = {
+    "after-first-package-published": {
+        "APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_publish|_commit_package:1:after"
+    },
+    "after-first-file-linked": {"APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_write:1:after"},
+    "before-services-render": {"APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_render:1:before"},
+    # Before the 2nd service write: the 1st is durable, reconciliation unfinished.
+    "after-first-service-write": {"APM_TEST_KILL_IN_SERVICES": "2"},
+}
+
+
+def _mcp_configs(world: World) -> list[Path]:
+    """Project files that register the world's MCP server (service-owned configs)."""
+    return [
+        path
+        for path in sorted(world.project.rglob("*.json"))
+        if not path.relative_to(world.project).as_posix().startswith(("apm_modules/", ".git/"))
+        and MCP_SERVER in path.read_text(encoding="utf-8", errors="replace")
+    ]
+
+
+_SIGKILL = getattr(signal, "SIGKILL", 9)  # absent on Windows, where the module is skipped
+
+
+_KILLED = (-_SIGKILL, 128 + _SIGKILL)
+
+
+_RELEASE_FAULT = """
+try:
+    import apm_cli.install.fast_output as _held_module
+except Exception:
+    _held_module = None
+if _held_module is not None and hasattr(_held_module, "HeldOutput"):
+
+    def _broken_release(self):
+        raise OSError(32, "injected broken pipe while releasing held output")
+
+    _held_module.HeldOutput.release = _broken_release
+"""

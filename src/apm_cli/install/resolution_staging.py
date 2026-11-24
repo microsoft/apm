@@ -23,6 +23,42 @@ from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 _STAGING_NAME = re.compile(r"[0-9a-f]{12}|[0-9a-f]{32}")
 
 
+def _publish_no_clobber(staged: Path, destination: Path) -> None:
+    """Rename *staged* to *destination* only if nothing is there, in one atomic step.
+
+    Windows ``rename`` never replaces; macOS has ``renamex_np(RENAME_EXCL)`` and
+    Linux ``renameat2(RENAME_NOREPLACE)``. Without such a call the publish
+    fails (the fast apply then rolls back and the full install runs).
+    """
+    if os.name == "nt":
+        os.rename(staged, destination)
+        return
+    import ctypes
+    import ctypes.util
+    import errno
+    import sys
+
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    source, target = os.fsencode(staged), os.fsencode(destination)
+    if sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        result = libc.renamex_np(source, target, ctypes.c_uint(0x4))  # RENAME_EXCL
+    elif sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        result = libc.renameat2(-100, source, -100, target, ctypes.c_uint(1))  # NOREPLACE
+    else:
+        raise OSError(errno.ENOSYS, "no atomic no-replace rename on this platform")
+    if result != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(destination))
+
+
+def _identity(path: Path) -> tuple[int, int] | None:
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
 class ResolutionStagingSession:
     """Track paths mutated during resolution and restore them on failure."""
 
@@ -45,6 +81,8 @@ class ResolutionStagingSession:
         self._replacement_by_destination: dict[Path, Path] = {}
         self._destination_by_replacement: dict[Path, Path] = {}
         self._relocations: list[tuple[Path, Path]] = []
+        # No-clobber publications: rollback removes one only while it is still that directory.
+        self._published: dict[Path, tuple[int, int]] = {}
         self._lock = threading.Lock()
 
     def prepare_path(self, path: Path) -> None:
@@ -97,8 +135,13 @@ class ResolutionStagingSession:
             self._destination_by_replacement[replacement] = resolved
         return replacement
 
-    def publish_replacement(self, replacement: Path) -> Path:
-        """Activate a prepared replacement and return its live path."""
+    def publish_replacement(self, replacement: Path, *, clobber: bool = True) -> Path:
+        """Activate a prepared replacement and return its live path.
+
+        With ``clobber=False`` an existing destination is never backed up and
+        replaced: the publish is atomic no-replace (:func:`_publish_no_clobber`)
+        and fails with :class:`FileExistsError` instead.
+        """
         staged = ensure_path_within(replacement, self._staging_root)
         with self._lock:
             resolved = self._destination_by_replacement.get(staged)
@@ -108,6 +151,17 @@ class ResolutionStagingSession:
                 raise RuntimeError(f"Path is already staged for replacement: {resolved}")
             if not staged.exists():
                 raise FileNotFoundError(f"Replacement path was not materialized: {staged}")
+            if not clobber:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                # The rename keeps the directory's identity: take it from the staged
+                # copy, so a destination substituted after the rename is never ours.
+                info = os.lstat(staged)
+                _publish_no_clobber(staged, resolved)
+                self._published[resolved] = (info.st_dev, info.st_ino)
+                self._backups[resolved] = None  # rollback removes what this created
+                self._replacement_by_destination.pop(resolved)
+                self._destination_by_replacement.pop(staged)
+                return resolved
 
             backup: Path | None = None
             if resolved.exists():
@@ -254,6 +308,11 @@ class ResolutionStagingSession:
                         path.parent.mkdir(parents=True, exist_ok=True)
                         backup.replace(path)
                     elif backup is None:
+                        current = _identity(path)
+                        if current is not None and current != self._published.get(path, current):
+                            block_recovery(path)
+                            cleanup_issues.append((path, "replaced after publish; left in place"))
+                            continue
                         if path.exists():
                             safe_rmtree(path, self._modules_dir)
                         self._remove_empty_parents(path.parent)
@@ -286,13 +345,8 @@ class ResolutionStagingSession:
                 cleanup_issues.append((self._staging_root, f"could not remove staging: {exc}"))
             finally:
                 cleanup_issues.extend(self._release_staging_lock())
+            cleanup_issues.extend(self.remove_created_modules_dir())
             try:
-                if (
-                    not self._modules_existed
-                    and self._modules_dir.exists()
-                    and not any(self._modules_dir.iterdir())
-                ):
-                    self._modules_dir.rmdir()
                 for created in self._missing_parents:
                     if created.is_dir() and not any(created.iterdir()):
                         created.rmdir()
@@ -306,6 +360,20 @@ class ResolutionStagingSession:
                 self._destination_by_replacement.clear()
                 self._relocations.clear()
         return cleanup_issues
+
+    def remove_created_modules_dir(self) -> list[tuple[Path, str]]:
+        """Remove ``apm_modules`` when this session created it and it is still empty."""
+        try:
+            if (
+                not self._modules_existed
+                and self._modules_dir.is_dir()
+                and not self._modules_dir.is_symlink()
+                and not any(self._modules_dir.iterdir())
+            ):
+                self._modules_dir.rmdir()
+        except OSError as exc:
+            return [(self._modules_dir, f"could not remove empty directory: {exc}")]
+        return []
 
     def _remove_empty_parents(self, path: Path) -> None:
         """Remove empty migration-created parents below ``apm_modules``."""

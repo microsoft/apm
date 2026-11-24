@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import sys
 import tarfile
 import zipfile
 
@@ -312,6 +314,18 @@ class TestArchiveLimitsApplyToEveryFormat:
             assert "duplicate" in str(refused.value)
         assert not (tmp_path / "out" / "apm.yml").exists()
 
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [("docs/caf\u00e9.md", "docs/cafe\u0301.md"), ("docs/cafe\u0301.md", "docs/caf\u00e9.md")],
+        ids=["nfc-then-nfd", "nfd-then-nfc"],
+    )
+    def test_unicode_equivalent_names_are_one_entry(self, fmt, first, second, tmp_path):
+        """#4972: NFC and NFD spellings of one name are a duplicate, never an overwrite."""
+        data = _build_archive(fmt, [(first, b"first\n"), (second, b"second\n")])
+        with pytest.raises(UnsafeTarballError, match="duplicate"):
+            _extract(fmt, data, tmp_path / "out")
+        assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
     def test_absolute_and_traversal_paths_are_refused(self, fmt, tmp_path):
         for name in ("/etc/passwd", "../escape.txt", "C:/win.txt"):
             data = _build_archive(fmt, [(name, b"x")])
@@ -390,6 +404,32 @@ def test_zip_special_file_modes_are_refused(mode, tmp_path):
     assert not (tmp_path / "out" / "apm.yml").exists()
 
 
+def test_zip_name_with_a_nul_is_refused_before_any_write(tmp_path):
+    """#4988: zipfile cuts a name at NUL; the name the archive stores is what is judged."""
+    data = _build_zip_entries([("apm.yml", b"name: x\n", 0), ("a.mdX.sh", b"x", 0)])
+    data = data.replace(b"a.mdX.sh", b"a.md\x00.sh")
+    with pytest.raises(UnsafeTarballError, match="null byte"):
+        extract_zip(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
+
+def test_tar_name_with_a_nul_is_refused_before_any_write(tmp_path):
+    """#4988: a pax path carrying a NUL is refused for tar.gz as well."""
+
+    def add(tar):
+        for name, content, path in (("apm.yml", b"name: x\n", None), ("a.md", b"x", "a.md\x00.sh")):
+            info = tarfile.TarInfo(name=name)
+            info.size = len(content)
+            if path:
+                info.pax_headers = {"path": path}
+            tar.addfile(info, io.BytesIO(content))
+
+    data = _build_tar_with(add)
+    with pytest.raises(UnsafeTarballError, match="null byte"):
+        extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
+
 @pytest.mark.parametrize("fmt", ["tar.gz", "zip"])
 @pytest.mark.parametrize("unsafe", ["../escape.txt", "/abs.txt"], ids=["traversal", "absolute"])
 def test_unsafe_entry_after_valid_ones_leaves_nothing_written(fmt, unsafe, tmp_path):
@@ -398,3 +438,39 @@ def test_unsafe_entry_after_valid_ones_leaves_nothing_written(fmt, unsafe, tmp_p
     with pytest.raises(UnsafeTarballError):
         _extract(fmt, data, tmp_path / "out")
     assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
+
+def _build_moded(fmt: str, name: str, content: bytes, mode: int) -> bytes:
+    if fmt == "zip":
+        return _build_zip_entries([(name, content, 0o100000 | mode)])
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo(name=name)
+        info.size = len(content)
+        info.mode = mode
+        tar.addfile(info, io.BytesIO(content))
+    return buf.getvalue()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits")
+@pytest.mark.parametrize("fmt", ["tar.gz", "zip"])
+@pytest.mark.parametrize(
+    ("mode", "written"),
+    [(0o4755, 0o755), (0o2755, 0o755), (0o1777, 0o755), (0o666, 0o644)],
+    ids=["setuid", "setgid", "sticky-world-writable", "group-other-write"],
+)
+def test_extracted_mode_keeps_only_owner_and_exec_bits(fmt, mode, written, tmp_path):
+    """#4974: setuid, setgid, sticky and group/other write bits are stripped."""
+    data = _build_moded(fmt, "tool.sh", b"#!/bin/sh\n", mode)
+    _extract(fmt, data, tmp_path / "out")
+    assert os.stat(tmp_path / "out" / "tool.sh").st_mode & 0o7777 == written
+
+
+@pytest.mark.parametrize("fmt", ["tar.gz", "zip"])
+def test_backslash_traversal_is_refused_before_any_write(fmt, tmp_path):
+    """#4974: backslash separators are normalized before the traversal check."""
+    data = _build_archive(fmt, [("apm.yml", b"name: x\n"), ("a\\..\\..\\x.md", b"x")])
+    with pytest.raises(UnsafeTarballError):
+        _extract(fmt, data, tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+    assert not (tmp_path / "x.md").exists()

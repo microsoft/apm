@@ -9,7 +9,6 @@ full pipeline decides. Oracle and cell contract in _engine_parity.py.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -44,13 +43,13 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.promise("P-INV-I1", "P-INV-I4"),
-    pytest.mark.skipif(sys.platform == "win32", reason="fast engines are POSIX-only"),
 ]
 
 
 @pytest.fixture
-def twin(lifecycle_template: World, tmp_path: Path) -> Twin:
-    return make_twin(lifecycle_template, tmp_path)
+def twin(lifecycle_template: World, _world_dir: Path) -> Twin:
+    # The short world root (Windows: git's '$GIT_DIR too big' workaround), both clones.
+    return make_twin(lifecycle_template, _world_dir.parent)
 
 
 @pytest.mark.parametrize(
@@ -148,11 +147,15 @@ def test_escaped_hidden_unicode_in_a_deployed_hook_declines(twin: Twin) -> None:
         f"{ORG}/p-exec", {".apm/hooks/session.json": text}, tag="v1.0.0"
     )
     twin.each(lambda w: _declare(w, *BOTH))
-    for argv in (("install",), ("approve", f"{ORG}/p-exec"), ("install",)):
-        twin.run(*argv)  # a scanner finding may block: parity holds either way
+    twin.run("install")  # a scanner finding may block: parity holds either way
+    twin.ok("approve", f"{ORG}/p-exec")  # the grant itself must succeed
+    twin.run("install")
     decision = twin.run("install")
     _assert_decision(decision, FULL)
-    assert "non-ASCII deployed content" in decision, decision
+    # Either guard may decline first: the content scan, or the deploy store refusing a
+    # record whose replayed body is not printable ASCII. Both decline before any write.
+    reasons = ("non-ASCII deployed content", "no matching package record")
+    assert any(reason in decision for reason in reasons), decision
 
 
 @NEEDS_ANY

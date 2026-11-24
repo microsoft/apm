@@ -655,6 +655,7 @@ def _missing_recorded_skill_subset_paths(
 
     from ..install.outcome import missing_requested_components
     from ..integration.skill_integrator import SkillIntegrator
+    from ..models.dependency.subsets import skill_subset_selects_all
     from ..models.validation import PackageType
 
     try:
@@ -668,6 +669,9 @@ def _missing_recorded_skill_subset_paths(
         available = frozenset()
     if available is None:
         available = frozenset()
+    if skill_subset_selects_all(subset):
+        # ``skills: ["*"]`` needs only one skill to be present.
+        return () if available else tuple(subset)
     return missing_requested_components(requested=subset, available=available)
 
 
@@ -943,8 +947,8 @@ def _kept_mcp_entries(
         name="kept-mcp-entries",
         passed=False,
         message=(
-            f"{len(details)} MCP finding(s): APM kept entries it wrote for servers it no "
-            "longer deploys because it cannot confirm them -- "
+            f"{len(details)} MCP finding(s): APM kept entries it wrote and no longer "
+            "deploys -- "
             f"{remediation.KEPT_MCP_ENTRIES.clause()}"
         ),
         remediations=(remediation.KEPT_MCP_ENTRIES,),
@@ -1333,6 +1337,7 @@ def _check_drift(
     verbose: bool = False,
     prepared_replay: PreparedCiAuditReplay | None = None,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> tuple[CheckResult, list[DriftFinding]]:
     """Replay the install in a scratch dir and diff against the project.
 
@@ -1375,6 +1380,7 @@ def _check_drift(
             cache_only=cache_only,
             user_scope=user_scope,
             policy_provider=policy_provider,
+            policy_fetch=policy_fetch,
         )
 
         try:
@@ -1532,8 +1538,15 @@ def _check_local_bundle_hooks(
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..install.errors import PolicyViolationError
     from ..install.local_bundle_canvas import unadmitted_bundle_canvas
-    from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
+    from ..install.local_bundle_hook_trust import (
+        bundle_hook_recheck_targets,
+        unadmitted_bundle_hooks,
+    )
     from ..security.executables import resolve_project_exec_allow_map
+
+    # Hooks a bundle registered for a target the manifest does not name are
+    # re-checked too: every hook target of the scope.
+    targets = bundle_hook_recheck_targets(targets, root=deployment_root, user_scope=user_scope)
 
     def allow_provider():
         return resolve_project_exec_allow_map(
@@ -1746,8 +1759,17 @@ def run_baseline_checks(
     no_policy: bool = False,
     policy_provider: Callable[[], Any] | None = None,
     policy_fetch: Callable[[], Any] | None = None,
+    content_integrity: bool = True,
+    mcp_config_consistency: bool = True,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
+
+    *content_integrity* ``False`` skips the deployed-content scan; only a caller
+    that has itself proven every deployed byte (hash and scan) may pass it.
+    *mcp_config_consistency* ``False`` skips the MCP config-consistency check
+    (Check 7; 7b and 7c still run); only a caller that then runs the install's
+    own MCP phase on the same state (which reconciles and records exactly as
+    install does, honoring personal approvals the audit view ignores) may pass it.
 
     When *fail_fast* is ``True`` (default), stops after the first
     failing check to skip expensive I/O (e.g. content integrity scan).
@@ -1885,14 +1907,17 @@ def run_baseline_checks(
     # Check 7: Config consistency (MCP); 7b: a differing same-name native MCP
     # entry --frozen refuses (#4477)
     if (
-        _run(
-            _check_config_consistency(
-                manifest,
-                lock,
-                prepared_replay=prepared_replay,
-                prepared_replay_error=prepared_replay_error,
-                replay_error_owner=replay_error_owner,
-                no_policy=no_policy,
+        (
+            mcp_config_consistency
+            and _run(
+                _check_config_consistency(
+                    manifest,
+                    lock,
+                    prepared_replay=prepared_replay,
+                    prepared_replay_error=prepared_replay_error,
+                    replay_error_owner=replay_error_owner,
+                    no_policy=no_policy,
+                )
             )
         )
         or _run(
@@ -1929,6 +1954,8 @@ def run_baseline_checks(
     if (
         _run(
             _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+            if content_integrity
+            else CheckResult(name="content-integrity", passed=True, message="proven by the caller")
         )
         or _run(
             _check_local_bundle_hooks(

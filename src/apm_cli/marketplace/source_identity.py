@@ -134,6 +134,26 @@ def same_marketplace_catalog(left: MarketplaceSource, right: MarketplaceSource) 
     )
 
 
+def catalog_pin_identity(source: MarketplaceSource) -> str:
+    """Return the identity a plugin ref pin is scoped to: the catalog, never its alias.
+
+    Equivalent spellings of one catalog (HTTPS or SSH, userinfo, default port,
+    a trailing ``.git``, host case) share an identity, as in
+    :func:`same_marketplace_catalog`. A local catalog is identified by its
+    resolved filesystem location and catalog path, and a hosted catalog file
+    by its URL, so neither can share pins with a Git-backed catalog.
+    """
+    if source.kind == "local":
+        return f"local:{os.path.realpath(source.local_path)}:{source.path}"
+    if source.kind == "url":
+        # A hosted file: only the authority is case-insensitive; path and query name it.
+        parts = urlsplit(marketplace_origin(source))
+        port = f":{parts.port}" if parts.port not in (None, 443) else ""
+        query = f"?{parts.query}" if parts.query else ""
+        return f"url:{(parts.hostname or '').lower()}{port}{parts.path}{query}"
+    return f"{_origin_comparison_key(marketplace_origin(source))}:{source.path}"
+
+
 def marketplace_policy_subject(origin_or_pattern: str) -> str:
     """Return the ``host/path`` key ``marketplace.allow`` matches an origin by.
 

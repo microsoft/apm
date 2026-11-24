@@ -6,6 +6,7 @@ Integrates .prompt.md files as commands for any target that supports the
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from pathlib import Path
@@ -69,6 +70,28 @@ _PRESERVED_COMMAND_KEYS_DISPLAY = frozenset(
         "input",
     }
 )
+
+# Extra keys kept only on the Claude target.  Claude Code documents that
+# ``.claude/commands/*.md`` accept the skill frontmatter except ``name``
+# and ``paths`` (https://code.claude.com/docs/en/skills#frontmatter-reference).
+# ``arguments`` is handled separately because ``input`` also maps to it.
+# ``hooks`` is withheld on purpose: frontmatter hooks are not routed through
+# APM's executable consent yet (see #3067 and #3227).
+_CLAUDE_NATIVE_COMMAND_KEYS = frozenset(
+    {
+        "when_to_use",
+        "disable-model-invocation",
+        "user-invocable",
+        "disallowed-tools",
+        "effort",
+        "context",
+        "agent",
+        "background",
+        "shell",
+    }
+)
+
+_CLAUDE_WITHHELD_COMMAND_KEYS = frozenset({"hooks"})
 
 
 def _is_valid_input_name(name: str) -> bool:
@@ -197,11 +220,15 @@ class CommandIntegrator(BaseIntegrator):
     def _transform_prompt_to_command(
         self,
         source: Path,
+        target_name: str | None = None,
     ) -> tuple[str, frontmatter.Post, list[str], list[str]]:
         """Transform a .prompt.md file into Claude command format.
 
         Args:
             source: Path to the .prompt.md file
+            target_name: Deployment target.  Only ``"claude"`` keeps the
+                Claude-native keys in ``_CLAUDE_NATIVE_COMMAND_KEYS`` and an
+                authored ``arguments``; other targets keep the shared subset.
 
         Returns:
             Tuple of (command_name, post, warnings, dropped_keys).
@@ -209,6 +236,23 @@ class CommandIntegrator(BaseIntegrator):
             command transformer does not preserve (e.g. ``author``,
             ``mcp``, ``parameters`` for Cursor-specific frontmatter).
         """
+        command_name, post, warnings, dropped_keys, _mapped = self._render_command_post(
+            source, target_name
+        )
+        return (command_name, post, warnings, dropped_keys)
+
+    def _render_command_post(
+        self,
+        source: Path,
+        target_name: str | None = None,
+    ) -> tuple[str, frontmatter.Post, list[str], list[str], list[str]]:
+        """Render *source* as a command post; see ``_transform_prompt_to_command``.
+
+        The fifth element lists the argument names mapped from ``input:``
+        (empty when no mapping happened, including when an authored Claude
+        ``arguments`` was kept verbatim).
+        """
+        is_claude = target_name == "claude"
         warnings: list[str] = []
 
         post = load_frontmatter(source)
@@ -240,6 +284,11 @@ class CommandIntegrator(BaseIntegrator):
         elif "argumentHint" in post.metadata:
             claude_metadata["argument-hint"] = post.metadata["argumentHint"]
 
+        if is_claude:
+            for key in sorted(_CLAUDE_NATIVE_COMMAND_KEYS):
+                if key in post.metadata:
+                    claude_metadata[key] = post.metadata[key]
+
         # Map APM 'input' to Claude 'arguments' and 'argument-hint'
         input_names, rejected_names = _extract_input_names(post.metadata.get("input"))
         if rejected_names:
@@ -252,6 +301,10 @@ class CommandIntegrator(BaseIntegrator):
             claude_metadata["arguments"] = input_names
             if "argument-hint" not in claude_metadata:
                 claude_metadata["argument-hint"] = " ".join(f"<{name}>" for name in input_names)
+        elif is_claude and "input" not in post.metadata and "arguments" in post.metadata:
+            # No 'input' at all: keep the author's native Claude 'arguments'.
+            # An authored 'input' (even empty or fully rejected) still wins.
+            claude_metadata["arguments"] = post.metadata["arguments"]
 
         # Convert APM input references to Claude $name placeholders
         content = post.content
@@ -269,9 +322,65 @@ class CommandIntegrator(BaseIntegrator):
         # Compute keys present in source frontmatter but not preserved by
         # the shared command transformer.  Surfaced by integrate_command()
         # via diagnostics so users see the lossy transform at install time.
-        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS)
+        preserved = _PRESERVED_COMMAND_KEYS
+        if is_claude:
+            preserved = preserved | _CLAUDE_NATIVE_COMMAND_KEYS
+            if "input" not in post.metadata:
+                preserved = preserved | {"arguments"}
+        dropped_keys = sorted(set(post.metadata.keys()) - preserved, key=str)
 
-        return (command_name, new_post, warnings, dropped_keys)
+        return (command_name, new_post, warnings, dropped_keys, input_names)
+
+    @staticmethod
+    def _warn_withheld_command_keys(
+        command_name: str,
+        withheld_keys: list[str],
+        diagnostics: DiagnosticCollector | None,
+        pkg_name: str,
+    ) -> None:
+        """Warn that Claude-native keys were withheld on purpose (inline ``hooks``)."""
+        if not withheld_keys or diagnostics is None:
+            return
+        diagnostics.warn(
+            message=(
+                f"Claude command {command_name}: frontmatter "
+                f"{', '.join(withheld_keys)} withheld. Claude Code supports "
+                f"inline hooks on commands, but APM does not yet run them "
+                f"through executable consent, so the command was deployed "
+                f"without them and may not behave as authored."
+            ),
+            package=pkg_name,
+        )
+
+    def _warn_retained_withheld_keys(
+        self, source: Path, target_name: str, diagnostics: Any, pkg_name: str
+    ) -> None:
+        """Repeat the withheld-keys warning when the rendered command is retained.
+
+        Adopted and receipted-unchanged commands skip ``integrate_command()``,
+        so without this a source that only gained ``hooks:`` would keep the
+        hook-free command silently.  Called only for files identical to the
+        render (``on_identical``); planning passes stay quiet.
+        """
+        if target_name != "claude" or diagnostics is None or self._overwrite_plan is not None:
+            return
+        try:
+            command_name, _post, _warnings, dropped_keys = self._transform_prompt_to_command(
+                source, target_name
+            )
+        except (yaml.YAMLError, OSError, ValueError) as exc:
+            # Kept by a raw-bytes match; report it per file, never abort the run.
+            # ValueError covers UnicodeDecodeError on a non-UTF-8 source.
+            diagnostics.warn(
+                message=(
+                    f"Command {source.name} left unchanged: unreadable, malformed "
+                    f"or over-budget frontmatter ({exc})."
+                ),
+                package=pkg_name,
+            )
+            return
+        withheld = [k for k in dropped_keys if k in _CLAUDE_WITHHELD_COMMAND_KEYS]
+        self._warn_withheld_command_keys(command_name, withheld, diagnostics, pkg_name)
 
     def integrate_command(
         self,
@@ -322,7 +431,9 @@ class CommandIntegrator(BaseIntegrator):
             decide whether to surface the one-shot passthrough notice.
         """
         # Transform to command format
-        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(source)
+        command_name, post, warnings, dropped_keys, mapped_args = self._render_command_post(
+            source, target_name
+        )
 
         # Resolve context links in content
         post.content, links_resolved = self.resolve_links(post.content, source, target)
@@ -337,22 +448,31 @@ class CommandIntegrator(BaseIntegrator):
         # claude_command transformer preserves only a common subset of
         # frontmatter.  A key the target format cannot carry is expected
         # behaviour, not a problem the user must act on, so it is a verbose
-        # note rather than a [!] warning (#4182).
-        if dropped_keys and diagnostics is not None and getattr(diagnostics, "verbose", False):
-            preserved_list = ", ".join(sorted(_PRESERVED_COMMAND_KEYS_DISPLAY))
+        # note rather than a [!] warning (#4182).  Claude-native keys that
+        # APM withholds on purpose (inline ``hooks``) change how the command
+        # behaves, so they stay a warning.
+        withheld_keys: list[str] = []
+        unsupported_keys = dropped_keys
+        display_keys = _PRESERVED_COMMAND_KEYS_DISPLAY
+        if target_name == "claude":
+            withheld_keys = [k for k in dropped_keys if k in _CLAUDE_WITHHELD_COMMAND_KEYS]
+            unsupported_keys = [k for k in dropped_keys if k not in _CLAUDE_WITHHELD_COMMAND_KEYS]
+            display_keys = display_keys | _CLAUDE_NATIVE_COMMAND_KEYS | {"arguments"}
+        if unsupported_keys and diagnostics is not None and getattr(diagnostics, "verbose", False):
+            preserved_list = ", ".join(sorted(display_keys))
             diagnostics.info(
                 message=(
                     f"{target_name.capitalize()} command {command_name}: "
                     f"frontmatter keys not supported for {target_name} commands "
-                    f"and were dropped: {', '.join(dropped_keys)}. "
+                    f"and were dropped: {', '.join(unsupported_keys)}. "
                     f"Supported keys: {preserved_list}."
                 ),
                 package=pkg_name,
             )
+        self._warn_withheld_command_keys(command_name, withheld_keys, diagnostics, pkg_name)
 
         # Surface install-time info when input -> arguments mapping happened so
         # users aren't surprised by content that differs from the source package.
-        mapped_args = post.metadata.get("arguments") if post.metadata else None
         if mapped_args and diagnostics is not None:
             diagnostics.info(
                 message=(
@@ -587,7 +707,18 @@ class CommandIntegrator(BaseIntegrator):
                 force,
                 diagnostics,
                 target_paths,
-                expected_content=self._rendered_command(prompt_file, target_path, mapping),
+                expected_content=self._rendered_command(
+                    prompt_file, target_path, mapping, target.name
+                ),
+                # Only a file holding the hook-free render was deployed without
+                # hooks; a kept user file or legacy adopt may carry its own.
+                on_identical=functools.partial(
+                    self._warn_retained_withheld_keys,
+                    prompt_file,
+                    target.name,
+                    diagnostics,
+                    pkg_name,
+                ),
             )
             if skip:
                 if adopted:
@@ -725,7 +856,9 @@ class CommandIntegrator(BaseIntegrator):
     # Gemini CLI Commands (.toml format)
     # ------------------------------------------------------------------
 
-    def _rendered_command(self, source: Path, target: Path, mapping: Any) -> str | None:
+    def _rendered_command(
+        self, source: Path, target: Path, mapping: Any, target_name: str | None = None
+    ) -> str | None:
         """Return the text this integrator deploys for *source*, for the adopt check.
 
         Commands are format-transformed, so an existing file is compared with
@@ -737,7 +870,9 @@ class CommandIntegrator(BaseIntegrator):
         try:
             if mapping.format_id == "gemini_command":
                 return self._gemini_command_text(source)
-            _name, post, _warnings, _dropped = self._transform_prompt_to_command(source)
+            _name, post, _warnings, _dropped = self._transform_prompt_to_command(
+                source, target_name
+            )
             post.content, _links = self.resolve_links(post.content, source, target)
             return frontmatter.dumps(post)
         except Exception:
