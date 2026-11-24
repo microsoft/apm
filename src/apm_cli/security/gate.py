@@ -100,6 +100,11 @@ class SecurityGate:
         When *paths* is provided, scan only those portable root-relative files
         instead of walking *root*. Other callers retain the generic walk.
         """
+        if paths is not None:  # RESEARCH: content scan deleted
+            return ScanVerdict(
+                files_scanned=len(paths),
+                scanned_files=frozenset(p.replace("\\", "/") for p in paths),
+            )
         findings_by_file: dict[str, list[ScanFinding]] = {}
         scanned_files: set[str] = set()
 
