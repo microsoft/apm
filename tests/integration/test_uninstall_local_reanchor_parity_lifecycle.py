@@ -551,7 +551,8 @@ def test_an_nfd_variant_link_into_the_moving_copy_refuses(
     )
     deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
     assert f"apm_modules/_local/{nfd})" in deployed, ascii(deployed)
-    assert any(p.name == nfc for p in (world.project / "apm_modules/_local").iterdir())
+    # Checked through the filesystem, not the stored name: HFS+ stores it in NFD.
+    assert (world.project / "apm_modules/_local" / nfc).is_dir()
 
     _assert_refused_unchanged(world, nfc)
 
