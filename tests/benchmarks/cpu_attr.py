@@ -325,6 +325,17 @@ def _report(out: str, wall: float, exit_code) -> None:
         "gc_collections": {str(g): v[0] for g, v in sorted(_gc.items())},
         "gc_seconds": {str(g): round(v[1], 4) for g, v in sorted(_gc.items())},
         "gc_threshold": list(__import__("gc").get_threshold()),
+        "yaml_calls_by_chain": top(_yaml_calls, 120),
+        "yaml_calls_total": {
+            n: sum(v for k, v in _yaml_calls.items() if k.startswith(n + " "))
+            for n in (
+                "yaml_to_str",
+                "load_yaml_str",
+                "load_yaml",
+                "dump_yaml",
+                "dump_yaml_roundtrip",
+            )
+        },
         "distinct_write_paths_by_kind": {k: len(v) for k, v in sorted(_write_paths.items())},
     }
     with open(out, "w", encoding="utf-8") as handle:
@@ -398,6 +409,41 @@ def _count_ops() -> None:
 
 
 _ROOTS: list = []
+_yaml_calls = collections.Counter()
+
+
+def _chain(start, depth: int = 4) -> str:
+    """The innermost *depth* apm_cli frames, innermost first."""
+    frame, found, hops = start, [], 0
+    while frame is not None and hops < 80 and len(found) < depth:
+        where = _where(frame.f_code)
+        if where.startswith("apm_cli/"):
+            found.append(f"{where.rsplit('/', 1)[-1]}:{frame.f_code.co_name}")
+        frame, hops = frame.f_back, hops + 1
+    return " <- ".join(found) or "<no apm frame>"
+
+
+def _count_yaml() -> None:
+    """Count yaml_io serialize/parse calls by caller chain (calls, not CPU)."""
+    try:
+        from apm_cli.utils import yaml_io
+    except Exception:
+        return
+    for name in ("yaml_to_str", "load_yaml_str", "load_yaml", "dump_yaml", "dump_yaml_roundtrip"):
+        original = getattr(yaml_io, name, None)
+        if original is None:
+            continue
+
+        def make(original=original, name=name):
+            def counted(*args, **kwargs):
+                _yaml_calls[f"{name} <- {_chain(sys._getframe(1))}"] += 1
+                return original(*args, **kwargs)
+
+            return counted
+
+        setattr(yaml_io, name, make())
+
+
 _gc: dict = {}
 _gc_start: list = [0.0]
 
@@ -526,6 +572,7 @@ def main() -> int:
     _count_realpath()
     _count_ops()
     _count_writes()
+    _count_yaml()
     __import__("gc").callbacks.append(_gc_callback)
     args = sys.argv[1:]
     out = args[args.index("-o") + 1]
