@@ -36,7 +36,8 @@ pytestmark = [
 ]
 
 _FIXED_SEEDS = tuple(range(200))
-_RUN_SEED = random.SystemRandom().randrange(1_000_000, 2**31)
+_CHUNK = 25
+_CHUNKS = len(_FIXED_SEEDS) // _CHUNK
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 
 
@@ -153,9 +154,15 @@ def _rows(project: Path) -> list[dict]:
     return list(lock.get("dependencies") or [])
 
 
-def _check_seed(seed: int, root: Path) -> str | None:
-    """None when prune kept every declared package, "skipped" when install refused
-    the graph, else the failure with its seed first."""
+def _check_seed(seed: int, root: Path) -> tuple[str | None, bool | None]:
+    """``(verdict, dropped root removed)``.
+
+    The verdict is None when prune kept every declared package, "skipped"
+    when install refused the graph, else the failure with its seed first.
+    The second value is None when a fail-closed rule is meant to keep the
+    dropped root (the planted chain, a promoted survivor, or a root another
+    survivor declares), else whether prune removed it.
+    """
     graph = _generate(seed)
     rng = random.Random(seed ^ 0x5EED)  # noqa: S311 -- reproducible test graphs
     project = root / "proj"
@@ -168,7 +175,7 @@ def _check_seed(seed: int, root: Path) -> str | None:
     _write_project(project, graph.roots)
     installed = _run(project, "install")
     if installed.exit_code != 0:
-        return "skipped"  # install's own limits on this graph are not prune's promise
+        return "skipped", None  # install's own limits on this graph are not prune's promise
     dropped = graph.motif[0] if graph.motif else rng.choice(graph.roots)
     graph.roots.remove(dropped)
     _write_project(project, graph.roots)
@@ -181,6 +188,12 @@ def _check_seed(seed: int, root: Path) -> str | None:
         parent = rng.choice(edited)
         graph.edges[parent].pop(rng.randrange(len(graph.edges[parent])))
         _write_package(vendor, graph, parent)
+    # Sometimes apm.yml now declares a transitive survivor directly.
+    promotable = sorted(_needed(graph) - set(graph.roots))
+    promoted = bool(promotable) and rng.random() < 0.3
+    if promoted:
+        graph.roots.append(rng.choice(promotable))
+        _write_project(project, graph.roots)
     clear_apm_yml_cache()
 
     pruned = _run(project, "prune")
@@ -189,40 +202,60 @@ def _check_seed(seed: int, root: Path) -> str | None:
     rows = _rows(project)
     named = frozenset(row.get("name") for row in rows if f"Retained {row['repo_url']}:" in output)
     needed = _needed(graph, named)
+    removed = (
+        None
+        if graph.motif or promoted or dropped in _needed(graph)
+        else not any(row.get("name") == dropped for row in rows)
+    )
     for name in sorted(needed):
         if not any(row.get("name") == name for row in rows):
-            return f"seed {seed}: lock row of declared {name} deleted; {output}"
+            return f"seed {seed}: lock row of declared {name} deleted; {output}", removed
         if not (project / ".claude" / "skills" / f"{name}-skill" / "SKILL.md").is_file():
-            return f"seed {seed}: deployed skill of declared {name} deleted; {output}"
+            return f"seed {seed}: deployed skill of declared {name} deleted; {output}", removed
     if pruned.exit_code != 0:
-        return f"seed {seed}: prune exited {pruned.exit_code}; {output}"
+        return f"seed {seed}: prune exited {pruned.exit_code}; {output}", removed
     for row in rows:
         if row.get("name") not in needed:
-            return f"seed {seed}: {row['repo_url']} kept without a name; {output}"
-    return None
+            return f"seed {seed}: {row['repo_url']} kept without a name; {output}", removed
+    return None, removed
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+@pytest.mark.parametrize("chunk", range(_CHUNKS))
 def test_prune_never_deletes_a_declared_package_on_generated_graphs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chunk: int
 ) -> None:
+    """One chunk of the fixed seeds; the last chunk adds one random seed, printed."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
-    print(f"generated-graph run seed: {_RUN_SEED}")
+    seeds = list(_FIXED_SEEDS[chunk * _CHUNK : (chunk + 1) * _CHUNK])
+    if chunk == _CHUNKS - 1:
+        run_seed = random.SystemRandom().randrange(1_000_000, 2**31)
+        print(f"generated-graph run seed: {run_seed}")
+        seeds.append(run_seed)
     failures = []
-    skipped = 0
-    for seed in (*_FIXED_SEEDS, _RUN_SEED):
+    skipped = removed = eligible = 0
+    for seed in seeds:
         root = tmp_path / f"s{seed}"
         root.mkdir()
-        failure = _check_seed(seed, root)
-        if failure == "skipped":
+        verdict, dropped_removed = _check_seed(seed, root)
+        if verdict == "skipped":
             skipped += 1
-        elif failure is not None:
-            failures.append(failure[:1500])
+            continue
+        if dropped_removed is not None:
+            eligible += 1
+            removed += dropped_removed
+        if verdict is not None:
+            failures.append(verdict[:1500])
     monkeypatch.chdir(tmp_path)
-    print(f"generated graphs: {len(_FIXED_SEEDS) + 1}, install refused: {skipped}")
+    print(f"seeds: {len(seeds)}, install refused: {skipped}, root removed: {removed}/{eligible}")
 
     assert not failures, f"{len(failures)} failing seed(s):\n" + "\n".join(failures)
     # Most graphs must reach prune, or the cell proves nothing.
-    assert skipped <= len(_FIXED_SEEDS) // 4, skipped
+    assert skipped <= len(seeds) // 4, skipped
+    # Keeping and naming everything would satisfy the oracle: where no
+    # fail-closed rule keeps it, prune must remove the dropped root in at
+    # least half of those graphs, and those graphs are not a token few.
+    assert eligible >= len(seeds) // 5, eligible
+    assert removed * 2 >= eligible, (removed, eligible)
