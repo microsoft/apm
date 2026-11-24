@@ -445,6 +445,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
+        if _prim_name in {"hooks"}:
+            continue  # RESEARCH: family deleted
         # Executable approval gate: skip hooks if not approved, and retire
         # the hooks this package deployed before it was gated (#3924).
         if _prim_name == "hooks" and not _hooks_approved:
