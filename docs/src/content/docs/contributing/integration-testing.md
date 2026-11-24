@@ -83,6 +83,13 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: one `ci-runtime.yml` invocation on schedule or manual dispatch that fails the workflow on error (`continue-on-error` is not set); never pull requests or the generic integration script
 - **Selection mechanism**: the explicit test node with `-m live`; collection gates remain owned by `tests/integration/conftest.py`
 
+### 5. **Real Harness** (nightly, manual, native-plugin PRs; not required)
+- **Location**: `scripts/real_harness/probe.py`, `.github/workflows/real-harness.yml`; harness pins are npm lockfiles under `scripts/real_harness/npm/`
+- **Purpose**: Prove that pinned Claude Code and Copilot CLI releases actually load a plugin APM installs natively, not only that the files exist
+- **Cells**: harness x environment (TUI in tmux, git worktree, `-p`) x scope (user, project), plus Claude diagnostic cells (second session, absolute path, no folder trust, native `claude plugin install`, worktree branches)
+- **Evidence**: the plugin's SessionStart hook marker, its stdio MCP server's JSON-RPC log, the skill in the `claude -p` init event or `copilot skill list`. Claude never reaches a model; Copilot sessions need the `real-harness` environment token, available only to schedule and dispatch runs on main, so those cells report BLOCKED elsewhere
+- **Verdicts**: `scripts/real_harness/expected.json` records each cell's expected verdict, known bugs included. `probe.py check` fails on any divergence except BLOCKED; a fix flips its cells
+
 ## Running Tests Locally
 
 ### Exact-head HOME-alias lifecycle qualification
@@ -670,10 +677,17 @@ release qualification or change required checks.
 ### Tier 1 and Tier 2 on every push to main
 
 `main-push-gate.yml` runs the whole PR gate suite (`ci.yml`, including every
-Lifecycle Smoke shard) and the full integration suite (`ci-integration.yml`,
-every shard) on each push to `main`. Its `main-push-gate` job fails the run
-when any tier job fails, so a red `main` shows on the commit. It is
-not a required check and never saves caches to the `main` scope.
+Lifecycle Smoke shard), the full integration suite (`ci-integration.yml`,
+every shard) and the lifecycle security cells (`lifecycle-security.yml`) on
+each push to `main`. Its `main-push-gate` job fails the run when any tier job
+fails, so a red `main` shows on the commit. It is not a required check and
+never saves caches to the `main` scope.
+
+`lifecycle-security.yml` runs `tests/lifecycle/security` on Linux and then
+requires a receipt from every security witness. Pull requests run it when they
+touch `src/apm_cli/`, `tests/lifecycle/`, the receipt ratchet, `pyproject.toml`
+or `uv.lock`; it is not a required check. The security cells run on Linux
+only; Windows and macOS run only the nightly journeys.
 
 ### Merge-train proof
 

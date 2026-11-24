@@ -318,7 +318,7 @@ class TestDownloadSubdirectoryPackageErrors:
     def test_subdir_not_found_raises_runtime_error(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill", reference=None)
         sparse_ok = False
 
         def fake_sparse(*args: Any, **kwargs: Any) -> bool:
@@ -349,7 +349,7 @@ class TestDownloadSubdirectoryPackageErrors:
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
         """Progress updates are sent when progress_obj and task_id are provided."""
-        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill", reference=None)
         progress_obj = MagicMock()
 
         import contextlib
@@ -371,7 +371,7 @@ class TestDownloadSubdirectoryPackageErrors:
     def test_permission_error_converted_to_runtime(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill", reference=None)
         exc = PermissionError(13, "Access denied")
         exc.filename = str(tmp_path / "some-file")
 
@@ -386,7 +386,7 @@ class TestDownloadSubdirectoryPackageErrors:
     def test_oserror_13_in_temp_converted_to_runtime(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill", reference=None)
         exc = OSError(13, "Permission denied")
         exc.errno = 13
         exc.filename = str(tmp_path / "some-file")
@@ -402,7 +402,7 @@ class TestDownloadSubdirectoryPackageErrors:
     def test_oserror_non_13_re_raised(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill", reference=None)
         exc = OSError(5, "Some other OS error")
         exc.errno = 5
         exc.filename = "/other/path"
@@ -419,7 +419,7 @@ class TestDownloadSubdirectoryPackageErrors:
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
         """When shared cache hits, _ws2_resolved_commit should skip Repo() open."""
-        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill", reference=None)
         sha = "a" * 40
 
         # Build a source subdir that looks like a real APM package
@@ -727,7 +727,7 @@ class TestDownloadPackage:
     def test_regular_package_clones_and_validates(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep()
+        dep = _make_dep(reference=None)  # the default-branch clone path
         resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
         repo_mock = MagicMock()
         validation = MagicMock()
@@ -781,7 +781,7 @@ class TestDownloadPackage:
     ) -> None:
         from git.exc import GitCommandError
 
-        dep = _make_dep()
+        dep = _make_dep(reference=None)  # the default-branch clone path
         resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
 
         with (
@@ -907,7 +907,7 @@ class TestDownloadPackage:
         from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
         from apm_cli.models.validation import PackageType
 
-        dep = _make_dep()
+        dep = _make_dep(reference=None)  # the default-branch clone path
         resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
         target = tmp_path / "pkg"
 
@@ -945,7 +945,7 @@ class TestDownloadPackage:
     ) -> None:
         from apm_cli.models.validation import PackageType
 
-        dep = _make_dep()
+        dep = _make_dep(reference=None)  # the default-branch clone path
         resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
         target = tmp_path / "pkg"
 
@@ -1063,7 +1063,7 @@ class TestPersistentGitCacheInDownloadPackage:
     def test_cache_exception_falls_through_to_clone(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep()
+        dep = _make_dep(reference=None)  # the default-branch clone path
         resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
 
         cache = MagicMock()

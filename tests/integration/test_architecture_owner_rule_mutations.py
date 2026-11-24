@@ -1638,6 +1638,27 @@ def test_executable_approval_cannot_leave_the_trust_owners(path: str, old: str, 
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_frontmatter_fences_stay_in_the_yaml_owner() -> None:
+    """Fence detection outside utils/yaml_io.py is a second frontmatter owner (#5248)."""
+    rule_id = "contracts-tooling-frontmatter-yaml"
+    path = "src/apm_cli/install/local_bundle_paths.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "def markdown_declares_hooks("
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old,
+        "def _fence(text):\n"
+        "    from frontmatter.default_handlers import YAMLHandler\n\n"
+        "    return YAMLHandler.FM_BOUNDARY.match(text)\n\n\n" + old,
+    )
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @pytest.mark.parametrize(
     ("path", "old", "new"),
     [
@@ -3382,6 +3403,37 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger, kept_paths)\n",
         new="",
         intent="Uninstall stops refusing out-of-project paths before any change.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-consent-kept-link-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/integration/cleanup.py",
+        old="if not _consent_keeps_link(physical, lockfile_consent=self._lockfile_consent):",
+        new="if not (self._lockfile_consent and physical.is_symlink()):",
+        intent="Cleanup's consent link rule forks from the one the read-only hook decision asks.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-hook-sync-consent-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/integration/cleanup.py",
+        old=(
+            "        and not _consent_keeps_link(project_root / rel_path, "
+            "lockfile_consent=lockfile_consent)\n"
+        ),
+        new="",
+        intent="The read-only hook decision drops the consent link rule the hook sync applies.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-uninstall-preflight-hook-sync-route",
+        rule_id="install-deployment-uninstall-preflight",
+        path="src/apm_cli/policy/allowlist_remedy.py",
+        old=(
+            "return hook_sync_unlinks(\n"
+            "                    path, root, recorded_hash=hashes.get(path), lockfile_consent=False\n"
+            "                )"
+        ),
+        new="return not hashes.get(path)",
+        intent="Audit's advice re-derives the hook sync's link decision beside its owner.",
     ),
     MutationCase(
         guard_id="install-deployment-uninstall-reachability",
