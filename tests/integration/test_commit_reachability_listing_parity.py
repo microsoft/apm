@@ -16,6 +16,7 @@ import pytest
 
 from apm_cli.cache.commit_reachability import (
     CommitNotReachableError,
+    _marker,
     _Unverified,
     open_verdict_stage,
     require_reachable_commit,
@@ -75,7 +76,7 @@ def _run(tmp_path: Path, mode: str, cases, env, monkeypatch) -> tuple[dict, dict
     listings = dict(stage.listings)
     stage.commit()
     for name, (url, sha) in cases.items():
-        marker = tmp_path / mode / name / "reachability" / cache_shard_key(url) / "verified" / sha
+        marker = _marker(tmp_path / mode / name, cache_shard_key(url), sha)
         markers[name] = marker.exists()
     return verdicts, markers, listings
 
@@ -167,3 +168,43 @@ def test_ref_tips_agree_with_git_on_a_real_no_tags_clone(tmp_path: Path) -> None
     assert _is_ref_tip(clone, first) is True
     assert _is_ref_tip(clone, second) is False
     assert _is_ref_tip(clone, tag_object) is False
+
+
+def test_a_recheck_after_a_failure_lists_the_origin_again(tmp_path, monkeypatch):
+    """The attempt memo never answers a post-failure recheck: the ref may have moved."""
+    import subprocess as sp
+
+    from apm_cli.cache.commit_reachability import (
+        AdmittedCommitGoneError,
+        _branch_and_tag_records,
+        _exact_tip,
+        _fresh_listing,
+        admitted_tip_name,
+    )
+
+    admitted, moved = "a" * 40, "b" * 40
+    tips = [admitted]
+    calls: list[str] = []
+
+    def _listing(url, *_patterns, **_kwargs):
+        calls.append(url)
+        return sp.CompletedProcess(["git"], 0, f"{tips[0]}\trefs/heads/main\n", "")
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _listing)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    url = "https://example.invalid/acme/pkg"
+    stage = open_verdict_stage()
+    try:
+        assert _branch_and_tag_records(url, None) == [(admitted, "refs/heads/main")]
+        assert _branch_and_tag_records(url, None) == [(admitted, "refs/heads/main")]
+        assert len(calls) == 1  # one listing per attempt
+        tips[0] = moved
+
+        with pytest.raises(AdmittedCommitGoneError):
+            admitted_tip_name(url, "main", admitted, None)
+        with _fresh_listing():
+            assert _exact_tip(url, "main", None) == moved
+        assert _exact_tip(url, "main", None) == admitted  # the attempt's own reads stay put
+        assert len(calls) == 3
+    finally:
+        stage.discard()

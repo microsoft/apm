@@ -886,4 +886,4 @@ def test_a_default_branch_head_aimed_outside_refs_heads_fails_closed(
     assert _UNREACHABLE not in output
     assert _installed(project) == []
     assert not (project / "apm.lock.yaml").exists()
-    assert not list((tmp_path / "cache").rglob("verified/*"))
+    assert not list((tmp_path / "cache").rglob("verified-v2/*"))

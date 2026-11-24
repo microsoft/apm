@@ -138,10 +138,23 @@ def _linked_dirs(path: Path, depth: int = 3) -> bool:
     return any(part.is_symlink() for part in list(path.parents)[:depth])
 
 
+_FRESH_LISTING = contextvars.ContextVar("apm_fresh_listing", default=False)
+
+
+@contextlib.contextmanager
+def _fresh_listing():
+    """Ask the origin again inside: a recheck after a failure needs its state now."""
+    token = _FRESH_LISTING.set(True)
+    try:
+        yield
+    finally:
+        _FRESH_LISTING.reset(token)
+
+
 def _attempt_listings() -> dict | None:
-    """The open install attempt's listing memo; None outside an attempt (no reuse)."""
+    """The open install attempt's listing memo; None outside an attempt or when fresh."""
     stage = _stage()
-    return None if stage is None else stage.listings
+    return None if stage is None or _FRESH_LISTING.get() else stage.listings
 
 
 def _write_marker(marker: Path, canonical: str) -> None:
@@ -591,7 +604,8 @@ def admitted_tip_name(url: str, ref: str, admitted: str, env) -> str | None:
         AdmittedCommitGoneError: *ref* no longer points at *admitted*.
     """
     try:
-        records = _branch_and_tag_records(url, env)
+        with _fresh_listing():
+            records = _branch_and_tag_records(url, env)
     except _Unverified:
         return None
     from ..deps.git_remote_ops import exact_branch_or_tag_sha
@@ -636,13 +650,14 @@ def _lost_admitted_commit(downloader, repo_ref, admitted) -> tuple[str, str, str
         from ..models.dependency.reference import DependencyReference
 
         dep_ref = DependencyReference.parse(repo_ref) if isinstance(repo_ref, str) else repo_ref
-        if _reachable_now(downloader, dep_ref, commit) is not False:
-            return None
-        found: list[str] = []
-        with contextlib.suppress(CommitNotReachableError):
-            _at_origin(
-                downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env))
-            )
+        with _fresh_listing():
+            if _reachable_now(downloader, dep_ref, commit) is not False:
+                return None
+            found: list[str] = []
+            with contextlib.suppress(CommitNotReachableError):
+                _at_origin(
+                    downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env))
+                )
     except Exception:
         return None
     return ref, commit, found[0][:12] if found else "no branch or tag"
