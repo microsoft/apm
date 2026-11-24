@@ -323,3 +323,29 @@ def test_dotdot_directories_are_checked_in_full_and_not_cached(tmp_path: Path, m
     full_checks = [(".", "a/b"), (".", "a/b/../b"), (".", "a/b/../b")]
     assert checked == full_checks + full_checks
     assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_differently_cased_root_aliases_are_resolved_separately(tmp_path: Path):
+    outside = tmp_path / "outside"
+    (outside / "elsewhere").mkdir(parents=True)
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".github").symlink_to(linked, target_is_directory=True)
+    try:
+        (tmp_path / "alias").symlink_to(outside, target_is_directory=True)
+        (tmp_path / "ALIAS").symlink_to(project, target_is_directory=True)
+    except FileExistsError:
+        pytest.skip("filesystem folds differently cased names")
+    outputs = {
+        tmp_path / "alias" / "elsewhere" / "x.md": "# x\n",
+        tmp_path / "ALIAS" / ".github" / "y.md": "# y\n",
+    }
+
+    with pytest.raises(OSError, match=r"symlinked path component: \.github/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert list(linked.iterdir()) == []
+    assert list((outside / "elsewhere").iterdir()) == []
