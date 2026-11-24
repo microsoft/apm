@@ -93,6 +93,14 @@ def _tree(root: Path) -> dict[str, bytes]:
     }
 
 
+def _assert_lands_like_git(fast: Path, slow: Path, sha: str, url: str) -> None:
+    """The in-process checkout on disk holds git's bytes and content hash, and it engaged."""
+    assert inprocess_verified(fast, sha, use="links"), url
+    assert not inprocess_verified(slow, sha, use="links"), url
+    assert _tree(fast) == _tree(slow), url
+    assert compute_package_hash(fast) == compute_package_hash(slow), url
+
+
 def test_in_process_engages_and_lands_the_bytes_and_hash_git_lands(windows_like_world, tmp_path):
     fixture, world_env = windows_like_world
     env = AuthResolver.build_public_github_anonymous_git_env(base_env=world_env)
@@ -105,10 +113,7 @@ def test_in_process_engages_and_lands_the_bytes_and_hash_git_lands(windows_like_
         fast = in_process.get_checkout(url, sha, locked_sha=sha, env=env)
         slow = via_git.get_checkout(url, sha, locked_sha=sha, env=forced)
 
-        assert inprocess_verified(fast, sha, use="links"), url
-        assert not inprocess_verified(slow, sha, use="links"), url
-        assert _tree(fast) == _tree(slow), url
-        assert compute_package_hash(fast) == compute_package_hash(slow), url
+        _assert_lands_like_git(fast, slow, sha, url)
     assert len(pins) == len(fixture.packages) == 10
 
 
@@ -126,5 +131,10 @@ def test_the_kept_network_env_equals_a_fresh_one(windows_like_world):
         first = inprocess_fetch._network_env(env)
         kept = inprocess_fetch._network_env(env)
 
-    assert first == fresh
-    assert kept == fresh
+    _assert_git_children_get(fresh, first, kept)
+
+
+def _assert_git_children_get(fresh: dict, *kept: dict) -> None:
+    """Every env the memo hands to a git child equals the one a fresh probe builds."""
+    for env in kept:
+        assert env == fresh

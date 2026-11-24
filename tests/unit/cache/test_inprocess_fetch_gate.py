@@ -168,11 +168,14 @@ def test_a_401_challenge_falls_back_without_sending_credentials(monkeypatch) -> 
         sent.update(kwargs)
         yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
 
+    import certifi
+
     monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
-    monkeypatch.setattr(fetch, "_session", lambda trust: object())
 
     with pytest.raises(fetch._Refuse, match="auth challenge"):
-        fetch._post("https://github.com/o/r/git-upload-pack", None, ("os", ""), b"0000")
+        fetch._post(
+            "https://github.com/o/r/git-upload-pack", None, ("file", certifi.where()), b"0000"
+        )
 
     assert "Authorization" not in sent["headers"]
     assert sent["ambient_credentials"] is False
@@ -210,8 +213,13 @@ def frozen_world(tmp_path: Path, monkeypatch):
     config.write_text("[user]\n\tname = a\n", encoding="utf-8")
     built, fake = _frozen_from(config)
     monkeypatch.setattr("apm_cli.utils.git_env.git_network_env", fake)
-    monkeypatch.setattr(fetch, "_config_paths", lambda env: (str(config),))
-    monkeypatch.setattr(fetch, "_binary_identity", lambda git: (git, 1, 2, 3, 4))
+    import sys
+
+    # Collaborators only: the config files git reports, and a stable "git" binary to stat.
+    monkeypatch.setattr(
+        "apm_cli.utils.git_config_memo.git_config_paths", lambda env: (str(config),)
+    )
+    monkeypatch.setattr("apm_cli.utils.git_env.get_git_executable", lambda: sys.executable)
     return config, built
 
 
