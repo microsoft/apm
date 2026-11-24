@@ -259,6 +259,9 @@ def receipts(world: World, *, history: bool = True) -> list[object]:
             data = json.loads(path.read_text(encoding="utf-8"))
             for key in _RECEIPT_BINDING:
                 data.pop(key, None)
+            for row in data.get("files", []) if isinstance(data.get("files"), list) else ():
+                if isinstance(row, dict):
+                    row.pop("identity", None)  # a config record's device and inode (#5189)
             if not history:
                 data.pop("history", None)
             # The checkout-keyed file name is identity; its directory (mcp/ or top) is not:

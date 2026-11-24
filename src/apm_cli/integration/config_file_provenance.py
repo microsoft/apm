@@ -189,6 +189,19 @@ class _Store:
                     continue
         return key, None
 
+    def identity_recorded(self, path: Path) -> bool:
+        """Whether any record carries *path*'s device and inode (#5189).
+
+        Consulted only on a lookup miss, and only ever to keep a file: an inode
+        reused by another file then errs toward keeping it.
+        """
+        try:
+            info = os.stat(path)
+        except OSError:
+            return False
+        identity = [info.st_dev, info.st_ino]
+        return any(row.get("identity") == identity for row in self.files.values())
+
     def local(self) -> bool:
         """(c): the store is reached through no link below ``$APM_HOME`` and no ancestor
         of it, as spelled or as resolved, is a VCS working tree."""
@@ -334,7 +347,14 @@ def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None)
     if origin is Origin.LEGACY and store.lookup(path)[1] is None and not _holds_entries(after):
         return  # a new legacy record never claims a bare skeleton (#5038)
     key = config_file_key(path)
-    store.files[key] = {"origin": origin.value, "hash": _digest(after)}
+    row: dict[str, Any] = {"origin": origin.value, "hash": _digest(after)}
+    try:
+        # The file's identity, so another path to it still finds this record (#5189).
+        info = os.stat(path)
+        row["identity"] = [info.st_dev, info.st_ino]
+    except OSError:
+        pass
+    store.files[key] = row
     from apm_cli.integration.write_seam import active_journal
 
     journal = active_journal()
@@ -474,6 +494,8 @@ def delete_emptied_config(
         _log.debug("Unreadable config file records; keeping %s", path, exc_info=True)
         return False
     key, row = store.lookup(path)
+    if row is None and store.identity_recorded(path):
+        return False  # recorded under another path (a second mount): never the fallback
     origin = _origin(row)
     if row is not None and origin is None:
         return False  # a record APM cannot read proves nothing either way
