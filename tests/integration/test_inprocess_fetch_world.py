@@ -210,6 +210,18 @@ def _run(apm: Path, project: Path, env: dict[str, str]) -> subprocess.CompletedP
     )
 
 
+def _engaged_or_why(apm: Path, project: Path, env: dict[str, str]) -> int:
+    """Packages fetched in process; on a miss the assertion shows each fallback reason."""
+    result = _run(apm, project, env)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    engaged = result.stderr.count(_ENGAGED)
+    reasons = sorted(
+        {line.strip()[-200:] for line in result.stderr.splitlines() if "in-process fetch" in line}
+    )
+    assert engaged == 10, reasons[:20]
+    return engaged
+
+
 def test_an_authenticated_attempt_fetches_in_process_with_only_apms_header(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -219,7 +231,7 @@ def test_an_authenticated_attempt_fetches_in_process_with_only_apms_header(
         world.services.proxy.clear()
         fast = tmp_path / "in-process"
         shutil.copytree(tree.project, fast)
-        assert _assert_installed(apm_binary_path, fast, _auth_env(world)) == 10
+        assert _engaged_or_why(apm_binary_path, fast, _auth_env(world)) == 10
         fetches = _fetches(world)
         assert len(fetches) == 10
         assert {request.header("Authorization") for request in fetches} == {_basic(_TOKEN)}
@@ -241,7 +253,7 @@ def test_a_private_repository_installs_in_process_like_git(
         _private(world)
         fast = tmp_path / "in-process"
         shutil.copytree(tree.project, fast)
-        assert _assert_installed(apm_binary_path, fast, _auth_env(world)) == 10
+        assert _engaged_or_why(apm_binary_path, fast, _auth_env(world)) == 10
 
         world.clear_cache()
         slow = tmp_path / "git"
