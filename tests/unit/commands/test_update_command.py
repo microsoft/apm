@@ -718,6 +718,33 @@ class TestUpdateNoChanges:
             assert result.exit_code == 0, result.output
             assert "already at their latest" in result.output
 
+    def test_unchanged_plan_with_pending_pin_repairs_proceeds_with_yes(self, runner, tmp_path):
+        """A conflicting legacy pin repair commits even when the dependency plan is unchanged (#5243)."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                cb = kwargs["plan_callback"]
+                captured["proceed"] = cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with (
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+                ),
+                patch(
+                    "apm_cli.marketplace.version_pins.has_pending_pin_repairs", return_value=True
+                ),
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+
+            assert result.exit_code == 0, result.output
+            assert captured.get("proceed") is True
+            assert "No dependency changes were applied" in result.output
+
 
 def test_module_cache_rehydration_requires_locked_dependencies(tmp_path: Path) -> None:
     """An empty cache is actionable only when the lock expects packages."""

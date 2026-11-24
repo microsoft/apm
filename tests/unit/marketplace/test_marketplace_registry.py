@@ -270,7 +270,6 @@ class TestCatalogScopedRefPins:
         from apm_cli.marketplace.source_identity import catalog_pin_identity
         from apm_cli.marketplace.version_pins import (
             enforce_ref_pin,
-            load_ref_pins,
             open_ref_pin_stage,
         )
 
@@ -288,24 +287,54 @@ class TestCatalogScopedRefPins:
         finally:
             stage.discard()
 
-        pins = load_ref_pins()
-        assert pins.get(f"{catalog}#tool/1.0.0") == "v3"
-        assert "team/tool/1.0.0" not in pins
-        assert "other/tool/1.0.0" not in pins
+        persisted = json.loads(self.pins.read_text())
+        assert persisted.get(f"{catalog}#tool/1.0.0") == "v3"
+        assert "team/tool/1.0.0" not in persisted
+        assert "other/tool/1.0.0" not in persisted
+
+    def test_conflicting_legacy_pins_repair_when_resolved_ref_matches_installed_ref(self):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import (
+            enforce_ref_pin,
+            has_pending_pin_repairs,
+            open_ref_pin_stage,
+            staged_ref_pin_repairs,
+        )
+
+        self._write({"team/tool/1.0.0": "v1", "other/tool/1.0.0": "v2"})
+        source_team = MarketplaceSource(name="team", owner="a", repo="catalog")
+        source_other = MarketplaceSource(name="other", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source_team)
+        registry_mod.add_marketplace(source_other)
+
+        stage = open_ref_pin_stage()
+        try:
+            catalog = catalog_pin_identity(source_other)
+            enforce_ref_pin("other", "tool", "v1", "1.0.0", accept_change=True, catalog=catalog)
+            assert has_pending_pin_repairs()
+            assert ("other", "tool", "1.0.0") in staged_ref_pin_repairs()
+            stage.commit()
+        finally:
+            stage.discard()
+
+        persisted = json.loads(self.pins.read_text())
+        assert persisted.get(f"{catalog}#tool/1.0.0") == "v1"
+        assert "team/tool/1.0.0" not in persisted
+        assert "other/tool/1.0.0" not in persisted
 
     def test_a_pinned_version_is_never_replaced_by_an_unpinned_resolution(self):
         from apm_cli.marketplace.source_identity import catalog_pin_identity
-        from apm_cli.marketplace.version_pins import _put, load_ref_pins
+        from apm_cli.marketplace.version_pins import record_ref_pin
 
         self._write({"team/tool/1.0.0": "v1"})
         source_team = MarketplaceSource(name="team", owner="a", repo="catalog")
         registry_mod.add_marketplace(source_team)
         catalog = catalog_pin_identity(source_team)
 
-        pins = load_ref_pins()
-        _put(pins, "other", "tool", "1.0.0", catalog, "")
-        assert "team/tool/1.0.0" in pins
-        assert f"{catalog}#tool/1.0.0" not in pins
+        record_ref_pin("other", "tool", "", "1.0.0", catalog=catalog)
+        persisted = json.loads(self.pins.read_text())
+        assert "team/tool/1.0.0" in persisted
+        assert f"{catalog}#tool/1.0.0" not in persisted
 
     def test_removing_an_alias_keeps_its_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1", "teams/tool/1.0.0": "v9"})

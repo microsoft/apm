@@ -875,6 +875,28 @@ def _run_dep_update(
         )
 
 
+def _handle_unchanged_plan_no_op(
+    retained_count: int,
+    apm_package: Any,
+    scope: Any,
+    logger: Any,
+    dry_run: bool,
+) -> bool:
+    if retained_count:
+        noun = "pin" if retained_count == 1 else "pins"
+        logger.info(
+            f"No dependencies updated; retained {retained_count} revision "
+            f"{noun} at the current SHA."
+        )
+    else:
+        _rich_success(
+            "All dependencies already at their latest matching refs.",
+            symbol="check",
+        )
+    _enforce_policy_without_changes(apm_package, scope, logger, dry_run)
+    return False
+
+
 def _run_dep_update_locked(
     *,
     assume_yes: bool,
@@ -1022,6 +1044,9 @@ def _run_dep_update_locked(
 
         # A moved revision pin is already listed above; list each package once (#4208).
         unpinned_plan = plan.excluding(update.dep_key for update in revision_pin_updates)
+        from apm_cli.marketplace.version_pins import has_pending_pin_repairs
+
+        has_pin_repairs = has_pending_pin_repairs()
         if unpinned_plan.has_changes:
             rendered = render_plan_text(unpinned_plan, verbose=verbose)
             if rendered:
@@ -1034,24 +1059,16 @@ def _run_dep_update_locked(
             reconcile_note = _reconcile_note(_exec_reconcile_required, plan_state.gate_retirement)
             if reconcile_note:
                 logger.info(reconcile_note)
-            elif not _cache_rehydration_required and not _restored_provenance:
-                retained_count = len(revision_pin_resolution.skips)
-                if retained_count:
-                    noun = "pin" if retained_count == 1 else "pins"
-                    logger.info(
-                        f"No dependencies updated; retained {retained_count} revision "
-                        f"{noun} at the current SHA."
-                    )
-                else:
-                    _rich_success(
-                        "All dependencies already at their latest matching refs.",
-                        symbol="check",
-                    )
-                # Nothing to change still judges the installed set against org
-                # policy, as install does (#4458).
-                _enforce_policy_without_changes(apm_package, scope, logger, dry_run)
-                return False
-            plan_state.cache_rehydration_requested = True
+            elif not _cache_rehydration_required and not _restored_provenance and not has_pin_repairs:
+                return _handle_unchanged_plan_no_op(
+                    len(revision_pin_resolution.skips),
+                    apm_package,
+                    scope,
+                    logger,
+                    dry_run,
+                )
+            if not has_pin_repairs:
+                plan_state.cache_rehydration_requested = True
 
         if revision_pin_updates and unpinned_plan.has_changes:
             pin_count = len(revision_pin_updates)

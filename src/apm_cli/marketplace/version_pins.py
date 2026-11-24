@@ -364,6 +364,7 @@ class RefPinStage:
 
     def __init__(self) -> None:
         self._pins: dict[tuple[str, str, str], tuple[str, str]] = {}
+        self._repairs: set[tuple[str, str, str]] = set()
         self._lock = threading.Lock()
 
     def add(
@@ -373,26 +374,37 @@ class RefPinStage:
         ref: str,
         version: str = "",
         catalog: str = "",
+        repair: bool = False,
     ) -> None:
         """Stage one plugin-to-ref mapping for :meth:`commit`."""
         with self._lock:
-            self._pins[(marketplace_name, plugin_name, version)] = (ref, catalog)
+            key = (marketplace_name, plugin_name, version)
+            self._pins[key] = (ref, catalog)
+            if repair:
+                self._repairs.add(key)
 
     def keys(self) -> frozenset[tuple[str, str, str]]:
         """Return the ``(marketplace, plugin, version)`` keys staged so far."""
         with self._lock:
             return frozenset(self._pins)
 
+    def repairs(self) -> frozenset[tuple[str, str, str]]:
+        """Return keys of pins that repair a conflict or mismatch."""
+        with self._lock:
+            return frozenset(self._repairs)
+
     def drop(self, keys: frozenset[tuple[str, str, str]]) -> None:
         """Withdraw staged pins of a package that will not install (#4322)."""
         with self._lock:
             for key in keys:
                 self._pins.pop(key, None)
+                self._repairs.discard(key)
 
     def commit(self, pins_dir: str | None = None) -> None:
         """Write every staged pin in one save and close this stage."""
         with self._lock:
             staged, self._pins = self._pins, {}
+            self._repairs.clear()
         self._close()
         if not staged:
             return
@@ -405,6 +417,7 @@ class RefPinStage:
         """Drop every staged pin and close this stage."""
         with self._lock:
             self._pins = {}
+            self._repairs.clear()
         self._close()
 
     def _close(self) -> None:
@@ -433,12 +446,13 @@ def stage_ref_pin(
     ref: str,
     version: str = "",
     catalog: str = "",
+    repair: bool = False,
 ) -> None:
     """Stage a pin for the open install attempt; no attempt means no write."""
     with _stage_lock:
         stage = _active_stage
     if stage is not None:
-        stage.add(marketplace_name, plugin_name, ref, version, catalog)
+        stage.add(marketplace_name, plugin_name, ref, version, catalog, repair=repair)
 
 
 def enforce_ref_pin(
@@ -460,6 +474,7 @@ def enforce_ref_pin(
     Returns:
         The previously pinned ref when an accepted change replaces it, else ``None``.
     """
+    repair = False
     try:
         previous_ref = check_ref_pin(
             marketplace_name, plugin_name, ref, version, pins_dir, catalog=catalog
@@ -468,10 +483,13 @@ def enforce_ref_pin(
         if not accept_change:
             raise
         previous_ref = None
+        repair = True
     if previous_ref is not None and not accept_change:
         key = _pin_key(marketplace_name, plugin_name, version, catalog)
         raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
-    stage_ref_pin(marketplace_name, plugin_name, ref, version, catalog)
+    if previous_ref is not None and accept_change:
+        repair = True
+    stage_ref_pin(marketplace_name, plugin_name, ref, version, catalog, repair=repair)
     return previous_ref
 
 
@@ -480,6 +498,18 @@ def staged_ref_pin_keys() -> frozenset[tuple[str, str, str]]:
     with _stage_lock:
         stage = _active_stage
     return stage.keys() if stage is not None else frozenset()
+
+
+def staged_ref_pin_repairs() -> frozenset[tuple[str, str, str]]:
+    """Return the pin keys staged as repairs by the open install attempt."""
+    with _stage_lock:
+        stage = _active_stage
+    return stage.repairs() if stage is not None else frozenset()
+
+
+def has_pending_pin_repairs() -> bool:
+    """Whether the open install attempt has staged pin repairs."""
+    return bool(staged_ref_pin_repairs())
 
 
 def withdraw_ref_pins(keys: frozenset[tuple[str, str, str]]) -> None:
