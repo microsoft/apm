@@ -1,0 +1,14 @@
+{
+  "issue": 5371,
+  "fixed_in": "Unreleased",
+  "summary": "Replay trusted a group-writable APM_HOME as user-private from an account enumeration that NSS may return incomplete or empty without an error; group privacy is now trusted only when the account and group databases are local files and the enumeration lists the user.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_deploy_snapshot.py::test_a_group_writable_apm_home_needs_a_complete_account_enumeration"
+  ]
+}

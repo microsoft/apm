@@ -120,15 +120,19 @@ def portable_relpath(path: Path, base: Path) -> str:
         return path.as_posix()
 
 
+def _resolve_instance(path: Path) -> Path:
+    return path.resolve()  # the instance's own resolve(), as portable_relpath calls it
+
+
 def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     """:func:`portable_relpath` of each path against one *base*, resolving it once.
 
     Each path is still resolved at use; only the shared base is not
     resolved again per path within this call.
     """
-    # The kernel form where it applies (Linux), as portable_relpath; elsewhere
-    # Path.resolve() itself.
-    resolve = resolve_path if kernel_resolves() else Path.resolve
+    # The fast forms where they apply (Linux kernel form; Windows via
+    # resolve_path); elsewhere each path's own resolve(), as portable_relpath.
+    resolve = resolve_path if (kernel_resolves() or os.name == "nt") else _resolve_instance
     try:
         resolved_base: Path | None = resolve(base)
     except (OSError, RuntimeError):

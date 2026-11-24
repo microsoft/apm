@@ -985,3 +985,43 @@ def test_two_racing_installs_replay_an_abandoned_journal_once(
     _assert_lock_matches_disk(chain.project)
     audit = chain.run("audit", "--ci")
     assert audit.returncode == 0, _evidence(audit)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX group write")
+def test_a_group_writable_apm_home_defers_replay_until_chmod_then_restores(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5385 W3d: a group-writable APM_HOME names the chmod, keeps the store unrenamed,
+    and the next install after the chmod replays it."""
+    from apm_cli.install.journal_modes import _user_private_group
+
+    gate = _GATES[1]
+    chain, before = _killed_world(tmp_path, apm_binary_path, gate)
+    home = Path(chain.env["APM_HOME"])
+    home.chmod(0o775)
+    if _user_private_group(home.stat().st_gid):
+        pytest.skip("this host proves APM_HOME's group private, so replay is trusted")
+    store = _abandoned(chain)
+    paths = [unit["path"] for unit in _journal(store)[1:] if unit.get("base") == "root"]
+    assert paths, _journal(store)
+    gate.cure(chain)
+    leftover = _tree_state(chain.project)
+
+    deferred = chain.run("install", *gate.args)
+    text = _text(deferred)
+
+    assert deferred.returncode == 1, _evidence(deferred)
+    assert "[!]" in text, _evidence(deferred)
+    assert f"chmod g-w {home}" in text, _evidence(deferred)
+    assert all(path in text for path in paths), _evidence(deferred)
+    assert text.isascii(), _evidence(deferred)
+    assert _tree_state(chain.project) == leftover, _evidence(deferred)
+    assert _stores(chain) == [store], _stores(chain)
+    assert not (store / "RETAINED").exists()
+
+    home.chmod(0o755)
+    replayed = chain.run("install", *gate.args)
+
+    assert replayed.returncode == 0, _evidence(replayed)
+    assert _tree_state(chain.project) == before, _evidence(replayed)
+    assert _stores(chain) == [], _evidence(replayed)

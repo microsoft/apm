@@ -39,7 +39,11 @@ from .immutable_requirements import (
     ImmutableRequirements,
     ReferenceResolver,
 )
-from .local_identity import portable_anchor_identity, transitive_local_identity
+from .local_identity import (
+    portable_anchor_identity,
+    transitive_local_identity,
+    with_declaring_edge,
+)
 from .local_identity import root_local_dirs as collect_root_local_dirs
 
 if TYPE_CHECKING:
@@ -279,6 +283,7 @@ class APMDependencyResolver:
         # before any dedup so the selection merge sees all of them (#3735).
         self._edge_selections: dict[str, list[EdgeSelection]] = {}
         self._edge_parents: dict[str, list[DependencyNode]] = {}
+        self._edge_refs: dict[tuple[str, int], DependencyReference] = {}
 
     @property
     def marketplace_provenance(self) -> dict[str, dict[str, str]]:
@@ -868,6 +873,7 @@ class APMDependencyResolver:
         tree = DependencyTree(root_package=root_package)
         self._edge_selections = {}
         self._edge_parents = {}
+        self._edge_refs = {}
         self.replacement_index = build_replacement_index(root_package.replace_rules or [])
         consumer_root = root_package.source_path or root_apm_yml.parent
         modules_dir = self._apm_modules_dir or root_apm_yml.parent / "apm_modules"
@@ -1305,15 +1311,16 @@ class APMDependencyResolver:
         )
         if parent_node is not None:
             self._edge_parents.setdefault(key, []).append(parent_node)
+            self._edge_refs.setdefault((key, id(parent_node)), dep_ref)
 
-    @staticmethod
     def _select_nearest_parent(
-        node: DependencyNode, declaring_parents: Iterable[DependencyNode]
+        self, node: DependencyNode, declaring_parents: Iterable[DependencyNode]
     ) -> None:
         """Make the recorded parent the nearest declaring parent, ties by lowest key.
 
         Equal-depth parents otherwise win by manifest order, which would make
         ``resolved_by`` (and so the lockfile bytes) depend on declaration order.
+        A local node takes that parent's own declaration too (#5386).
         """
         if node.parent is None:
             return
@@ -1324,6 +1331,9 @@ class APMDependencyResolver:
             nearest,
             key=lambda parent: (parent.dependency_ref.get_unique_key(), parent.get_id()),
         )
+        edge = self._edge_refs.get((node.dependency_ref.get_unique_key(), id(chosen)))
+        if edge is not None:
+            node.dependency_ref = with_declaring_edge(node.dependency_ref, edge)
         if chosen is node.parent:
             return
         node.parent = chosen

@@ -45,8 +45,9 @@ def selected_skill_sources(package_info: PackageInfo) -> SkillSourceSelection:
     """Resolve the one source route consumed by deployment and preflight."""
     from apm_cli.integration.skill_integrator import SkillIntegrator, should_install_skill
     from apm_cli.models.apm_package import PackageType
+    from apm_cli.utils.realpath import resolve_path
 
-    root = package_info.install_path.resolve()
+    root = resolve_path(package_info.install_path)
     subskills = root / ".apm" / "skills"
 
     def local_children() -> dict[str, Path]:
