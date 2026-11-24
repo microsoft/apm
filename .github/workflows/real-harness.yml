@@ -25,6 +25,8 @@
 name: Real Harness
 
 on:
+  push:
+    branches: [danielmeppiel-ql-rh-5184-precheck]
   schedule:
     - cron: '23 2 * * *'
   workflow_dispatch:

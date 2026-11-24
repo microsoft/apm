@@ -1,24 +1,69 @@
 {
   "_doc": "Expected verdict per real-harness cell, for every pinned harness version in .github/workflows/real-harness.yml. `probe.py check` fails on any divergence except BLOCKED. A known bug cell that starts to LOAD fails too: flip it here and close the issue in the fixing PR.",
   "cells": {
-    "claude-normal-user": {"verdict": "LOADS"},
-    "claude-worktree-user": {"verdict": "LOADS"},
-    "claude-headless-user": {"verdict": "LOADS"},
-    "claude-normal-project": {"verdict": "PARTIAL", "issue": 5176},
-    "claude-worktree-project": {"verdict": "PARTIAL", "issue": 5176},
-    "claude-headless-project": {"verdict": "PARTIAL", "issue": 5176},
-    "claude-headless-rerun-project": {"verdict": "LOADS", "note": "second session after Claude registered the marketplace"},
-    "claude-headless-abspath-project": {"verdict": "LOADS", "note": "apm settings with an absolute marketplace path"},
-    "claude-headless-native-project": {"verdict": "LOADS", "note": "oracle: claude plugin marketplace add + plugin install --scope project"},
-    "claude-headless-untrusted-project": {"verdict": "DOES NOT LOAD", "note": "Claude's folder-trust gate: an untrusted project loads no project plugins"},
-    "claude-tui-untrusted-project": {"verdict": "DOES NOT LOAD", "note": "folder-trust gate in the interactive TUI: the trust dialog is left unanswered"},
-    "claude-headless-wt-branch-project": {"verdict": "DOES NOT LOAD", "issue": 5180},
-    "claude-headless-wt-after-main-project": {"verdict": "PARTIAL", "issue": 5180, "note": "loads the main checkout's copy"},
-    "copilot-normal-user": {"verdict": "LOADS"},
-    "copilot-worktree-user": {"verdict": "LOADS"},
-    "copilot-headless-user": {"verdict": "LOADS"},
-    "copilot-normal-project": {"verdict": "LOADS"},
-    "copilot-worktree-project": {"verdict": "LOADS"},
-    "copilot-headless-project": {"verdict": "LOADS"}
+    "claude-normal-user": {
+      "verdict": "LOADS"
+    },
+    "claude-worktree-user": {
+      "verdict": "LOADS"
+    },
+    "claude-headless-user": {
+      "verdict": "LOADS"
+    },
+    "claude-normal-project": {
+      "verdict": "LOADS"
+    },
+    "claude-worktree-project": {
+      "verdict": "LOADS"
+    },
+    "claude-headless-project": {
+      "verdict": "LOADS"
+    },
+    "claude-headless-rerun-project": {
+      "verdict": "LOADS",
+      "note": "second session after Claude registered the marketplace"
+    },
+    "claude-headless-abspath-project": {
+      "verdict": "LOADS",
+      "note": "apm settings with an absolute marketplace path"
+    },
+    "claude-headless-native-project": {
+      "verdict": "LOADS",
+      "note": "oracle: claude plugin marketplace add + plugin install --scope project"
+    },
+    "claude-headless-untrusted-project": {
+      "verdict": "DOES NOT LOAD",
+      "note": "Claude's folder-trust gate: an untrusted project loads no project plugins"
+    },
+    "claude-tui-untrusted-project": {
+      "verdict": "DOES NOT LOAD",
+      "note": "folder-trust gate in the interactive TUI: the trust dialog is left unanswered"
+    },
+    "claude-headless-wt-branch-project": {
+      "verdict": "LOADS"
+    },
+    "claude-headless-wt-after-main-project": {
+      "verdict": "PARTIAL",
+      "issue": 5180,
+      "note": "loads the main checkout's copy"
+    },
+    "copilot-normal-user": {
+      "verdict": "LOADS"
+    },
+    "copilot-worktree-user": {
+      "verdict": "LOADS"
+    },
+    "copilot-headless-user": {
+      "verdict": "LOADS"
+    },
+    "copilot-normal-project": {
+      "verdict": "LOADS"
+    },
+    "copilot-worktree-project": {
+      "verdict": "LOADS"
+    },
+    "copilot-headless-project": {
+      "verdict": "LOADS"
+    }
   }
 }
