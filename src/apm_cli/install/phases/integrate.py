@@ -728,6 +728,11 @@ def run(ctx: InstallContext) -> None:
     apm_modules_dir = ctx.apm_modules_dir
     if apm_modules_dir is None:
         raise RuntimeError("Resolution must set apm_modules_dir before integration")
+    from apm_cli.utils.realpath_win import register_held_root
+
+    for target in ctx.targets or ():
+        # Deploy writes go through the write seam, which releases before it moves.
+        register_held_root(ctx.project_root / target.root_dir, ctx.project_root)
 
     # LSP capability gate (#3727): declared LSP servers with no capable target
     # fail before this phase deploys anything to a target.

@@ -57,6 +57,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
+from apm_cli.utils.realpath_win import release_held
 
 _Kind = Literal["absent", "file", "dir", "symlink"]
 _STORE_PREFIX = "deploy-"
@@ -97,6 +98,7 @@ def remove_empty_directories(directories: Iterable[Path]) -> None:
     for directory in sorted(set(directories), key=lambda p: len(p.parts), reverse=True):
         with contextlib.suppress(OSError):
             if directory.is_dir() and not directory.is_symlink():
+                release_held(directory)
                 directory.rmdir()
 
 
