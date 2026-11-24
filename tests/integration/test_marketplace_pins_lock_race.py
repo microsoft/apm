@@ -7,6 +7,7 @@ the adopted pin instead of overwriting it.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -45,7 +46,7 @@ def test_a_pin_commit_waits_for_a_concurrent_writer_holding_the_pins_lock(tmp_pa
         save_ref_pins(pins, pins_dir)
     assert child.wait(timeout=60) == 0
 
-    assert load_ref_pins(pins_dir) == {
+    assert json.loads(Path(_pins_path(pins_dir)).read_text(encoding="utf-8")) == {
         "cat#adopted/1.0.0": "v-adopted",
         "cat#child/1.0.0": "v-child",
     }

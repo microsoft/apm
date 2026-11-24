@@ -182,6 +182,7 @@ LOCAL_CATALOGS: Mapping[str, tuple[str, str]] = {
 _MARKET_FORMS = frozenset({"marketplace-object", "plugin-at-mkt", *LOCAL_CATALOGS})
 _MARKET_CACHE = ".apm/cache/marketplace"
 _PINS = f"{_MARKET_CACHE}/version-pins.json"
+_PINS_LOCK = f"{_MARKET_CACHE}/version-pins.lock"  # writers serialize on it (#5169)
 # The marketplace catalog cache a project install may refresh under APM_HOME.
 _CATALOG_CACHE = (
     f"{_MARKET_CACHE}/{MARKETPLACE_NAME}.json",
@@ -814,7 +815,7 @@ class SourceMachine(MachineBase):
             cells=self.cells(op, "real", choices),
             converged=converged,
             model=allowed,
-            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS)},
+            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS, _PINS_LOCK)},
         )
         self.egress(step)
         if step.result.returncode == 0:
@@ -1005,7 +1006,7 @@ class SourceMachine(MachineBase):
             cells=self.cells("marketplace", "real", choices),
             mutating=True,
             forbidden={"project": ("*",), "outside": ("*",)},
-            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS)},
+            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS, _PINS_LOCK)},
         )
         catalog = [
             entry
@@ -1537,7 +1538,7 @@ class SourceMachine(MachineBase):
 
 
 _DURABLE = {
-    "home": (_PINS,),
+    "home": (_PINS, _PINS_LOCK),
     "project": (
         "apm.yml",
         "apm.lock.yaml",
