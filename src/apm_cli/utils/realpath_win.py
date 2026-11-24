@@ -340,41 +340,54 @@ def _root_text() -> str | None:
         return cwd
 
 
-def _deepest_held(text: str, root: str) -> tuple[str, str]:
+_Held = tuple[str, int]  # (final path, handle); identity marks one hold's lifetime
+
+
+def _deepest_held(text: str, root: str) -> tuple[str, _Held]:
     with _lock:
         held = _held.get(text)
         if held is not None:
-            return text, held[0]
+            return text, held
         index = len(text)
         while True:
             index = text.rfind("\\", len(root), index)
             if index <= len(root):
-                return root, _held[root][0]
+                return root, _held[root]
             held = _held.get(text[:index])
             if held is not None:
-                return text[:index], held[0]
+                return text[:index], held
 
 
-def _adopt(directory: str, proven: str) -> None:
-    """Hold *directory* when it is inside a registered package and still proven."""
-    held = _hold(directory)
-    if held is None:
-        return
+def _adopt(directory: str, proven: str) -> _Held | None:
+    """Hold *directory* (inside a registered root, still the proven object), or ``None``.
+
+    The open happens under the table lock, so :func:`release_held` never
+    misses a handle that is being opened.
+    """
     with _lock:
-        keep = (
-            held[0] == proven
-            and directory not in _held
-            and _registered_cover(directory)
-            and _holds_allowed()
-        )
-        if keep:
-            _held[directory] = held
-    if not keep:
-        _close(held[1])
+        existing = _held.get(directory)
+        if existing is not None:
+            return existing
+        if not (_registered_cover(directory) and _holds_allowed()):
+            return None  # released meanwhile: APM is about to move it
+        held = _hold(directory)
+        if held is None:
+            return None
+        if held[0] != proven:
+            _close(held[1])
+            return None
+        _held[directory] = held
+        return held
 
 
-def _held_anchor(text: str) -> tuple[str, str] | None:
-    """``(deepest held prefix of text, its final path)``, or ``None`` outside the held tree."""
+def _still_held(used: list[tuple[str, _Held]]) -> bool:
+    """Whether every hold a walk relied on was held for the whole walk."""
+    with _lock:
+        return all(_held.get(key) is held for key, held in used)
+
+
+def _held_anchor(text: str) -> tuple[str, _Held] | None:
+    """``(deepest held prefix of text, its hold)``, or ``None`` outside the held tree."""
     if not _holds_allowed():
         return None
     root = _root_text()
@@ -393,17 +406,22 @@ def _held_realpath(text: str) -> str | None:
     found = _held_anchor(text)
     if found is None:
         return None
-    anchor, resolved = found
+    anchor, held = found
     if anchor == text:
-        return resolved
+        return held[0]
     parts = text[len(anchor) + 1 :].split("\\")
     inside_package = _registered_cover(text)
     if len(parts) > 1 and not inside_package:
         return None  # nothing below would be held: form B's one open is cheaper
-    return _walk_below(anchor, resolved, parts, adopt=inside_package)
+    used = [(anchor, held)]
+    resolved = _walk_below(anchor, held[0], parts, used, adopt=inside_package)
+    # A hold released (and its directory moved) mid-walk voids the proof.
+    return resolved if resolved is not None and _still_held(used) else None
 
 
-def _walk_below(anchor: str, resolved: str, parts: list[str], *, adopt: bool) -> str | None:
+def _walk_below(
+    anchor: str, resolved: str, parts: list[str], used: list[tuple[str, _Held]], *, adopt: bool
+) -> str | None:
     """Prove *parts* below the held *anchor* one component at a time."""
     current = anchor
     for position, part in enumerate(parts):
@@ -417,8 +435,12 @@ def _walk_below(anchor: str, resolved: str, parts: list[str], *, adopt: bool) ->
         attributes, name = entry
         resolved = f"{resolved.rstrip(chr(92))}\\{name}"
         current = candidate
-        if adopt and attributes & _FILE_ATTRIBUTE_DIRECTORY:
-            _adopt(candidate, resolved)
+        if adopt and attributes & _FILE_ATTRIBUTE_DIRECTORY and _registered_cover(candidate):
+            held = _adopt(candidate, resolved)
+            if held is not None:
+                used.append((candidate, held))
+            elif position < len(parts) - 1:
+                return None  # a registered directory that cannot be pinned: below is unproven
     return resolved
 
 

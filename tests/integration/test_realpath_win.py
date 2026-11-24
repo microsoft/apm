@@ -99,6 +99,22 @@ def test_held_package_cannot_be_renamed_by_another_process(project: Path) -> Non
 
 
 @_WINDOWS
+def test_held_package_pins_its_ancestors_against_another_process(project: Path) -> None:
+    """Form A's anchor answers rely on it: an ancestor of a held dir cannot be renamed."""
+    with _held_scope(project) as package:
+        resolve_path(package / "f.txt")
+        assert str(package).lower() in _held_keys()
+        owner = package.parent
+        blocked = _other_process(_RENAME, owner, owner.with_name("o-moved"))
+        assert blocked.returncode != 0, "the parent of a held package dir was renamed"
+        assert (package / "f.txt").is_file()
+
+        release_held()
+        assert _other_process(_RENAME, owner, owner.with_name("o-moved")).returncode == 0
+        assert (owner.with_name("o-moved") / "r" / "f.txt").is_file()
+
+
+@_WINDOWS
 def test_r4_forget_memos_releases_holds_for_user_code(project: Path) -> None:
     with _held_scope(project) as package:
         resolve_path(package / "sub" / "b.txt")
