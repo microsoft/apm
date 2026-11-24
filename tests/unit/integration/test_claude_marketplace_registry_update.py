@@ -10,6 +10,7 @@ owner: native_plugins/claude_marketplaces.py _merge
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -21,18 +22,21 @@ pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-claude-native-pl
 
 def _racing(monkeypatch: pytest.MonkeyPatch, path: Path, edits: list[dict]) -> None:
     """Another writer replaces *path* right after each of APM's first reads of it."""
-    original = Path.read_bytes
+    original = os.open
     calls = {"n": 0}
 
-    def read_bytes(target: Path) -> bytes:
-        raw = original(target)
-        if target == path:
+    def open_(target, flags, *args, **kwargs):
+        descriptor = original(target, flags, *args, **kwargs)
+        if Path(os.fspath(target)) == path and not flags & os.O_CREAT:
             calls["n"] += 1
             if calls["n"] % 2 == 1 and edits:
-                target.write_text(json.dumps(edits.pop(0)), encoding="utf-8")
-        return raw
+                # Published by rename: the descriptor APM holds still reads the old bytes.
+                staged = path.with_name(path.name + ".other")
+                staged.write_text(json.dumps(edits.pop(0)), encoding="utf-8")
+                os.replace(staged, path)
+        return descriptor
 
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    monkeypatch.setattr(os, "open", open_)
 
 
 def _add_apm(data: dict) -> bool:

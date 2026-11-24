@@ -81,10 +81,23 @@ def _text(value: Any) -> str:
     return printable_ascii_text(str(value))
 
 
+def _regular_bytes(path: Path) -> bytes:
+    """Read *path* only as a regular file: a FIFO or device never blocks the read.
+
+    Opened non-blocking and never through a final-component link, then judged
+    on the opened file; anything but a regular file raises ``OSError``.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(f"not a regular file: {path.name}")
+        return handle.read()
+
+
 def _read(path: Path) -> tuple[bytes | None, dict[str, Any]]:
     """``(raw bytes, object)``: ``(None, {})`` when absent; ``_Skip`` when unusable."""
     try:
-        raw = path.read_bytes()
+        raw = _regular_bytes(path)
     except FileNotFoundError:
         return None, {}
     except OSError as exc:
@@ -233,14 +246,8 @@ def claude_trusts(checkout: Path) -> bool:
     path = _claude_trust_file()
     if user_config_crosses_link(path, path.parent):
         return False
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        # Non-blocking, then judged on the opened file: a FIFO or device never blocks a read.
-        descriptor = os.open(path, flags)
-        with os.fdopen(descriptor, "rb") as handle:
-            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                return False
-            data = json.loads(handle.read().decode("utf-8"))
+        data = json.loads(_regular_bytes(path).decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return False
     projects = data.get("projects") if isinstance(data, dict) else None
