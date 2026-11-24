@@ -59,17 +59,20 @@ _LINKED = [
 ]
 
 
-@pytest.mark.parametrize("relative", _PLAIN)
+@pytest.mark.parametrize("relative", [*_PLAIN, *(pytest.param(r, marks=_LINKS) for r in _LINKED)])
 def test_resolve_path_matches_pathlib(tree: Path, relative: str) -> None:
     candidate = tree / relative
     assert resolve_path(candidate) == candidate.resolve()
 
 
 @_LINKS
-@pytest.mark.parametrize("relative", _LINKED)
-def test_resolve_path_matches_pathlib_through_links(tree: Path, relative: str) -> None:
-    candidate = tree / relative
-    assert resolve_path(candidate) == candidate.resolve()
+def test_a_subclass_resolves_its_own_filesystem_path(tree: Path) -> None:
+    class Elsewhere(type(tree)):
+        def __fspath__(self) -> str:
+            return str(tree / "dir")
+
+    candidate = Elsewhere(tree / "link_dir")
+    assert resolve_path(candidate) == candidate.resolve() == (tree / "dir").resolve()
 
 
 @_LINKS

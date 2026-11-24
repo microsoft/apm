@@ -15,7 +15,7 @@ from __future__ import annotations
 import errno
 import os
 import sys
-from pathlib import Path
+from pathlib import Path, PosixPath
 
 _O_PATH = getattr(os, "O_PATH", 0)
 _FAST = sys.platform.startswith("linux") and bool(_O_PATH)
@@ -79,10 +79,11 @@ def _missing_realpath(text: str, depth: int) -> str | None:
 def resolve_path(path: Path) -> Path:
     """Return ``path.resolve()``, computed in the kernel when that is exact.
 
-    A class that overrides ``resolve`` keeps its own behavior, and any
+    Only a stock ``PosixPath`` takes the fast form: a subclass (which may
+    override ``resolve`` or ``__fspath__``) keeps its own behavior, and any
     failure of the fast form leaves the answer (or the error) to it.
     """
-    if _FAST and getattr(type(path), "resolve", None) is _STOCK_RESOLVE:
+    if _FAST and type(path) is PosixPath and PosixPath.resolve is _STOCK_RESOLVE:
         text = str(path)
         if text.startswith("/") and not text.startswith("//"):
             try:
