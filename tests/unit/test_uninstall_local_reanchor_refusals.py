@@ -145,3 +145,22 @@ def test_the_survivor_read_drives_the_offline_reach_check(tmp_path: Path) -> Non
     assert exc.value.code == 1
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert "apm_modules/ is missing" in message, message
+
+
+@pytest.mark.parametrize(
+    ("text", "declared"),
+    [("- a\n- b\n", True), ("just a string\n", True), ("name: proj\n", False)],
+    ids=["list", "scalar", "mapping"],
+)
+def test_a_non_mapping_manifest_counts_as_declaring_replacements(
+    tmp_path: Path, text: str, declared: bool
+) -> None:
+    """An apm.yml that is not a mapping refuses the offline re-anchor like an
+    unreadable one; a mapping without a replace block behaves as today (#5226)."""
+    from apm_cli.commands.uninstall.local_reanchor import _manifest_declares_replacements
+
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(text, encoding="utf-8")
+
+    assert _manifest_declares_replacements(manifest) is declared
+    assert manifest.read_text(encoding="utf-8") == text
