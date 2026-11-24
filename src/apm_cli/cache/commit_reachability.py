@@ -462,16 +462,12 @@ def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
     would fetch wherever it points then, so every declared ref other than a
     full commit is fetched by the commit it was admitted at (#5138). That
     also keeps ``refs/heads/<x>``, ``refs/tags/<x>`` and hex-like names
-    exact, so admission and the fetch judge the same commit. No ref (the
-    default branch) is fetched by the commit admitted for it too (#5199);
-    only when the default branch resolves to no commit is it fetched by name.
+    exact, so admission and the fetch judge the same commit.
 
     Raises:
         CommitNotReachableError: The commit is not admitted.
     """
-    if not ref:
-        return _admitted_default_branch_commit(downloader, dep_ref)
-    by_commit = not (len(ref) in (40, 64) and _COMMIT_RE.match(ref))
+    by_commit = bool(ref) and not (len(ref) in (40, 64) and _COMMIT_RE.match(ref))
     if not by_commit:
         admit_pinned_commit(downloader, dep_ref, ref)
         return ref
@@ -487,34 +483,6 @@ def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
     admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
     _note_admitted(ref, commit)
     return commit.lower()
-
-
-def admitted_full_commit(resolved) -> str | None:
-    """The full commit *resolved* names, lowercased, or ``None`` (fetched by name then).
-
-    A dependency that names no ref is fetched by this commit once admitted (#5199).
-    """
-    commit = getattr(resolved, "resolved_commit", None)
-    if not isinstance(commit, str) or len(commit) not in (40, 64):
-        return None
-    return commit.lower() if _COMMIT_RE.match(commit) else None
-
-
-def _admitted_default_branch_commit(downloader, dep_ref) -> str | None:
-    """The commit the default branch is admitted at, or ``None`` to fetch it by name.
-
-    Admission is unchanged (#5199 scope): with the tiered resolver it judges
-    the one resolution handed to it here, which is also the commit fetched;
-    without it, it admits nothing, as before, and that resolution is fetched.
-    """
-    try:
-        resolved = downloader.resolve_git_reference(dep_ref)
-    except Exception:
-        admit_pinned_commit(downloader, dep_ref, None)
-        return None
-    tiered = getattr(downloader, "_tiered_resolver", None) is not None
-    admit_pinned_commit(downloader, dep_ref, None, resolved=resolved if tiered else None)
-    return admitted_full_commit(resolved)
 
 
 def _listed_tip_instead(downloader, dep_ref, ref: str, failure: Exception) -> str:

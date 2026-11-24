@@ -98,12 +98,10 @@ class _Origin:
         return env
 
 
-def _project(root: Path, ref: str | None, path: str | None = None) -> Path:
+def _project(root: Path, ref: str, path: str | None = None) -> Path:
     project = root / "app"
     project.mkdir(exist_ok=True)
-    dep = {"git": f"{_REMOTE}.git"}
-    if ref is not None:
-        dep["ref"] = ref
+    dep = {"git": f"{_REMOTE}.git", "ref": ref}
     if path:
         dep["path"] = path
     manifest = {
@@ -345,41 +343,27 @@ def test_a_policy_denied_install_of_a_verified_commit_leaves_no_reachability_sta
 
 
 @pytest.mark.parametrize(
-    ("ref", "path", "no_cache", "tiered"),
+    ("path", "no_cache", "tiered"),
     [
-        ("main", None, False, True),
-        ("main", None, True, True),
-        ("main", "skills/tool", False, True),
-        ("main", "skills/tool", True, True),
-        ("main", "skills/tool", False, False),
-        (None, None, False, True),
-        (None, None, True, True),
-        (None, "skills/tool", False, True),
-        (None, "skills/tool", True, True),
+        (None, False, True),
+        (None, True, True),
+        ("skills/tool", False, True),
+        ("skills/tool", True, True),
+        ("skills/tool", False, False),
     ],
-    ids=[
-        "repo-cached",
-        "repo-no-cache",
-        "subdir-cached",
-        "subdir-no-cache",
-        "subdir-untiered",
-        "default-branch-repo-cached",
-        "default-branch-repo-no-cache",
-        "default-branch-subdir-cached",
-        "default-branch-subdir-no-cache",
-    ],
+    ids=["repo-cached", "repo-no-cache", "subdir-cached", "subdir-no-cache", "subdir-untiered"],
 )
 def test_a_branch_that_moves_after_admission_installs_the_admitted_commit(
-    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, ref, path, no_cache, tiered
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, path, no_cache, tiered
 ) -> None:
-    """A named ref (#5138) or the default branch (#5199) is fetched by its admitted commit."""
-    # Admission is the hook between resolution and fetch, for any ref.
-    admit = importlib.import_module(_ADMISSION).admit_pinned_commit
+    """#5138: a named ref is fetched by the commit it was admitted at, never by name."""
+    # The verdict recorder is the hook between admission and fetch.
+    record_tip = importlib.import_module(_ADMISSION)._record_tip
     work = tmp_path / "remote" / "work"
     moved: list[str] = []
 
     def _admit_then_move(*args, **kwargs):
-        admit(*args, **kwargs)
+        record_tip(*args, **kwargs)
         if not moved:
             _package(work, "pkg", "m3")
             _package(work / "skills" / "tool", "tool", "m3")
@@ -388,11 +372,11 @@ def test_a_branch_that_moves_after_admission_installs_the_admitted_commit(
             moved.append(_git("rev-parse", "HEAD", cwd=work))
             _git("push", "-q", str(origin.path), "main", cwd=work)
 
-    project = _project(tmp_path, ref, path)
+    project = _project(tmp_path, "main", path)
     env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache")}
     if not tiered:
         env["APM_TIERED_RESOLVER"] = "0"
-    monkeypatch.setattr(f"{_ADMISSION}.admit_pinned_commit", _admit_then_move)
+    monkeypatch.setattr(f"{_ADMISSION}._record_tip", _admit_then_move)
 
     result = _install(project, origin, monkeypatch, **env)
 
