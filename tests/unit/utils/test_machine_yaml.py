@@ -10,6 +10,8 @@ handed out by the memoized lockfile parse, and its single caller.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 import re
 from pathlib import Path
@@ -141,3 +143,48 @@ def test_only_the_lockfile_parse_uses_the_machine_loader() -> None:
         "src/apm_cli/deps/lockfile_container.py",
         "src/apm_cli/utils/yaml_io.py",
     ]
+
+
+@pytest.mark.parametrize("path", _LOCKFILES, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_lockfile_identity_is_unchanged_by_the_owner_parse(path: Path) -> None:
+    """Journals an older APM wrote compare equal: the identity formula's value is the same."""
+    import hashlib
+    import json
+
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    text = path.read_text(encoding="utf-8")
+    try:
+        canonical = json.dumps(yaml_io.load_yaml_str(text), sort_keys=True, default=str)
+    except (yaml.YAMLError, ValueError, TypeError, RecursionError):
+        canonical = text.replace("\r\n", "\n")
+    assert lockfile_identity(text) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def test_identifying_one_lockfile_twice_parses_it_once() -> None:
+    """The commit mark and the settle identify the same text: one memoized parse."""
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    text = "lockfile_version: '1'\ndependencies:\n- repo_url: o/identity-memo\n"
+    key = lockfile_container.parse_key(text)
+    lockfile_container._parsed_texts.pop(key, None)
+    first = lockfile_identity(text)
+    parsed = lockfile_container._parsed_texts[key]
+    assert lockfile_identity(text) == first
+    assert lockfile_container._parsed_texts[key] is parsed
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'lockfile_version: "1"\nname: "\\ud800"\n',
+        'lockfile_version: "1"\nx-vendor: !!set {0: null, 36: null, 72: null, 108: null}\n',
+    ],
+    ids=["lone-surrogate", "set-value"],
+)
+def test_a_lockfile_the_owner_refuses_keeps_its_old_identity(text: str) -> None:
+    """Refused or non-JSON-native text: the old loader's identity, so replay stays committed."""
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    canonical = json.dumps(yaml_io.load_yaml_str(text), sort_keys=True, default=str)
+    assert lockfile_identity(text) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -201,7 +201,8 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
     _allow(consumer, key, f"{dep}#1.0.0")
     world.apm(consumer, "install", str(dep), "--no-policy")
-    assert _hook_entries(consumer) == {"PreToolUse": ["Bash", "Write"]}
+    # APM entries take one canonical order by source (#5285).
+    assert _hook_entries(consumer) == {"PreToolUse": ["Write", "Bash"]}
     world.apm(consumer, "audit", "--ci", "--no-policy")
     world.apm(consumer, "uninstall", str(dep))
     assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
@@ -633,7 +634,7 @@ def test_uninstall_bundle_removes_its_hooks_and_claims(
     dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
     _allow(consumer, key, f"{dep}#1.0.0")
     world.apm(consumer, "install", str(dep))
-    assert _hook_entries(consumer) == {"Stop": ["Mine"], "PreToolUse": ["Bash", "Write"]}
+    assert _hook_entries(consumer) == {"Stop": ["Mine"], "PreToolUse": ["Write", "Bash"]}
     script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
     assert _bundle_hook_claims(world, consumer) == [script]
     _assert_lock_matches_disk(world, consumer)
@@ -1877,3 +1878,119 @@ def test_uninstall_bundle_refuses_a_hook_shape_the_grammar_does_not_recognize(
 
     assert ".github/hooks/user.json" in text, text
     assert (consumer / script).is_file()
+
+
+def test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281 control: a script path in an unrelated cwd runs another script; uninstall goes on.
+
+    A bare ``./x.sh`` stays in use under #5106's default-deny, so the control
+    names a directory that certainly resolves elsewhere.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, hook = _copilot_bundle_consumer(world, tmp_path, "cwd-elsewhere-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {
+                "preToolUse": [{"type": "command", "bash": "./scripts/x.sh", "cwd": "tools"}]
+            },
+        },
+    )
+
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    text = output(result)
+
+    assert result.returncode == 0, text
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / hook).exists(), text
+    assert not (consumer / script).exists(), text
+    assert hook not in _claims_of(consumer)
+    assert script not in _claims_of(consumer)
+    assert (consumer / ".github" / "hooks" / "user.json").is_file()
+
+
+def test_uninstall_bundle_refuses_a_user_hook_whose_cwd_escapes_the_project(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281: a cwd outside the project cannot be cleared; uninstall fails closed."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "cwd-escape-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {"preToolUse": [{"type": "command", "bash": "./x.sh", "cwd": "../elsewhere"}]},
+        },
+    )
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".github/hooks/user.json" in text, text
+    assert "Traceback" not in text, text
+    assert (consumer / script).is_file()
+    assert script in _claims_of(consumer)
+
+
+def test_uninstall_bundle_keeps_a_script_a_user_hook_runs_through_its_cwd(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281: ``./scripts/x.sh`` in cwd ``<bundle>/hooks`` runs the bundle's script.
+
+    The command alone resolves elsewhere from every base, so only the cwd check
+    (runs_through_cwd) sees the script; without it uninstall deletes it.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "cwd-runs-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {
+                "preToolUse": [
+                    {
+                        "type": "command",
+                        "bash": "./scripts/x.sh",
+                        "cwd": path.rsplit("/", 2)[0],
+                    }
+                ]
+            },
+        },
+    )
+    assert script == ".github/hooks/scripts/hookpkg/hooks/scripts/x.sh", script
+
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    text = output(result)
+
+    assert (consumer / script).is_file(), f"uninstall removed a script a user hook runs:\n{text}"
+    assert result.returncode == 1, text
+    assert ".github/hooks/user.json" in text, text
+    assert "Traceback" not in text, text
+    assert script in _claims_of(consumer)
+
+
+@pytest.mark.parametrize("preview", [(), ("--dry-run",)], ids=["run", "dry-run"])
+def test_a_refused_bundle_uninstall_leaves_the_pending_record_untouched(
+    tmp_path: Path, apm_binary_path: Path, preview: tuple[str, ...]
+) -> None:
+    """#5291: the in-use refusal runs before the resume note, so it writes nothing.
+
+    The preview refuses the same way: it never promises a removal the run refuses.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "refused-note-consumer")
+    _user_hook_naming_the_script(
+        consumer,
+        lambda path: {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": path}]}},
+    )
+    before = tree_bytes(consumer)
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", *preview, expect=1))
+
+    assert ".github/hooks/user.json" in text, text
+    assert "Would remove hooks" not in text, text
+    after = tree_bytes(consumer)
+    changed = sorted(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
+    assert changed == [], changed

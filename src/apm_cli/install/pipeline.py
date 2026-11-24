@@ -515,6 +515,12 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         apm_package=apm_package,
         logger=logger,
     ):
+        from ..native_plugins.claude_marketplaces import release_undeclared_marketplaces
+
+        # Nothing is declared: a registry entry a failed uninstall left converges (#5258);
+        # `apm lock` writes only the lockfile.
+        if not lockfile_only:
+            release_undeclared_marketplaces(project_root, scope, logger)
         return InstallResult()
 
     if target_decision is None:

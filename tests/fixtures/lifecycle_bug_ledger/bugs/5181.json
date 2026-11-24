@@ -1,0 +1,15 @@
+{
+  "issue": 5181,
+  "fixed_in": "Unreleased",
+  "summary": "Removing a package's hooks rewrote a merged hook config in place, so a config path that is a link changed the linked file; cleanup now writes a temp file and atomically replaces the config path.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_hook_cleanup_linked_config_lifecycle.py::test_uninstall_replaces_a_linked_hook_config_and_leaves_its_target_unchanged"
+  ]
+}

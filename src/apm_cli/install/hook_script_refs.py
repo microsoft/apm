@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import posixpath
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
 from pathlib import Path
+from typing import Any
 
 from ..utils.paths import caseless
 
@@ -166,3 +167,46 @@ def _certainly_elsewhere(word: str, paths: frozenset, bases: tuple, moved: bool)
     if moved or "/" not in relative or relative.startswith(".."):
         return False  # a bare name, or a directory that is not certain
     return all(_normalized(f"{base.as_posix()}/{relative}") not in paths for base in bases)
+
+
+def script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
+    """Return each script row under *target_root*, spelled relative to it."""
+    tails = []
+    for value in scripts:
+        spelled = Path(value) if Path(value).is_absolute() else project_root / value
+        if spelled.is_relative_to(target_root):
+            tails.append(spelled.relative_to(target_root).as_posix())
+    return tails
+
+
+def hook_commands(document: Any) -> list[str]:
+    """Commands a per-file hook document runs, read from handler positions only (#5136).
+
+    The shared hook grammar locates the handlers, so metadata that merely names
+    a script (``env.command``) runs nothing. A shape the grammar does not
+    recognize (a Kiro action list, a malformed entry) is scanned whole, as
+    before, so it still fails closed.
+    """
+    from apm_cli.hook_contract import HookContractError, parse_hook_source
+
+    try:
+        commands = [declared.command for declared in parse_hook_source(document).commands]
+    except HookContractError:
+        commands = list(_every_command_field(document))
+    # Raw text: the matcher reads backslash escapes; only the tail match normalizes (#5106).
+    return commands
+
+
+def _every_command_field(node: Any) -> Iterator[str]:
+    """Every hook command field anywhere in a document the grammar cannot read."""
+    from apm_cli.hook_contract import HOOK_COMMAND_KEYS
+
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in HOOK_COMMAND_KEYS and isinstance(value, str):
+                yield value
+            else:
+                yield from _every_command_field(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _every_command_field(item)
