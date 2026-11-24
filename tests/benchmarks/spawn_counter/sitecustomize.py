@@ -21,6 +21,7 @@ _LOG = os.environ.get("APM_PERF_SPAWN_LOG")
 if _LOG:
     _counts = {}
     _git_sub = {}
+    _git_callers = {}
     _ops = {}
     _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
     _FS_EVENTS = {
@@ -117,7 +118,16 @@ if _LOG:
             name = name[:-4]
         _counts[name] = _counts.get(name, 0) + 1
         if name == "git":
-            _bump(_git_sub, _git_subcommand(event, args))
+            sub = _git_subcommand(event, args)
+            _bump(_git_sub, sub)
+            frames = []
+            frame = sys._getframe(1)
+            while frame is not None and len(frames) < 4:
+                filename = frame.f_code.co_filename.replace("\\", "/")
+                if "apm_cli/" in filename and "/utils/git_env.py" not in filename:
+                    frames.append(filename.split("apm_cli/", 1)[1] + ":" + frame.f_code.co_name)
+                frame = frame.f_back
+            _bump(_git_callers, sub + " <- " + " < ".join(frames))
 
     def _wrap_hash(module, attr):
         original = getattr(module, attr, None)
@@ -149,6 +159,7 @@ if _LOG:
             "self_cpu_s": round(times.user + times.system, 4),
             "children_cpu_s": round(times.children_user + times.children_system, 4),
             "git_sub": _git_sub,
+            "git_callers": _git_callers,
             "ops": _ops,
         }
         with open(_LOG, "a", encoding="utf-8") as handle:
