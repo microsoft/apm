@@ -12,6 +12,6 @@
   ],
   "regression_tests": [
     "tests/integration/test_enterprise_registry_lifecycle.py::test_catalog_declaration_installs_under_a_default_registry",
-    "tests/unit/test_apm_yml_registries.py::TestDefaultRouting::test_marketplace_declaration_not_routed"
+    "tests/integration/test_enterprise_registry_lifecycle.py::test_a_shorthand_routes_to_the_default_registry_beside_a_catalog"
   ]
 }

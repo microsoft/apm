@@ -473,25 +473,6 @@ class TestDefaultRouting:
         assert d.source == "registry"
         assert d.registry_name == "corp"
 
-    def test_marketplace_declaration_not_routed(self, write_yml):
-        # The catalog names the registry and version; the default never claims it (#5256).
-        p = write_yml("""
-            name: x
-            version: 1.0.0
-            registries:
-              corp:
-                url: https://corp.example.com/apm
-              default: corp
-            dependencies:
-              apm:
-                - {name: widget, marketplace: corp-catalog}
-            """)
-        pkg = APMPackage.from_apm_yml(p)
-        d = pkg.dependencies["apm"][0]
-        assert d.is_marketplace
-        assert d.source is None
-        assert d.registry_name is None
-
 
 class TestDefaultRoutingErrors:
     def test_branch_ref_routed_to_registry(self, write_yml):
