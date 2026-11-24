@@ -287,3 +287,48 @@ def test_an_unreadable_hooked_file_is_kept(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.undo()
     _assert_partition(tmp_path, removed, kept, set(), {"a.md"})
+
+
+def test_each_record_is_judged_by_its_own_key(tmp_path: Path) -> None:
+    """#5254: withdrawing one version's key never retires another still-granted version's files."""
+    from apm_cli.install.local_bundle_markdown_hooks import _unadmitted
+    from apm_cli.integration.hook_ownership import (
+        BUNDLE_MARKDOWN_RECORD_FILE,
+        BUNDLE_RECORD_MARKDOWN,
+        write_per_file_bundle_record,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    old_row, new_row = ".claude/commands/run.md", ".github/prompts/run.prompt.md"
+    for row in (old_row, new_row):
+        (project / row).parent.mkdir(parents=True, exist_ok=True)
+        (project / row).write_bytes(b"---\nhooks: {}\n---\nRun.\n")
+    for root, key, row in (
+        (".claude", "pkg#1@sha256:aa", old_row),
+        (".github", "pkg#2@sha256:bb", new_row),
+    ):
+        write_per_file_bundle_record(
+            project / root / BUNDLE_MARKDOWN_RECORD_FILE,
+            "pkg",
+            key,
+            [row],
+            kind=BUNDLE_RECORD_MARKDOWN,
+            file_hashes={row: compute_file_hash(project / row)},
+        )
+    rows = [old_row, new_row]
+
+    holdings = _unadmitted(
+        project,
+        [KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]],
+        lambda: {"pkg#2@sha256:bb": {"hooks": True}},
+        rows,
+        _lock_hashes(project, rows),
+    )
+
+    _assert_holdings(holdings, {("pkg", "approval no longer granted"): [old_row]})
+
+
+def _assert_holdings(holdings, expected: dict) -> None:
+    assert {(h.slug, h.reason): sorted(h.files) for h in holdings} == expected
