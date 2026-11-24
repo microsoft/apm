@@ -1,0 +1,6 @@
+{
+  "id": "reference.depth_reuses_canonical_first_wins_identity",
+  "phase": 1,
+  "oracle_tier": "semantic",
+  "law": "Dependency depth uses canonical ref-insensitive identity and reuses the first-wins node's depth."
+}

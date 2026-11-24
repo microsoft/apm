@@ -47,6 +47,7 @@ pytestmark = [
         "P-OWN-git-semver-preflight-resolution",
         "P-OWN-prospective-dry-run-install-plan",
         "P-OWN-dependency-identity-materialization",
+        "P-LAW-reference.depth_reuses_canonical_first_wins_identity",
     ),
 ]
 

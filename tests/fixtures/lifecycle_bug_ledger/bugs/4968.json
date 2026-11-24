@@ -1,0 +1,14 @@
+{
+  "issue": 4968,
+  "fixed_in": "Unreleased",
+  "summary": "Install's depth check treated one dependency declared with different refs as separate packages and refused a graph whose first-wins resolution stayed within policy; it now reuses the canonical node and depth.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "reference.depth_reuses_canonical_first_wins_identity"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_graph_version.py::test_max_depth_reuses_a_direct_dependency_across_declared_refs"
+  ]
+}

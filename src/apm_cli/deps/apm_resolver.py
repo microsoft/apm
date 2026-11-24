@@ -1004,7 +1004,7 @@ class APMDependencyResolver:
                 queued_keys.discard(dep_ref.get_resolution_key())
 
                 # Check if we already processed this dependency at this level or higher
-                existing_node = tree.nodes.get(dep_ref.get_resolution_key())
+                existing_node = tree.get_node(dep_ref.get_unique_key())
                 if existing_node and existing_node.depth <= depth:
                     # Prod wins over dev: if existing was dev and this is prod, promote it
                     if existing_node.is_dev and not is_dev:
