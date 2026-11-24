@@ -12,7 +12,9 @@ GRAPH=direct-also-transitive | cross-root diamond | replaced edge
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -790,3 +792,108 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     assert lock_bytes(world.project) == lock, "the next install rewrote the lockfile"
     assert not changed, f"the next install rewrote the re-anchored copy: {changed}"
     assert not [key for key in modules if ".apm-reanchor-" in key], sorted(modules)
+
+
+# -- Which compiled outputs the moving-copy check reads (#5097) ------------------
+
+
+def _marked(marker: str, link: str) -> str:
+    return f"{marker}\n# Rules\n\nSee [ref]({link}).\n"
+
+
+def test_an_unmarked_user_agents_md_linking_into_the_copy_still_moves(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A user's own AGENTS.md (no APM header) is not a compiled output: the copy moves."""
+    world = _docs_world(tmp_path, apm_binary_path)
+    agents = world.project / "AGENTS.md"
+    agents.write_text(f"# Mine\n\nSee [ref]({_LINK}).\n", encoding="utf-8")
+    kept = agents.read_bytes()
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert not (world.project / "apm_modules/_local/e").exists()
+    assert agents.read_bytes() == kept
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_a_symlinked_agents_md_is_skipped(tmp_path: Path, apm_binary_path: Path) -> None:
+    """APM writes compiled outputs as regular files; a linked one is never opened."""
+    from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+
+    world = _docs_world(tmp_path, apm_binary_path)
+    outside = tmp_path / "outside-agents.md"
+    outside.write_text(_marked(AGENTS_MD_GENERATED_MARKER, _LINK), encoding="utf-8")
+    (world.project / "AGENTS.md").symlink_to(outside)
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert not (world.project / "apm_modules/_local/e").exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_a_fifo_named_agents_md_does_not_hang_the_check(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A FIFO is not a regular file: it is never opened, so nothing blocks."""
+    world = _docs_world(tmp_path, apm_binary_path)
+    os.mkfifo(world.project / "AGENTS.md")
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert not (world.project / "apm_modules/_local/e").exists()
+
+
+def test_a_nested_distributed_agents_md_linking_into_the_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A distributed AGENTS.md below the root is in compile's placement universe."""
+    from apm_cli.compilation.constants import DISTRIBUTED_AGENTS_MD_GENERATED_MARKER
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _docs_world(tmp_path, apm_binary_path)
+    nested = world.project / "src/feature/AGENTS.md"
+    nested.parent.mkdir(parents=True)
+    nested.write_text(
+        _marked(DISTRIBUTED_AGENTS_MD_GENERATED_MARKER, f"../../{_LINK}"), encoding="utf-8"
+    )
+
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert (tree_digest(world.project), _modules(world.project)) == before
+    assert "src/feature/AGENTS.md links into its apm_modules copy" in output, output
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or getattr(os, "geteuid", lambda: 0)() == 0,
+    reason="needs POSIX permissions that the user cannot bypass",
+)
+@pytest.mark.parametrize("what", ["output", "directory"])
+def test_an_unreadable_compiled_output_or_directory_refuses(
+    tmp_path: Path, apm_binary_path: Path, what: str
+) -> None:
+    """A marked output or a directory the walk cannot read keeps the copy in place."""
+    from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _docs_world(tmp_path, apm_binary_path)
+    blocked = world.project / ("AGENTS.md" if what == "output" else "src")
+    if what == "output":
+        blocked.write_text(_marked(AGENTS_MD_GENERATED_MARKER, "docs.md"), encoding="utf-8")
+    else:
+        blocked.mkdir()
+    blocked.chmod(0)
+    try:
+        before = (tree_digest(world.project), _modules(world.project))
+        refused = world.apm("uninstall", "./vendor/e", expect=1)
+        after = (tree_digest(world.project), _modules(world.project))
+    finally:
+        blocked.chmod(0o755)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    name = "AGENTS.md" if what == "output" else "src"
+    assert f"{name} links into its apm_modules copy" in output, output
+    assert after == before

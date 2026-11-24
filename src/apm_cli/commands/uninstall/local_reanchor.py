@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -794,15 +795,16 @@ def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
     owners = {f"package:{key}" for key in plan.renames}
     if owners & set((getattr(lockfile, "lsp_config_provenance", None) or {}).values()):
         return "it supplies a language server"
-    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    for record in ledger.records.values():
         if len(record.owners) > 1 and any(owner in plan.renames for owner in record.owners):
             return f"it shares {DeploymentLedgerCodec.legacy_value(record.locator)} with another package"
-    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root)):
+    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root), ledger):
         return f"{linked} links into its apm_modules copy"
     return None
 
 
-def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
+def _links_into_moving_copy(lockfile, plan, project_root: Path, ledger=None) -> str | None:
     """A recorded deployed file that names a copy the re-anchor moves (#4999).
 
     Rendered links (a package's in-package assets, or the project's own skill
@@ -828,23 +830,25 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
         data = member.read_bytes()
         return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
 
-    for deployed in sorted(_recorded_claims(lockfile)):
+    for deployed in sorted(_recorded_claims(lockfile, ledger)):
         if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
     return _compiled_output_naming(project_root, names)
 
 
-def _recorded_claims(lockfile) -> set[str]:
+def _recorded_claims(lockfile, ledger=None) -> set[str]:
     """Every deployed path the lock records: the legacy view and canonical rows (#5097).
 
     A canonical ``deployments`` row may have no legacy ``deployed_files`` entry;
-    its project-relative path is a deployed file all the same.
+    its project-relative path is a deployed file all the same. *ledger* is the
+    caller's already decoded ledger, when it has one.
     """
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.deployment_state import LocatorKind
 
     claims = set(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile))
-    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+    ledger = ledger if ledger is not None else DeploymentLedgerCodec.from_lockfile(lockfile)
+    for record in ledger.records.values():
         if record.locator.kind is LocatorKind.PROJECT_RELATIVE:
             claims.add(record.locator.value)
     return claims
@@ -852,21 +856,32 @@ def _recorded_claims(lockfile) -> set[str]:
 
 # Compiled outputs are not recorded claims; APM marks each one in its header.
 _COMPILED_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
-_SKIPPED_DIRS = frozenset({"apm_modules", ".git", "node_modules"})
+
+
+class _UnreadableDir(OSError):
+    """A directory the compiled-output walk cannot list: refuse, never skip it."""
 
 
 def _compiled_output_naming(project_root: Path, names) -> str | None:
     """A compiled output (AGENTS.md and kin) that names the moving copy (#5097).
 
     ``apm compile`` copies links verbatim into these files, so one that names
-    the copy keeps it in place like a deployed file. Only files carrying APM's
-    generated-marker header are read; an unreadable one refuses too.
+    the copy keeps it in place like a deployed file. The walk covers compile's
+    own placement universe (``placement_prunes_dir``). Only regular files are
+    opened; a file's header is read, and its full content only when it carries
+    APM's generated marker. An unreadable directory or marked output refuses.
     """
     from ...compilation.constants import (
         AGENTS_MD_GENERATED_MARKER,
         DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
         GEMINI_MD_GENERATED_MARKER,
+        decode_utf8_prefix,
         has_generated_marker_header,
+    )
+    from ...compilation.context_optimizer import (
+        PLACEMENT_HIDDEN_TOOL_TREES,
+        hidden_tool_root,
+        placement_prunes_dir,
     )
     from ...utils.paths import portable_relpath
 
@@ -875,18 +890,39 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
         DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
         GEMINI_MD_GENERATED_MARKER,
     )
-    for directory, subdirs, files in os.walk(project_root):
-        subdirs[:] = sorted(d for d in subdirs if d not in _SKIPPED_DIRS)
-        for name in sorted(_COMPILED_NAMES.intersection(files)):
-            path = Path(directory) / name
-            if path.is_symlink():
-                continue  # APM writes compiled outputs as regular files
-            try:
-                text = path.read_bytes().decode("utf-8", "replace")
-                if has_generated_marker_header(text, markers) and names(path):
-                    return portable_relpath(path, project_root)
-            except OSError:
-                return portable_relpath(path, project_root)
+
+    root = Path(project_root)
+
+    def refuse(error: OSError) -> None:
+        raise _UnreadableDir(error.filename or root)
+
+    try:
+        for directory, subdirs, files in os.walk(root, onerror=refuse):
+            here = Path(directory)
+            subdirs[:] = sorted(
+                name
+                for name in subdirs
+                if not placement_prunes_dir(
+                    name,
+                    outside_tool_roots=not hidden_tool_root(
+                        (here / name).relative_to(root).parts, PLACEMENT_HIDDEN_TOOL_TREES
+                    ),
+                )
+            )
+            for name in sorted(_COMPILED_NAMES.intersection(files)):
+                path = here / name
+                try:
+                    # One lstat: a link, FIFO or device is never opened (#5097).
+                    if not stat.S_ISREG(path.lstat().st_mode):
+                        continue
+                    with path.open("rb") as handle:
+                        header = decode_utf8_prefix(handle.read(4096))
+                    if has_generated_marker_header(header, markers) and names(path):
+                        return portable_relpath(path, root)
+                except OSError:
+                    return portable_relpath(path, root)
+    except _UnreadableDir as unreadable:
+        return portable_relpath(Path(unreadable.args[0]), root)
     return None
 
 
