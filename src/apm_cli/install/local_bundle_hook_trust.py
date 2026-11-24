@@ -18,7 +18,7 @@ from __future__ import annotations
 import contextlib
 import os
 from collections.abc import Callable, Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,16 +27,18 @@ from apm_cli.install.hook_script_refs import (
     hook_commands,
     runs_script,
     script_refs,
-    script_tails,
 )
-from apm_cli.install.local_bundle_hook_cwd import runs_through_cwd
+from apm_cli.install.local_bundle_hook_cwd import commands_without_cwd, runs_through_cwd
 from apm_cli.install.local_bundle_hook_states import (
+    BundleHookStates,
+    _BundleHookState,
     _merged_hook_documents,
-    _merged_hook_states,
     _MergedHookState,
     _modified_slugs,
+    _per_file_targets,
     _recorded_slugs,
     _sidecar_identities,
+    read_bundle_hook_states,
 )
 
 REASON_UNRECORDED = "no approval record"
@@ -52,24 +54,6 @@ class UnadmittedBundleHooks:
     hook_files: tuple[str, ...] = ()
 
 
-@dataclass
-class _BundleHookState:
-    keys: set[str | None] = field(default_factory=set)
-    hook_files: set[str] = field(default_factory=set)
-
-
-def _per_file_targets(targets: Any) -> list[Any]:
-    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
-
-    return [
-        target
-        for target in targets or ()
-        if getattr(target, "name", None) not in _MERGE_HOOK_TARGETS
-        and callable(getattr(target, "supports", None))
-        and target.supports("hooks")
-    ]
-
-
 def _record_value(path: Path, project_root: Path) -> str:
     """Return the lockfile value for *path*: project-relative, else absolute."""
     if path.is_relative_to(project_root):
@@ -79,21 +63,16 @@ def _record_value(path: Path, project_root: Path) -> str:
 
 def _collect_per_file(
     project_root: Path,
-    targets: Any,
+    states: BundleHookStates,
     bundle_paths: Collection[str] | Callable[[], Collection[str]],
     found: dict[str, _BundleHookState],
 ) -> None:
-    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
-    from apm_cli.integration.hook_ownership import per_file_bundle_hook_keys
-
-    for target in _per_file_targets(targets):
-        target_root = Path(project_root) / target.root_dir
+    for per_file in states.per_file:
+        target_root = Path(project_root) / per_file.target.root_dir
         recorded: set[str] = set()
-        try:
-            records = per_file_bundle_hook_keys(target_root / _APM_HOOKS_SIDECAR)
-        except (OSError, ValueError, TypeError):
-            records = {}
-        for slug, (key, files) in records.items():
+        # Read once by read_bundle_hook_states (#5211); None names the sidecar (#5144).
+        unreadable = per_file.label if per_file.records is None else None
+        for slug, (key, files) in (per_file.records or {}).items():
             state = found.setdefault(slug, _BundleHookState())
             state.keys.add(key)
             state.hook_files.update(files)
@@ -115,25 +94,30 @@ def _collect_per_file(
             state = found.setdefault(slug, _BundleHookState())
             state.keys.add(None)
             state.hook_files.add(value)
+            if unreadable is not None:
+                state.unreadable.add(unreadable)
 
 
 def deployed_bundle_hook_keys(
     project_root: Path,
     targets: Any,
     bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
+    states: BundleHookStates | None = None,
 ) -> dict[str, _BundleHookState]:
     """Return each deployed local bundle slug with its recorded keys and hook files.
 
     *bundle_paths* are the lockfile's local-bundle deployed paths; they name
-    per-file hook files whose approval record is missing.
+    per-file hook files whose approval record is missing. *states*, when the
+    caller already read them, are used instead of reading every config again.
     """
     from apm_cli.integration.hook_ownership import (
         parse_local_bundle_hook_source,
         reinject_apm_source_from_sidecar,
     )
 
+    states = states or read_bundle_hook_states(project_root, targets)
     found: dict[str, _BundleHookState] = {}
-    for data, sidecar, container in _merged_hook_documents(project_root, targets):
+    for data, sidecar, container in _merged_hook_documents(project_root, targets, states.merged):
         if data is None:
             continue
         hooks = data.get(container)
@@ -150,7 +134,7 @@ def deployed_bundle_hook_keys(
                 )
                 if parsed is not None:
                     found.setdefault(parsed[0], _BundleHookState()).keys.add(parsed[1])
-    _collect_per_file(project_root, targets, bundle_paths, found)
+    _collect_per_file(project_root, states, bundle_paths, found)
     return found
 
 
@@ -159,6 +143,7 @@ def unadmitted_bundle_hooks(
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]]],
     bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
+    states: BundleHookStates | None = None,
 ) -> list[UnadmittedBundleHooks]:
     """Return deployed local-bundle hooks the current trust does not admit.
 
@@ -166,7 +151,7 @@ def unadmitted_bundle_hooks(
     only when a local bundle has deployed hooks. A gate-off map from the trust
     owner admits every hook, as installs do; a missing map admits none.
     """
-    deployed = deployed_bundle_hook_keys(project_root, targets, bundle_paths)
+    deployed = deployed_bundle_hook_keys(project_root, targets, bundle_paths, states)
     if not deployed:
         return []
     allow_map = allow_executables()
@@ -183,7 +168,9 @@ def unadmitted_bundle_hooks(
     for slug, state in sorted(deployed.items()):
         keys = state.keys
         files = tuple(sorted(state.hook_files))
-        if None in keys:
+        if state.unreadable:
+            result.append(UnadmittedBundleHooks(slug, state.unreadable_reason(), files))
+        elif None in keys:
             result.append(UnadmittedBundleHooks(slug, REASON_UNRECORDED, files))
         elif not all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys):
             result.append(UnadmittedBundleHooks(slug, REASON_NOT_GRANTED, files))
@@ -204,7 +191,10 @@ def _scripted_slugs(state: _MergedHookState, lock_paths: Collection[str], projec
 
 
 def bundle_hook_ownership(
-    project_root: Path, targets: Any, bundle_paths: Collection[str] = ()
+    project_root: Path,
+    targets: Any,
+    bundle_paths: Collection[str] = (),
+    states: BundleHookStates | None = None,
 ) -> list[str]:
     """Every bundle hook ownership problem, reading each config and sidecar once (#5078).
 
@@ -214,16 +204,23 @@ def bundle_hook_ownership(
     record names no entry for that bundle (a missing or stripped sidecar).
     Each would otherwise leave the bundle's entries silently unattributed.
     """
-    states = list(_merged_hook_states(project_root, targets))
-    problems: list[str] = []
-    for state in states:
+    states = states or read_bundle_hook_states(project_root, targets)
+    # A per-file record that cannot be read (#5144) is named, never read as "no record".
+    problems = [
+        f"{state.label}: the bundle hook ownership record cannot be read, "
+        "so bundle hooks there cannot be attributed"
+        for state in states.per_file
+        if state.records is None
+    ]
+    for state in states.merged:
         scripted = _scripted_slugs(state, bundle_paths, project_root)
         if state.sidecar_unreadable or (
             state.config_unreadable and (scripted or _recorded_slugs(state))
         ):
+            named = f" (unreadable: {state.sidecar_label})" if state.sidecar_unreadable else ""
             problems.append(
-                f"{state.label}: the hook config or its ownership record cannot be read, "
-                "so bundle hooks there cannot be attributed"
+                f"{state.label}: the hook config or its ownership record cannot be read"
+                f"{named}, so bundle hooks there cannot be attributed"
             )
             continue
         problems += [
@@ -308,7 +305,7 @@ def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
                 blockers.append(f"{label} (linked path)")
                 continue
             try:
-                read_hook_object(path)
+                read_hook_object(path, regular_only=path.name == _APM_HOOKS_SIDECAR)
                 if config is None:
                     # A per-file sidecar's bundle records are read again on removal.
                     per_file_bundle_hook_keys(path)
@@ -577,7 +574,6 @@ def _per_file_configs_running(
     refs = script_refs(project_root, scripts)
     for target in _per_file_targets(targets):
         target_root = project_root / target.root_dir
-        tails = script_tails(project_root, target_root, scripts)
         hooks_dir = target_root / "hooks"
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not hooks_dir.is_dir():
@@ -592,14 +588,10 @@ def _per_file_configs_running(
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
             texts = list(hook_commands(document))
-            if (
-                any(tail in text.replace("\\", "/") for text in texts for tail in tails)
-                or any(
-                    runs_script(text, refs, (project_root, target_root), project_root)
-                    for text in texts
-                )
-                or runs_through_cwd(document, project_root, scripts)
-            ):
+            if any(
+                runs_script(text, refs, (project_root, target_root), project_root)
+                for text in commands_without_cwd(document, texts)
+            ) or runs_through_cwd(document, project_root, scripts):
                 found.add(value)
     return found
 
@@ -644,14 +636,13 @@ def _configs_still_running(
         if config is None:
             continue
         target_root = project_root / target.root_dir
-        tails = script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not json_path.is_file():
             continue
         try:
             hooks = read_hook_object(json_path).get(config.event_container_key)
-            sidecar = read_hook_object(json_path.parent / _APM_HOOKS_SIDECAR)
+            sidecar = read_hook_object(json_path.parent / _APM_HOOKS_SIDECAR, regular_only=True)
         except (OSError, ValueError, TypeError):
             continue
         if not isinstance(hooks, dict):
@@ -666,7 +657,7 @@ def _configs_still_running(
             if not (isinstance(entry, dict) and entry.get("_apm_source") in markers)
         ]
         texts = [text for entry in foreign for text in commands(entry)]
-        if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
+        if any(
             runs_script(text, refs, (project_root, target_root), project_root) for text in texts
         ):
             found.add(_record_value(json_path, project_root))

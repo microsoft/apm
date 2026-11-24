@@ -14,7 +14,7 @@ from typing import Any, TypeVar
 
 from filelock import FileLock, Timeout
 
-from apm_cli.core.scope import get_apm_home
+from apm_cli.core.scope import ensure_apm_home, get_apm_home
 from apm_cli.utils.path_security import has_symlink_component
 
 LIFECYCLE_LOCK_TIMEOUT = 120.0
@@ -139,6 +139,7 @@ def acquire_lifecycle_lock(*, timeout: float = LIFECYCLE_LOCK_TIMEOUT) -> Lifecy
         hint=" This lock is shared by every APM_HOME for the current OS user.",
     )
     try:
+        ensure_apm_home()  # the metadata lock is the first thing APM writes there
         _acquire_or_wait(metadata, timeout, _validate_lifecycle_lock_path)
     except BaseException:
         deployment.release()

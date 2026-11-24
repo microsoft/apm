@@ -1029,14 +1029,9 @@ _TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset(
     {"http.sslbackend", "http.sslcainfo", "http.sslcapath"}
 )
 
-# Module-level cache for the ambient (env=None) TLS probe -- see
-# real_git_tls_config(). None means "not probed yet"; {} is a legitimate,
-# cached "no ambient TLS config" answer, not a retry signal. Guarded by
-# _real_git_tls_config_lock: parallel installs call this once per
-# dependency, and the probe spawns a `git config` child with its own
-# 10s/30s retry budget, so an unguarded check-then-probe race could let
-# several workers pay that cost concurrently before either stores a result.
-_real_git_tls_config_cache: dict[str, str] | None = None
+# (stamp, answer) of the ambient (env=None) TLS probe; {} is a real answer.
+# The lock makes racing workers share one probe (each has a retry budget).
+_real_git_tls_config_cache: tuple[tuple, dict[str, str]] | None = None
 _real_git_tls_config_lock = threading.Lock()
 
 
@@ -1064,9 +1059,8 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
     tracked key is recorded during the scan and only the final, possibly
     empty, values are filtered out afterward.
 
-    Cached for the default ``env=None`` case after the first probe: the
-    ambient config a plain ``git clone`` sees is stable for the life of the
-    process, and both ``AuthResolver.build_public_github_anonymous_git_env``
+    Cached for ``env=None`` while ``git_config_memo.ambient_tls_stamp`` (env,
+    config files, user-code epoch) is unchanged, and both ``AuthResolver.build_public_github_anonymous_git_env``
     and ``AuthResolver.git_env_for_context`` call this once per attempt, so
     an uncached probe would spawn one extra ``git config`` child process
     (with its own retry/timeout budget) per dependency in a large install.
@@ -1080,8 +1074,12 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
     probe instead of each paying its own retry/timeout budget.
     """
     global _real_git_tls_config_cache
-    if env is None and _real_git_tls_config_cache is not None:
-        return dict(_real_git_tls_config_cache)
+    from apm_cli.utils.git_config_memo import ambient_tls_stamp
+
+    stamp = ambient_tls_stamp() if env is None else None
+    kept = _real_git_tls_config_cache
+    if kept is not None and kept[0] == stamp:
+        return dict(kept[1])
 
     def _probe() -> dict[str, str]:
         try:
@@ -1102,10 +1100,11 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
         return _probe()
 
     with _real_git_tls_config_lock:
-        if _real_git_tls_config_cache is not None:
-            return dict(_real_git_tls_config_cache)
+        kept = _real_git_tls_config_cache
+        if kept is not None and kept[0] == stamp:
+            return dict(kept[1])
         result = _probe()
-        _real_git_tls_config_cache = result
+        _real_git_tls_config_cache = (stamp, result)
         return dict(result)
 
 

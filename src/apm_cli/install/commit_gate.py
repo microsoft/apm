@@ -613,6 +613,11 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
     skill = ctx.integrators.get("skill")
     if getattr(skill, "_materialization_session", None) is None or ctx.diagnostics is None:
         return
+    if _gated_dest_dirs_empty(ctx, write_plan):
+        # W3d S1: no gated dest dir holds a file, so no planned write can meet an
+        # existing file and the planning pass could only return nothing.
+        ctx.overwrite_preflight_refused = False
+        return
     kept = [
         (owner, path, edit)
         for package_info, plan, managed in write_plan
@@ -624,6 +629,64 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
         message = kept_edit_message(entry, user_scope=user_scope, proven_edit=edit is not None)
         ctx.diagnostics.error(message, package=owner)
     ctx.overwrite_preflight_refused = bool(kept)
+
+
+def _gated_dest_dirs_empty(ctx: InstallContext, write_plan: Sequence[PlannedPackage]) -> bool:
+    """Whether every directory a gated primitive deploys into is absent or empty.
+
+    One scandir per (target, gated primitive) dest dir. The targets phase creates
+    the target roots, so the proof is per dest dir. Any doubt (user scope, an
+    external or absolute root, an unreadable dir) answers ``False``: plan as today.
+    """
+    import os
+
+    from apm_cli.core.scope import InstallScope
+
+    if ctx.scope is InstallScope.USER or ctx.project_root is None:
+        return False
+    # The targets the planning pass would visit: each plan's own selection.
+    targets = {
+        id(t): t
+        for _info, plan, _managed in write_plan
+        if plan is not None and getattr(plan, "target_selection", None) is not None
+        for t in plan.target_selection.targets
+    }
+    base = str(ctx.project_root)
+    dirs: set[str] = set()
+    for target in targets.values():
+        if getattr(target, "name", None) in _UNGATED_TARGETS:
+            continue
+        root_dir = getattr(target, "root_dir", None)
+        primitives = getattr(target, "primitives", None)
+        if (
+            not root_dir
+            or os.path.isabs(root_dir)
+            or primitives is None
+            or getattr(target, "managed_deploy_root", None) is not None
+        ):
+            return False
+        for primitive in _GATED_PRIMITIVES:
+            mapping = primitives.get(primitive)
+            if mapping is None:
+                continue
+            root = getattr(mapping, "deploy_root", None) or root_dir
+            if os.path.isabs(root):
+                return False
+            dirs.add(
+                os.path.join(base, root, mapping.subdir)
+                if mapping.subdir
+                else os.path.join(base, root)
+            )
+    for path in dirs:
+        try:
+            with os.scandir(path) as entries:
+                if next(entries, None) is not None:
+                    return False
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+    return True
 
 
 def _planned_keeps(
