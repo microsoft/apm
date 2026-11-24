@@ -1538,8 +1538,15 @@ def _check_local_bundle_hooks(
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..install.errors import PolicyViolationError
     from ..install.local_bundle_canvas import unadmitted_bundle_canvas
-    from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
+    from ..install.local_bundle_hook_trust import (
+        bundle_hook_cleanup_targets,
+        unadmitted_bundle_hooks,
+    )
     from ..security.executables import resolve_project_exec_allow_map
+
+    # Hooks a bundle registered for a target the manifest does not name are
+    # re-checked too: every hook target of the scope.
+    targets = bundle_hook_cleanup_targets(targets, user_scope=user_scope)
 
     def allow_provider():
         return resolve_project_exec_allow_map(
