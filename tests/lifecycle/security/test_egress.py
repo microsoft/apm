@@ -62,6 +62,7 @@ from tests.lifecycle.world import registry as world_registry
 from tests.lifecycle.world.services import (
     ADO_BEARER,
     ADO_PAT,
+    ORG,
     POLICY_REPO,
     REGISTRY_HOST,
     REGISTRY_SERVER,
@@ -214,10 +215,32 @@ class Operation:
     setup: Callable[[World, HostSlice], None] = lambda world, host: None
 
 
+def _api_spec(world: World, host: HostSlice) -> str:
+    """The spec whose install asks *host*'s REST API.
+
+    Since #4970 a branch or tag name resolves from the origin's git ref
+    listing; only an abbreviated commit that names no branch or tag still
+    asks the commits API, so ``api_abbreviated`` swaps the tag for one.
+    """
+    if not host.api_abbreviated:
+        return host.api_spec or host.spec
+    url, _, tag = host.spec.partition("#")
+    bare = world.services.served_repository(f"{ORG}/{url.rsplit('/', 1)[-1]}")
+    sha = subprocess.run(
+        ("git", "--git-dir", str(bare), "rev-parse", "--verify", f"{tag}^{{commit}}"),
+        env=world.env,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    ).stdout.strip()
+    return f"{url}#{sha[:12]}"
+
+
 OPERATIONS: Mapping[str, Operation] = {
     "clone": Operation(lambda w, h: ["install", h.spec], _is_git),
     "api-probe": Operation(
-        lambda w, h: ["install", h.api_spec or h.spec],
+        lambda w, h: ["install", _api_spec(w, h)],
         _is_api,
         lambda w, h: h.api_setup(w) if h.api_setup else None,
     ),
