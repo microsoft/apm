@@ -37,7 +37,7 @@ class ApplyRestoreIncomplete(Exception):
 
 
 @contextlib.contextmanager
-def journaled_apply() -> Iterator[DeployJournal]:
+def journaled_apply(contain: Path) -> Iterator[DeployJournal]:
     """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
 
     The caller records each path it creates; every path written at the
@@ -54,11 +54,13 @@ def journaled_apply() -> Iterator[DeployJournal]:
 
     store_parent = get_apm_home() / "install-snapshots"
     journal = DeployJournal(store_parent)
+    # *contain* (the project) bounds the rollback only; nothing is persisted for replay.
+    journal.contain = Path(os.path.abspath(contain))
 
     def seam(path: Path, contents: bool, expected: str | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
-    write_seam.listen(seam, journal.after_write)
+    write_seam.listen(seam, journal.after_write, journal=journal.token)
     try:
         yield journal
     except BaseException as exc:
@@ -545,7 +547,8 @@ class InstallTransaction:
             self._deploy_journal = DeployJournal(
                 store_parent, root=root, workspace=self.apm_modules_dir.parent
             )
-            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)
+            token = self._deploy_journal.token
+            write_seam.listen(self._record_deploy_write, self._seal_deploy_write, journal=token)
 
     def _mark_deploy_commit(self) -> None:
         """Seal the journal and name the staged lockfile it is about to commit."""

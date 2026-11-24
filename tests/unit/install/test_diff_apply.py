@@ -755,7 +755,7 @@ def test_a_fast_apply_config_write_is_sealed_at_the_write_seam(
     config = tmp_path / "project" / ".gitignore"
     config.parent.mkdir()
 
-    with journaled_apply() as journal:
+    with journaled_apply(config.parent) as journal:
         sealed_by = write_seam._after
         write_seam.write_text(config, "apm_modules/\n")
         recorded = [unit.path for unit in journal.units]
@@ -781,3 +781,43 @@ def test_a_junction_parent_of_a_deployed_path_declines(tmp_path: Path) -> None:
         diff_apply._within(tmp_path, "link/file.md")
 
     assert (outside / "file.md").read_text(encoding="utf-8") == "outside\n"
+
+
+def test_a_fast_apply_rollback_keeps_a_config_below_a_linked_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed fast apply never restores a config through a parent replaced by a link."""
+    import shutil
+
+    from apm_cli.install.transaction import ApplyRestoreIncomplete, journaled_apply
+    from apm_cli.integration import write_seam
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    project = tmp_path / "project"
+    config = project / ".github" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "config.json").write_text('{"keep": true}\n', encoding="utf-8")
+
+    with pytest.raises(ApplyRestoreIncomplete) as caught:
+        with journaled_apply(project):
+            write_seam.write_text(config, '{"apm": true}\n')
+            shutil.rmtree(project / ".github")
+            try:
+                (project / ".github").symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+            raise RuntimeError("apply failed")
+
+    assert (outside / "config.json").read_text(encoding="utf-8") == '{"keep": true}\n'
+    assert config in [path for path, _reason in caught.value.issues]
+
+
+def test_a_fast_apply_journal_needs_its_containment_root() -> None:
+    """A fast apply cannot start without the root that bounds its rollback (#5207)."""
+    from apm_cli.install.transaction import journaled_apply
+
+    with pytest.raises(TypeError):
+        journaled_apply()
