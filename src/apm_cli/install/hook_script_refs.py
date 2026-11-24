@@ -224,12 +224,30 @@ def _certainly_elsewhere(
     if _NOT_PLAIN.search(word.replace(" ", "")):
         return False
     if word.startswith("/") or _DRIVE.match(word):
+        if _linked_below(Path(Path(word).anchor or "/"), word):
+            return False  # a link may alias the bundle script: identity is not certain
         return _normalized(word) not in paths
     relative = posixpath.normpath(word)
     qualified = "/" in relative or (from_cwd and word.startswith("./"))
     if moved or not qualified or relative.startswith(".."):
         return False  # a bare name, or a directory that is not certain
+    if any(_linked_below(base, relative) for base in bases):
+        return False  # a link may alias the bundle script: identity is not certain
     return all(_normalized(f"{base.as_posix()}/{relative}") not in paths for base in bases)
+
+
+def _linked_below(base: Path, relative: str) -> bool:
+    """Whether an existing *relative* below *base* goes through a link (or cannot be proven not to).
+
+    A link or junction anywhere on the path may alias a bundle script, so a
+    lexical mismatch proves nothing there (fail closed).
+    """
+    from ..utils.path_security import has_symlink_component
+
+    candidate = Path(base) / relative
+    if not (candidate.is_symlink() or candidate.exists()):
+        return False
+    return has_symlink_component(Path(base), candidate)
 
 
 def hook_commands(document: Any) -> list[str]:

@@ -213,13 +213,84 @@ def test_a_cwd_handler_running_another_script_is_not_in_use(
     assert _user_hook_with_cwd(tmp_path, command, cwd) == set()
 
 
-def test_a_longer_name_through_a_linked_cwd_is_not_in_use(tmp_path: Path) -> None:
-    """#5332: the identity match resolves from the linked directory, not by substring."""
+@pytest.mark.parametrize(
+    ("command", "alias"),
+    [
+        ("./x.sh", "x.sh"),
+        ("sh -e ./x.sh", "x.sh"),
+        ("./lk/x.sh", "lk"),
+    ],
+    ids=["linked-script", "linked-script-shell-options", "linked-directory"],
+)
+def test_a_cwd_operand_through_a_link_to_the_bundle_script_is_in_use(
+    tmp_path: Path, command: str, alias: str
+) -> None:
+    """A link under the handler's cwd may alias the bundle script: never cleared lexically."""
+
+    def link(project: Path) -> None:
+        tools = project / "tools"
+        tools.mkdir()
+        script = project / _COPILOT_SCRIPT
+        target = script if alias == "x.sh" else script.parent
+        (tools / alias).symlink_to(target, target_is_directory=alias != "x.sh")
+
+    assert _user_hook_with_cwd(tmp_path, command, "tools", link) == {".github/hooks/user.json"}
+
+
+def test_a_linked_cwd_is_in_use_whatever_the_name(tmp_path: Path) -> None:
+    """A linked cwd may alias the script directory, so it is never cleared (fail closed)."""
 
     def link(project: Path) -> None:
         (project / "lk").symlink_to(project / _SCRIPT_DIR, target_is_directory=True)
 
-    assert _user_hook_with_cwd(tmp_path, "./prefix-x.sh", "lk", link) == set()
+    assert _user_hook_with_cwd(tmp_path, "./prefix-x.sh", "lk", link) == {".github/hooks/user.json"}
+
+
+def _user_hook(project: Path, command: str, prepare) -> set[str]:
+    """Write an unowned Copilot hook running *command* with no cwd; return the hook files in use."""
+    from apm_cli.install.local_bundle_hook_trust import _per_file_configs_running
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (project / _COPILOT_SCRIPT).parent.mkdir(parents=True)
+    (project / _COPILOT_SCRIPT).write_bytes(b"#!/bin/sh\n")
+    prepare(project)
+    hook = project / ".github" / "hooks" / "user.json"
+    handler = {"type": "command", "bash": command}
+    hook.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": [handler]}}))
+    return _per_file_configs_running(project, [KNOWN_TARGETS["copilot"]], set(), {_COPILOT_SCRIPT})
+
+
+def _linked_leaf(project: Path) -> None:
+    (project / "tools").mkdir()
+    (project / "tools" / "x.sh").symlink_to(project / _COPILOT_SCRIPT)
+
+
+def _linked_parent(project: Path) -> None:
+    (project / "tools").symlink_to(project / _SCRIPT_DIR, target_is_directory=True)
+
+
+def _plain_copy(project: Path) -> None:
+    (project / "tools").mkdir()
+    (project / "tools" / "x.sh").write_bytes(b"#!/bin/sh\n")
+
+
+@pytest.mark.parametrize(
+    ("command", "prepare", "in_use"),
+    [
+        ("sh tools/x.sh", _linked_leaf, True),
+        ("sh tools/x.sh", _linked_parent, True),
+        ("sh {root}/tools/x.sh", _linked_leaf, True),
+        ("sh tools/x.sh", _plain_copy, False),
+    ],
+    ids=["linked-leaf", "linked-parent", "absolute-through-link", "plain-control"],
+)
+def test_an_operand_through_a_link_is_in_use(
+    tmp_path: Path, command: str, prepare, in_use: bool
+) -> None:
+    """A link on the operand path may alias the bundle script: in use; a plain file is not."""
+    found = _user_hook(tmp_path, command.format(root=tmp_path.as_posix()), prepare)
+
+    assert found == ({".github/hooks/user.json"} if in_use else set())
 
 
 @pytest.mark.parametrize(
