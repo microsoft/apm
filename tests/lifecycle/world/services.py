@@ -31,7 +31,7 @@ import json
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
@@ -362,10 +362,14 @@ class WorldServices:
         status: int,
         headers: Mapping[str, str] | None = None,
         body: bytes = b"",
+        when: Callable[[ScriptedRequest], bool] | None = None,
     ) -> None:
-        """Answer requests to *host* under *path_prefix* with a fixed response until ``reset``."""
+        """Answer requests to *host* under *path_prefix* with a fixed response until ``reset``.
+
+        With *when*, only the requests it accepts are scripted.
+        """
         response = ScriptedResponse(status, dict(headers or {}), body)
-        self.routes.scripted.append(routes.ScriptedRoute(host, path_prefix, response))
+        self.routes.scripted.append(routes.ScriptedRoute(host, path_prefix, response, when))
 
     def redirect(self, host: str, path_prefix: str, location: str, status: int = 307) -> None:
         """Answer *host* + *path_prefix* with a 3xx to *location* (another host or path)."""
