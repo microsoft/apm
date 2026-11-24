@@ -81,6 +81,24 @@ def get_apm_home() -> Path:
     return Path.home() / USER_APM_DIR
 
 
+def ensure_apm_home() -> Path:
+    """Return ``APM_HOME``, creating it as 0700 when it does not exist yet (#5257).
+
+    Only a directory APM creates here is made private to the user; an existing
+    ``APM_HOME`` keeps its mode. Missing parents are created with the umask's mode.
+    """
+    home = get_apm_home()
+    if os.path.lexists(home):
+        return home
+    home.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.mkdir(home, 0o700)
+    except FileExistsError:
+        return home  # created concurrently: whoever created it chose its mode
+    os.chmod(home, 0o700)  # exact, whatever bits the umask cleared
+    return home
+
+
 # ---------------------------------------------------------------------------
 # Enum
 # ---------------------------------------------------------------------------
