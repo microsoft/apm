@@ -364,11 +364,10 @@ def lockfile_identity(text: str) -> str:
     from apm_cli.utils.yaml_io import load_yaml_str
 
     try:
-        try:  # The owner's memoized parse; text it refuses keeps the old loader's identity.
-            tree = parse_lockfile_text(text)
+        try:  # Owner's memoized parse; refused or non-JSON-native text keeps the old identity.
+            canonical = json.dumps(parse_lockfile_text(text), sort_keys=True)
         except Exception:
-            tree = load_yaml_str(text)
-        canonical = json.dumps(tree, sort_keys=True, default=str)
+            canonical = json.dumps(load_yaml_str(text), sort_keys=True, default=str)
     except (yaml.YAMLError, ValueError, TypeError, RecursionError):
         canonical = text.replace("\r\n", "\n")
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

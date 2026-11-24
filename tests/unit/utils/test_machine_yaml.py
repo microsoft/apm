@@ -174,12 +174,17 @@ def test_identifying_one_lockfile_twice_parses_it_once() -> None:
     assert lockfile_container._parsed_texts[key] is parsed
 
 
-def test_a_lockfile_the_owner_refuses_keeps_its_old_identity() -> None:
-    """An escaped lone surrogate: the old loader's identity, so replay stays committed."""
+@pytest.mark.parametrize(
+    "text",
+    [
+        'lockfile_version: "1"\nname: "\\ud800"\n',
+        'lockfile_version: "1"\nx-vendor: !!set {0: null, 36: null, 72: null, 108: null}\n',
+    ],
+    ids=["lone-surrogate", "set-value"],
+)
+def test_a_lockfile_the_owner_refuses_keeps_its_old_identity(text: str) -> None:
+    """Refused or non-JSON-native text: the old loader's identity, so replay stays committed."""
     from apm_cli.install.deploy_snapshot import lockfile_identity
 
-    text = 'lockfile_version: "1"\nname: "\\ud800"\n'
-    with pytest.raises((yaml.YAMLError, ValueError)):
-        lockfile_container.parse_lockfile_text(text)
     canonical = json.dumps(yaml_io.load_yaml_str(text), sort_keys=True, default=str)
     assert lockfile_identity(text) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
