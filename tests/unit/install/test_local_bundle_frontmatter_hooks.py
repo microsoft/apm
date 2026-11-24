@@ -384,3 +384,33 @@ def test_a_fifo_markdown_hook_record_is_refused_without_blocking(tmp_path: Path)
             tmp_path, [KNOWN_TARGETS["claude"]], scope=InstallScope.PROJECT
         )
     assert record.is_fifo()
+
+
+@pytest.mark.parametrize("linked", [False, True], ids=["in-root", "ancestor-linked-after-scan"])
+def test_a_retirement_removes_only_through_an_unlinked_frame(tmp_path: Path, linked: bool) -> None:
+    """#5254 review: the frame is re-checked right before each removal (no TOCTOU)."""
+    import shutil
+
+    from apm_cli.install.local_bundle_markdown_hooks import _remove_exact
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    root, rel = tmp_path / "project", ".claude/commands/run.md"
+    (root / rel).parent.mkdir(parents=True)
+    (root / rel).write_bytes(b"hooked\n")
+    recorded = {rel: compute_file_hash(root / rel)}
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "run.md").write_bytes(b"hooked\n")
+    if linked:
+        shutil.rmtree(root / ".claude" / "commands")
+        try:
+            (root / ".claude" / "commands").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+
+    removed, kept = _remove_exact(root, {rel}, recorded, [KNOWN_TARGETS["claude"]])
+
+    assert (outside / "run.md").read_bytes() == b"hooked\n"
+    assert (removed, kept) == ((set(), {rel}) if linked else ({rel}, set()))
+    assert (root / rel).exists() is linked
