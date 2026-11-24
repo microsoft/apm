@@ -1,0 +1,18 @@
+{
+  "issue": 5281,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall <bundle> ignored a hook handler's cwd field when checking whether an unowned hook still runs a bundle script, so a hook running ./x.sh in the script's directory did not block and the script was deleted. The check now resolves the command against the cwd (relative to the project root); a cwd that escapes the project or cannot be resolved refuses.",
+  "failure_modes": [
+    "ownership",
+    "outcome"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_bundle_script_in_use_spellings_lifecycle.py::test_uninstall_bundle_keeps_a_script_a_user_hook_runs",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_user_hook_whose_cwd_escapes_the_project",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere"
+  ]
+}

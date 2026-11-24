@@ -117,6 +117,31 @@ def test_generation_is_deterministic(tmp_path: Path) -> None:
     assert shas[0] == shas[1]
 
 
+def _rev(bare: Path, ref: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "--git-dir", str(bare), "rev-parse", ref],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+def test_pin_shapes_reference_the_tip_or_a_non_tip_commit(tmp_path: Path) -> None:
+    tip = build_tree(TREE_RECIPES["tree-10-tip"], tmp_path / "tip")
+    tip_project = yaml.safe_load((tip.project / "apm.yml").read_text(encoding="utf-8"))
+    sha = build_tree(TREE_RECIPES["tree-10-sha"], tmp_path / "sha")
+    sha_project = yaml.safe_load((sha.project / "apm.yml").read_text(encoding="utf-8"))
+    bares = publish_repositories(sha, tmp_path / "repos")
+
+    assert all("#" not in spec for spec in tip_project["dependencies"]["apm"])
+    for spec in sha_project["dependencies"]["apm"]:
+        path, _, pinned = spec.partition("#")
+        bare = bares[sha.slug(path.rsplit("/", 1)[-1])]
+        tagged, main = _rev(bare, "v1.0.0"), _rev(bare, "main")
+        assert len(pinned) == 40
+        assert tagged.stdout.strip() == pinned != main.stdout.strip()
+
+
 def _install(apm: str, cwd: Path, env: dict[str, str], *flags: str) -> None:
     result = subprocess.run(
         [apm, "install", *flags],
