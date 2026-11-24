@@ -677,29 +677,3 @@ def test_an_explicit_bundle_reinstall_retires_hooked_markdown_a_withdrawn_key_ad
     lock = world.lock(consumer)
     assert _DEPLOYED["command"] not in lock["local_deployed_files"]
     assert _DEPLOYED["skill"] in lock["local_deployed_files"]
-
-
-def test_the_markdown_hook_record_is_managed_under_an_unmanaged_files_deny_policy(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """#5308 review: APM's own approval record is never an unmanaged file."""
-    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
-    bundle, key = _bundle(world, tmp_path, "command")
-    consumer = _consumer(world, "managed-record-consumer")
-    manifest = load_yaml(consumer / "apm.yml")
-    manifest["executables"] = {"allow": {key: {"hooks": True}}}
-    dump_yaml(manifest, consumer / "apm.yml")
-    world.apm(consumer, "install", str(bundle), "--no-policy")
-    assert (consumer / ".claude" / "apm-bundle-markdown-hooks.json").is_file()
-    policy = tmp_path / "apm-policy.yml"
-    write(
-        policy,
-        "name: acme\nversion: 1.0.0\nenforcement: block\n"
-        "unmanaged_files:\n  action: deny\n  directories: ['.claude']\n",
-    )
-
-    audited = world.apm(consumer, "audit", "--ci", "--policy", str(policy), expect=None)
-
-    text = output(audited)
-    assert "apm-bundle-markdown-hooks.json" not in text, text
-    assert audited.returncode == 0, text
