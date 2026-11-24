@@ -1,0 +1,17 @@
+{
+  "issue": 5221,
+  "fixed_in": "Unreleased",
+  "summary": "Failed-download diagnostics could list the origin host when a git mirror was configured through includeIf hasconfig; they now list under the env a clone of the origin gets, so only the mirror is contacted, and when that env cannot be built the check is skipped without contacting the origin.",
+  "failure_modes": [
+    "auth",
+    "routing"
+  ],
+  "properties": [
+    "auth.credentials_isolated",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_git_cache_sha_reachability.py::test_a_failed_download_diagnostic_lists_only_the_mirror_a_remote_activates",
+    "tests/integration/test_git_cache_sha_reachability.py::test_a_failed_download_diagnostic_skips_the_check_when_mirror_rules_cannot_apply"
+  ]
+}
