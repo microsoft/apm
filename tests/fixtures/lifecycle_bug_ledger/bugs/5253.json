@@ -1,0 +1,16 @@
+{
+  "issue": 5253,
+  "fixed_in": "Unreleased",
+  "summary": "apm pack refused a project with a native Claude plugin installed whole under .agents/plugins as a stale install, and its 'apm install' remedy looped; pack now leaves the plugin out and names it in one line.",
+  "failure_modes": [
+    "outcome",
+    "routing"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells",
+    "tests/unit/bundle/test_plugin_exporter_lockfile.py::test_a_whole_native_plugin_is_named_not_a_provenance_gap"
+  ]
+}
