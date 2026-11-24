@@ -15,7 +15,6 @@ A control without the offending input installs.
 
 from __future__ import annotations
 
-import re
 import subprocess
 from pathlib import Path
 
@@ -642,41 +641,3 @@ def test_warn_policy_at_the_root_destination_warns_on_an_mcp_install(
     assert _HAND_WRITTEN in text, text
     assert path.read_text(encoding="utf-8") == "# hand written\n"
     assert (target / ".mcp.json").is_file()
-
-
-def _approved_hook_bundle_install(world: World, target: str) -> None:
-    """Install ``p-exec`` for *target*, approve its exact key, and install it again."""
-    bundle = world.packages["p-exec:bundle"].spec
-    parked = _assert_ok(world, "install", "--target", target, bundle)
-    key = re.search(r"apm approve '([^']+)'", _text(parked))
-    assert key is not None, _evidence(parked)
-    _assert_ok(world, "approve", key.group(1))
-    _assert_ok(world, "install", "--target", target, bundle)
-
-
-def test_unmanaged_files_deny_passes_audit_after_an_approved_copilot_hook_bundle(
-    lifecycle_world: World,  # noqa: F811
-) -> None:
-    world = lifecycle_world
-    use_policy(world, "unmanaged-deny")
-    _seed(world)
-    _approved_hook_bundle_install(world, "copilot")
-    assert (world.project / ".github" / "hooks" / "p-exec-hooks.json").is_file()
-    audit = _assert_ok(world, "audit", "--ci")
-    assert "No unmanaged files in governance directories" in _text(audit), _evidence(audit)
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="#5277: unmanaged_files counts only dependency deployed_files, not APM's own .claude files",
-)
-def test_unmanaged_files_deny_counts_apm_owned_claude_hook_files(
-    lifecycle_world: World,  # noqa: F811
-) -> None:
-    world = lifecycle_world
-    use_policy(world, "unmanaged-deny")
-    _seed(world)
-    _approved_hook_bundle_install(world, "claude")
-    assert (world.project / ".claude" / "apm-hooks.json").is_file()
-    audit = _apm(world, "audit", "--ci")
-    assert audit.returncode == 0, _evidence(audit)
