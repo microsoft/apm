@@ -1962,6 +1962,32 @@ def test_public_run_has_no_partial_selection_surface() -> None:
     assert partial.exit_code == 2
 
 
+def test_the_definition_index_matches_the_direct_scan_and_fails_closed(tmp_path: Path) -> None:
+    """Indexed definers and fail-closed violations equal the per-call scan (#5196)."""
+    from scripts.architecture_linter.checks.registry_definition_index import (
+        _defining_files,
+        _scan_defining_files,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    sources = {
+        "src/apm_cli/a.py": "def target():\n    pass\n\n\nclass Target:\n    pass\n",
+        "src/apm_cli/b.py": "class Holder:\n    def target(self):\n        pass\n",
+        "src/apm_cli/broken.py": "def (:\n",
+    }
+    provider = FactsProvider(tmp_path, tuple(sources), registry=None, source_overrides=sources)
+    for name, kinds in (
+        ("target", ("function",)),
+        ("Target", ("class",)),
+        ("absent", ("function",)),
+    ):
+        indexed = _defining_files(provider, "rule-x", name, kinds=kinds)
+        assert indexed == _scan_defining_files(provider, "rule-x", name, kinds=kinds)
+        assert [failure.path for failure in indexed[1]] == ["src/apm_cli/broken.py"]
+    definers, _ = _defining_files(provider, "rule-x", "target", kinds=("function",))
+    assert "src/apm_cli/a.py" in definers
+
+
 def test_every_binary_selection_detector_is_gated_or_always_runs() -> None:
     """A detector added without a pre-filter gate can never be skipped silently (#5196)."""
     from dataclasses import fields
