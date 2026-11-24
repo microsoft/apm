@@ -129,6 +129,7 @@ def _read_records(project_root: Path, targets: Any) -> list[tuple[dict, dict]]:
         per_file_bundle_file_hashes,
         per_file_bundle_hook_keys,
     )
+    from ..utils.path_security import open_regular_file
     from .local_bundle_hook_trust import _relative_value
 
     found: list[tuple[dict, dict]] = []
@@ -139,6 +140,9 @@ def _read_records(project_root: Path, targets: Any) -> list[tuple[dict, dict]]:
             continue
         seen.add(path)
         try:
+            # A FIFO, device or link is never read: it would block or redirect the preflight.
+            with open_regular_file(path):
+                pass
             found.append(
                 (
                     per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN),

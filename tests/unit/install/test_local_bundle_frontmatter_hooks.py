@@ -362,3 +362,25 @@ def test_each_record_is_judged_by_its_own_key(tmp_path: Path) -> None:
 
 def _assert_holdings(holdings, expected: dict) -> None:
     assert {(h.slug, h.reason): sorted(h.files) for h in holdings} == expected
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_a_fifo_markdown_hook_record_is_refused_without_blocking(tmp_path: Path) -> None:
+    """#5254 review: the record preflight never blocks on a named pipe."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.local_bundle_markdown_hooks import (
+        BundleMarkdownRecordUnreadable,
+        preflight_bundle_markdown_records,
+    )
+    from apm_cli.integration.hook_ownership import BUNDLE_MARKDOWN_RECORD_FILE
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    record = tmp_path / ".claude" / BUNDLE_MARKDOWN_RECORD_FILE
+    record.parent.mkdir()
+    os.mkfifo(record)
+
+    with pytest.raises(BundleMarkdownRecordUnreadable, match=BUNDLE_MARKDOWN_RECORD_FILE):
+        preflight_bundle_markdown_records(
+            tmp_path, [KNOWN_TARGETS["claude"]], scope=InstallScope.PROJECT
+        )
+    assert record.is_fifo()
