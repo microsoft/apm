@@ -211,10 +211,16 @@ class _SourceFacts:
 
     def contained(self, root: Path, path: Path) -> bool:
         """Whether *path* is reached from *root* with no linked component and stays inside."""
-        from ...utils.path_security import has_symlink_component
+        from ...utils.path_security import (
+            has_symlink_component,
+            is_within,
+            resolve_for_containment,
+        )
 
         try:
-            return not has_symlink_component(root, path) and path.resolve().is_relative_to(root)
+            return not has_symlink_component(root, path) and is_within(
+                resolve_for_containment(path), resolve_for_containment(root)
+            )
         except (OSError, RuntimeError, ValueError):
             return False
 
