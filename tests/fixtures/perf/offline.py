@@ -19,9 +19,7 @@ it does not serve, so nothing leaves the machine through HTTPS.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import os
-import ssl
 import subprocess
 import sys
 import threading
@@ -236,11 +234,23 @@ def _serve_crl(path: Path) -> Iterator[str]:
         thread.join(timeout=5)
 
 
+def _certificate_serial(ca_pem: Path) -> str:
+    """The serial number certutil names *ca_pem* by (``openssl x509 -serial``)."""
+    from tests.utils.local_github_https_fixture import openssl_executable
+
+    shown = subprocess.run(
+        [openssl_executable() or "openssl", "x509", "-in", str(ca_pem), "-noout", "-serial"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return shown.stdout.strip().partition("=")[2]
+
+
 @contextlib.contextmanager
 def _trusted_by_windows(ca_pem: Path) -> Iterator[None]:
     """Add the mirror CA to the machine Root store (CI runners are admin)."""
-    der = ssl.PEM_cert_to_DER_cert(ca_pem.read_text(encoding="ascii"))
-    thumbprint = hashlib.sha1(der, usedforsecurity=False).hexdigest()
+    serial = _certificate_serial(ca_pem)
     added = subprocess.run(
         ["certutil", "-addstore", "-f", "Root", str(ca_pem)],
         capture_output=True,
@@ -257,7 +267,7 @@ def _trusted_by_windows(ca_pem: Path) -> Iterator[None]:
         yield
     finally:
         subprocess.run(
-            ["certutil", "-delstore", "Root", thumbprint],
+            ["certutil", "-delstore", "Root", serial],
             capture_output=True,
             check=False,
         )
