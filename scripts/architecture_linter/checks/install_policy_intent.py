@@ -33,6 +33,7 @@ from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import 
     RULE_GITLAB_FACADE,
     RULE_LOCAL_BUNDLE_PREFLIGHT,
     RULE_REMOTE_ORIGIN_OWNER,
+    RULE_REMOTE_READ_REUSE,
     RULE_REQUIRE_HASHES,
     RULE_WINNER_SELECTION,
     check_dependency_winner_selection,
@@ -40,6 +41,7 @@ from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import 
     check_gitlab_policy_adapter,
     check_local_bundle_preflight,
     check_policy_remote_origin_owner,
+    check_remote_read_reuse,
     check_require_hashes_enforcement,
 )
 from scripts.architecture_linter.checks.install_policy_mcp_transport import (
@@ -125,6 +127,15 @@ EXTRA_RULES: tuple[Rule, ...] = (
             "Policy discovery reads and parses the git remote through one owner (policy/_remote.py)."
         ),
         check=check_policy_remote_origin_owner,
+    ),
+    Rule(
+        id=RULE_REMOTE_READ_REUSE,
+        group=GROUP,
+        guard_ids=(RULE_REMOTE_READ_REUSE,),
+        description=(
+            "Only the verified-state record reuses a remote read, dropped once user code ran."
+        ),
+        check=check_remote_read_reuse,
     ),
     Rule(
         id=RULE_POLICY_MCP_TRANSPORT,

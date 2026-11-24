@@ -541,10 +541,11 @@ def _named_bundle(world: MarketplacePackWorld, tmp_path: Path, name: str) -> tup
 def _recorded(world: MarketplacePackWorld, path: Path) -> dict | None:
     """This machine's config file record of *path* (what crash recovery verifies)."""
     records = Path(world.env["APM_HOME"]) / "deployment-receipts" / "config-files"
-    store = records / "records.json"
-    if not store.is_file():
-        return None
-    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    rows = [
+        row
+        for store in (sorted(records.glob("*.json")) if records.is_dir() else ())
+        for row in json.loads(store.read_text(encoding="utf-8")).get("files", [])
+    ]
     return next((row for row in rows if row["path"] == path.resolve().as_posix()), None)
 
 

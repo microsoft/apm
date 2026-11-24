@@ -814,6 +814,11 @@ def try_apply(
         if files or packages
         else "no-op (desired state already deployed)"
     )
+    if not (files or packages):
+        from apm_cli.install import verdict_record
+
+        # An applied diff holds its service output, so only a no-op is recorded (#4977).
+        verdict_record.note_verified_noop()
     return True
 
 
