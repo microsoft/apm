@@ -52,6 +52,9 @@ class HostSlice:
     # and a setup that authors and serves it in the world (receives the World).
     api_spec: str = ""
     api_setup: Callable[[Any], None] | None = None
+    # api-probe names the tag's commit by a 12-hex abbreviation: since #4970 a
+    # branch or tag name resolves from the git ref listing, not the commits API.
+    api_abbreviated: bool = False
     rows: tuple[EgressRow, ...] = ()
 
 

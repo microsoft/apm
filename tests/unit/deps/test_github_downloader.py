@@ -459,11 +459,16 @@ class TestEnterpriseHostHandling:
         url_ssh = downloader._build_repo_url("owner/repo", use_ssh=True, dep_ref=dep_ref)
         url_https = downloader._build_repo_url("owner/repo", use_ssh=False, dep_ref=dep_ref)
 
-        assert "custom.ghe.com" in url_ssh
-        assert "custom.ghe.com" in url_https
-        assert "owner/repo" in url_https
-        # Should NOT fall back to github.com
-        assert "github.com" not in url_https or "custom.ghe.com" in url_https
+        # Both URLs target the custom host, never github.com.
+        parsed = urlparse(url_https)
+        assert parsed.hostname == "custom.ghe.com"
+        assert parsed.path.rstrip("/") in ("/owner/repo.git", "/owner/repo")
+        if "://" in url_ssh:
+            assert urlparse(url_ssh).hostname == "custom.ghe.com"
+        else:  # scp form: [user@]host:path
+            userhost, _, path = url_ssh.partition(":")
+            assert userhost.rsplit("@", 1)[-1] == "custom.ghe.com"
+            assert path.rstrip("/") in ("owner/repo.git", "owner/repo")
 
     def test_multiple_hosts_resolution(self, monkeypatch):
         """Test installing packages from multiple GitHub hosts."""
