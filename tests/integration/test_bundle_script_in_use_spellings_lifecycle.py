@@ -162,6 +162,8 @@ def test_a_refused_bundle_uninstall_writes_nothing(tmp_path: Path, apm_binary_pa
 
     text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
 
+    assert ".github/hooks/user.json" in text, text
+    assert (consumer / script).is_file()
     changed = sorted(
         k
         for k in set(before) | set(tree_bytes(consumer))
