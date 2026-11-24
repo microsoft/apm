@@ -184,6 +184,11 @@ _incl = collections.Counter()
 _module_incl = collections.Counter()
 _imports = [0.0]
 _samples = [0]
+# Check attribution: CPU by innermost apm_cli function (stdlib below it folded in),
+# and the stdlib leaf kind under that apm function (e.g. realpath <- path_security:f).
+_apm_owner = collections.Counter()
+_leaf_owner = collections.Counter()
+_realpath_calls = collections.Counter()
 _stop = threading.Event()
 
 
@@ -218,6 +223,10 @@ def _sample() -> None:
                 _imports[0] += delta
             if keys:
                 _self[keys[0]] += delta
+                owner = next((k for k in keys if k.startswith("apm_cli/")), "<no apm frame>")
+                _apm_owner[owner] += delta
+                if not keys[0].startswith("apm_cli/"):
+                    _leaf_owner[f"{keys[0]} <- {owner}"] += delta
             for key in set(keys):
                 _incl[key] += delta
             for module in modules:
@@ -254,12 +263,39 @@ def _report(out: str, wall: float, exit_code) -> None:
         "module_inclusive": top(_module_incl, 40),
         "function_inclusive": top(_incl, 60),
         "function_self": top(_self, 60),
+        "apm_owner_self": top(_apm_owner, 150),
+        "leaf_by_apm_owner": top(_leaf_owner, 150),
+        "realpath_calls_by_apm_owner": top(_realpath_calls, 60),
+        "realpath_calls_total": sum(_realpath_calls.values()),
     }
     with open(out, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=1)
 
 
+def _count_realpath() -> None:
+    """Count os.path.realpath calls (Path.resolve uses it) by innermost apm_cli caller."""
+    original = os.path.realpath
+
+    def counted(path, *args, **kwargs):
+        frame, owner, depth = sys._getframe(1), "<no apm frame>", 0
+        while frame is not None and depth < 60:
+            where = _where(frame.f_code)
+            if where.startswith("apm_cli/"):
+                owner = f"{where}:{frame.f_code.co_name}"
+                break
+            frame, depth = frame.f_back, depth + 1
+        _realpath_calls[owner] += 1
+        return original(path, *args, **kwargs)
+
+    os.path.realpath = counted
+    import pathlib
+
+    if hasattr(pathlib, "os") and getattr(pathlib.os.path, "realpath", None) is not counted:
+        pathlib.os.path.realpath = counted
+
+
 def main() -> int:
+    _count_realpath()
     args = sys.argv[1:]
     out = args[args.index("-o") + 1]
     del args[args.index("-o") : args.index("-o") + 2]
