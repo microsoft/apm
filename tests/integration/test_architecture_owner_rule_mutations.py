@@ -4637,6 +4637,25 @@ CASE_IDS: tuple[str, ...] = tuple(case.guard_id for case in MUTATIONS)
 # registry guards. Execute these through the same source-override mutation seam.
 USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/local_bundle_hook_cwd.py",
+        old="        ensure_path_within(spelled, root)\n",
+        new="        Path(os.path.realpath(spelled)).relative_to(root)\n",
+        intent="The hook cwd in-use check computes link containment itself, not through path_security (#5310).",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/local_bundle_hook_trust.py",
+        old="                or runs_through_cwd(document, project_root, scripts)\n",
+        new=(
+            "                or runs_through_cwd(document, project_root, scripts)\n"
+            "                or not Path(os.path.realpath(path)).is_relative_to(project_root)\n"
+        ),
+        intent="The bundle in-use check adds an inline realpath containment beside the cwd owner (#5310).",
+    ),
+    MutationCase(
         guard_id="install-deployment-claude-agents-md-routing",
         rule_id="install-deployment-claude-agents-md-routing",
         path="src/apm_cli/integration/instruction_integrator.py",
