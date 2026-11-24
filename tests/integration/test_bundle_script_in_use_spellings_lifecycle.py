@@ -26,8 +26,10 @@ from tests.lifecycle.known import KnownFailure
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-OWN-local-bundle-hook-trust", "P-INV-I7"),
 ]
 
 
