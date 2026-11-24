@@ -1,0 +1,15 @@
+{
+  "issue": 5156,
+  "fixed_in": "Unreleased",
+  "summary": "install -g refused a skill destination reached through a symlinked directory with the lockfile path translator's internal-error text ('This is a bug -- please report it'); it now refuses with the standard message naming the link and the next step, exit 1 and state unchanged.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_config_dir_home_skill_lifecycle.py::test_a_symlinked_skills_dir_under_a_home_claude_root_is_refused",
+    "tests/unit/install/test_deployed_path_symlink_refusal.py::test_a_symlinked_component_is_refused_with_the_standard_message"
+  ]
+}
