@@ -534,7 +534,7 @@ def _hook_commands(node: Any) -> Iterator[str]:
     if isinstance(node, dict):
         for key, value in node.items():
             if key in HOOK_COMMAND_KEYS and isinstance(value, str):
-                yield value.replace("\\", "/")
+                yield value
             else:
                 yield from _hook_commands(value)
     elif isinstance(node, list):
@@ -573,7 +573,7 @@ def _per_file_configs_running(
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
             texts = list(_hook_commands(document))
-            if any(tail in text for text in texts for tail in tails) or any(
+            if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
                 runs_script(text, refs, (project_root, target_root), project_root) for text in texts
             ):
                 found.add(value)
@@ -606,7 +606,7 @@ def _configs_still_running(
             return []
         handlers = [entry, *(h for h in entry.get("hooks") or () if isinstance(h, dict))]
         return [
-            value.replace("\\", "/")
+            value
             for handler in handlers
             for key in HOOK_COMMAND_KEYS
             if isinstance(value := handler.get(key), str)
@@ -642,7 +642,7 @@ def _configs_still_running(
             if not (isinstance(entry, dict) and entry.get("_apm_source") in markers)
         ]
         texts = [text for entry in foreign for text in commands(entry)]
-        if any(tail in text for text in texts for tail in tails) or any(
+        if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
             runs_script(text, refs, (project_root, target_root), project_root) for text in texts
         ):
             found.add(_record_value(json_path, project_root))

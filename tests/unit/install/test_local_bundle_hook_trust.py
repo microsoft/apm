@@ -231,3 +231,63 @@ def test_script_references_compare_by_the_shared_caseless_key(script: str, comma
     root = Path("/project")
 
     assert runs_script(command, script_refs(root, [script]), (root, root / ".claude"), root)
+
+
+_DIR = ".claude/hooks/hookpkg/hooks/scripts"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"S=x; sh {_DIR}/${{S}}.sh",
+        f"S=x; sh {_DIR}/$S.sh",
+        f'sh "$(printf {_DIR}/%s.sh x)"',
+        f"sh `printf {_DIR}/%s.sh x`",
+        f"sh {_DIR}/x.{{sh,}}",
+        f"sh {_DIR}/x.s?",
+        f"sh {_DIR}/*.sh",
+        f"sh {_DIR}/[x].sh",
+        f"sh {_DIR}/x.\\\nsh",
+        f'a=x; b=.sh; eval "sh {_DIR}/$a$b"',
+    ],
+    ids=[
+        "braced-variable",
+        "variable",
+        "command-substitution",
+        "backticks",
+        "brace-list",
+        "glob-question",
+        "glob-star",
+        "glob-class",
+        "backslash-newline",
+        "eval-variables",
+    ],
+)
+def test_a_spelling_that_hides_the_script_name_fails_closed(command: str) -> None:
+    """#5106: an expansion left after the anchors may spell the script, so it runs it."""
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    root = Path("/project")
+
+    assert runs_script(command, script_refs(root, [_SCRIPT]), (root, root / ".claude"), root)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"${CLAUDE_PROJECT_DIR}/.claude/hooks/otherpkg/hooks/scripts/lint.sh"',
+        '"$CLAUDE_PROJECT_DIR/.claude/hooks/otherpkg/hooks/scripts/lint.sh"',
+        'pwsh -File "$env:CLAUDE_PROJECT_DIR/.claude/hooks/otherpkg/run.ps1"',
+        'sh "$HOME/tools/lint.sh"',
+        'sh "${HOME}/tools/lint.sh"',
+        'pwsh -File "$env:HOME/tools/run.ps1"',
+    ],
+    ids=["braced-project-dir", "project-dir", "env-project-dir", "home", "braced-home", "env-home"],
+)
+def test_a_lone_documented_anchor_never_refuses(command: str) -> None:
+    """#5106: anchors are substituted first, so a hook running another script never refuses."""
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    root = Path("/project")
+
+    assert not runs_script(command, script_refs(root, [_SCRIPT]), (root, root / ".claude"), root)

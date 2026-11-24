@@ -1707,8 +1707,19 @@ def _user_hook(consumer: Path, where: str, command: str) -> str:
         ("claude", "sh .claude/hooks/hookpkg/hooks/scripts/./x.sh"),
         ("claude", "sh hooks/hookpkg/hooks/scripts/./x.sh"),
         ("claude", "sh -c 'sh .claude/hooks/hookpkg/hooks/scripts/./x.sh'"),
+        ("claude", "S=x; sh .claude/hooks/hookpkg/hooks/scripts/$S.sh"),
+        ("copilot", "sh .claude/hooks/hookpkg/hooks/scripts/x.\\\nsh"),
     ],
-    ids=["other-target", "dot-slash", "cd-prefix", "dot-segment", "target-root", "nested"],
+    ids=[
+        "other-target",
+        "dot-slash",
+        "cd-prefix",
+        "dot-segment",
+        "target-root",
+        "nested",
+        "variable",
+        "backslash-newline",
+    ],
 )
 def test_uninstall_bundle_keeps_a_script_a_user_hook_runs_under_any_spelling(
     tmp_path: Path, apm_binary_path: Path, where: str, command: str
