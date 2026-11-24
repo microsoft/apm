@@ -819,7 +819,7 @@ def _spy(ctx: Context, journey: Journey, launch: list[str], prof: Path) -> None:
             if not raw.is_file():
                 print(f"[SPY] no output: {result.stderr[-600:]}")
                 continue
-            text = raw.read_text(encoding="utf-8")
+            text = raw.read_text(encoding="utf-8", errors="replace")
             try:
                 for line in (*summarize(text, rate), *invariants(text, rate)):
                     print(f"[SPY] {ctx.fixture.name} {journey.name} {line}")
