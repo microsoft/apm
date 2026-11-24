@@ -29,9 +29,11 @@ pytestmark = [
 URL = "https://github.com/owner/repo"
 
 
-def _headers(*keys: str) -> tuple[GitConfigEntry, ...]:
+def _headers(*keys: str, empty: tuple[int, ...] = ()) -> tuple[GitConfigEntry, ...]:
+    """Header entries; the indexes in *empty* hold an empty value (Git's list reset)."""
     return tuple(
-        GitConfigEntry("global", key, f"X-Cell: {index}") for index, key in enumerate(keys)
+        GitConfigEntry("global", key, "" if index in empty else f"X-Cell: {index}")
+        for index, key in enumerate(keys)
     )
 
 
@@ -235,7 +237,7 @@ def test_an_unwritable_clone_target_fails_the_clone_and_creates_nothing(
     assert not target.exists()
 
 
-def _seeded_cases(count: int) -> list[tuple[str, tuple[str, ...]]]:
+def _seeded_cases(count: int) -> list[tuple[str, tuple[str, ...], tuple[int, ...]]]:
     import random
 
     rng = random.Random(4939)  # noqa: S311 -- a seeded test corpus, not a secret
@@ -245,7 +247,7 @@ def _seeded_cases(count: int) -> list[tuple[str, tuple[str, ...]]]:
     cases = []
     for _ in range(count):
         url = f"{rng.choice(schemes)}://{rng.choice(hosts[:1] + hosts[2:])}/owner/repo"
-        keys = []
+        keys: list[str] = []
         for _ in range(rng.randint(1, 4)):
             if rng.random() < 0.2:
                 keys.append("http.extraheader")
@@ -253,7 +255,8 @@ def _seeded_cases(count: int) -> list[tuple[str, tuple[str, ...]]]:
                 keys.append(
                     f"http.{rng.choice(schemes)}://{rng.choice(hosts)}{rng.choice(paths)}.extraheader"
                 )
-        cases.append((url, tuple(keys)))
+        empty = tuple(index for index in range(len(keys)) if rng.random() < 0.25)
+        cases.append((url, tuple(keys), empty))
     return cases
 
 
@@ -264,8 +267,8 @@ def test_a_seeded_differential_agrees_with_git_on_every_answered_case(
     (the differential) raises on none of them."""
     monkeypatch.setenv("APM_DEBUG", "1")
     answered = 0
-    for url, keys in _seeded_cases(240):
-        headers = _headers(*keys)
+    for url, keys, empty in _seeded_cases(240):
+        headers = _headers(*keys, empty=empty)
         fast = git_config_once.inprocess_header_group(url, headers)
         if fast is None:
             continue
@@ -306,3 +309,29 @@ def _assert_same_env(once, probed) -> None:
 
 def _assert_enough_answered(answered: int) -> None:
     assert answered >= 100
+
+
+GENERIC = "http.extraheader"
+HOST_KEY = "http.https://github.com.extraheader"
+
+
+@pytest.mark.parametrize(
+    ("keys", "empty"),
+    [
+        pytest.param((GENERIC, HOST_KEY), (1,), id="generic-value-url-key-empty"),
+        pytest.param((HOST_KEY, HOST_KEY), (1,), id="url-key-value-then-same-key-empty"),
+        pytest.param((GENERIC, HOST_KEY), (0,), id="generic-empty-specific-value"),
+    ],
+)
+def test_an_empty_header_value_selects_what_git_selects(
+    keys: tuple[str, ...], empty: tuple[int, ...]
+) -> None:
+    """W3d D6: an empty extraHeader value resets Git's list; the selected group, empty
+    entries included, equals Git's."""
+    headers = _headers(*keys, empty=empty)
+    _assert_git_agrees(URL, headers, git_config_once.inprocess_header_group(URL, headers))
+
+
+def test_port_zero_is_left_to_git() -> None:
+    """Git rejects port 0 in a URL key, so it never overrides the generic header here."""
+    _assert_git_decides(URL, _headers(GENERIC, "http.https://github.com:0.extraheader"))

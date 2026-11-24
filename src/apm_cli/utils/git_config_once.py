@@ -78,6 +78,8 @@ def _simple_http_url(url: str) -> tuple[str, str, int, str] | None:
     except ValueError:
         return None
     scheme = parts.scheme.lower()
+    if port == 0:
+        return None  # Git rejects port 0: let it decide
     if scheme not in _DEFAULT_PORTS or not parts.hostname or parts.username or parts.password:
         return None
     path = parts.path or "/"
