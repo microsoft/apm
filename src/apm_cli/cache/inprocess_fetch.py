@@ -396,7 +396,7 @@ def _classify(entries) -> tuple[dict[str, str], tuple[str, ...]]:
     from ..deps.anonymous_ref_listing import _list_key
 
     values: dict[str, str] = {}
-    headers: dict[str, list[str]] = {}
+    headers: dict[str, list[tuple[str, str]]] = {}
     prefixes: list[str] = []
     for entry in entries:
         key = entry.key.lower()
@@ -409,7 +409,7 @@ def _classify(entries) -> tuple[dict[str, str], tuple[str, ...]]:
         list_key = _list_key(entry.key)
         if list_key is not None:
             live = headers.get(list_key[1], [])
-            headers[list_key[1]] = [*live, entry.value] if entry.value else []
+            headers[list_key[1]] = [*live, (entry.key, entry.value)] if entry.value else []
         elif key in _TRUST_KEYS:
             values[key] = entry.value
         elif key.startswith("url.") and key.endswith(".insteadof"):
@@ -418,8 +418,9 @@ def _classify(entries) -> tuple[dict[str, str], tuple[str, ...]]:
             continue
         elif key.startswith(_FORCING_PREFIXES) or key in _FORCING_KEYS:
             raise _Refuse(f"git config {entry.key}")
-    if any(headers.values()):
-        raise _Refuse("git config http.extraHeader")
+    for live in headers.values():
+        if live:
+            raise _Refuse(f"git config {live[-1][0]}")
     return values, tuple(prefixes)
 
 

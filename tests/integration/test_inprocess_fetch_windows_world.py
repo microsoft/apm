@@ -96,8 +96,8 @@ def test_in_process_engages_and_lands_the_bytes_and_hash_git_lands(windows_like_
         fast = in_process.get_checkout(url, sha, locked_sha=sha, env=env)
         slow = via_git.get_checkout(url, sha, locked_sha=sha, env=forced)
 
-        assert inprocess_verified(fast, sha), url
-        assert not inprocess_verified(slow, sha), url
+        assert inprocess_verified(fast, sha, use="links"), url
+        assert not inprocess_verified(slow, sha, use="links"), url
         assert _tree(fast) == _tree(slow), url
         assert compute_package_hash(fast) == compute_package_hash(slow), url
     assert len(pins) == len(fixture.packages) == 10
