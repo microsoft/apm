@@ -851,9 +851,11 @@ def test_prune_keeps_a_survivor_whose_directory_another_candidate_shares(
     os.symlink("f", vendor / "e", target_is_directory=True)
     world.env["PYTHONHASHSEED"] = hash_seed
 
-    world.apm("prune")
+    pruned = _output(world.apm("prune"))
 
     rows = _rows(world)
-    assert "_local/f" in rows, sorted(rows)
+    assert "local:vendor/f and ./vendor/e resolve to one directory" in pruned, pruned
+    assert "Retained _local/f:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(rows), sorted(rows)
     assert _row_named(world, "f")[1]["resolved_by"] in rows
     assert (world.project / _F_SKILL / "SKILL.md").is_file()

@@ -291,23 +291,33 @@ def _build_local_dir_index(
     index: dict[Path, str] = {}
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
-    for key in candidate_orphans:
+    identities: dict[tuple[int, int], str] = {}
+    for key in sorted(candidate_orphans):
         dep = lockfile.get_dependency(key)
         if dep is None or dep.source != "local":
             continue
         try:
-            index[
-                resolve_local_dep_dir(
-                    dep,
-                    lockfile,
-                    project_root,
-                    parent_index=parent_index,
-                    resolved_cache=resolved_cache,
-                )
-            ] = key
+            directory = resolve_local_dep_dir(
+                dep,
+                lockfile,
+                project_root,
+                parent_index=parent_index,
+                resolved_cache=resolved_cache,
+            )
         except (LocalResolutionError, OSError, RuntimeError) as exc:
             # A symlink loop cannot be resolved either: the walk is incomplete.
             unverifiable.append((key, str(exc)))
+            continue
+        identity = _dir_identity(directory)
+        other = index.get(directory) or (identities.get(identity) if identity else None)
+        if other is not None:
+            # Two rows in one directory: a reached edge cannot say which one
+            # it needs, so the walk is incomplete and both stay (#4989).
+            unverifiable.append((key, f"{key} and {other} resolve to one directory"))
+            continue
+        index[directory] = key
+        if identity is not None:
+            identities[identity] = key
     return index
 
 
@@ -524,6 +534,8 @@ def compute_forward_reachable_keys(
         for path, key in local_dir_index.items()
         if (identity := _dir_identity(path)) is not None
     }
+    # A reached edge names its exact lock key first; directories match the rest.
+    indexed_keys = frozenset(local_dir_index.values())
 
     reachable: set[str] = set()
     dev_only: set[str] = set()
@@ -598,9 +610,11 @@ def compute_forward_reachable_keys(
                     root_local_dirs=root_local_dirs,
                 )
             visit_key = ref.get_unique_key() if ref.replacement is not None else str(real_dir)
+            exact = ref.get_unique_key()
             matched_key = (
-                ref.get_unique_key()
-                if ref.replacement is not None and ref.get_unique_key() in lockfile.dependencies
+                exact
+                if exact in lockfile.dependencies
+                and (ref.replacement is not None or exact in indexed_keys)
                 else local_dir_index.get(real_dir) or local_dir_ids.get(_dir_identity(real_dir))
             )
             if matched_key is None and ref.get_unique_key() in lockfile.dependencies:
