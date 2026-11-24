@@ -118,7 +118,10 @@ class OrphanRemovalDecision:
     their lock row stays with its content. ``rescued_parents``,
     ``rescued_depths`` and ``rescued_dev`` give the parent, depth and dev
     status every row the walk reaches from those roots takes, as a fresh
-    install records them (#4833).
+    install records them (#4833). ``unverified_keys`` names each lock row
+    prune kept only because the graph could not prove it unreachable, with
+    the reason (#4989); ``anchored_keys`` names each removed row prune keeps
+    because a survivor still resolves through it under another identity.
     """
 
     operation: OrphanOperation
@@ -138,6 +141,8 @@ class OrphanRemovalDecision:
     retained_paths: tuple[str, ...] = ()
     stale_keys: tuple[str, ...] = ()
     expected_paths: frozenset[str] = frozenset()
+    unverified_keys: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    anchored_keys: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     superseded_roots: tuple[tuple[str, frozenset[str]], ...] = ()
     repairs: Mapping[str, tuple[str, str | None, bool]] = field(
         default_factory=lambda: MappingProxyType({})
@@ -474,16 +479,24 @@ def _decide_installed_paths(
     from ..deps.reachability import retained_lock_keys
 
     declared = [entry for entry in intended if not isinstance(entry, str)]
+    unverified: dict[str, str] = {}
+    anchors: dict[str, str] = {}
+    walks: list = []
     retained = (
         retained_lock_keys(
             lockfile,
             reachability.project_root,
             reachability.apm_modules_dir,
             list(reachability.direct_refs),
+            unverified=unverified,
+            anchored=anchors,
+            walks=walks,
         )
         if lockfile is not None
         else frozenset()
     )
+    walk = walks[0] if walks and walks[0].complete else None
+    declared_keys = {ref.get_unique_key() for ref in declared}
     apm_modules_dir = installed_paths.root
     expected = _build_expected_install_paths(
         declared,
@@ -503,7 +516,7 @@ def _decide_installed_paths(
         _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
     )
     orphaned = set(_find_orphaned_packages(installed | set(lock_keys_by_path), expected))
-    expected_keys = {ref.get_unique_key() for ref in declared} | retained
+    expected_keys = declared_keys | retained
     removed_paths = tuple(sorted(installed & orphaned))
     stale_keys = tuple(
         sorted(
@@ -521,6 +534,7 @@ def _decide_installed_paths(
     removed_keys = set(stale_keys)
     for keys in path_keys.values():
         removed_keys.update(keys)
+    reparented = _reparented_survivors(lockfile, removed_keys, retained, walk)
     return OrphanRemovalDecision(
         operation=operation,
         candidate_keys=frozenset(removed_keys),
@@ -530,6 +544,37 @@ def _decide_installed_paths(
         retained_paths=tuple(sorted((installed - orphaned) - expected)),
         stale_keys=stale_keys,
         expected_paths=frozenset(expected),
+        unverified_keys=MappingProxyType(dict(sorted(unverified.items()))),
+        anchored_keys=MappingProxyType(dict(sorted(anchors.items()))),
+        rescued_parents=MappingProxyType(
+            {key: walk.reachable_via[key] for key in reparented} if walk else {}
+        ),
+        rescued_depths=MappingProxyType(
+            {key: walk.depths[key] for key in reparented if key in walk.depths} if walk else {}
+        ),
+        reachability=walk,
+    )
+
+
+def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
+    """Retained rows recorded under a parent this prune removes (#4989).
+
+    They take the parent a fresh install records, from the complete walk;
+    without one they keep their rows unchanged.
+    """
+    if walk is None or lockfile is None or not removed_keys:
+        return []
+    gone = {
+        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements)
+        for key in removed_keys
+        if key in lockfile.dependencies
+    }
+    return sorted(
+        key
+        for key in retained
+        if key in lockfile.dependencies
+        and key in walk.reachable_via
+        and lockfile.dependencies[key].resolved_by in gone
     )
 
 

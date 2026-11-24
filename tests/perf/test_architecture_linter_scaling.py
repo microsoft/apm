@@ -639,6 +639,57 @@ def test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n() -> Non
     assert large / small <= _MAX_MATRIX_RATIO
 
 
+def test_definition_index_answers_every_real_query_like_the_direct_scan() -> None:
+    """On a full run of the real repository, every ``_defining_files`` query the
+    registry guards make gets the same answer from the per-run index as from the
+    direct scan it replaced (#5196)."""
+    import scripts.architecture_linter.checks.registry_owner_guards as guards
+    from scripts.architecture_linter.checks.registry_definition_index import (
+        _defining_files,
+        _scan_defining_files,
+    )
+
+    queried: list[str] = []
+    differing: list[str] = []
+    found: list[str] = []
+
+    def compared(
+        provider: FactsProvider, rule_id: str, name: str, *, kinds: tuple[str, ...]
+    ) -> tuple[frozenset[str], tuple[Violation, ...]]:
+        indexed = _defining_files(provider, rule_id, name, kinds=kinds)
+        if indexed != _scan_defining_files(provider, rule_id, name, kinds=kinds):
+            differing.append(name)
+        queried.append(name)
+        if indexed[0]:
+            found.append(name)
+        return indexed
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(guards, "_defining_files", compared)
+        report = runner.run(Path(__file__).resolve().parents[2])
+    assert report.failures == ()
+    # The queries the registry guards make today; a new one is added here on purpose.
+    assert sorted(set(queried)) == [
+        "_create_minimal_apm_yml",
+        "_get_bootstrap_config",
+        "bootstrap_config",
+        "configured_user_root",
+        "get_apm_home",
+        "print_version",
+        "resolve_audit_target_decision",
+        "resolve_audit_targets",
+        "resolve_bootstrap_project_name",
+        "resolve_deployment_target_decision",
+        "resolve_user_invocable",
+        "resolve_user_root",
+        "validate_project_name",
+        "write_minimal_manifest",
+    ]
+    # Non-vacuous: real definers are found (an empty scan would agree with an empty index).
+    assert "get_apm_home" in found and len(set(found)) >= 10, sorted(set(found))
+    assert differing == [], differing
+
+
 def test_binary_selection_prefilter_finds_what_every_detector_finds() -> None:
     """The binary-selection pre-filter (#5196) never hides a finding: on every
     tracked Python file, the filtered detectors report exactly the unfiltered ones."""
