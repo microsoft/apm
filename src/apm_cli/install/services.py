@@ -801,6 +801,31 @@ _plugin_bin_deployable = plugin_bin_deployable
 # ---------------------------------------------------------------------------
 
 
+def _bundle_entry_within(
+    dest: Path, deploy_root: Path, project_root: Path, rel: str, logger: Any
+) -> bool:
+    """Whether *dest* stays inside *deploy_root*; a skipped entry is warned about.
+
+    A link loop cannot be resolved, so it is refused like any linked parent (#5287).
+    """
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+    try:
+        ensure_path_within(dest, deploy_root)
+    except PathTraversalError as exc:
+        if logger is not None:
+            logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+        return False
+    except (OSError, RuntimeError):
+        from apm_cli.install.deployed_paths import refuse_symlinked_deploy
+
+        refuse_symlinked_deploy(
+            dest, project_root if dest.is_relative_to(project_root) else deploy_root
+        )
+        raise
+    return True
+
+
 def integrate_local_bundle(
     bundle_info: Any,
     project_root: Path,
@@ -1040,11 +1065,7 @@ def integrate_local_bundle(
                 # target's default root.
                 deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
                 dest = deploy_root / _deploy_rel
-            try:
-                ensure_path_within(dest, deploy_root)
-            except PathTraversalError as exc:
-                if logger is not None:
-                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+            if not _bundle_entry_within(dest, deploy_root, project_root, rel, logger):
                 skipped += 1
                 continue
             try:

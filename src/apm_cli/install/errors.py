@@ -157,7 +157,9 @@ def symlinked_deploy_cause(error: BaseException) -> Exception | None:
         if isinstance(current, SymlinkedDeployError):
             return current
         seen.add(id(current))
-        current = current.__cause__ or current.__context__
+        # An implicit context counts only when not suppressed (``raise ... from None``).
+        context = None if current.__suppress_context__ else current.__context__
+        current = current.__cause__ or context
     return None
 
 
