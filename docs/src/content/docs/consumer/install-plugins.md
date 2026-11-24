@@ -168,6 +168,10 @@ set), with the checkout's absolute path. Without that entry, Claude Code's
 first session on a machine (CI, `claude -p`, claude-code-action, a fresh clone)
 starts a plugin's MCP server but not its skills or hooks. The write adds one
 entry and changes no other; `apm uninstall` removes only the entry APM wrote.
+If the registry already lists the project's marketplace for another checkout
+(a second clone or worktree), cannot be parsed, or is reached through a
+symbolic link, APM leaves it unchanged and warns; the plugins then load from
+Claude Code's second session in that checkout.
 Claude Code still loads nothing from a folder you have not trusted: accept its
 folder-trust prompt once (headless runs record it as `hasTrustDialogAccepted`
 in `~/.claude.json`).
