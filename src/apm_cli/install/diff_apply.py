@@ -689,6 +689,7 @@ def try_apply(
     decide_only: bool = False,
 ) -> bool:
     """Apply the verified diff and return True; False (with a trace reason) runs the full pipeline."""
+    return False  # RESEARCH: diff-apply fast path deleted (full pipeline only)
     from apm_cli.install import noop_diff
     from apm_cli.install.transaction import ApplyRestoreIncomplete
 
