@@ -28,6 +28,23 @@ if _LOG:
     def _bump(table, key, by=1):
         table[key] = table.get(key, 0) + by
 
+    def _split_command_line(text):
+        """Split a ``list2cmdline`` string (Windows) on spaces outside double quotes."""
+        parts, current, quoted, any_char = [], [], False, False
+        for char in text:
+            if char == '"':
+                quoted, any_char = not quoted, True
+            elif char in " \t" and not quoted:
+                if current or any_char:
+                    parts.append("".join(current))
+                current, any_char = [], False
+            else:
+                current.append(char)
+                any_char = True
+        if current or any_char:
+            parts.append("".join(current))
+        return parts
+
     def _git_verb(argv):
         rest = iter(argv[1:])
         for item in rest:
@@ -85,7 +102,7 @@ if _LOG:
                 _bump(_git_verbs, _git_verb(list(argv)))
             elif isinstance(argv, (str, bytes)):
                 text = argv.decode(errors="replace") if isinstance(argv, bytes) else argv
-                _bump(_git_verbs, _git_verb(text.split()))
+                _bump(_git_verbs, _git_verb(_split_command_line(text)))
 
     def _flush():
         record = {"pid": os.getpid(), "spawns": _counts, "modules": len(sys.modules)}
