@@ -29,6 +29,7 @@ import hashlib
 import json
 import shutil
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from tests.lifecycle.machines._gate_plugin_bin import (
     BIN_PATH,
@@ -42,6 +43,7 @@ from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.world import registry
 from tests.lifecycle.world.services import MARKETPLACE_NAME
 
 # Forms of the plugin this spine drives -> the world package key of their spec.
@@ -53,6 +55,9 @@ CATALOGS = {
     "local-mkt": "lifecycle-bin-local",
     "file-mkt": "lifecycle-bin-file",
 }
+# The package registry form: the plugin published as an archive and declared by id.
+REGISTRY = "pkg-registry"
+REGISTRY_ID = f"lifecycle/{PLUGIN}"
 # Commands that resolve the graph but must leave a deployed, trusted root alone.
 _KEEPING = ("lock", "compile", "audit", "update", "approve-deny", "marketplace")
 _REMOVING = ("uninstall", "prune")
@@ -226,7 +231,31 @@ class SourceBin(StepRunner):
         self._edit_manifest("undeclare-" + PLUGIN, lambda data: data["dependencies"].update(apm=[]))
         self.state = replace(self.state, declared=False)
 
+    def install_words(self, form: str) -> tuple[str, ...]:
+        """``apm install --trust-bin`` for *form*: by spec, or (registry) by manifest entry."""
+        if form != REGISTRY:
+            return ("install", "--trust-bin", self.spec(form))
+        if not self.dry:
+            self.edit("declare-registry-" + PLUGIN, self._declare_registry)
+        return ("install", "--trust-bin")
+
+    def _declare_registry(self) -> None:
+        data = self.bench.manifest()
+        entry = {"registry": registry.NAME, "id": REGISTRY_ID, "version": "1.0.0"}
+        data.setdefault("dependencies", {})["apm"] = [entry]
+        self.bench.write_manifest(data)
+
+    def publish_registry(self) -> None:
+        """Publish the plugin to the world's package registry as ``lifecycle/<plugin>``."""
+        if self.dry:
+            return
+        root = self.bench.world.packages[PLUGIN].spec
+        archive = registry.zip_tree(Path(root))
+        self.bench.world.services.package_registry.publish(REGISTRY_ID, "1.0.0", archive)
+
     def spec(self, form: str) -> str:
+        if form == REGISTRY:
+            return REGISTRY_ID
         if form in CATALOGS:
             return f"{PLUGIN}@{CATALOGS[form]}"
         return "" if self.dry else self.bench.world.packages[FORMS[form]].spec
@@ -239,8 +268,16 @@ class SourceBin(StepRunner):
                 ("marketplace", "add", source),
                 exits=frozenset({0}),
                 mutating=True,
-                forbidden={"project": ("*",), "outside": ("*",)},
-                allowed={},
+                # The bench's roots stay forbidden (HOME included); registration may
+                # write only the catalog registry and the catalog cache there.
+                forbidden={**self.bench.forbidden(), "project": ("*",)},
+                allowed={
+                    "home": (
+                        ".apm/marketplaces.json",
+                        ".apm/marketplaces.lock",
+                        ".apm/cache/marketplace",
+                    )
+                },
             )
 
     def catalog_source(self, form: str) -> str:
@@ -269,12 +306,14 @@ class SourceBin(StepRunner):
 
 def replay_source_bin(machine: SourceBin) -> None:
     """Each form: deploy the root, run every command that keeps it, then remove it twice."""
-    for form in (*FORMS, *CATALOGS):
+    for form in (*FORMS, *CATALOGS, REGISTRY):
         machine.setup()
         spec = machine.spec(form)
         if form in CATALOGS:
             machine.register(form)
-        machine.run("install", form, "install", "--trust-bin", spec)
+        if form == REGISTRY:
+            machine.publish_registry()
+        machine.run("install", form, *machine.install_words(form))
         if form in CATALOGS:
             machine.run("marketplace", form, "marketplace", "update", CATALOGS[form])
         machine.run("lock", form, "lock")
@@ -283,7 +322,7 @@ def replay_source_bin(machine: SourceBin) -> None:
         machine.run("update", form, "update", "--yes")
         machine.run("approve-deny", form, "approve", PLUGIN)
         machine.run("uninstall", form, "uninstall", spec)
-        machine.run("install", form, "install", "--trust-bin", spec)
+        machine.run("install", form, *machine.install_words(form))
         machine.undeclare()
         machine.run("prune", form, "prune")
 
