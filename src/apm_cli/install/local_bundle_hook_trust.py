@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ from typing import Any
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
 from apm_cli.install.hook_script_refs import runs_script, script_refs
 from apm_cli.install.local_bundle_hook_states import (
+    _hook_commands,
     _merged_hook_documents,
     _merged_hook_states,
     _MergedHookState,
@@ -576,39 +577,6 @@ def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str
         if spelled.is_relative_to(target_root):
             tails.append(spelled.relative_to(target_root).as_posix())
     return tails
-
-
-def _hook_commands(document: Any) -> list[str]:
-    """Commands a per-file hook document runs, read from handler positions only (#5136).
-
-    The shared hook grammar locates the handlers, so metadata that merely names
-    a script (``env.command``) runs nothing. A shape the grammar does not
-    recognize (a Kiro action list, a malformed entry) is scanned whole, as
-    before, so it still fails closed.
-    """
-    from apm_cli.hook_contract import HookContractError, parse_hook_source
-
-    try:
-        commands = [declared.command for declared in parse_hook_source(document).commands]
-    except HookContractError:
-        commands = list(_every_command_field(document))
-    # Raw text: the matcher reads backslash escapes; only the tail match normalizes (#5106).
-    return commands
-
-
-def _every_command_field(node: Any) -> Iterator[str]:
-    """Every hook command field anywhere in a document the grammar cannot read."""
-    from apm_cli.hook_contract import HOOK_COMMAND_KEYS
-
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key in HOOK_COMMAND_KEYS and isinstance(value, str):
-                yield value
-            else:
-                yield from _every_command_field(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _every_command_field(item)
 
 
 def _per_file_configs_running(
