@@ -21,8 +21,16 @@ from collections.abc import Mapping
 from pathlib import Path
 
 BUDGETS_PATH = Path(__file__).resolve().parents[2] / "perf" / "count_budgets.json"
-# The journeys PR 1 of the engine budgets, all at tree-10, offline mirror, rtt 0.
-JOURNEYS = ("install-cold", "install-warm", "install-noop")
+# The budgeted journeys, all at tree-10, offline mirror, rtt 0.
+JOURNEYS = (
+    "install-cold",
+    "install-warm",
+    "install-noop",
+    "outdated",
+    "update",
+    "install-cold-auth",
+    "install-warm-auth",
+)
 _FS_COUNTERS = (
     "files_written",
     "lockfile_reads",

@@ -171,6 +171,9 @@ jobs:
         RTT: ${{ needs.request.outputs.rtt }}
         SHARD: ${{ matrix.shard }}
         PROFILE: ${{ needs.request.outputs.profile }}
+        # Real github.com cells only: the job's read-only token (contents: read,
+        # public packages) for the authenticated journeys; never the anonymous ones.
+        APM_BENCH_REAL_TOKEN: ${{ contains(needs.request.outputs.fixtures, 'real') && secrets.GITHUB_TOKEN || '' }}
       run: |
         PROFILE_FLAG=()
         if [ "$PROFILE" = 1 ] && [ "$SHARD" = 1 ]; then PROFILE_FLAG=(--profile); fi
