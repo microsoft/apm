@@ -45,10 +45,10 @@
         "pr": "#5338"
       },
       "git.config": {
-        "budget": 55,
-        "measured": 52,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 10,
+        "measured": 9,
+        "reason": "52 -> 9: #5325/#5333 memoized git config reads (52 -> 8), then #5351 adds 1 per command (the in-process attribute gate reads config under the checkout env, a new #5283 memo key); main Smoke 6472a85a -> d62aebe0: 8 -> 9; Full Suite run 45446694499 at c0296fab: 9",
+        "pr": "#5378"
       },
       "git.remote": {
         "budget": 13,
@@ -409,16 +409,16 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 12393,
-        "measured": 11802,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 16774,
+        "measured": 15975,
+        "reason": "lstat_calls 11802 -> 15975: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.realpath_calls": {
-        "budget": 1263,
-        "measured": 1202,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1810,
+        "measured": 1723,
+        "reason": "realpath_calls 1202 -> 1723: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.stat_calls": {
         "budget": 21899,
@@ -513,16 +513,16 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 11759,
-        "measured": 11199,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 16147,
+        "measured": 15378,
+        "reason": "lstat_calls 11199 -> 15378: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.realpath_calls": {
-        "budget": 1208,
-        "measured": 1150,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1757,
+        "measured": 1673,
+        "reason": "realpath_calls 1150 -> 1673: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.stat_calls": {
         "budget": 21825,
