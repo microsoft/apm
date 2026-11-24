@@ -104,6 +104,10 @@ COMPONENT_ONLY: dict[str, str] = {
         "needs the native gate check to raise; tests/unit/test_prune_command.py drives that branch"
     ),
     "prune-partial": _FAULT,
+    "prune-replaced-parent": (
+        "executed outside the command families here: "
+        "tests/integration/test_prune_replaced_parent_lifecycle.py follows it to a clean prune"
+    ),
     "registry-canonical-unrecorded": _NETWORK,
     "runtime-missing": _NETWORK,
     "staged-bundle-drift": "executed end to end by "

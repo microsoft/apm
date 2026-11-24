@@ -1,0 +1,7 @@
+{
+  "name": "real-harness-copilot-1.0.114-0",
+  "private": true,
+  "dependencies": {
+    "@github/copilot": "1.0.114-0"
+  }
+}

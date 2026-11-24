@@ -1,0 +1,7 @@
+{
+  "name": "real-harness-claude-2.1.326",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.326"
+  }
+}
