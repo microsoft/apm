@@ -861,9 +861,9 @@ class AuthResolver:
                 host_kind=host_info.kind,
                 base_env=base_env,
             )
-            if github_auth_first_opted_out:
-                # No-credential last resort for the opt-out: keep the caller's
-                # TLS trust when base_env carries an isolated config.
+            if host_info.kind in _GITHUB_CLASS_KINDS:
+                # No-credential attempt (and the opt-out's last resort): keep
+                # the caller's TLS trust when base_env carries an isolated config.
                 self._inherit_ambient_github_tls(unauth_env)
 
         def _auth_context() -> AuthContext:
@@ -1741,7 +1741,7 @@ class AuthResolver:
 
     @classmethod
     def _inherit_ambient_github_tls(cls, env: dict[str, str]) -> None:
-        """Restore the caller's Git TLS trust inside an isolated github.com env.
+        """Restore the caller's Git TLS trust inside an isolated GitHub-class env.
 
         Issue #2545: isolation (``GIT_CONFIG_NOSYSTEM`` / isolated
         ``GIT_CONFIG_GLOBAL``) discards ``http.sslBackend``,
@@ -1816,9 +1816,10 @@ class AuthResolver:
         ordinary 401/403/404-triggered retry, or the ``--auth-first`` bypass
         of the anonymous attempt) must not hit the same TLS-inspecting-proxy
         failure the isolated hardened base env would otherwise reproduce --
-        mirrors :meth:`build_public_github_anonymous_git_env`. Scoped to
-        exact-host github.com only; GHE Cloud/GHES/ADO/GitLab/generic are
-        unaffected.
+        mirrors :meth:`build_public_github_anonymous_git_env`. Every
+        GitHub-class host (github.com, GHE Cloud, GHES) keeps it: the keys are
+        host-agnostic and exactly what a plain ``git clone`` of that host reads.
+        ADO/GitLab/generic are unaffected.
         """
         scheme = ctx.auth_scheme
         if ctx.token and ctx.host_info.kind in {"github", "ghe_cloud", "ghes"}:
@@ -1830,7 +1831,7 @@ class AuthResolver:
             base_env=base_env,
             username=getattr(ctx, "username", None),
         )
-        if ctx.host_info.kind == "github":
+        if ctx.host_info.kind in _GITHUB_CLASS_KINDS:
             AuthResolver._inherit_ambient_github_tls(env)
         return env
 
