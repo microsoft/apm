@@ -266,13 +266,9 @@ def materialize_tree(
         entries = _frozen_entries(child_env)
         if entries is None:
             entries = _read_effective_git_config(child_env).entries
-        for entry in entries:
-            key = entry.key.lower()
-            if key.startswith("filter.") or key in (
-                "core.attributesfile",
-                "core.checkroundtripencoding",
-            ):
-                return None
+        # A filter, eol or encoding applies only through an attribute: with every
+        # attributes source outside the commit inert (W4) and the commit's own
+        # .gitattributes refused, filter.* definitions cannot change a byte.
         _require_inert_attributes(child_env, entries)
     except Exception:
         return None
