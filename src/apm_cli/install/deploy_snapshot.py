@@ -119,6 +119,7 @@ class DeployJournal:
         # With a deploy root every unit is also written to the store's
         # manifest, so the next install can replay a journal a kill abandoned.
         self.root = Path(os.path.abspath(root)) if root is not None else None
+        self.contain = self.root  # rollback-only containment; a fast apply sets its project
         # The metadata workspace (lockfile directory) whose ledger vouches for it.
         self.workspace = Path(os.path.abspath(workspace or root or store_parent))
         self.store: Path | None = None
@@ -285,16 +286,28 @@ class DeployJournal:
         with self._lock:
             units = list(reversed(self._units))
         for unit in units:
+            if self._crosses_link(unit.path):
+                issues.append((unit.path, "kept: a parent directory is a symbolic link"))
+                continue
             try:
                 self._restore_unit(unit)
             except OSError as exc:
                 issues.append((unit.path, f"could not restore: {exc}"))
-        remove_empty_directories(a for unit in units for a in unit.absent_ancestors)
+        remove_empty_directories(
+            a for unit in units for a in unit.absent_ancestors if not self._crosses_link(a)
+        )
         if issues and self.store is not None:
             issues.append((self._retain(), "pre-install copies retained here for recovery"))
         else:
             self.discard()
         return issues
+
+    def _crosses_link(self, path: Path) -> bool:
+        """Whether a directory between *path* and its deploy root (or APM home) is a link."""
+        for base in (self.contain, self.store_parent.parent):
+            if base is not None and path.parent.is_relative_to(base):
+                return has_symlink_component(base, path.parent)
+        return False
 
     def _retain(self) -> Path:
         """Rename the store so no later install reaps the copies a user still needs."""

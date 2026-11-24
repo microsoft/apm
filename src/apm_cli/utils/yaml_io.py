@@ -593,6 +593,35 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
+    """Return *path*'s BOM-stripped frontmatter block, through its closing fence.
+
+    Only a *prefix_bytes* prefix is read, unless the fence is still open at
+    its end; then the whole file is. Bytes after the closing fence are never
+    decoded strictly. A file without frontmatter yields ``""``. Raises
+    ``OSError`` when the file cannot be read and ``UnicodeError`` when the
+    block is not UTF-8.
+    """
+    boundary = _BOUNDED_FRONTMATTER_HANDLER.FM_BOUNDARY
+    with Path(path).open("rb") as handle:
+        data = handle.read(prefix_bytes)
+        complete = len(data) < prefix_bytes
+        while True:
+            text = data.decode("utf-8", errors="surrogateescape").removeprefix("\ufeff")
+            if not boundary.match(text):
+                return ""
+            fences = boundary.finditer(text)
+            next(fences)
+            closing = next(fences, None)
+            if complete or (closing is not None and closing.end() < len(text)):
+                break
+            data += handle.read()
+            complete = True
+    block = text[: closing.end()] if closing is not None else text
+    block.encode("utf-8")  # an undecodable block raises UnicodeEncodeError
+    return block
+
+
 def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     """Parse Markdown text through the bounded handler.
 

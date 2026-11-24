@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import secrets
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -68,6 +69,8 @@ class LocalReanchorPlan:
     fresh: tuple[tuple[Path, Any, bool], ...] = ()
     # Lock key -> install's breadth-first visit rank, for request order (#4999).
     visit_order: dict[str, int] = field(default_factory=dict)
+    # Re-identified key -> the child keys it wins as nearest parent (#5091).
+    children: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Deployed path -> the writer a fresh install records once re-ranked (#5048).
     writers: dict[str, str] = field(default_factory=dict)
 
@@ -106,6 +109,63 @@ def _root_identities(
     return identities
 
 
+def _won_children(walk, nodes, renames: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    """Each re-identified key's children whose winning parent it is (#5091).
+
+    The winner is the nearest parent, ties going to the lowest re-anchored
+    key, as install and ``resolved_by`` rank them; a child another parent
+    wins keeps naming that parent.
+    """
+    won: dict[str, list[str]] = {key: [] for key in nodes}
+    for child in sorted(walk.declaring_edges):
+        nearest = _nearest_parents(walk, child)
+        if nearest:
+            winner = min(nearest, key=lambda parent: renames.get(parent, parent))
+            if winner in won:
+                won[winner].append(child)
+    return {key: tuple(children) for key, children in won.items()}
+
+
+def _respelled_descendants(
+    lockfile, decision, walk, local_roots, label, modules_dir: Path
+) -> dict[str, tuple[str, str, Any, str]]:
+    """Local descendants whose winning edge respells their directory (#5091).
+
+    A case-only spelling on a case-insensitive filesystem, or a symlinked
+    spelling, resolves to the same package directory, but a fresh install
+    records the winning edge's spelling and names its copy after it (#5091).
+    Such a descendant is re-keyed like a root, with the same identity fields.
+    """
+    respelled: dict[str, tuple[str, str, Any, str]] = {}
+    for key in sorted(set(decision.rescued_parents) - set(local_roots)):
+        row = lockfile.get_dependency(key)
+        nearest = _nearest_parents(walk, key)
+        if row is None or row.source != "local" or not nearest:
+            continue
+        declared, alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))
+        via = walk.declaring_edges.get(key, {}).get(nearest[0])
+        real_dir = walk.local_dirs.get(key)
+        if (
+            declared == row.repo_url
+            or alias != row.alias
+            or via is None
+            or via[1] is None
+            or real_dir is None
+            or not _same_install_dir(row, declared, modules_dir)
+        ):
+            continue
+        copy = row.to_dependency_ref().get_install_path(modules_dir)
+        _require_copy(copy, key, label, modules_dir)
+        # A copy that moves like a root takes the fresh-copy path for stale excluded
+        # files; one that stays put (an alias names its path) gets no refresh, so its
+        # excluded files must match too.
+        spelled = replace(row.to_dependency_ref(), local_path=via[1], repo_url=declared)
+        stays = os.fspath(spelled.get_install_path(modules_dir)) == os.fspath(copy)
+        _require_fresh_copy(row, real_dir, copy, key, label, modules_dir, unhashed=stays)
+        respelled[key] = (via[1], nearest[0], real_dir, declared)
+    return respelled
+
+
 def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir: Path):
     """Return the winning edge's repo spelling, or refuse when it installs elsewhere.
 
@@ -129,7 +189,11 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
 
 
 def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
-    """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem)."""
+    """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem).
+
+    Only letter case may differ (#5091's scope); a Unicode-normalization
+    respelling refuses (#5222). The filesystem then decides.
+    """
     if declared is None or declared.casefold() != row.repo_url.casefold():
         return False
     ref = row.to_dependency_ref()
@@ -181,9 +245,10 @@ def plan_local_reanchor(
             root=project_root,
             root_local_dirs={},
         )
-        for key, (local_path, parent_key, real_dir, repo_url) in _root_identities(
-            lockfile, walk, local_roots, label, modules_dir
-        ).items()
+        for key, (local_path, parent_key, real_dir, repo_url) in {
+            **_root_identities(lockfile, walk, local_roots, label, modules_dir),
+            **_respelled_descendants(lockfile, decision, walk, local_roots, label, modules_dir),
+        }.items()
     }
     renames = {key: node.get_unique_key() for key, node in nodes.items()}
     collisions = sorted(
@@ -232,8 +297,59 @@ def plan_local_reanchor(
         resolved_by,
         moves=moves,
         fresh=fresh,
+        children=_won_children(walk, nodes, renames),
         visit_order=dict(getattr(walk, "visit_order", {}) or {}),
     )
+
+
+def reparent_rows(
+    lockfile,
+    walk,
+    keys,
+    renames: dict[str, str] | None = None,
+    *,
+    skip=frozenset(),
+    locked_identity: bool = False,
+) -> tuple[dict[str, tuple[str, str | None]], dict[str, str | None]]:
+    """The parent install records for each of *keys*, from a complete walk.
+
+    Returns ``(declaring_parents, resolved_by)`` for :class:`LocalReanchorPlan`:
+    a local row takes the first shallowest declaring edge, and every row the
+    nearest parent, ties to the lowest key as install ranks them (#4833).
+    ``apm prune`` re-parents a survivor whose recorded parent it removes (#4989);
+    with *locked_identity* a parent that keeps its lock row is named by that
+    row, so a parent reached through a symlink alias names its own row.
+    """
+    from ...deps.lockfile import lockfile_parent_identity
+
+    renames = renames or {}
+    declaring_parents: dict[str, tuple[str, str | None]] = {}
+    resolved_by: dict[str, str | None] = {}
+    for key in keys:
+        nearest = _nearest_parents(walk, key)
+        if not nearest:
+            continue
+        edges = walk.declaring_edges[key]
+        # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
+        parent_key = min(nearest, key=lambda parent: renames.get(parent, parent))
+        resolved_by[key] = edges[parent_key][0]
+        parent_row = lockfile.dependencies.get(parent_key) if locked_identity else None
+        if parent_row is not None:
+            resolved_by[key] = lockfile_parent_identity(parent_row, lockfile.replacements)
+        row = lockfile.get_dependency(key)
+        # A legacy local row (no declaring_parent) re-parented by prune takes
+        # the new parent's local_path too, or it would resolve elsewhere.
+        if (
+            row is not None
+            and row.source == "local"
+            and key not in skip
+            and (row.declaring_parent or locked_identity)
+        ):
+            # A legacy row resolves local_path against resolved_by, so it takes
+            # that parent's edge; others keep install's first shallowest edge.
+            first = nearest[0] if row.declaring_parent else parent_key
+            declaring_parents[key] = (renames.get(first, first), edges[first][1])
+    return declaring_parents, resolved_by
 
 
 def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> tuple:
@@ -260,7 +376,9 @@ def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> t
         except (OSError, ValueError):
             stale = False
         if stale:
-            fresh.append((current, ref, row.content_hash_framed))
+            # A descendant's local_path is relative to its parent: stage from the source itself.
+            sourced = replace(ref, local_path=os.path.abspath(source))
+            fresh.append((current, sourced, row.content_hash_framed))
     return tuple(fresh)
 
 
@@ -275,7 +393,19 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
         current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
         target = node.get_install_path(modules_dir)
         _require_copy(current, key, label, modules_dir)
-        if current == target:
+        # Compared as spelled: a case-insensitive Path equality hides a case-only rename.
+        if os.fspath(current) == os.fspath(target):
+            continue
+        if target.exists() and _same_directory(current, target):
+            # A case-only rename goes through a temporary name, which every
+            # case-insensitive filesystem honors (#5091).
+            # A short name: the package name may already be near the length limit.
+            step = current.with_name(f".apm-case-{secrets.token_hex(4)}")
+            if step.exists():
+                raise LocalReanchorRefused(
+                    f"{label(key)} stays, but {_modules_path(step, modules_dir)} is in the way"
+                )
+            moves += [(current, step), (step, target)]
             continue
         if target.exists():
             raise LocalReanchorRefused(
@@ -284,6 +414,13 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
             )
         moves.append((current, target))
     return tuple(moves)
+
+
+def _same_directory(first: Path, second: Path) -> bool:
+    try:
+        return first.samefile(second)
+    except OSError:
+        return False
 
 
 def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
@@ -297,12 +434,21 @@ def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
 
 
 def _require_fresh_copy(
-    row, source: Path | None, copy: Path, key: str, label, modules_dir: Path
+    row,
+    source: Path | None,
+    copy: Path,
+    key: str,
+    label,
+    modules_dir: Path,
+    *,
+    unhashed: bool = True,
 ) -> None:
     """Refuse a kept descendant whose local source no longer matches its copy (#4999).
 
     Install recopies a changed local source, so keeping the old copy would not
     leave apm_modules as a fresh install does. An unreadable source refuses too.
+    With *unhashed* false, only the hashed content counts: a moving copy whose
+    excluded files went stale is re-materialized instead (#5102).
     """
     from ...install.phases.local_content import local_source_matches_copy
 
@@ -310,7 +456,7 @@ def _require_fresh_copy(
         fresh = (
             source is not None
             and local_source_matches_copy(row, source, copy)
-            and _unhashed_files_match(source, copy)
+            and (not unhashed or _unhashed_files_match(source, copy))
         )
     except (OSError, ValueError, TypeError):
         fresh = False
@@ -510,7 +656,14 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
     """
     if not plan:
         return False
+    from ...deps.lockfile import lockfile_parent_identity
+
     renames = {old: new for old, new in plan.renames.items() if old != new}
+    replacements = getattr(lockfile, "replacements", None)
+    old_identity = {
+        key: lockfile_parent_identity(lockfile.dependencies[key], replacements)
+        for key in plan.identities
+    }
     for key, (local_path, parent_key, anchored, repo_url) in plan.identities.items():
         row = lockfile.dependencies[key]
         row.local_path, row.declaring_parent, row.anchored_local_path = (
@@ -537,9 +690,34 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
             if row.resolved_by in renames:
                 row.resolved_by = renames[row.resolved_by]
             lockfile.dependencies[renames.get(key, key)] = row
+    _reidentify_children(lockfile, old_identity, renames, replacements, plan.children)
     for row in lockfile.dependencies.values():
         _rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
     return True
+
+
+def _reidentify_children(
+    lockfile, old_identity: dict, renames: dict, replacements, children: dict
+) -> None:
+    """Point a re-identified parent's own children at its new identity (#5091).
+
+    Without replacements a child names its parent by repository identity, not
+    by lock key, so a respelled parent (``_local/F`` -> ``_local/f``) would
+    leave its children naming a parent that no longer exists. That identity
+    is not unique (another ``F`` directory has the same one), so only the
+    children this parent wins as nearest parent are updated.
+    """
+    from ...deps.lockfile import lockfile_parent_identity
+
+    for key, before in old_identity.items():
+        row = lockfile.dependencies.get(renames.get(key, key))
+        after = lockfile_parent_identity(row, replacements) if row is not None else before
+        if after == before:
+            continue
+        for child in children.get(key, ()):
+            child_row = lockfile.dependencies.get(renames.get(child, child))
+            if child_row is not None and child_row.resolved_by == before:
+                child_row.resolved_by = after
 
 
 def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> LocalReanchorPlan:

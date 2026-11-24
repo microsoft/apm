@@ -2293,6 +2293,66 @@ def test_a_linked_journal_naming_another_project_is_kept_not_skipped(
     assert config.read_bytes() == b"killed\n"
 
 
+def test_a_rollback_keeps_a_path_whose_parent_became_a_link(tmp_path: Path, apm_home: Path) -> None:
+    """A deploy path whose parent directory is now a symbolic link is kept and reported:
+    the rollback never removes or writes through that link."""
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    deployed = project / "agents" / "a.md"
+    deployed.parent.mkdir(parents=True)
+    deployed.write_bytes(b"prior\n")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.write_bytes(b"installed\n")
+    journal.after_write(deployed)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.md").write_bytes(b"outside\n")
+    shutil.rmtree(project / "agents")
+    try:
+        (project / "agents").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    issues = journal.restore()
+
+    assert (outside / "a.md").read_bytes() == b"outside\n"
+    assert deployed in [path for path, _reason in issues]
+
+
+def test_a_rollback_never_cleans_a_directory_through_a_linked_parent(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Directories a rollback would remove as empty are left alone below a linked parent."""
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    project.mkdir()
+    deployed = project / "agents" / "sub" / "a.md"
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.parent.mkdir(parents=True)
+    deployed.write_bytes(b"installed\n")
+    journal.after_write(deployed)
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    shutil.rmtree(project / "agents")
+    try:
+        (project / "agents").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    issues = journal.restore()
+
+    assert (outside / "sub").is_dir()
+    assert deployed in [path for path, _reason in issues]
+
+
 def _shared_dir_install(apm_home: Path, project: Path, packages: int) -> Path:
     """*packages* writers each ensure one shared directory, then write a file into it."""
     from apm_cli.install.deploy_snapshot import DeployJournal

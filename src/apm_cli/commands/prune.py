@@ -272,6 +272,7 @@ def prune(ctx, dry_run):
         orphaned_packages = list(decision.removed_paths)
         for package in decision.retained_paths:
             logger.progress(f"Retained {package}: required package content.")
+        _warn_retained_rows(decision, lockfile, logger)
         missing_orphaned_keys = list(decision.stale_keys)
         deployment_ledger = (
             DeploymentLedgerCodec.from_lockfile(lockfile) if lockfile is not None else None
@@ -498,6 +499,7 @@ def prune(ctx, dry_run):
 
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
+            _reparent_survivors(lockfile, decision)
             lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
             if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
@@ -603,6 +605,43 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _warn_retained_rows(decision, lockfile, logger) -> None:
+    """Name every row prune keeps because it cannot prove removal safe (#4989)."""
+
+    def name(dep_key: str) -> str:
+        locked = lockfile.dependencies.get(dep_key) if lockfile is not None else None
+        return locked.repo_url if locked is not None else dep_key
+
+    for dep_key, reason in decision.anchored_keys.items():
+        logger.warning(f"Retained {name(dep_key)}: {reason}.")
+    for dep_key, reason in decision.unverified_keys.items():
+        logger.warning(
+            f"Retained {name(dep_key)}: the dependency graph could not be read completely, "
+            f"so prune cannot prove no package still needs it ({reason}). Restore the "
+            "unreadable package, then prune again."
+        )
+
+
+def _reparent_survivors(lockfile, decision) -> None:
+    """Record each survivor whose parent was pruned under the parent install records (#4989)."""
+    if not decision.rescued_parents or decision.reachability is None:
+        return
+    from .uninstall.local_reanchor import LocalReanchorPlan, apply_local_reanchor, reparent_rows
+
+    declaring, resolved = reparent_rows(
+        lockfile, decision.reachability, decision.rescued_parents, locked_identity=True
+    )
+    apply_local_reanchor(
+        lockfile, LocalReanchorPlan(declaring_parents=declaring, resolved_by=resolved)
+    )
+    for key, parent in resolved.items():
+        if key in lockfile.dependencies and parent is not None:
+            lockfile.dependencies[key].resolved_by = parent
+    for key, depth in decision.rescued_depths.items():
+        if key in lockfile.dependencies:
+            lockfile.dependencies[key].depth = depth
 
 
 def _native_ownership(lockfile, lockfile_path):

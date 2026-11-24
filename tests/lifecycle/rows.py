@@ -75,6 +75,9 @@ _PROJECT_HOME_ALLOWED = (
     ".cache/apm",
     # The world's hermetic az stub logs each call here (tests/lifecycle/world/shims.py).
     ".azure/lifecycle-az-calls.log",
+    # Claude Code's marketplace registry and APM's record of its entry (#5176).
+    ".claude/plugins/known_marketplaces.json",
+    ".apm/claude-known-marketplaces.json",
 )
 _RECONCILING = frozenset({"install", "update"})
 
