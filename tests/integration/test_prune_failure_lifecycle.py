@@ -301,3 +301,53 @@ def test_prune_lock_write_failure_after_removal_names_it_and_retry_converges(
     )
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr
     assert "No orphaned packages found" in repeated.stdout
+
+
+def test_prune_retry_converges_after_a_child_delete_failed_under_a_pruned_parent(
+    tmp_path: Path,
+) -> None:
+    """parent -> child, both orphaned; the child's delete fails, the parent's succeeds.
+
+    The retry must still read the chain and finish: the child never stays
+    "retained" forever under a parent with no lock row (#5238).
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+    environment = isolated.subprocess_env()
+    factory = LocalPackageFactory(isolated.work_root)
+    consumer = factory.create("consumer", targets=("copilot",))
+    parent = factory.create("parent", targets=("copilot",))
+    child = factory.create("child", targets=("copilot",))
+    factory.add_relative_dependency(parent, child)
+    factory.add_relative_dependency(consumer, parent)
+    healthy = _runner(consumer.root / "apm_modules", "none")
+    installed = healthy.run(
+        ("install", "--target", "copilot", "--no-policy"),
+        cwd=consumer.root,
+        env=environment,
+        scenario_id="prune-child-failure-install",
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"] = []
+    dump_yaml(manifest, consumer.manifest_path)
+    blocked = next((consumer.root / "apm_modules/_local").glob("*/child"))
+
+    failed = _runner(blocked, "blocked").run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-child-failure"
+    )
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+
+    retry = healthy.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-child-failure-retry"
+    )
+    output = " ".join((retry.stdout + retry.stderr).split())
+    assert retry.returncode == 0, output
+    assert "Retained" not in output, output
+    assert not blocked.exists(), output
+    state = LifecycleStateSnapshot.capture(consumer.root, targets=("copilot",))
+    assert state.lockfile_bytes is None, output
+    repeated = healthy.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-child-failure-repeat"
+    )
+    assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+    assert "No orphaned packages found" in repeated.stdout
