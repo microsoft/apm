@@ -221,3 +221,66 @@ def test_a_failed_probe_is_never_kept(world: _World) -> None:
         _memo_read(world, flaky)
     assert attempts == [1, 1]
     _assert_probes(world, 1)
+
+
+def test_a_relative_include_in_a_subdirectory_is_resolved_and_kept(world: _World) -> None:
+    (world.home / "conf.d").mkdir()
+    (world.home / "conf.d" / "extra.cfg").write_text('[url "https://h.example/"]\n\tinsteadOf = hh:\n')
+    (world.home / ".gitconfig").write_text("[include]\n\tpath = conf.d/extra.cfg\n")
+    with invocation_scope():
+        world.read()
+        kept = world.read()  # kept from the second miss, once the include is known
+        world.read()
+        _assert_probes(world, 2)
+        (world.home / "conf.d" / "extra.cfg").write_text(
+            '[url "https://i.example/"]\n\tinsteadOf = ii:\n'
+        )
+        after = world.read()
+    _assert_probes(world, 3)
+    assert kept.rewrites == (("https://h.example/", "hh:"),)
+    assert after.rewrites == (("https://i.example/", "ii:"),)
+
+
+def test_a_commondir_created_after_a_kept_probe_forces_a_real_probe(
+    world: _World, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True, env=world.env)
+    with invocation_scope():
+        world.read(git_dir=repo)
+        world.read(git_dir=repo)
+        _assert_probes(world, 1)
+        (repo / "commondir").write_text(str(tmp_path / "elsewhere.git") + "\n")
+        world.read(git_dir=repo)
+        world.read(git_dir=repo)  # a shared common dir is never kept
+    _assert_probes(world, 3)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="drive-less rooted paths exist only on Windows")
+def test_a_drive_less_include_on_windows_is_never_kept(world: _World) -> None:
+    (world.home / ".gitconfig").write_text("[include]\n\tpath = /mingw64/etc/extra.cfg\n")
+    with invocation_scope():
+        world.read()
+        world.read()
+    _assert_probes(world, 2)
+
+
+def test_concurrent_misses_on_one_key_probe_once(world: _World) -> None:
+    import threading
+
+    (world.home / ".gitconfig").write_text('[url "https://a.example/"]\n\tinsteadOf = gh:\n')
+    start = threading.Barrier(4)
+    results: list[object] = []
+
+    def worker() -> None:
+        start.wait()
+        results.append(world.read())
+
+    with invocation_scope():
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    _assert_probes(world, 1)
+    assert len({id(result) for result in results}) == 1

@@ -97,7 +97,11 @@ def _repository_files(git_dir: Path | None, worktree: Path | None) -> tuple[str,
     # resolved by Git itself; such a probe is not kept.
     if not base.is_dir() or (base / "commondir").exists():
         return None
-    return (str(base / "config"), str(base / "config.worktree"))
+    # ``commondir`` stays a candidate: creating it later redirects Git elsewhere.
+    return (str(base / "config"), str(base / "config.worktree"), str(base / "commondir"))
+
+
+_MAX_INCLUDE_DEPTH = 10  # Git's own limit on nested includes
 
 
 def _include_files(
@@ -105,8 +109,9 @@ def _include_files(
 ) -> tuple[str, ...] | None:
     """Return every file an include in *entries* may name, or ``None`` if not keepable.
 
-    Relative targets resolve against every known file's directory, nested
-    includes until nothing new appears: an over-approximation only re-probes more.
+    A relative target resolves against the directory of every existing file
+    that could hold it (Git reads includes only from files it read), nested
+    to Git's depth limit: an over-approximation only re-probes more.
     """
     homes = [env[name] for name in _HOME_ENV if env.get(name)]
     absolute: set[str] = set()
@@ -127,16 +132,22 @@ def _include_files(
             absolute.add(value)
         else:
             relative.add(value)
+    # Git for Windows opens a drive-less rooted path inside its own install.
+    if os.name == "nt" and any(not Path(path).drive for path in absolute):
+        return None
     known = set(files) | absolute
-    while True:
+    readers = {path for path in known if os.path.isfile(path)}
+    for _ in range(_MAX_INCLUDE_DEPTH):
         found = {
             os.path.normpath(os.path.join(os.path.dirname(path), rel))
-            for path in known
+            for path in readers
             for rel in relative
-        }
-        if found <= known:
+        } - known
+        if not found:
             return tuple(sorted(known - set(files)))
         known |= found
+        readers = {path for path in found if os.path.isfile(path)}
+    return None
 
 
 def git_config_paths(env: Mapping[str, str]) -> tuple[str, ...] | None:
@@ -206,8 +217,29 @@ def read(
     key = ("snapshot", git, tuple(sorted(env.items())), _real(git_dir), _real(worktree))
     with _lock:
         kept = memo.get(key)
+        key_lock = memo.setdefault(("lock", key), threading.Lock())
     if isinstance(kept, _Kept) and fingerprint(kept.candidates, file_id) == kept.fingerprint:
         return kept.snapshot
+    # One miss per key at a time: concurrent workers wait and share its answer.
+    with key_lock:
+        with _lock:
+            kept = memo.get(key)
+        if isinstance(kept, _Kept) and fingerprint(kept.candidates, file_id) == kept.fingerprint:
+            return kept.snapshot
+        return _miss(probe, env, memo, key, git, git_dir, worktree, config_paths, file_id)
+
+
+def _miss(
+    probe: Callable[[], _T],
+    env: Mapping[str, str],
+    memo: dict[Any, Any],
+    key: tuple[Any, ...],
+    git: str,
+    git_dir: Path | None,
+    worktree: Path | None,
+    config_paths: Callable[[Mapping[str, str]], tuple[str, ...] | None],
+    file_id: Callable[[str], _FileId | None],
+) -> _T:
     paths_key = ("paths", git, tuple((name, env.get(name)) for name in _PATH_ENV))
     with _lock:
         scope_files = memo.get(paths_key)
