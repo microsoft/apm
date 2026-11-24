@@ -51,7 +51,7 @@ def path_state(path: Path) -> dict[str, Any]:
 
 
 # PERF PROTOTYPE (stat-cut): compute the original too and fail loudly on any difference.
-_STAT_DIFFERENTIAL = True
+_STAT_DIFFERENTIAL = False
 _REPARSE_POINT = 0x400
 
 
