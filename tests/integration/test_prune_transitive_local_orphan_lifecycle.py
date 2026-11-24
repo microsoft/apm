@@ -499,7 +499,11 @@ _REPLACE_SCHEMA = (
 def test_prune_keeps_a_local_child_of_a_retained_replaced_package(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """d -> test/r (replaced by local vendor/r) -> ../e: dropping d keeps r, so e stays too."""
+    """d -> test/r (replaced by local vendor/r) -> ../e: dropping d never loses r or e.
+
+    Prune refuses before any change when d is the replacement's only recorded
+    parent (#5140), so e's row and files stay, under --dry-run and for real.
+    """
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"
     world.publish("r", lambda root, name: _skill_package(root, name))
@@ -523,14 +527,14 @@ def test_prune_keeps_a_local_child_of_a_retained_replaced_package(
     dump_yaml(manifest, world.project / "apm.yml")
     lock = lock_bytes(world.project)
 
-    # The real prune aborts writing the lock once d, the replacement's recorded
-    # parent, is gone (#5140); the dry run shows the retention decision.
-    preview = _output(world.apm("prune", "--dry-run"))
+    for args in (("prune", "--dry-run"), ("prune",)):
+        refused = _output(world.apm(*args, expect=1))
 
-    assert "Found 1 orphaned package(s)" in preview, preview
-    assert "_local/d (would be removed)" in preview, preview
-    assert lock_bytes(world.project) == lock
-    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+        assert "Cannot prune ./vendor/d" in refused, refused
+        assert "Nothing was changed" in refused, refused
+        assert lock_bytes(world.project) == lock
+        assert "_local/e" in _rows(world)
+        assert (world.project / _E_SKILL / "SKILL.md").is_file()
 
 
 def test_prune_treats_a_surviving_single_file_dependency_as_a_leaf(
