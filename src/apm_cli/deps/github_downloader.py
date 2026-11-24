@@ -1905,8 +1905,15 @@ class GitHubPackageDownloader:
                 if _payload is not None:
                     # PERF B3 PROTOTYPE: verified by construction (B1-fetched this command).
                     from ..cache.inprocess_fetch import materialize_payload
+                    from ..install.cache_pin import MARKER_FILENAME, marker_bytes
 
-                    materialize_payload(target_path, _payload)
+                    materialize_payload(
+                        target_path,
+                        _payload,
+                        pin=(MARKER_FILENAME, marker_bytes(resolved_ref.resolved_commit))
+                        if resolved_ref is not None and resolved_ref.resolved_commit
+                        else None,
+                    )
                 else:
                     from ..utils.file_ops import robust_copy_entry
 

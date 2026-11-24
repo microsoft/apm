@@ -589,27 +589,40 @@ def fetch_worktree(
         return None
 
 
-def materialize_payload(target: Path, payload: list[tuple[str, bytes, bool]]) -> None:
+def materialize_payload(
+    target: Path, payload: list[tuple[str, bytes, bool]], pin: tuple[str, bytes] | None = None
+) -> None:
     """PERF B3 PROTOTYPE: write a verified in-memory tree into empty *target*.
 
     The bytes are the objects B1 hashed to their ids this command, so the copy
-    equals the verified commit by construction (no copy-then-re-read). Records
-    a within-command stat proof plus the bytes so the package content hash is
-    computed from memory while nothing on disk changed.
+    equals the verified commit by construction (no copy-then-re-read). *pin* is
+    ``(name, bytes)`` of the ``.apm-pin`` marker, written by the same writer BEFORE
+    the proof is sealed (W3d P1), so the later cache-pin pass finds it equal and
+    writes nothing (P2). The seal (P4) requires every directory's entry names to
+    equal what was written and every file's lstat to equal its write-fd fstat;
+    otherwise nothing is seeded and every reader walks and hashes from disk.
     """
     root = str(target)
     if os.listdir(root):
         raise _Refuse("target is not empty")
     made = {root}
+    expected: dict[str, set[str]] = {root: set()}
     files: dict[str, tuple[int, int, int, int, int]] = {}
-    for rel, data, executable in payload:
+    writes = [(rel, data, executable) for rel, data, executable in payload]
+    if pin is not None:
+        writes.append((pin[0], pin[1], False))
+    for rel, data, executable in writes:
         parts = rel.split("/")
         directory = root
         for part in parts[:-1]:
+            parent = directory
             directory = os.path.join(directory, part)
             if directory not in made:
                 os.mkdir(directory, 0o755)
                 made.add(directory)
+                expected.setdefault(directory, set())
+                expected[parent].add(part)
+        expected[directory].add(parts[-1])
         path = os.path.join(directory, parts[-1])
         fd = os.open(path, _WRITE_FLAGS, 0o755 if executable else 0o644)
         try:
@@ -623,7 +636,26 @@ def materialize_payload(target: Path, payload: list[tuple[str, bytes, bool]]) ->
     dirs = {}
     for directory in made:
         info = os.lstat(directory)
+        if not stat.S_ISDIR(info.st_mode):
+            return
+        with os.scandir(directory) as entries:
+            if {entry.name for entry in entries} != expected[directory]:
+                return  # W3d P4: a planted or missing entry -> no seed
         dirs[directory] = (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns)
+    for rel, proof in files.items():
+        info = os.lstat(os.path.join(root, *rel.split("/")))
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or (
+                info.st_dev,
+                info.st_ino,
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_ctime_ns,
+            )
+            != proof
+        ):
+            return  # W3d P4: a swapped file -> no seed
     from ..utils.content_hash import seed_package_tree
 
-    seed_package_tree(root, payload, files, dirs)
+    seed_package_tree(root, payload, files, dirs, extras=(pin[0],) if pin is not None else ())

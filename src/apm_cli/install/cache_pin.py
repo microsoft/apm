@@ -79,30 +79,31 @@ def write_marker(install_path: Path, resolved_commit: str) -> None:
     """
     if not install_path.exists() or not install_path.is_dir():
         return
-    payload = {
-        "schema_version": SCHEMA_VERSION,
-        "resolved_commit": resolved_commit,
-    }
     marker = install_path / MARKER_FILENAME
-    data = json.dumps(payload).encode("utf-8")
+    data = marker_bytes(resolved_commit)
     try:
         current = _regular_marker_bytes(marker)
     except OSError:
         current = None  # unreadable: treat as a miss and still repair it
     if current == data:
         return
-    from ..utils.content_hash import reseal_root, seed_holds
+    from ..utils.content_hash import drop_seed
 
-    sealed = seed_holds(install_path)
+    # PERF B3 PROTOTYPE (W3d P2): a differing marker voids the sealed tree; never re-seal.
+    drop_seed(install_path)
     try:
         _replace_marker(install_path, marker, data)
-        if sealed:
-            # PERF B3 PROTOTYPE: our own marker write keeps the verified-tree proof.
-            reseal_root(install_path, MARKER_FILENAME)
     except OSError:
         # Read-only mount, permission denied, a directory in the way, etc.
         # Drift will surface this on the next audit; install must not fail.
         return
+
+
+def marker_bytes(resolved_commit: str) -> bytes:
+    """The exact ``.apm-pin`` bytes for *resolved_commit*."""
+    return json.dumps(
+        {"schema_version": SCHEMA_VERSION, "resolved_commit": resolved_commit}
+    ).encode("utf-8")
 
 
 def _regular_marker_bytes(marker: Path) -> bytes | None:
