@@ -185,6 +185,10 @@ def credits_dimension(node: str, cell: Mapping[str, str]) -> bool:
     return not (node == SOURCE_SPINE and step in SOURCE_SPINE_UNOBSERVED)
 
 
+# User bin spine gate levels at which bin/ is deployed when install --mcp runs
+# (tests/lifecycle/machines/_gate_bin.py replay_bin).
+_BIN_DEPLOYED_LEVELS = frozenset({"none", "allowed", "revoked-after-deploy"})
+
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "bundle": ("bundle-install", ()),
@@ -322,6 +326,15 @@ def machine_cells() -> list[MachineCell]:
             if assignment["GATE"] == "denied-dependency":
                 # A refusal proves its GATE level only, never a success cell.
                 continue
+            if (
+                witness == GATE_BIN_SPINE
+                and key.split("|")[1] == "mcp-install"
+                and assignment["GATE"] in _BIN_DEPLOYED_LEVELS
+            ):
+                # install --mcp over a deployed bin/ keeps it byte-identical (U7): the
+                # step's evidence names bin/ present, so it proves the OP x PRIM pair.
+                context = {"OP": "mcp-install", "PRIM": "bin"}
+                cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
             if witness == GATE_PACK_SPINE:
                 # A real pack over the primitive also proves the OP x PRIM pair.
                 context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}

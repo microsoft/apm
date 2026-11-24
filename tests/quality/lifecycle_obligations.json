@@ -17886,6 +17886,11 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=mcp-install|PRIM=bin": {
+   "credited_by": [
+    "G1|mcp-install|bin|allowed|user",
+    "G1|mcp-install|bin|none|user",
+    "G1|mcp-install|bin|revoked-after-deploy|user"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
@@ -17893,8 +17898,9 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=mcp-install|PRIM=canvas": {
    "family": "pair",
