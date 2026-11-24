@@ -120,6 +120,10 @@ def portable_relpath(path: Path, base: Path) -> str:
         return path.as_posix()
 
 
+def _resolve_instance(path: Path) -> Path:
+    return path.resolve()  # the instance's own resolve(), as portable_relpath calls it
+
+
 def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     """:func:`portable_relpath` of each path against one *base*, resolving it once.
 
@@ -127,7 +131,7 @@ def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     resolved again per path within this call.
     """
     # The kernel form where it applies (Linux); elsewhere Path.resolve() itself.
-    resolve = resolve_path if kernel_resolves() else Path.resolve
+    resolve = resolve_path if kernel_resolves() else _resolve_instance
     try:
         resolved_base: Path | None = resolve(base)
     except (OSError, RuntimeError):

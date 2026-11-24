@@ -37,6 +37,9 @@ _proc_state = {"proven": False, "refused": False}
 
 
 def _reset_proof() -> None:
+    global _proof_lock
+    # A thread that held the lock at fork() does not exist in the child.
+    _proof_lock = threading.Lock()
     _proc_state.update(proven=False, refused=False)
 
 

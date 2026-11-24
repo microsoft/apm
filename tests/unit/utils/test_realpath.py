@@ -164,7 +164,8 @@ def fresh_proof():
 def test_a_failed_proc_proof_leaves_every_later_call_to_pathlib(
     tree: Path, fresh_proof: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    candidate = tree / "dir" / "sub" / "file.md"
+    # A path through a link takes the /proc form (openat2 refuses links).
+    candidate = tree / "link_dir" / "file.md"
     expected = candidate.resolve()
 
     def diverged(*_args, **_kwargs):
@@ -173,11 +174,12 @@ def test_a_failed_proc_proof_leaves_every_later_call_to_pathlib(
     monkeypatch.setattr(os, "stat", diverged)
     assert resolve_path(candidate) == expected
     monkeypatch.undo()
+    assert realpath._proc_state["refused"] is True
 
     def no_kernel(*_args, **_kwargs):
         raise AssertionError("the kernel form must stay off")
 
-    monkeypatch.setattr(os, "readlink", no_kernel)
+    monkeypatch.setattr(os, "open", no_kernel)
     assert [resolve_path(candidate), resolve_path(tree / "dir")] == [
         expected,
         (tree / "dir").resolve(),
