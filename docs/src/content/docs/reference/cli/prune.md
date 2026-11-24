@@ -20,7 +20,7 @@ apm prune [--dry-run]
 `apm prune` mirrors `npm prune`: it removes installed packages that are not in
 the manifest's resolved dependency graph. Unlike npm, it also removes the
 harness-deployed files those packages produced (prompts, agents, hooks, MCP
-wiring) and rewrites the lockfile.
+and LSP wiring) and rewrites the lockfile.
 :::
 
 ## Description
@@ -38,9 +38,11 @@ dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
 A package removed from `apm.yml` by hand that another installed package still
-declares is kept; the next `apm install` records it as transitive. If a
-retained package's manifest cannot be read, prune keeps such packages rather
-than guess.
+declares is kept; the next `apm install` records it as transitive. A
+transitive local package that no remaining package declares is orphaned: its
+lock entry goes, and its deployed files go only where APM can prove it wrote
+them. If a retained package's manifest cannot be read, prune keeps such
+packages rather than guess, and names each one it kept.
 
 Switching a whole-repository dependency such as `owner/repo` to `path:`
 dependencies on the same repository needs no prune: the next `apm install` or
@@ -68,6 +70,11 @@ owned harness deployments using the protections below, removes its entry from
 deleted only with evidence that APM wrote its current bytes: a local deployment
 receipt, or byte equality with the locked version's render, taken before the
 package directory is removed. Files without evidence are kept with a warning.
+The orphan's MCP and LSP server entries go in the same run, through the same
+cleanup `apm uninstall` uses: only entries the lockfile records as APM-owned
+are removed, and user-authored entries stay. If an LSP config cannot be
+updated, it is left as is, its lockfile records stay, and prune exits 1; fix
+the config, then run `apm install`.
 
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
