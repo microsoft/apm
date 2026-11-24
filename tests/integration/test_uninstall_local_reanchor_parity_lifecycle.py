@@ -12,6 +12,7 @@ GRAPH=direct-also-transitive | cross-root diamond | replaced edge
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -793,6 +794,60 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     assert lock_bytes(world.project) == lock, "the next install rewrote the lockfile"
     assert not changed, f"the next install rewrote the re-anchored copy: {changed}"
     assert not [key for key in modules if ".apm-reanchor-" in key], sorted(modules)
+
+
+_COPY_LOG_ENTRY = """\
+import json
+import sys
+
+sys.path.extend(json.loads(sys.argv.pop(1)))
+log = open(sys.argv.pop(1), "a", encoding="utf-8")
+
+def record(event, args):
+    if event == "shutil.copyfile":
+        log.write(str(args[0]) + "\\t" + str(args[1]) + "\\n")
+        log.flush()
+
+sys.addaudithook(record)
+from apm_cli.cli import main
+main()
+"""
+
+
+def test_a_fresh_copy_re_anchor_stages_each_package_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5193: deciding and building e's fresh copy stages each of its files once.
+
+    The decision compares only the hash-excluded subtrees, and the one staged
+    image is verified against the lock's content_hash, never staged twice.
+    """
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+
+    def git_head(project: Path) -> None:
+        head = project / "vendor/e/.git/HEAD"
+        head.parent.mkdir(parents=True)
+        head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+    world = _docs_world(tmp_path, apm_binary_path, git_head)
+    (world.project / "vendor/e/.git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+    log = tmp_path / "copies.log"
+    roots = json.dumps([str(Path(path).resolve()) for path in sys.path if path])
+    runner = ApmLifecycleRunner((sys.executable, "-c", _COPY_LOG_ENTRY, roots, str(log)))
+
+    result = runner.run(("uninstall", "./vendor/e"), cwd=world.project, env=world.env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    skill = (world.project / "vendor/e/.apm/skills/e-skill/SKILL.md").resolve()
+    staged = [
+        destination
+        for source, destination in (
+            line.split("\t", 1) for line in log.read_text(encoding="utf-8").splitlines()
+        )
+        if Path(source).resolve() == skill and "apm-reanchor-" in destination
+    ]
+    assert len(staged) == 1, staged
+    assert not (world.project / "apm_modules/_local/e").exists()
 
 
 @pytest.mark.parametrize(
