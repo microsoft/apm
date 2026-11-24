@@ -47,9 +47,9 @@ ENVS = ("normal", "worktree", "headless")
 # Diagnostic variants: a second headless session in the same project, and the
 # project marketplace path rewritten to an absolute path.
 # Claude-only diagnostics at project scope: a second session in the same HOME, the
-# marketplace path made absolute, no folder trust (headless and TUI), and the native oracle (Claude's
-# own `plugin marketplace add` + `plugin install --scope project`, then the user
-# plugin state wiped to simulate a fresh clone). Worktree diagnostics: apm installs
+# marketplace path made absolute, no folder trust (headless and TUI), and the
+# native oracle (Claude's own `plugin marketplace add` + `plugin install --scope
+# project`, then the user plugin state wiped to simulate a fresh clone). Worktree diagnostics: apm installs
 # only on the worktree's branch (main checkout has no .agents/plugins), or a
 # session runs in the main checkout before the first session in a worktree.
 DIAG_ENVS = (
@@ -689,6 +689,10 @@ class Cell:
                 self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             cwd = self.run_dir()
             self.list_probes(cwd)
+            # `claude mcp list` health-checks (spawns) MCP servers; session evidence
+            # must come from the session alone.
+            self.evidence["list_mcp_marker"] = _read(self.mcp_marker)
+            self.reset_markers()
             if self.env.startswith("headless"):
                 self.headless(cwd)
             else:
