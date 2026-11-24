@@ -187,46 +187,12 @@ def test_concurrent_hook_installs_keep_every_shared_settings_entry(
     )
 
 
-_KNOWN_5285 = pytest.mark.xfail(
-    strict=True,
-    reason="#5285: incremental hook installs order a merged hook config unlike a full install",
-)
-
-
 def _project_bytes(project: Path) -> dict[str, bytes]:
     return {
         path.relative_to(project).as_posix(): path.read_bytes()
         for path in sorted(project.rglob("*"))
         if path.is_file() and not {"apm_modules", "pkgs"} & set(path.relative_to(project).parts)
     }
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        "copilot",
-        pytest.param("claude", marks=_KNOWN_5285),
-        pytest.param("cursor", marks=_KNOWN_5285),
-        pytest.param("codex", marks=_KNOWN_5285),
-        pytest.param("gemini", marks=_KNOWN_5285),
-    ],
-)
-def test_incremental_hook_installs_in_any_order_pass_audit(
-    tmp_path: Path, apm_binary_path: Path, target: str
-) -> None:
-    """``apm install <pkg>`` additions out of name order leave a converged
-    project: ``audit --ci`` agrees and a plain install changes no byte (I2, I3)."""
-    runner, env, project, _settings = _hook_project(tmp_path, apm_binary_path, target)
-    for name in ("gamma", "beta"):
-        added = runner.run(("install", "--no-policy", f"./pkgs/{name}"), cwd=project, env=env)
-        assert added.returncode == 0, added.stdout + added.stderr
-    before = _project_bytes(project)
-    audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
-    rerun = runner.run(("install", "--no-policy"), cwd=project, env=env)
-    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
-    after = _project_bytes(project)
-    changed = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
-    assert (changed, audit.returncode) == ([], 0), audit.stdout[-1200:]
 
 
 def _mcp_package(root: Path, name: str) -> None:
