@@ -518,8 +518,9 @@ class Context:
             )
             out.seek(0)
             err.seek(0)
-            tail = out.read()[-3000:].decode(errors="replace") + "\n"
-            tail += err.read()[-3000:].decode(errors="replace")
+            # Redact before slicing: a token cut at the boundary leaves no fragment.
+            tail = _redact(out.read().decode(errors="replace"))[-3000:] + "\n"
+            tail += _redact(err.read().decode(errors="replace"))[-3000:]
         return returncode, tail, cpu
 
     def checked(self, argv: list[str], cwd: Path) -> None:
@@ -527,7 +528,7 @@ class Context:
         if result.returncode != 0:
             raise RuntimeError(
                 f"setup `apm {' '.join(argv)}` failed ({result.returncode}) in {cwd}:\n"
-                f"{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
+                f"{_redact(result.stdout)[-3000:]}\n{_redact(result.stderr)[-3000:]}"
             )
 
     # state helpers (untimed)
@@ -830,7 +831,7 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             check=False,
         )
         if result.returncode != 0 or not target.is_file():
-            stderr = _redact(result.stderr[-500:].decode(errors="replace"))
+            stderr = _redact(result.stderr.decode(errors="replace"))[-500:]
             print(f"[!] cProfile run failed for {journey.name}: {stderr}")
             return None
     if prof.exists():

@@ -16,7 +16,7 @@ import pytest
 
 from tests.benchmarks import journeys
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-credential-origin-scope")]
 
 _TOKEN = "ghs_" + "S3cr3tBenchT0ken" * 2
 
