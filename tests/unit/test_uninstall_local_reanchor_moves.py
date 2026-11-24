@@ -598,3 +598,73 @@ def test_a_staged_copy_that_cannot_be_removed_is_reported_and_nothing_commits(
     assert "apm_modules/_local/.apm-reanchor-fresh-e" in " ".join(errors), errors
     assert (current / "apm.yml").is_file()
     assert not target.exists()
+
+
+def test_a_fresh_swap_rolled_back_after_the_save_restores_the_original_copy(
+    tmp_path: Path,
+) -> None:
+    """#5213: a staged fresh copy (changed .git/HEAD), then binding raises: all restored."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import (
+        _persist_lock_then_resync_native,
+        _StillNeededRepair,
+    )
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        snapshot_for_rollback,
+    )
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    modules = tmp_path / "apm_modules"
+    current = _package(modules, "e")
+    (current / ".git").mkdir()
+    (current / ".git/HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    source = tmp_path / "vendor/e"
+    source.mkdir(parents=True)
+    (source / "apm.yml").write_bytes((current / "apm.yml").read_bytes())
+    (source / ".git").mkdir()
+    (source / ".git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+    manifest, lock = tmp_path / "apm.yml", tmp_path / "apm.lock.yaml"
+    manifest.write_text("name: proj\n", encoding="utf-8")
+    lock.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    plan = snapshot_for_rollback(
+        LocalReanchorPlan(
+            renames={"./vendor/e": "local:vendor/e"},
+            moves=((current, modules / "_local" / "h1" / "e"),),
+            fresh=((current, DependencyReference.parse("./vendor/e"), True),),
+        ),
+        (manifest, lock),
+    )
+    before = (_tree(modules), manifest.read_bytes(), lock.read_bytes())
+    manifest.write_text("name: changed\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        _persist_lock_then_resync_native(
+            lock_changed=True,
+            persist_allowed=True,
+            lockfile=LockFile(),
+            lockfile_path=lock,
+            logger=MagicMock(),
+            integration_cleanup=IntegrationCleanupOutcome(
+                counts={},
+                deployed_files={},
+                failed_paths=[],
+                error_count=0,
+                materialization_session=MagicMock(
+                    bind_committed_claims=MagicMock(side_effect=RuntimeError("binding failed"))
+                ),
+            ),
+            deploy_root=tmp_path,
+            modules_dir=modules,
+            scope=None,
+            native_before=None,
+            still_needed_repairs=_StillNeededRepair({}, {}, {}, frozenset(), plan),
+        )
+
+    assert exc.value.code == 1
+    assert (_tree(modules), manifest.read_bytes(), lock.read_bytes()) == before
+    assert not [p.name for p in (modules / "_local").iterdir() if p.name.startswith(".apm-")]
+    assert not (modules / "_local" / "h1").exists()
