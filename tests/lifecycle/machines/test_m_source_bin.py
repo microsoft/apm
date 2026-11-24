@@ -55,6 +55,8 @@ def test_source_kit_spine_credits_registry_executable_cells(
     assert not missing, f"source kit ids without an oracle receipt: {sorted(missing)}"
     strict = {cell.label for cell in machine.known}
     assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
+    # The spine ends with an orphan prune: the package's canvas extension is gone.
+    assert not (machine.bench.deploy_root / ".github" / "extensions" / "p-kit").exists()
 
 
 def test_source_bundle_spine_credits_bundle_executable_cells(
@@ -66,3 +68,5 @@ def test_source_bundle_spine_credits_bundle_executable_cells(
     replay_source_bundle(machine)
     missing = source_bundle_cells() - earned_cells(current_node(), "SB2|")
     assert not missing, f"source bundle ids without an oracle receipt: {sorted(missing)}"
+    # The spine ends with the approved reinstall: the bundle's canvas extension is deployed.
+    assert (machine.bench.deploy_root / ".github" / "extensions" / "p-pack").is_dir()

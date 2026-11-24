@@ -268,8 +268,16 @@ class SourceBin(StepRunner):
                 ("marketplace", "add", source),
                 exits=frozenset({0}),
                 mutating=True,
-                forbidden={"project": ("*",), "outside": ("*",)},
-                allowed={},
+                # The bench's roots stay forbidden (HOME included); registration may
+                # write only the catalog registry and the catalog cache there.
+                forbidden={**self.bench.forbidden(), "project": ("*",)},
+                allowed={
+                    "home": (
+                        ".apm/marketplaces.json",
+                        ".apm/marketplaces.lock",
+                        ".apm/cache/marketplace",
+                    )
+                },
             )
 
     def catalog_source(self, form: str) -> str:

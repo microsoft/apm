@@ -74,6 +74,8 @@ class SourceKit(StepRunner):
         self.state = KitState()
         self.credited: set[str] = set()
         self._op = ""
+        # The package's LSP server names, as its install records them in the lockfile.
+        self.lsp_records: set[str] = set()
         self.known = ()
 
     def run(self, op: str, *words: str) -> None:
@@ -105,6 +107,7 @@ class SourceKit(StepRunner):
         self.state = requested
 
     def _check_outcome(self, op: str, requested: KitState, step: Step) -> None:
+        self._check_lsp_records(op, step)
         after = set(step.after.deployed)
         wanted = {"/".join(c) for c in expected_deployed(requested.model(), KINDS)}
         if (op, "lsp") in KNOWN:
@@ -117,6 +120,25 @@ class SourceKit(StepRunner):
             assert set(PRIMS) <= kinds, f"{op}: executables not deployed: {sorted(after)}"
         if op in _REMOVING:
             assert not kinds, f"{op} kept {sorted(after)}"
+
+    def _check_lsp_records(self, op: str, step: Step) -> None:
+        """The lockfile's LSP records of the package come and go with the package."""
+
+        def servers(lock) -> set[str]:
+            if lock is None:
+                return set()
+            return {
+                *lock.lsp_servers,
+                *lock.lsp_configs,
+                *(name for names in lock.lsp_target_servers.values() for name in names),
+            }
+
+        if op == "install":
+            self.lsp_records |= servers(step.after.lock) - servers(step.before.lock)
+            assert self.lsp_records, "install recorded no LSP server in the lockfile"
+        if op in _REMOVING:
+            kept = servers(step.after.lock) & self.lsp_records
+            assert not kept, f"{op} kept the package's LSP records: {sorted(kept)}"
 
     def _credit(self, op: str, cell: str, step: Step) -> None:
         unchanged: dict[str, tuple[str, ...]] = {"outside": ("*",)}
