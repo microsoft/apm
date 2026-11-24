@@ -72,6 +72,7 @@ NETWORK_JOURNEYS = (
     "install-cold",
     "install-warm",
     "install-noop",
+    "install-noop-replay",
     "install-frozen",
     "install-locked-warm",
     "install-frozen-warm",
@@ -686,6 +687,30 @@ def _noop(_ctx: Context) -> None:
     return None
 
 
+# The verified-state record's own diagnostics ("[i] verdict record: hit|miss (...)",
+# stderr); the variable is never part of the verdict key (ENV_NOT_VERDICT).
+_REPLAY_TRACE = (("APM_INSTALL_FAST_PATH", "verdict"),)
+_REPLAY_LINE = "[i] verdict record: "
+# Journeys whose setup keeps the installed project between samples.
+_KEEP_INSTALLED = ("install-noop", "install-noop-replay")
+
+
+def _setup_replay(ctx: Context) -> None:
+    """Installed, then one untimed no-op that proves it and writes the record."""
+    ctx.installed()
+    for root in ctx.roots():
+        ctx.checked(["install"], root)
+
+
+def _replay_outcome(tail: str) -> str:
+    """``hit`` or ``miss (<reason>)`` from a run's verdict-record line; "" when none."""
+    found = ""
+    for line in tail.splitlines():
+        if line.startswith(_REPLAY_LINE):
+            found = line[len(_REPLAY_LINE) :].strip()
+    return found
+
+
 _AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
 
 
@@ -701,7 +726,18 @@ JOURNEYS: dict[str, Journey] = {
         # fixed placeholder token the offline mirror accepts, auth first.
         Journey("install-cold-auth", _setup_cold, lambda c: _per_root(c, ["install"]), _AUTH),
         Journey("install-warm-auth", _setup_warm, lambda c: _per_root(c, ["install"]), _AUTH),
-        Journey("install-noop", Context.installed, lambda c: _per_root(c, ["install"])),
+        # install-noop is a user's first unchanged re-install (install #2): the
+        # engine proves the no-op and writes the verified-state record.
+        # install-noop-replay is every later one (#3+): it replays that record.
+        Journey(
+            "install-noop", Context.installed, lambda c: _per_root(c, ["install"]), _REPLAY_TRACE
+        ),
+        Journey(
+            "install-noop-replay",
+            _setup_replay,
+            lambda c: _per_root(c, ["install"]),
+            _REPLAY_TRACE,
+        ),
         Journey("install-frozen", _setup_frozen, lambda c: _per_root(c, ["install", "--frozen"])),
         Journey("install-locked-warm", _locked_project, lambda c: _per_root(c, ["install"])),
         Journey(
@@ -771,6 +807,8 @@ class Sample:
     routes: dict = field(default_factory=dict)
     git_verbs: dict = field(default_factory=dict)
     fs: dict = field(default_factory=dict)
+    # Verified-state record outcome per step (noop journeys): "hit", "miss (...)".
+    replay: str = ""
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
@@ -787,10 +825,12 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     output = ""
     returncode = 0
     cpu = 0.0
+    replays: list[str] = []
     start = time.perf_counter()
     for argv, cwd in journey.steps(ctx):
         code, tail, step_cpu = ctx.timed_run(argv, cwd)
         cpu += step_cpu
+        replays.append(_replay_outcome(tail))
         if code != 0:
             returncode = code
             output = f"$ apm {' '.join(argv)}\n{tail}"
@@ -802,6 +842,7 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
     sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
+    sample.replay = "; ".join(r for r in replays if r)
     return sample, output
 
 
@@ -889,7 +930,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
-        if journey.name != "install-noop":
+        if journey.name not in _KEEP_INSTALLED:
             ctx.is_installed = False
         sample.load1 = load
         sample.load_ok = load < args.max_load
@@ -922,6 +963,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "routes": ok[-1].routes if ok else {},
         "git_verbs": ok[-1].git_verbs if ok else {},
         "fs": ok[-1].fs if ok else {},
+        "replay": ok[-1].replay if ok else "",
         "samples": [asdict(s) for s in samples],
         "error": error,
     }
