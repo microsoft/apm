@@ -77,14 +77,17 @@ def test_merged_hook_config_bytes_do_not_depend_on_addition_order(
     assert len(canonical) >= 1
     for order, files in written.items():
         assert files == canonical, order
+    first_rel, first_bytes = next(iter(canonical.items()))
+    assert (tmp_path / "gamma-beta-alpha" / first_rel).read_bytes() == first_bytes
 
 
 @pytest.mark.parametrize("target", _TARGETS)
 def test_canonical_order_keeps_user_hooks_in_place(tmp_path: Path, target: str) -> None:
     """#5285: APM's entries are ordered among themselves; the user's entry stays first."""
     config = _MERGE_HOOK_TARGETS[target]
-    files = _install_in_order(tmp_path, target, ("gamma", "alpha", "beta"))
-    document = json.loads(files[f"{KNOWN_TARGETS[target].root_dir}/{config.config_filename}"])
+    _install_in_order(tmp_path, target, ("gamma", "alpha", "beta"))
+    written = tmp_path / KNOWN_TARGETS[target].root_dir / config.config_filename
+    document = json.loads(written.read_text(encoding="utf-8"))
 
     container = config.event_container_key
     assert {k: v for k, v in document.items() if k != container} == {
