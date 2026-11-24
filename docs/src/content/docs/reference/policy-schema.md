@@ -228,6 +228,16 @@ proving a supply-chain attack. Every finding is enriched in place:
 [!] .github/agents/rogue.agent.md [type: agent] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue*)
 ```
 
+A merged hook config (for example `.claude/settings.json`) and its
+`apm-hooks.json` sidecar count as managed only while their ownership is
+attested by the committed lock or the committed apm.yml approval. Every entry
+the sidecar records must name a dependency the lock records, or a local
+bundle whose exact approval key apm.yml grants `hooks: true`, and the config's
+hooks must be exactly those entries. Any user-authored hook in the file, or a
+linked, unreadable or hand-edited file, leaves both files unmanaged. Other
+keys in the config are covered at file granularity. A special file (such as a
+FIFO) in a governed directory is always reported.
+
 ## security
 
 Rules over APM's security checks. The `audit.on_install`, `audit.external`

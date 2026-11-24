@@ -417,13 +417,24 @@ def dependency_hook_source_marker(dependency_ref) -> str:
 def verified_apm_hook_files(project_root: Path, lock) -> frozenset[str]:
     """Return the merged hook configs and sidecars APM provably owns (#5277).
 
-    ``unmanaged_files`` counts these as managed. A config and its
-    ``apm-hooks.json`` sidecar count only while their ownership verifies: both
-    are regular files reached through no symlink, both parse as strict JSON
-    objects, every sidecar event is a list of entries whose ``_apm_source``
-    names a local bundle or a dependency *lock* records, and each of those
-    entries is still present in the config. Anything else, including a
-    hand-edited sidecar or config, stays unmanaged (fail closed).
+    ``unmanaged_files`` counts these as managed. Its guarantee is
+    attestation by committed records: a committer who can forge the lock or
+    the apm.yml approval can already add a ``deployed_files`` row, so content
+    is not re-bound here. A config and its ``apm-hooks.json`` sidecar count
+    only while ownership verifies:
+
+    - both are regular files reached through no link (a FIFO never blocks);
+    - both parse as strict JSON objects;
+    - every sidecar entry's ``_apm_source`` names a dependency *lock*
+      records, or a local bundle whose exact approval key apm.yml grants
+      ``hooks: true`` (and does not deny);
+    - each event of the config's hooks container holds exactly the sidecar's
+      entries, and no event the sidecar lacks (a user-authored hook leaves the
+      shared file unmanaged).
+
+    Keys outside the hooks container (a merged ``settings.json`` holds other
+    settings) are covered at file granularity. Anything else stays unmanaged
+    (fail closed).
     """
     from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
     from apm_cli.integration.targets import KNOWN_TARGETS
@@ -433,14 +444,40 @@ def verified_apm_hook_files(project_root: Path, lock) -> frozenset[str]:
             dependency_hook_source_marker(locked.to_dependency_ref())
             for locked in lock.get_all_dependencies()
         }
-    except (AttributeError, TypeError, ValueError, KeyError):
+        approved = _approved_bundle_hook_keys(project_root)
+    except (AttributeError, OSError, TypeError, ValueError, KeyError):
         return frozenset()
     managed: set[str] = set()
     specs = merge_hook_config_projection_specs(list(KNOWN_TARGETS.values()))
     for config_rel, (sidecar_rel, container_key) in specs.items():
-        if _hook_ownership_verifies(project_root, config_rel, sidecar_rel, container_key, sources):
+        if _hook_ownership_verifies(
+            project_root, config_rel, sidecar_rel, container_key, (sources, approved)
+        ):
             managed.update((config_rel, sidecar_rel))
     return frozenset(managed)
+
+
+def _approved_bundle_hook_keys(project_root: Path) -> frozenset[str]:
+    """Approval keys the committed apm.yml grants ``hooks: true`` and does not deny."""
+    from yaml import YAMLError
+
+    from apm_cli.security.executables import package_type_approved, parse_project_executables
+    from apm_cli.utils.yaml_io import load_yaml
+
+    path = manifest_file(project_root)
+    try:
+        data = load_yaml(path) if path.is_file() else None
+    except YAMLError:
+        return frozenset()
+    if not isinstance(data, dict):
+        return frozenset()
+    allow, deny, _alias = parse_project_executables(data)
+    return frozenset(
+        key
+        for key in allow
+        if package_type_approved(allow, (key,), "hooks")
+        and not package_type_approved(deny, (key,), "hooks")
+    )
 
 
 def _strict_object(project_root: Path, path: Path) -> dict[str, Any]:
@@ -466,33 +503,39 @@ def _content_key(entry: dict[str, Any]) -> str:
     return json.dumps({k: v for k, v in entry.items() if k != "_apm_source"}, sort_keys=True)
 
 
-def _owned_by(entry: object, sources: set[str]) -> bool:
-    """Whether *entry* carries a marker naming a local bundle or a locked dependency."""
+def _owned_by(entry: object, attesting: tuple[set[str], frozenset[str]]) -> bool:
+    """Whether *entry*'s marker names a locked dependency or an approved local bundle."""
+    sources, approved = attesting
     marker = entry.get("_apm_source") if isinstance(entry, dict) else None
     parsed = parse_local_bundle_hook_source(marker)
     if parsed is not None:
-        return bool(parsed[0])
+        return bool(parsed[0]) and parsed[1] is not None and parsed[1] in approved
     return isinstance(marker, str) and marker in sources
 
 
 def _hook_ownership_verifies(
-    project_root: Path, config_rel: str, sidecar_rel: str, container_key: str, sources: set[str]
+    project_root: Path,
+    config_rel: str,
+    sidecar_rel: str,
+    container_key: str,
+    attesting: tuple[set[str], frozenset[str]],
 ) -> bool:
     try:
         sidecar = _strict_object(project_root, project_root / sidecar_rel)
         container = _strict_object(project_root, project_root / config_rel).get(container_key)
     except (OSError, ValueError):
         return False
-    if not sidecar or not isinstance(container, dict):
+    if not sidecar or not isinstance(container, dict) or set(container) - set(sidecar):
         return False
     for event_name, owned in sidecar.items():
         on_disk = container.get(event_name)
         if not isinstance(owned, list) or not owned or not isinstance(on_disk, list):
             return False
-        if not all(_owned_by(entry, sources) for entry in owned):
+        if not all(_owned_by(entry, attesting) for entry in owned):
             return False
-        present = Counter(_content_key(e) for e in on_disk if isinstance(e, dict))
-        if any(present[key] < count for key, count in Counter(map(_content_key, owned)).items()):
+        if not all(isinstance(entry, dict) for entry in on_disk):
+            return False
+        if Counter(map(_content_key, on_disk)) != Counter(map(_content_key, owned)):
             return False
     return True
 

@@ -15,6 +15,7 @@ A control without the offending input installs.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import stat
@@ -707,6 +708,33 @@ def _fifo_sidecar(claude: Path) -> None:
     os.mkfifo(sidecar)
 
 
+_USER_HOOK = {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}]}
+
+
+def _user_hook(claude: Path, event: str) -> None:
+    settings = claude / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["hooks"].setdefault(event, []).append(_USER_HOOK)
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _user_hook_in_owned_event(claude: Path) -> None:
+    _user_hook(claude, "SessionStart")
+
+
+def _user_hook_in_another_event(claude: Path) -> None:
+    _user_hook(claude, "PreToolUse")
+
+
+def _forged_bundle_marker(claude: Path) -> None:
+    """A hand-written hook mirrored into the sidecar under an unapproved bundle key."""
+    _user_hook(claude, "PreToolUse")
+    sidecar = claude / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    data["PreToolUse"] = [{**_USER_HOOK, "_apm_source": "local-bundle::x::y"}]
+    sidecar.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def _fingerprint(path: Path) -> object:
     """Bytes of a regular file; the file type of anything else (a FIFO is never read)."""
     mode = path.lstat().st_mode
@@ -715,13 +743,25 @@ def _fingerprint(path: Path) -> object:
 
 @pytest.mark.parametrize(
     "tamper",
-    [_edit_sidecar_entry, _drop_settings_hooks, _truncate_sidecar, _link_sidecar, _fifo_sidecar],
+    [
+        _edit_sidecar_entry,
+        _drop_settings_hooks,
+        _truncate_sidecar,
+        _link_sidecar,
+        _fifo_sidecar,
+        _user_hook_in_owned_event,
+        _user_hook_in_another_event,
+        _forged_bundle_marker,
+    ],
     ids=[
         "sidecar-entry-edited",
         "settings-hooks-removed",
         "sidecar-unparsable",
         "sidecar-symlinked",
         "sidecar-fifo",
+        "user-hook-in-owned-event",
+        "user-hook-in-another-event",
+        "forged-bundle-marker",
     ],
 )
 def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_verify(
