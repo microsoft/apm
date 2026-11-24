@@ -334,9 +334,11 @@ def _report_group_writable_home(exc: Any, logger: Any) -> None:
     )
     for path, _reason in exc.issues:
         logger.warning(f"  {path}")
+    import shlex
+
     logger.warning(
-        f"Run 'chmod g-w {exc.home}', then run the command again; the journal is kept "
-        f"at {exc.store} and is replayed then."
+        f"Run 'chmod g-w {shlex.quote(str(exc.home))}', then run the command again; "
+        f"the journal is kept at {exc.store} and is replayed then."
     )
 
 
