@@ -510,3 +510,40 @@ def test_a_bare_package_argument_is_never_rewritten_from_the_subdirectory(
 
     assert resolve_cli_packages_for_project_root((package,), subdir, root) == (package,)
     assert resolve_cli_packages_for_project_root(("./pkg",), subdir, root) == ("./sub/pkg",)
+
+
+@pytest.mark.parametrize(
+    ("invoking", "package", "rebased"),
+    [
+        ("sub", ".\\pkg", "./sub/pkg"),
+        (".packages", "./pkg", "./.packages/pkg"),
+        ("sub", "../pkg", "./pkg"),
+    ],
+    ids=["backslash-prefix", "dot-directory", "parent"],
+)
+def test_an_explicit_relative_package_is_rebased_onto_the_project_root(
+    tmp_path: Path, invoking: str, package: str, rebased: str
+) -> None:
+    """Rebased paths keep a ./ prefix and POSIX separators (#4545)."""
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+
+    root = tmp_path / "project"
+    (root / invoking).mkdir(parents=True)
+
+    assert resolve_cli_packages_for_project_root((package,), root / invoking, root) == (rebased,)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_selected_symlink_keeps_its_own_name_when_rebased(tmp_path: Path) -> None:
+    """Rebasing never follows the selected link, so install still refuses it (#4545)."""
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+
+    root = tmp_path / "project"
+    sub = root / "sub"
+    sub.mkdir(parents=True)
+    (root / "actual.prompt.md").write_text("# actual\n", encoding="utf-8")
+    (sub / "sel.prompt.md").symlink_to("../actual.prompt.md")
+
+    assert resolve_cli_packages_for_project_root(("./sel.prompt.md",), sub, root) == (
+        "./sub/sel.prompt.md",
+    )

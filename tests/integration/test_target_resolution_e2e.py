@@ -578,6 +578,31 @@ def test_s16f_installed_cli_nested_project_is_not_swallowed_by_its_parent(
     assert _snapshot_dir(invoking) == invoking_before
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_s16g_installed_cli_subdirectory_symlinked_file_is_still_refused(
+    tmp_path, apm_binary_path: Path
+):
+    """Rebasing ./link from a subdirectory keeps the link, so install refuses it (#4545)."""
+    project = _setup(tmp_path / "project", "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    (project / "actual.prompt.md").write_text("# actual\n", encoding="utf-8")
+    (subdir / "sel.prompt.md").symlink_to("../actual.prompt.md")
+    manifest_before = (project / "apm.yml").read_bytes()
+
+    res = subprocess.run(
+        [str(apm_binary_path), "install", "./sel.prompt.md"],
+        cwd=subdir,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+
+    combined = " ".join((res.stdout + res.stderr).split())
+    assert res.returncode != 0, combined
+    assert "symlink" in combined, combined
+    assert (project / "apm.yml").read_bytes() == manifest_before
+
+
 def test_s16_control_root_flag_from_subdirectory(tmp_path):
     """Control: --root DIR from a subdirectory keeps today's sources and writes."""
     project = _setup(tmp_path, "s16b_provenance_cwd")
