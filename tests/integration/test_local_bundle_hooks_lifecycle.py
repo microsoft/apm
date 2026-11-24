@@ -1660,6 +1660,55 @@ def test_uninstall_bundle_refuses_a_sidecar_record_with_malformed_hook_files(
     assert tree_bytes(consumer) == before
 
 
+def test_audit_names_a_sidecar_record_with_malformed_hook_files(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144: audit reports the corrupted record's sidecar, not a missing approval."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "malformed-audit-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = {}
+    write(sidecar, json.dumps(data))
+    before = tree_bytes(consumer)
+
+    audited = output(world.apm(consumer, "audit", "--ci", "--no-policy", expect=1))
+
+    # Either fail-closed finding names the sidecar: the unadmitted reason (#5144)
+    # or the ownership problem the shared read reports first (#5211).
+    assert (
+        "hookpkg: approval record in .github/apm-hooks.json is unreadable" in audited
+        or ".github/apm-hooks.json: the bundle hook ownership record cannot be read" in audited
+    ), audited
+    assert "no approval record" not in audited, audited
+    assert "Traceback" not in audited, audited
+    assert tree_bytes(consumer) == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="FIFOs and unprivileged links are POSIX here")
+@pytest.mark.parametrize("kind", ["fifo", "link"])
+def test_audit_refuses_a_copilot_sidecar_that_is_not_a_regular_file(
+    tmp_path: Path, apm_binary_path: Path, kind: str
+) -> None:
+    """#5328: the per-file Copilot sidecar is read as a regular file only, never blocking."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, f"{kind}-sidecar-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    kept = tmp_path / "sidecar-copy.json"
+    shutil.copyfile(sidecar, kept)
+    sidecar.unlink()
+    if kind == "fifo":
+        os.mkfifo(sidecar)
+    else:
+        sidecar.symlink_to(kept)
+
+    audited = output(world.apm(consumer, "audit", "--ci", "--no-policy", expect=1))
+
+    assert ".github/apm-hooks.json" in audited, audited
+    assert "Traceback" not in audited, audited
+
+
 def test_install_retires_nothing_from_a_corrupt_sidecar_and_names_it(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -1937,10 +1986,10 @@ def test_uninstall_bundle_with_an_unreadable_user_hook_naming_the_script_fails_c
 def test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#5281 control: a script path in an unrelated cwd runs another script; uninstall goes on.
+    """#5281 control: ``./x.sh`` in an unrelated cwd runs another script; uninstall goes on.
 
-    A bare ``./x.sh`` stays in use under #5106's default-deny, so the control
-    names a directory that certainly resolves elsewhere.
+    The command resolves from its declared cwd (#5332), so a bare ``./x.sh``
+    there is certainly not the bundle's script.
     """
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     consumer, hook = _copilot_bundle_consumer(world, tmp_path, "cwd-elsewhere-consumer")
@@ -1948,9 +1997,7 @@ def test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere(
         consumer,
         lambda path: {
             "version": 1,
-            "hooks": {
-                "preToolUse": [{"type": "command", "bash": "./scripts/x.sh", "cwd": "tools"}]
-            },
+            "hooks": {"preToolUse": [{"type": "command", "bash": "./x.sh", "cwd": "tools"}]},
         },
     )
 
@@ -2048,3 +2095,23 @@ def test_a_refused_bundle_uninstall_leaves_the_pending_record_untouched(
     after = tree_bytes(consumer)
     changed = sorted(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
     assert changed == [], changed
+
+
+def test_audit_names_a_bundle_record_whose_hook_files_is_not_a_list(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144 via #5211: a corrupted bundle record fails audit naming the sidecar,
+    never reading as a bundle with no approval record."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "record-shape-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = record["hook_files"][0]
+    sidecar.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    text = output(world.apm(consumer, "audit", "--ci", "--no-policy", expect=1))
+
+    assert ".github/apm-hooks.json" in text, text
+    assert "ownership record cannot be read" in text, text
+    assert "no approval record" not in text, text

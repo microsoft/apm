@@ -13,8 +13,6 @@ from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, W
 
 from .realpath import kernel_resolves, resolve_path
 
-_WINDOWS = os.name == "nt"
-
 # Marks an input the string comparison does not decide; pathlib decides it.
 _UNDECIDED = object()
 # Only pathlib's own classes: a subclass may override relative_to/is_relative_to.
@@ -122,17 +120,19 @@ def portable_relpath(path: Path, base: Path) -> str:
         return path.as_posix()
 
 
+def _resolve_instance(path: Path) -> Path:
+    return path.resolve()  # the instance's own resolve(), as portable_relpath calls it
+
+
 def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     """:func:`portable_relpath` of each path against one *base*, resolving it once.
 
     Each path is still resolved at use; only the shared base is not
-    resolved again per path within this call. On Linux (the kernel form) and
-    Windows each resolve takes :func:`resolve_path`'s exact fast form;
-    elsewhere it stays ``Path.resolve`` (on macOS the swap measured slower).
+    resolved again per path within this call.
     """
-    resolve: Callable[[Path], Path] = (
-        resolve_path if _WINDOWS or kernel_resolves() else Path.resolve
-    )
+    # The fast forms where they apply (Linux kernel form; Windows via
+    # resolve_path); elsewhere each path's own resolve(), as portable_relpath.
+    resolve = resolve_path if (kernel_resolves() or os.name == "nt") else _resolve_instance
     try:
         resolved_base: Path | None = resolve(base)
     except (OSError, RuntimeError):

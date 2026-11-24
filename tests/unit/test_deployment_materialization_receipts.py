@@ -1401,9 +1401,10 @@ def test_recording_many_writes_resolves_each_root_once(
         paths.append(extra)
     session = _session(root, lock)
     # Every resolution reaches one of these: pathlib's realpath, the Linux
-    # kernel form's open(O_PATH), or the Windows fast form's final-path call.
+    # /proc form's open(O_PATH), the openat2 form's fsencode, or the Windows
+    # fast form's final-path call.
     resolved: list[str] = []
-    realpath, open_ = os.path.realpath, os.open
+    realpath, open_, fsencode = os.path.realpath, os.open, os.fsencode
 
     def counted(value, *args, **kwargs):
         resolved.append(os.fspath(value))
@@ -1413,9 +1414,14 @@ def test_recording_many_writes_resolves_each_root_once(
         resolved.append(os.fspath(value))
         return open_(value, *args, **kwargs)
 
+    def counted_fsencode(value):
+        resolved.append(os.fspath(value))
+        return fsencode(value)
+
     with monkeypatch.context() as patch:
         patch.setattr(os.path, "realpath", counted)
         patch.setattr(os, "open", counted_open)
+        patch.setattr(os, "fsencode", counted_fsencode)
         if sys.platform == "win32":
             import nt  # type: ignore[import-not-found]
 

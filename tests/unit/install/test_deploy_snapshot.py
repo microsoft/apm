@@ -2174,18 +2174,205 @@ def test_an_apm_home_others_can_write_is_kept_and_reported(tmp_path: Path, apm_h
     assert config.read_bytes() == b"killed\n"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
-def test_a_group_writable_apm_home_is_still_trusted(tmp_path: Path, apm_home: Path) -> None:
-    """A user-private group (umask 0o002) leaves APM_HOME group writable: still replayed."""
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner, group and mode bits")
+@pytest.mark.parametrize(
+    ("group", "private"),
+    [
+        ("user-private", True),
+        ("another-member", False),
+        ("another-account-primary", False),
+        ("not-the-primary-group", False),
+        ("unknown-group", False),
+    ],
+)
+def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, group: str, private: bool
+) -> None:
+    """#5313: APM_HOME may be group writable only when its group is private to this user."""
+    import grp
+    import pwd
+    from types import SimpleNamespace
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
     project = tmp_path / "project"
     config, ledger = _private_config(project)
     _killed_journal(apm_home, project, config)
     apm_home.chmod(0o775)
+    gid = apm_home.stat().st_gid
+    me = SimpleNamespace(
+        pw_name="me",
+        pw_uid=os.geteuid(),
+        pw_gid=gid + 1 if group == "not-the-primary-group" else gid,
+    )
+    other = SimpleNamespace(
+        pw_name="other",
+        pw_uid=os.geteuid() + 1,
+        pw_gid=gid if group == "another-account-primary" else gid + 1,
+    )
+    members = ["me", "other"] if group == "another-member" else ["me"]
 
+    def getgrgid(wanted: int):
+        if group == "unknown-group":
+            raise KeyError(wanted)
+        return SimpleNamespace(gr_name="me", gr_gid=wanted, gr_mem=members)
+
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: me)
+    monkeypatch.setattr(pwd, "getpwall", lambda: [me, other])
+    monkeypatch.setattr(grp, "getgrgid", getgrgid)
+    _local_account_databases(tmp_path, monkeypatch, "files")
+
+    if private:
+        outcome = _replay(apm_home, project, lambda: ledger)
+        assert (outcome.restored, outcome.kept) == (1, ())
+        assert config.read_bytes() == _CONFIG_BYTES
+        return
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+    _assert_deferred_for_group_write(kept.value, apm_home, config)
+
+
+_HOME_GROUP_WRITABLE = (
+    "APM_HOME is group writable and its group cannot be shown private to this user"
+)
+
+
+def _assert_deferred_for_group_write(error, apm_home: Path, config: Path) -> None:
+    """Only APM_HOME's group write refused: it is named, nothing restored, store left (#5385)."""
+    assert error.home == apm_home
+    assert error.issues == [(".mcp.json", _HOME_GROUP_WRITABLE)]
+    assert error.store.name.startswith("deploy-")
+    assert config.read_bytes() == b"killed\n"
+
+
+def _local_account_databases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sources, initgroups: str | None = None
+) -> None:
+    """Point the name service switch at a file listing *sources* (``None``: no file)."""
+    nsswitch = tmp_path / "nsswitch.conf"
+    if sources is not None:
+        lines = f"passwd: {sources}\ngroup: {sources}\nhosts: files dns\n"
+        if initgroups is not None:
+            lines += f"initgroups: {initgroups}\n"
+        nsswitch.write_text(lines, encoding="utf-8")
+    monkeypatch.setattr("apm_cli.utils.name_service.NSSWITCH", nsswitch)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner, group and mode bits")
+@pytest.mark.parametrize(
+    ("accounts", "sources"),
+    [
+        ("empty", "files"),
+        ("without-me", "files"),
+        ("complete", "files sss"),
+        ("complete", "files [NOTFOUND=return] ldap"),
+        ("complete", None),
+        ("complete", "files systemd"),
+        ("complete", "files+remote-initgroups"),
+    ],
+    ids=[
+        "empty-enumeration",
+        "partial-enumeration",
+        "sssd",
+        "ldap",
+        "no-nsswitch",
+        "systemd-enumeration",
+        "remote-initgroups",
+    ],
+)
+def test_a_group_writable_apm_home_needs_a_complete_account_enumeration(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, accounts: str, sources
+) -> None:
+    """#5371: group privacy is trusted only when the account list is provably complete."""
+    import grp
+    import pwd
+    from types import SimpleNamespace
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o775)
+    gid = apm_home.stat().st_gid
+    me = SimpleNamespace(pw_name="me", pw_uid=os.geteuid(), pw_gid=gid)
+    stranger = SimpleNamespace(pw_name="stranger", pw_uid=os.geteuid() + 1, pw_gid=gid + 1)
+    listed = {"empty": [], "without-me": [stranger], "complete": [me, stranger]}[accounts]
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: me)
+    monkeypatch.setattr(pwd, "getpwall", lambda: listed)
+    monkeypatch.setattr(
+        grp, "getgrgid", lambda wanted: SimpleNamespace(gr_name="me", gr_gid=wanted, gr_mem=[])
+    )
+    if sources == "files+remote-initgroups":
+        # Supplementary memberships from SSSD never show in gr_mem or a primary group.
+        _local_account_databases(tmp_path, monkeypatch, "files", initgroups="files sss")
+    else:
+        _local_account_databases(tmp_path, monkeypatch, sources)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    _assert_deferred_for_group_write(kept.value, apm_home, config)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner, group and mode bits")
+def test_a_group_writable_apm_home_defers_replay_until_its_group_write_is_removed(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5385 W3d: only APM_HOME's group write fails, so the store waits for the chmod."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o775)
+    _local_account_databases(tmp_path, monkeypatch, "files sss")
+
+    with pytest.raises(JournalReplayError) as deferred:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert deferred.value.home == apm_home
+    assert [path for path, _reason in deferred.value.issues] == [".mcp.json"]
+    assert deferred.value.store == store
+    assert store.is_dir()
+    assert not (store / "RETAINED").exists()
+    assert [p.name for p in store.parent.iterdir()] == [store.name]
+    assert config.read_bytes() == b"killed\n"
+
+    apm_home.chmod(0o755)
     outcome = _replay(apm_home, project, lambda: ledger)
 
     assert (outcome.restored, outcome.kept) == (1, ())
     assert config.read_bytes() == _CONFIG_BYTES
+    assert not store.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell and group write")
+def test_the_printed_chmod_fixes_an_apm_home_whose_path_has_a_space(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5385 review: the printed recovery command quotes APM_HOME, so a shell reads one path."""
+    import shlex
+
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+    from apm_cli.install.transaction import replay_abandoned_deploys
+
+    home = tmp_path / "APM home"
+    monkeypatch.setenv("APM_HOME", str(home))
+    project = tmp_path / "project"
+    config, _ledger = _private_config(project)
+    _killed_journal(home, project, config)
+    home.chmod(0o775)
+    _local_account_databases(tmp_path, monkeypatch, "files sss")
+    warnings: list[str] = []
+    logger = type("Logger", (), {"warning": lambda self, m: warnings.append(m)})()
+
+    with pytest.raises(InstallFailureAlreadyRendered):
+        replay_abandoned_deploys(project / "apm_modules", logger)
+
+    (command,) = [m.split("Run '", 1)[1].split("',", 1)[0] for m in warnings if "Run '" in m]
+    assert shlex.split(command) == ["chmod", "g-w", str(home)]
+    assert config.read_bytes() == b"killed\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")

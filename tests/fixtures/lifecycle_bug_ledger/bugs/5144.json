@@ -12,6 +12,7 @@
   ],
   "regression_tests": [
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_sidecar_record_with_malformed_hook_files",
-    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_install_retires_nothing_from_a_corrupt_sidecar_and_names_it"
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_install_retires_nothing_from_a_corrupt_sidecar_and_names_it",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_audit_names_a_sidecar_record_with_malformed_hook_files"
   ]
 }

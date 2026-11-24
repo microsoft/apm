@@ -657,7 +657,11 @@ def _validate_skill_bundle(
     Returns:
         ValidationResult: Updated validation result
     """
-    from ..utils.path_security import ensure_path_within, validate_path_segments
+    from ..utils.path_security import (
+        ensure_path_within_resolved,
+        resolve_for_containment,
+        validate_path_segments,
+    )
     from ..utils.yaml_io import load_frontmatter
     from .apm_package import APMPackage
 
@@ -678,6 +682,8 @@ def _validate_skill_bundle(
         )
         return result
 
+    # Read-only loop: the base is observed once here; each SKILL.md is resolved at use.
+    resolved_skills_dir = resolve_for_containment(skills_dir)
     skill_names: list[str] = []
     for skill_dir in nested_dirs:
         name = skill_dir.name
@@ -692,7 +698,7 @@ def _validate_skill_bundle(
         # Path safety: ensure resolved SKILL.md is within skills/
         skill_md_path = skill_dir / SKILL_MD_FILENAME
         try:
-            ensure_path_within(skill_md_path, skills_dir)
+            ensure_path_within_resolved(skill_md_path, resolved_skills_dir)
         except ValueError as e:
             result.add_error(str(e))
             continue

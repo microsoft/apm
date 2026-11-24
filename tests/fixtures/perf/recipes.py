@@ -83,7 +83,9 @@ class MonorepoRecipe:
 
 
 # Enterprise shapes: the same trees referenced across GitHub, GHE Cloud, GitLab
-# and Azure DevOps (``-multi``), and with a stdio MCP server in every package
+# and Azure DevOps (``-multi``), every package on one non-github.com host (GHE
+# Cloud ``-ghe``, GitLab ``-gitlab``: the git path, never the github.com-only
+# in-process fetch or listing), and with a stdio MCP server in every package
 # (``-mcp``). Pin shapes: branch-tip (``-tip``) and non-tip commit SHA (``-sha``)
 # direct dependencies. Same seeds, so only the variant's axis differs.
 _MULTI_HOSTS = ("github", "ghe", "gitlab", "ado")
@@ -100,6 +102,8 @@ TREE_RECIPES: dict[str, TreeRecipe] = {
     for recipe in (
         base,
         replace(base, name=f"{base.name}-multi", hosts=_MULTI_HOSTS),
+        replace(base, name=f"{base.name}-ghe", hosts=("ghe",)),
+        replace(base, name=f"{base.name}-gitlab", hosts=("gitlab",)),
         replace(base, name=f"{base.name}-mcp", primitives=_MCP_HEAVY),
         # Rule-dir and command targets render instructions and prompts (#4940).
         replace(base, name=f"{base.name}-claude", targets=("claude",)),

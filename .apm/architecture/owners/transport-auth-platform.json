@@ -95,7 +95,7 @@
     {
       "id": "url-path-containment-decoding",
       "decision": "Symlink-component containment, filesystem-aware (case-insensitive) path containment and strict percent-encoded URL-path decoding",
-      "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments)",
+      "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments); the uninstall in-use hook cwd check (install/local_bundle_hook_cwd.py, consumed by install/local_bundle_hook_trust.py) decides containment through ensure_path_within (#5310)",
       "selectors": ["src/apm_cli/utils/path_security.py", "src/apm_cli/utils/realpath.py"],
       "guards": ["transport-platform-url-path-security"]
     },
@@ -124,7 +124,7 @@
       "id": "checkout-commit-verification",
       "decision": "Package checkouts are verified against their commit: objects re-hashed, working-tree bytes matched, nothing untracked",
       "owner": "cache/checkout_verify.py (verify_checkout / require_verified_checkout); utils/git_object_id.py (object_format / git_object_id: git's object ids, not a security hash)",
-      "selectors": ["src/apm_cli/cache/checkout_verify.py", "src/apm_cli/utils/git_object_id.py", "src/apm_cli/cache/inprocess_fetch.py"],
+      "selectors": ["src/apm_cli/cache/checkout_verify.py", "src/apm_cli/utils/git_object_id.py", "src/apm_cli/cache/inprocess_fetch.py", "src/apm_cli/cache/pack_objects.py"],
       "guards": ["transport-platform-checkout-verified"]
     },
     {

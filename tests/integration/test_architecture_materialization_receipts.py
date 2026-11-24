@@ -115,7 +115,7 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
         ),
         (
             "core/deployment_ledger.py",
-            "deployed_path_entry(path, self.root, targets),",
+            "deployed_path_entry(path, self.root, targets, candidate, roots(self.root)),",
             "DeploymentLedgerCodec.legacy_value(locator),",
         ),
         (
