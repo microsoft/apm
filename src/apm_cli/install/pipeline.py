@@ -612,7 +612,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     ctx.tui.__enter__()
     try:
         ctx.tui.start_phase("resolve", total=len(all_apm_deps) or 1)
-        _run_phase("resolve", _resolve_phase, ctx)
+        ctx.deps_to_install = []  # RESEARCH: resolve deleted
     except PreviewIncomplete:
         refused = True  # --dry-run only: the preview reports ctx.preview_errors
     finally:
