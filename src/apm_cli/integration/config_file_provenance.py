@@ -292,7 +292,8 @@ def _origin_before_write(
     if recorded is not None:
         return key, recorded
     if manifest_root is None:
-        return key, None  # a rewrite of an unrecorded file stays unrecorded
+        # A cleanup rewrite (#5038): an older APM's entries are legacy's content proof.
+        return key, Origin.LEGACY if _holds_entries(before) else None
     return key, _unrecorded_origin(manifest_root, before)
 
 
@@ -328,6 +329,8 @@ def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None)
     if before == after or origin is None:
         return  # nothing written (a converged install records nothing, I2), or unrecorded
     store = _Store.load()
+    if origin is Origin.LEGACY and store.lookup(path)[1] is None and not _holds_entries(after):
+        return  # a new legacy record never claims a bare skeleton (#5038)
     key = config_file_key(path)
     store.files[key] = {"origin": origin.value, "hash": _digest(after)}
     if before is None:
@@ -344,8 +347,9 @@ def recorded_config_write(
     """Record who created *path* around one APM write of it.
 
     *manifest_root* (the project, or ``$APM_HOME`` at user scope) classifies a
-    file that existed without a record; a cleanup rewrite passes none and only
-    keeps an existing record current. A link or other non-regular path is
+    file that existed without a record; a cleanup rewrite passes none and
+    records such a file as legacy only when it holds entries before and after
+    (#5038). A link or other non-regular path is
     never recorded. Recording failures never fail the write.
     """
     path = Path(path)

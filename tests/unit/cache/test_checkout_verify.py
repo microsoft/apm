@@ -27,7 +27,7 @@ from apm_cli.cache.checkout_verify import (
     require_verified_copy,
     verify_checkout,
 )
-from apm_cli.cache.git_cache import GitCache
+from apm_cli.cache.git_cache import CachedCheckoutTamperedError, GitCache, raise_if_tampered
 from apm_cli.utils.file_ops import robust_rmtree
 from tests.utils.git_link_fixture import (
     EXPECTED_PKG,
@@ -152,7 +152,13 @@ def test_a_linked_package_shard_verifies(tmp_path: Path) -> None:
     assert tree_bytes(checkout / "pkg") == EXPECTED_PKG
 
 
-def test_the_cache_rebuilds_a_tampered_shard_with_the_true_bytes(tmp_path: Path) -> None:
+def test_the_cache_rebuilds_a_tampered_shard_with_the_true_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "apm_cli.utils.console._rich_warning", lambda message, **_: warnings.append(message)
+    )
     origin, sha = build_link_origin(tmp_path)
     cache = GitCache(tmp_path / "cache")
     checkout = cache.get_checkout(str(origin), sha, locked_sha=sha)
@@ -160,21 +166,41 @@ def test_the_cache_rebuilds_a_tampered_shard_with_the_true_bytes(tmp_path: Path)
     (checkout / "pkg" / "untracked.md").write_bytes(b"never deployed\n")
     forget_verdicts()  # a later run
 
-    healed = cache.get_checkout(str(origin), sha, locked_sha=sha)
+    healed = cache.get_checkout(str(origin), sha, locked_sha=sha, label="acme/pkg")
 
     assert tree_bytes(healed / "pkg") == EXPECTED_PKG
     assert not (healed / "pkg" / "untracked.md").exists()
+    # The warning names the package, then where its copy came from (#5159).
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Cached copy of acme/pkg (")
+    assert f" @ {sha[:12]}) failed verification against its commit" in warnings[0]
 
 
-def test_a_read_only_reader_treats_a_tampered_shard_as_a_miss(tmp_path: Path) -> None:
+def test_a_read_only_reader_reports_a_tampered_shard_and_never_repairs_it(
+    tmp_path: Path,
+) -> None:
     origin, sha = build_link_origin(tmp_path)
     checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), sha, locked_sha=sha)
     (checkout / "pkg" / "AGENTS.md").write_bytes(b"Injected instructions\n")
     forget_verdicts()
+    reader = GitCache(tmp_path / "cache", read_only=True)
 
-    with pytest.raises(LookupError, match="does not match its commit"):
-        GitCache(tmp_path / "cache", read_only=True).get_checkout(str(origin), sha, locked_sha=sha)
+    with pytest.raises(CachedCheckoutTamperedError, match=r"Cached copy of acme/pkg \(") as raised:
+        reader.get_checkout(str(origin), sha, locked_sha=sha, label="acme/pkg")
+    # Not a cache miss: a reader that clones past a miss must not clone past this (#5159).
+    assert not isinstance(raised.value, LookupError)
+    with pytest.raises(CachedCheckoutTamperedError):
+        raise_if_tampered(_chained(raised.value))
+    raise_if_tampered(LookupError("a plain miss"))  # a miss is not re-raised
     assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"Injected instructions\n"
+
+
+def _chained(cause: BaseException) -> BaseException:
+    """*cause* wrapped the way an auth fallback re-raises a failed attempt."""
+    try:
+        raise RuntimeError("all attempts failed") from cause
+    except RuntimeError as exc:
+        return exc
 
 
 def test_an_empty_cache_yields_a_verified_checkout(tmp_path: Path) -> None:

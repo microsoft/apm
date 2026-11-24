@@ -7,6 +7,7 @@ the exit status is the documented one (source: issue #5036 scope record).
 CELL: OP=install(upgrade) SRC=git PRIM=skill,native-plugin(claude) SCOPE=user
 DEPLOYED=loose(claude,codex) GATE=native-parked|native-admitted
 TGT=claude(default|CLAUDE_CONFIG_DIR outside HOME|CLAUDE_CONFIG_DIR=HOME, #5092)
+    claude+hermes(CLAUDE_CONFIG_DIR nested under HERMES_HOME, #5162)
 SCOPE=project LAYOUT=legacy-skill-paths -> flagless (parked for claude+copilot, #5092)
 owner: install/deployment_plan.py PackageDeploymentPlan (loose projection and
 the values a parked native plan keeps)
@@ -72,13 +73,16 @@ class _World:
         self.cwd = isolated.work_root
         self.project = project
         self.targets = list(targets)
-        # The Claude user root: ~/.claude, a CLAUDE_CONFIG_DIR outside HOME, or HOME itself.
+        # The Claude user root: ~/.claude, a CLAUDE_CONFIG_DIR outside HOME, HOME
+        # itself, or one nested under an outside-HOME HERMES_HOME (#5162).
+        self.hermes_root = isolated.root / "profiles"
         self.claude_root = {
             "default": self.home / ".claude",
             "external": isolated.root / "claude-config",
             "home": self.home,
+            "nested": self.hermes_root / "claude",
         }[claude]
-        self.claude_root.mkdir(exist_ok=True)
+        self.claude_root.mkdir(parents=True, exist_ok=True)
         (self.home / ".codex").mkdir(exist_ok=True)
         self.manifest = (self.cwd if project else isolated.config_root) / "apm.yml"
         repositories = LocalGitRepositoryFactory(
@@ -107,10 +111,18 @@ class _World:
                 encoding="ascii",
             )
         self.env = repositories.url_rewrite_subprocess_env(self.repository, _REMOTE)
-        for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "APM_LEGACY_SKILL_PATHS"):
+        for name in (
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "COPILOT_HOME",
+            "HERMES_HOME",
+            "APM_LEGACY_SKILL_PATHS",
+        ):
             self.env.pop(name, None)
         if claude != "default":
             self.env["CLAUDE_CONFIG_DIR"] = str(self.claude_root)
+        if claude == "nested":
+            self.env["HERMES_HOME"] = str(self.hermes_root)
         self.runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
 
     def publish(self, body: str, descriptor: dict | None = None) -> str:
@@ -294,14 +306,21 @@ def _assert_kept_and_bound(world: _World, kept: dict[str, Path], step: CommandRe
     assert f"hash-drift: {claim}" in _text(tampered), _evidence(tampered)
 
 
-@pytest.mark.parametrize("claude", ["external"], ids=["outside-home"])
+@pytest.mark.parametrize(
+    "claude", ["external", "nested"], ids=["outside-home", "nested-under-hermes-home"]
+)
 def test_a_parked_native_replacement_keeps_the_loose_skill_under_a_relocated_claude_root(
     tmp_path: Path, apm_binary_path: Path, claude: str
 ) -> None:
-    """CLAUDE_CONFIG_DIR outside HOME (absolute claims) or at HOME (root ``.``) (#5092)."""
-    world = _World(tmp_path, apm_binary_path, claude=claude)
+    """CLAUDE_CONFIG_DIR outside HOME (#5092), or nested under HERMES_HOME (#5162).
+
+    Nested, the kept Claude skill replays in Claude's own (deeper) root, so
+    audit stays clean whichever target is resolved first.
+    """
+    targets = ("hermes", "codex", "claude") if claude == "nested" else ("codex", "claude")
+    world = _World(tmp_path, apm_binary_path, claude=claude, targets=targets)
     skill = world.claude_root / "skills" / "demo" / "SKILL.md"
-    claim = skill.as_posix() if claude == "external" else "skills/demo/SKILL.md"
+    claim = skill.as_posix()
 
     upgraded, before = _upgrade_to_parked(world)
 
@@ -309,8 +328,7 @@ def test_a_parked_native_replacement_keeps_the_loose_skill_under_a_relocated_cla
     text = _text(upgraded)
     assert (world.home / _CODEX_SKILL).read_text(encoding="ascii") == _skill("Updated skill.")
     assert "native plugin that replaces it was parked" in text, _evidence(upgraded)
-    shown = claim.rsplit("/", 1)[0] if claude == "external" else "~/skills/demo"
-    assert f"Kept {shown}" in text, _evidence(upgraded)
+    assert f"Kept {claim.rsplit('/', 1)[0]}" in text, _evidence(upgraded)
     assert "~//" not in text, _evidence(upgraded)
     _assert_kept_and_bound(world, {claim: skill}, upgraded)
 

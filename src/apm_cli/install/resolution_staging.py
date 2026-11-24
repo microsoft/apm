@@ -345,13 +345,8 @@ class ResolutionStagingSession:
                 cleanup_issues.append((self._staging_root, f"could not remove staging: {exc}"))
             finally:
                 cleanup_issues.extend(self._release_staging_lock())
+            cleanup_issues.extend(self.remove_created_modules_dir())
             try:
-                if (
-                    not self._modules_existed
-                    and self._modules_dir.exists()
-                    and not any(self._modules_dir.iterdir())
-                ):
-                    self._modules_dir.rmdir()
                 for created in self._missing_parents:
                     if created.is_dir() and not any(created.iterdir()):
                         created.rmdir()
@@ -365,6 +360,20 @@ class ResolutionStagingSession:
                 self._destination_by_replacement.clear()
                 self._relocations.clear()
         return cleanup_issues
+
+    def remove_created_modules_dir(self) -> list[tuple[Path, str]]:
+        """Remove ``apm_modules`` when this session created it and it is still empty."""
+        try:
+            if (
+                not self._modules_existed
+                and self._modules_dir.is_dir()
+                and not self._modules_dir.is_symlink()
+                and not any(self._modules_dir.iterdir())
+            ):
+                self._modules_dir.rmdir()
+        except OSError as exc:
+            return [(self._modules_dir, f"could not remove empty directory: {exc}")]
+        return []
 
     def _remove_empty_parents(self, path: Path) -> None:
         """Remove empty migration-created parents below ``apm_modules``."""

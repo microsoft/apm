@@ -1308,6 +1308,7 @@ def resolve_marketplace_plugin(
     current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
     raw_ref_override = bool(version_spec) and resolved_constraint is None
     if current_ref and enforce_ref_pins and not raw_ref_override:
+        from .source_identity import catalog_pin_identity
         from .version_pins import enforce_ref_pin
 
         replaced_ref = enforce_ref_pin(
@@ -1316,6 +1317,7 @@ def resolve_marketplace_plugin(
             current_ref,
             version=resolved_version or plugin.version or "",
             accept_change=accept_ref_change,
+            catalog=catalog_pin_identity(source),
         )
         if replaced_ref is not None:
             _emit_warning(
