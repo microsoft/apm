@@ -1660,6 +1660,27 @@ def test_uninstall_bundle_refuses_a_sidecar_record_with_malformed_hook_files(
     assert tree_bytes(consumer) == before
 
 
+def test_audit_names_a_sidecar_record_with_malformed_hook_files(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144: audit reports the corrupted record's sidecar, not a missing approval."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "malformed-audit-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = {}
+    write(sidecar, json.dumps(data))
+    before = tree_bytes(consumer)
+
+    audited = output(world.apm(consumer, "audit", "--ci", "--no-policy", expect=1))
+
+    assert "hookpkg: approval record in .github/apm-hooks.json is unreadable" in audited, audited
+    assert "no approval record" not in audited, audited
+    assert "Traceback" not in audited, audited
+    assert tree_bytes(consumer) == before
+
+
 def test_install_retires_nothing_from_a_corrupt_sidecar_and_names_it(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
