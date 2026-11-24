@@ -831,6 +831,28 @@ def bundle_hook_cleanup_targets(targets: Any, *, user_scope: bool) -> list[Any]:
     return list(found.values())
 
 
+def bundle_hook_recheck_targets(targets: Any, *, root: Path, user_scope: bool) -> list[Any]:
+    """Return every hook target of the scope the bundle hook re-check covers.
+
+    The manifest's *targets* plus every hook-capable target (see
+    :func:`bundle_hook_cleanup_targets`). At project scope an added target
+    whose root under *root* is reached through a link is left out: the
+    manifest did not choose it, and it may name another project's config.
+    """
+    from apm_cli.utils.path_security import has_symlink_component
+
+    found = bundle_hook_cleanup_targets(targets, user_scope=user_scope)
+    if user_scope:
+        return found
+    named = {target.name for target in targets or ()}
+    base = Path(root)
+    return [
+        target
+        for target in found
+        if target.name in named or not has_symlink_component(base, base / target.root_dir)
+    ]
+
+
 class BundleHookTargetsUnresolved(RuntimeError):
     """The scope's targets could not be resolved, so no hook was re-checked."""
 
@@ -878,7 +900,7 @@ def reconcile_scope_bundle_hooks(
     )
     # A bundle installed with --target may hold hooks in a target the manifest
     # does not name: every hook target of the scope is re-checked.
-    targets = bundle_hook_cleanup_targets(targets, user_scope=is_user_scope(scope))
+    targets = bundle_hook_recheck_targets(targets, root=root, user_scope=is_user_scope(scope))
     lock_dir = get_apm_dir(scope)
     hooks = retire_unadmitted_bundle_hooks(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
