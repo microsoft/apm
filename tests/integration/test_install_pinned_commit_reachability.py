@@ -810,4 +810,5 @@ with open({str(calls_log)!r}, "a") as log:
     calls = calls_log.read_text(encoding="utf-8").splitlines()
     # Fetched by the locked commit; the ref is neither listed nor cloned by name.
     assert [call for call in calls if " fetch " in call and call.endswith(origin.m2)]
-    assert not [call for call in calls if "ls-remote" in call or "--branch" in call], calls
+    listed = [call for call in calls if {"ls-remote", "--branch"} & set(call.split())]
+    assert not listed, listed

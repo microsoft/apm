@@ -854,7 +854,7 @@ def require_reachable_commit(
 ) -> None:
     """Refuse *sha* unless an origin branch or tag reaches it.
 
-    *url* is the remote contacted; *origin* (default *url*) is the remote
+    *url* is the remote contacted, under the env a clone of it gets; *origin* (default *url*) is the remote
     the verdict is recorded for. With *persist* false (a read-only cache)
     an existing verdict is reused, but verification state lives in scratch
     storage and no verdict is written.
@@ -869,16 +869,23 @@ def require_reachable_commit(
     from .git_cache import _safe_git_args, _sanitize_url
 
     sha = sha.lower()
-    canonical = _verdict_key(origin or url, url, env)
-    marker = _marker(cache_root, shard_key, sha)
-    if canonical is not None and _recorded(marker, canonical):
-        return
     where = _sanitize_url(url)
     unverifiable = (
         f"Cannot verify that commit {sha} of {where} is reachable from a branch or tag: "
         "the first install of a pinned commit needs network access once. "
         "Re-run with network access, or pin a branch or tag instead."
     )
+    # The verdict key, the listing and the reachability fetch (whose persisted
+    # repository has an origin remote) all use the env a clone of *url* gets,
+    # so each names the server that answers, a remote-activated mirror included.
+    try:
+        env = _listing_env(url, env)
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        raise _Unverified(unverifiable, exc) from exc
+    canonical = _verdict_key(origin or url, url, env)
+    marker = _marker(cache_root, shard_key, sha)
+    if canonical is not None and _recorded(marker, canonical):
+        return
     try:
         listing = git_remote_refs(
             url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()

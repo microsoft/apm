@@ -7,6 +7,7 @@ was then deleted, unmerged.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import os
 import shutil
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.cache.git_cache import GitCache
+from apm_cli.cache.url_normalize import normalize_repo_url
 from tests.utils.cached_repo_trust import trust_cached_repos
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
@@ -1105,3 +1107,41 @@ def test_a_resolved_tip_a_mirror_served_is_not_trusted_for_the_origin_without_th
     assert len(downloader.contacted) > contacted, "the origin was never checked"
     [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
     assert marker.name == origin.m2
+
+
+def test_a_commit_only_a_mirror_holds_is_never_recorded_as_the_origins_verdict(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: a reachability fetch a remote-activated mirror served records the mirror."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
+
+    mirror = tmp_path / "mirror.git"
+    _REAL_RUN(["git", "clone", "-q", "--mirror", str(origin.path), str(mirror)], check=True)
+    extra = tmp_path / "mirror-work"
+    _REAL_RUN(["git", "clone", "-q", str(mirror), str(extra)], check=True)
+    (extra / "x1.txt").write_text("x1", encoding="utf-8")
+    origin.git("add", "x1.txt", cwd=extra)
+    origin.git("commit", "-qm", "x1", cwd=extra)
+    only_mirror = origin.git("rev-parse", "HEAD", cwd=extra)
+    _REAL_RUN(["git", "push", "-q", str(mirror), "HEAD:main"], cwd=extra, check=True)
+    include = tmp_path / "rewrite.gitconfig"
+    include.write_text(f'[url "{mirror.as_uri()}"]\n\tinsteadOf = {origin.url}\n', "ascii")
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{origin.url}"]\n\tpath = {include.as_posix()}\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+    for _attempt in range(2):
+        with contextlib.suppress(CommitNotReachableError):
+            admit_pinned_commit(downloader, _ref(only_mirror), only_mirror)
+    config.write_text("[core]\n\tbare = false\n", encoding="ascii")
+
+    with pytest.raises(CommitNotReachableError, match="not reachable"):
+        admit_pinned_commit(downloader, _ref(only_mirror), only_mirror)
+
+    # Only the mirror's verdict exists: it never stands for the origin.
+    markers = list((tmp_path / "cache" / "reachability").rglob(f"verified-v2/{only_mirror}"))
+    recorded = [m.read_text(encoding="utf-8").splitlines()[-1] for m in markers]
+    assert recorded == [normalize_repo_url(mirror.as_uri())]
