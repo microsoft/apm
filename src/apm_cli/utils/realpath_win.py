@@ -435,13 +435,12 @@ def _walk_below(
         attributes, name = entry
         resolved = f"{resolved.rstrip(chr(92))}\\{name}"
         current = candidate
-        if adopt and attributes & _FILE_ATTRIBUTE_DIRECTORY and position < len(parts) - 1:
+        if adopt and attributes & _FILE_ATTRIBUTE_DIRECTORY and _registered_cover(candidate):
             held = _adopt(candidate, resolved)
-            if held is None:
-                return None  # not pinned: what lies below it is unproven
-            used.append((candidate, held))
-        elif adopt and attributes & _FILE_ATTRIBUTE_DIRECTORY:
-            _adopt(candidate, resolved)
+            if held is not None:
+                used.append((candidate, held))
+            elif position < len(parts) - 1:
+                return None  # a registered directory that cannot be pinned: below is unproven
     return resolved
 
 
