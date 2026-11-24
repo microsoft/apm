@@ -133,11 +133,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     from .phases import integrate as _integrate_phase
     from .service import InstallService
 
-    session = (
-        None
-        if ctx.lockfile_only or ctx.dry_run
-        else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
-    )
+    session = None  # RESEARCH: deployment ledger deleted
     locked = locked_skill_sources(ctx) if session is not None else None
     if session is not None:
         session.locked_sources = locked
@@ -850,7 +846,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             return stop_before_integration(ctx, diagnostics)
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
-        transaction.journal_deploy_writes(ctx)
+        # RESEARCH: deploy journal deleted
         materialization_session = _run_integration_phase(ctx)
 
         # A direct dependency failing integration fails the install; transitive ones continue.
@@ -889,8 +885,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
         # The lockfile is staged in its writer scope (#4086): the commit gate
         # checks it before that scope commits it (install/commit_gate.py).
-        LockfileBuilder(ctx).build_and_save()
-        check_before_lockfile(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
+        # RESEARCH: lockfile build + write deleted
 
         # ------------------------------------------------------------------
         # Phase: Post-deps local .apm/ content.
@@ -900,7 +895,6 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             from .phases import post_deps_local as _post_deps_local_phase
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
-            check_before_release(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
             if materialization_session is not None:
                 after_lockfile_commit(
                     lambda: materialization_session.bind_committed_claims(
