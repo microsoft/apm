@@ -17,7 +17,6 @@ import pytest
 
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-from tests.lifecycle.known import KnownFailure
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
@@ -205,8 +204,7 @@ def test_codex_bundle_agent_through_a_user_agents_link_loop_is_refused(
 def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_writes_nothing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """Nothing is written through the link and no user lock records it (#5287);
-    the exit code and text are the #5300 strict cell's."""
+    """Nothing is written through the link and no user lock records it (#5287)."""
     world, install, outside = _symlinked_user_agents(tmp_path, apm_binary_path, "outside")
 
     world.apm(world.root, *install, expect=None)
@@ -218,14 +216,6 @@ def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_writes_nothi
     assert not any(".codex/agents" in str(claim) for claim in claims), claims
 
 
-_OUT_OF_SCOPE_EXITS_ZERO = KnownFailure(
-    "#5300",
-    "install exits 0 when a codex agent destination is a symlink out of scope",
-    r"-> 0 \(expected 1\)",
-)
-
-
-@_OUT_OF_SCOPE_EXITS_ZERO.mark()
 @pytest.mark.skipif(os.name == "nt", reason="needs an unprivileged symlink")
 def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_fails_the_install(
     tmp_path: Path, apm_binary_path: Path
