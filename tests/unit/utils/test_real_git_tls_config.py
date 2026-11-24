@@ -278,4 +278,6 @@ class TestRealGitTlsConfigStamp:
             forget_invocation_memos()  # a lifecycle script ran and may have edited ~/.gitconfig
             real_git_tls_config()
 
-        assert len(child.starts) == 2
+        # Inside a command the config memo also asks git which files it reads; count probes.
+        probes = [cmd for cmd, _env in child.starts if cmd[-2:] == ["--show-scope", "--list"]]
+        assert len(probes) == 2
