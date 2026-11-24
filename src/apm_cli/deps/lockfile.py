@@ -1856,7 +1856,7 @@ class LockFile:
             if cached is None:
                 return None
             _RESEARCH_READS[key] = cached
-        return _copy.deepcopy(cached)
+        return cached  # RESEARCH: no copy (upper bound, unsafe)
 
     @classmethod
     def _read_uncached(cls, path: Path) -> LockFile | None:
