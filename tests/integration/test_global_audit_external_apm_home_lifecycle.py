@@ -105,3 +105,52 @@ def test_global_install_then_audit_passes_with_apm_home_location(
     assert checks["drift"]["passed"] is True, checks["drift"]
     assert payload["passed"] is True, payload["checks"]
     assert_unchanged(before, ArtifactSnapshot.capture(home))
+
+
+@pytest.mark.parametrize(
+    "claude_root_parts",
+    [
+        pytest.param(("home", ".claude"), id="default"),
+        pytest.param(("home", "profiles", "work"), id="config-dir-under-home"),
+        pytest.param(("claude-config",), id="config-dir-outside-home"),
+    ],
+)
+def test_global_install_to_an_undeclared_claude_root_then_audit_finds_its_files(
+    tmp_path: Path, apm_binary_path: Path, claude_root_parts: tuple[str, ...]
+) -> None:
+    """#5312: `install -g --target claude` into a redirected CLAUDE_CONFIG_DIR, with a
+    manifest declaring another target: audit resolves the recorded Claude claims
+    under the root install used, as it does for the default ~/.claude."""
+    isolated = IsolatedApmEnvironment.create(tmp_path.resolve() / "scene", base_env=os.environ)
+    home = isolated.root / "home"
+    apm_home = home / ".apm"
+    claude_root = isolated.root.joinpath(*claude_root_parts)
+    for directory in (apm_home, claude_root, home / ".copilot"):
+        directory.mkdir(parents=True, exist_ok=True)
+    env = isolated.subprocess_env(overrides={"PYTHONDONTWRITEBYTECODE": "1"})
+    env.update({"HOME": str(home), "USERPROFILE": str(home)}, APM_NO_CACHE="1")
+    for variable in ("COPILOT_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "APM_HOME"):
+        env.pop(variable, None)
+    if claude_root_parts != ("home", ".claude"):
+        env["CLAUDE_CONFIG_DIR"] = str(claude_root)
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    package = _write_package(isolated.package_root)
+    (apm_home / "apm.yml").write_text(
+        "name: user\nversion: 0.0.0\ntargets: [copilot]\n", encoding="utf-8"
+    )
+
+    install = runner.run(
+        ("install", "--global", "--target", "claude", str(package), "--no-policy"),
+        scenario_id="install-global-claude",
+        cwd=isolated.work_root,
+        env=env,
+    )
+    assert install.returncode == 0, (install.stdout, install.stderr)
+    assert (claude_root / "agents" / "helper.md").is_file()
+
+    before = ArtifactSnapshot.capture(isolated.root)
+    audit = runner.run(_AUDIT, scenario_id="audit-ci", cwd=apm_home, env=env)
+    checks = {check["name"]: check for check in json.loads(audit.stdout)["checks"]}
+    assert checks["deployed-files-present"]["passed"] is True, checks["deployed-files-present"]
+    assert checks["content-integrity"]["passed"] is True, checks["content-integrity"]
+    assert_unchanged(before, ArtifactSnapshot.capture(isolated.root))
