@@ -175,6 +175,9 @@ class _Store:
     generation: str = ""
     # The index as this store last read or wrote it: a save re-reads it only if changed.
     marker_stamp: tuple[int, int, int] | None = None
+    # The record files the index lists. A listed file that is gone or unreadable
+    # fails closed; it never reads as a directory with no records (#5037).
+    listed: set[str] | None = None
 
     def _shard_path(self, shard: str) -> Path:
         return self.path.parent / f"d-{shard}.json"
@@ -211,7 +214,13 @@ class _Store:
             raise ValueError("unknown version or layout")
         if not isinstance(generation, str):
             raise ValueError("unknown version or layout")
+        shards = marker.get("shards")
+        if shards is not None and not (
+            isinstance(shards, list) and all(isinstance(s, str) for s in shards)
+        ):
+            raise ValueError("unknown version or layout")
         self.generation, self.indexed = generation, True
+        self.listed = set(shards) if shards is not None else None
 
     def _absorb(self, data: dict[str, Any]) -> None:
         if not isinstance(data.get("files"), list):
@@ -236,13 +245,18 @@ class _Store:
         if shard in self.loaded:
             return
         path = self._shard_path(shard)
+        listed = self.listed is not None and shard in self.listed
         if not os.path.lexists(path):
+            if listed:
+                raise _UnreadableStore(f"{path}: a listed record file is missing")
             self.loaded.add(shard)
             return
         try:
             data = _read_json(path)
             if data.get("version") != _VERSION:
                 raise ValueError("unknown version or layout")
+            if listed and data.get("generation", "") != self.generation:
+                raise ValueError("a listed record file belongs to another generation")
             if data.get("generation", "") != self.generation:
                 # Another generation's leftover proves nothing. It is not loaded, so a
                 # save never deletes it; a save with records there overwrites it.
@@ -365,10 +379,39 @@ class _Store:
         for shard in sorted(set(grouped) - self.loaded):
             self._load_if_indexed(shard)  # a record file is never saved unread
             grouped = self._grouped()
-        for shard in sorted(self.loaded | set(grouped)):
-            self._save_shard(shard, sorted(grouped.get(shard, ())))
+        shards = {shard: sorted(grouped.get(shard, ())) for shard in self.loaded | set(grouped)}
+        # A record file is written before the index lists it, and unlisted before it
+        # is removed, so a kill never leaves a listed file missing (#5037).
+        for shard in sorted(shards):
+            if shards[shard]:
+                self._save_shard(shard, shards[shard])
+        removed = {shard for shard, keys in shards.items() if not keys}
+        if self.indexed:
+            self._save_listing(removed, {shard for shard, keys in shards.items() if keys})
+        for shard in sorted(removed):
+            self._save_shard(shard, [])
         if self.indexed and not grouped and not self._shard_files():
             self._drop_index()  # like the other receipts: no records, no file
+
+    def _save_listing(self, removed: set[str], written: set[str]) -> None:
+        """Rewrite the index only when the record files it lists change."""
+        known = self.listed
+        if known is None:
+            known = {path.stem.removeprefix("d-") for path in self._shard_files()}
+        listed = (known - removed) | written
+        if listed == self.listed:
+            return
+        self._write(self.path, self._marker(listed))
+        self._stamp_marker()
+        self.listed = listed
+
+    def _marker(self, listed: set[str]) -> dict[str, Any]:
+        return {
+            "version": _VERSION,
+            "layout": _LAYOUT,
+            "generation": self.generation,
+            "shards": sorted(listed),
+        }
 
     def _grouped(self) -> dict[str, list[str]]:
         grouped: dict[str, list[str]] = {}
@@ -387,7 +430,7 @@ class _Store:
         from apm_cli.integration.write_seam import atomic_write_text, mkdir
 
         generation = secrets.token_hex(16)
-        marker = {"version": _VERSION, "layout": _LAYOUT, "generation": generation}
+        marker = {"version": _VERSION, "layout": _LAYOUT, "generation": generation, "shards": []}
         mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
         try:
             # Published whole or not at all: a kill never leaves an empty index.
@@ -418,12 +461,12 @@ class _Store:
         for shard in sorted(grouped):
             self._save_shard(shard, sorted(grouped[shard]))
         if grouped:
-            marker = {"version": _VERSION, "layout": _LAYOUT, "generation": self.generation}
-            self._write(self.path, marker)
+            self._write(self.path, self._marker(set(grouped)))
             self._stamp_marker()
         else:
             unlink(self.path)
         self.legacy_layout, self.indexed = False, bool(grouped)
+        self.listed = set(grouped) if grouped else None
 
     def _save_shard(self, shard: str, keys: list[str]) -> None:
         from apm_cli.integration.write_seam import unlink

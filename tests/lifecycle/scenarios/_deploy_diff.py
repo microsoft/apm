@@ -260,6 +260,9 @@ def receipts(world: World, *, history: bool = True) -> list[object]:
             data = json.loads(path.read_text(encoding="utf-8"))
             for key in _RECEIPT_BINDING:
                 data.pop(key, None)
+            if isinstance(data.get("shards"), list):
+                # The index lists its record files by path-derived name: compare the count.
+                data["shards"] = len(data["shards"])
             if not history:
                 data.pop("history", None)
             # The checkout-keyed file name is identity; its directory (mcp/ or top) is not:

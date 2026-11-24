@@ -1046,7 +1046,8 @@ def test_a_record_file_of_another_generation_is_never_deleted(tmp_path, apm_home
     old_file = _holding(apm_home, old)
     marker = apm_home / "deployment-receipts" / "config-files" / "records.json"
     data = json.loads(marker.read_text(encoding="utf-8"))
-    marker.write_text(json.dumps({**data, "generation": "another"}), encoding="utf-8")
+    # Another generation's index never lists this generation's record files.
+    marker.write_text(json.dumps({**data, "generation": "another", "shards": []}), encoding="utf-8")
 
     store = _Store.load()
     store.lookup(old)  # reads the old generation's file, which proves nothing now
