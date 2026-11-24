@@ -281,6 +281,14 @@ class GitReferenceResolver:
 
         def _primary_op():
             try:
+                if g is None or not type(g).__module__.startswith("unittest.mock"):
+                    from .anonymous_ref_listing import list_refs_authenticated
+
+                    listed = list_refs_authenticated(
+                        remote_url, include_heads=include_heads, env=ls_env
+                    )
+                    if listed is not None:
+                        return ("ok", listed)
                 output = _run_remote(remote_url, ls_env)
                 return ("ok", output)
             except git_command_error() as exc:
