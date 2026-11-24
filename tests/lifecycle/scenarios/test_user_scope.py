@@ -205,9 +205,11 @@ def test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states(lifecy
     scenario.run("install --trust-bin p-native-claude-bin", credit=[_BIN_STATES["first"]])
     assert not binary.exists(), "an unapproved plugin bin/ deployed"
     scenario.run("approve p-native-claude-bin")
-    scenario.run("install --trust-bin", credit=[_BIN_STATES["converged"]])
+    scenario.run("install --trust-bin")
     assert binary.is_file()
     deployed = binary.read_bytes()
+    scenario.run("install --trust-bin", credit=[_BIN_STATES["converged"]])
+    assert binary.read_bytes() == deployed
     step = scenario.run("install --trust-bin --no-policy", credit=[_BIN_STATES["no-policy"]])
     assert re.search(_NO_POLICY_SAYS, step.output), step.output
     assert binary.read_bytes() == deployed
