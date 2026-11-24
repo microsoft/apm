@@ -884,12 +884,18 @@ def test_a_journal_whose_token_is_forged_does_not_vouch_for_two_writers(
 def test_a_cold_clone_without_the_journal_converges_on_the_next_install(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """With the abandoned journal and apm_modules gone (a fresh clone of the killed
-    tree), the next install has nothing to replay: it converges to the manifest, the
-    lockfile matches disk and ``audit --ci`` passes."""
+    """A fresh clone of the killed tree on another machine: no abandoned journal, no
+    apm_modules, no deployment or config-file receipts and no download cache. The next
+    install has nothing to replay: it converges to the manifest, the lockfile matches
+    disk and ``audit --ci`` passes."""
     chain, before = _killed_two_writers(tmp_path, apm_binary_path)
     shutil.rmtree(_abandoned(chain))
     shutil.rmtree(chain.project / "apm_modules", ignore_errors=True)
+    receipts = sorted(Path(chain.env["APM_HOME"]).glob("deployment-receipts*"))
+    assert receipts, sorted(Path(chain.env["APM_HOME"]).iterdir())
+    for machine_local in (*receipts, chain.isolated.cache_root):
+        shutil.rmtree(machine_local, ignore_errors=True)
+    chain.isolated.cache_root.mkdir(parents=True)
 
     result = chain.run("install")
 
