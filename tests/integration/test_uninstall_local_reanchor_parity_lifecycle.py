@@ -938,3 +938,229 @@ def test_an_agents_md_that_is_not_utf8_refuses_by_name(
     assert "AGENTS.md links into its apm_modules copy" in output, output
     assert "Traceback" not in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+# -- A descendant the winning edge spells differently (#5091) --------------------
+
+
+def _case_insensitive(path: Path) -> bool:
+    probe = path / "CaseProbe"
+    probe.mkdir()
+    try:
+        return (path / "caseprobe").exists()
+    finally:
+        probe.rmdir()
+
+
+def _respelled_world(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    link_f,
+    f_deps: tuple[str, ...] = (),
+    prod_chain=False,
+    other_f=False,
+    spellings: tuple[str, str] = ("F", "f"),
+) -> ReplayWorld:
+    """e -> ../F direct, dev d -> e and a -> ../f; *link_f* makes vendor/f.
+
+    *prod_chain* adds production p -> q -> ../F, which the walk reaches first
+    although a's shallower dev edge wins F's spelling. *other_f* adds an
+    unrelated direct ./other/F -> ../h, whose parent identity is also _local/F.
+    *spellings* replaces ``(F, f)``, the directory and the winning spelling.
+    """
+    upper, lower = spellings
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / upper, "F", f_deps)
+    if f_deps:
+        _skill_package(vendor / "g", "g")
+    if prod_chain:
+        _skill_package(vendor / "q", "q", (f"../{upper}",))
+        _skill_package(vendor / "p", "p", ("../q",))
+    if other_f:
+        shared = ("../../vendor/g",) if other_f == "shared" else ()
+        _skill_package(world.project / "other/F", "o", ("../h", *shared))
+        _skill_package(world.project / "other/h", "h")
+    link_f(vendor)
+    _skill_package(vendor / "e", "e", (f"../{upper}",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    _skill_package(vendor / "a", "a", (f"../{lower}",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {
+                "apm": [
+                    "./vendor/e",
+                    *(["./vendor/p"] if prod_chain else []),
+                    *(["./other/F"] if other_f else []),
+                ]
+            },
+            "devDependencies": {"apm": ["./vendor/d", "./vendor/a"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    return world
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize(
+    ("f_deps", "prod_chain", "other_f"),
+    [
+        ((), False, False),
+        (("../g",), False, False),
+        (("../g",), True, False),
+        (("../g",), True, True),
+        (("../g",), True, "shared"),
+    ],
+    ids=[
+        "leaf",
+        "with-child",
+        "cross-root-child",
+        "unrelated-same-name-parent",
+        "child-shared-with-a-winning-same-name-parent",
+    ],
+)
+def test_a_descendant_spelled_through_a_symlink_reanchors_to_the_fresh_spelling(
+    tmp_path: Path, apm_binary_path: Path, f_deps: tuple[str, ...], prod_chain: bool, other_f
+) -> None:
+    """vendor/f links to vendor/F: a's ../f wins after e goes, so F takes that spelling;
+    a child g beneath F then names F by that spelling too."""
+    if _case_insensitive(tmp_path):
+        pytest.skip("vendor/f and vendor/F are one name here; the case-only cell covers it")
+    world = _respelled_world(
+        tmp_path,
+        apm_binary_path,
+        lambda vendor: (vendor / "f").symlink_to(vendor / "F", target_is_directory=True),
+        f_deps,
+        prod_chain,
+        other_f,
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+
+
+@pytest.mark.windows_compat
+def test_a_case_only_descendant_spelling_reanchors_to_the_fresh_spelling(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """On a case-insensitive filesystem ../f and ../F are one package directory."""
+    if not _case_insensitive(tmp_path):
+        pytest.skip("needs a case-insensitive filesystem")
+    world = _respelled_world(tmp_path, apm_binary_path, lambda vendor: None)
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+    assert not list((world.project / "apm_modules").rglob(".apm-case-*"))
+
+
+def test_two_packages_that_differ_only_by_case_stay_distinct(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """On a case-sensitive filesystem vendor/f and vendor/F are two packages."""
+    if _case_insensitive(tmp_path):
+        pytest.skip("needs a case-sensitive filesystem")
+    # Skill names fold case, so the second package ships a distinct one.
+    world = _respelled_world(
+        tmp_path, apm_binary_path, lambda vendor: _skill_package(vendor / "f", "g")
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    copies = {key.rsplit("/", 2)[-2] for key in _modules(world.project) if key.endswith("/apm.yml")}
+    assert {"F", "f"} <= copies, sorted(copies)
+    _assert_no_frozen_rewrites_nothing(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_an_nfd_descendant_spelling_is_refused(tmp_path: Path, apm_binary_path: Path) -> None:
+    """vendor/<NFD> links to vendor/<NFC>: only letter case is in #5091's scope, so a
+    Unicode-normalization respelling refuses before any write (accepting it is #5222)."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    nfc, nfd = "caf\u00e9", "cafe\u0301"
+
+    def link_nfd(vendor: Path) -> None:
+        if (vendor / nfd).exists():
+            pytest.skip("this volume folds Unicode normalization: one name, nothing to link")
+        (vendor / nfd).symlink_to(vendor / nfc, target_is_directory=True)
+
+    world = _respelled_world(tmp_path, apm_binary_path, link_nfd, spellings=(nfc, nfd))
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "installs elsewhere" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_an_aliased_respelled_descendant_with_stale_excluded_files_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Both edges alias F as x: the copy stays at apm_modules/x and is not refreshed, so
+    its stale .git/HEAD refuses instead of being kept silently."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "F", "F")
+    if _case_insensitive(vendor):
+        pytest.skip("vendor/f and vendor/F are one name here")
+    head = vendor / "F/.git/HEAD"
+    head.parent.mkdir(parents=True)
+    head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (vendor / "f").symlink_to(vendor / "F", target_is_directory=True)
+    _aliased_package(vendor / "e", "e", "../F", "x")
+    _aliased_package(vendor / "a", "a", "../f", "x")
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d", "./vendor/a"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    head.write_text("ref: refs/heads/other\n", encoding="utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "differs from its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_a_respelled_descendant_with_stale_excluded_files_reanchors_as_a_fresh_copy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """F's .git/HEAD changes after install: the respelled copy is re-materialized (#5102)."""
+    if _case_insensitive(tmp_path):
+        pytest.skip("vendor/f and vendor/F are one name here; the case-only cell covers it")
+
+    def link_f(vendor: Path) -> None:
+        head = vendor / "F/.git/HEAD"
+        head.parent.mkdir(parents=True)
+        head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (vendor / "f").symlink_to(vendor / "F", target_is_directory=True)
+
+    world = _respelled_world(tmp_path, apm_binary_path, link_f)
+    (world.project / "vendor/F/.git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+    assert not list((world.project / "apm_modules").rglob(".apm-reanchor-*"))
