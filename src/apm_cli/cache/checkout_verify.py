@@ -615,10 +615,15 @@ def require_verified_copy(
     for _directory, subdirs, names in os.walk(dest):
         if any(_names_git_dir(entry) for entry in (*subdirs, *names)):
             raise CheckoutVerificationError("the copy holds a .git entry")
+    from apm_cli.utils.file_digest_memo import record as record_verified_digest
+
     copied: set[str] = set()
     for rel, path in _worktree_files(Path(dest)):
         source = _join(prefix, rel)
-        _check_bytes(manifest, source, *_read_regular(source, path))
+        data, info = _read_regular(source, path)
+        _check_bytes(manifest, source, data, info)
+        # The content hash of this copy reuses the digest of bytes verified here.
+        record_verified_digest(path, info, data)
         copied.add(source)
     under = f"{prefix}/" if prefix else ""
     missing = sorted(rel for rel in manifest.files if rel.startswith(under) and rel not in copied)

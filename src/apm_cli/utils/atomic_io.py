@@ -67,7 +67,10 @@ def atomic_copy(source: Path, destination: Path, *, metadata: bool = True) -> Pa
     through the link. On failure the temp file is removed (made writable
     first, for Windows) and the destination is untouched.
     """
+    from apm_cli.utils.file_digest_memo import forget
+
     target = Path(os.path.realpath(destination)) if destination.is_symlink() else destination
+    forget(target)
     source_stat = os.stat(source)
     if metadata:
         mode: int | None = stat.S_IMODE(source_stat.st_mode)
@@ -143,6 +146,9 @@ def write_text_lf(path: Path, data: str) -> None:
     translation that ``Path.write_text`` performs in text mode, so the on-disk
     bytes (and therefore their content hash) are identical on every OS.
     """
+    from apm_cli.utils.file_digest_memo import forget
+
+    forget(path)
     path.write_text(normalize_crlf_to_lf(data), encoding="utf-8", newline="")
 
 
@@ -192,6 +198,9 @@ def atomic_write_text(
     On any failure, the temp file is removed and the original target
     file (if any) remains untouched.
     """
+    from apm_cli.utils.file_digest_memo import forget
+
+    forget(path)
     existed = path.exists()
     existing_mode = stat.S_IMODE(path.stat().st_mode) if existed else None
     _validate_temp_name_fragment(temp_prefix, "temp_prefix")

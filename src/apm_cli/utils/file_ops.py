@@ -305,7 +305,10 @@ def robust_rmtree(
     max_retries:
         Maximum retry attempts for transient lock errors.
     """
+    from apm_cli.utils.file_digest_memo import forget_tree
+
     path_s = _without_trailing_separators(str(path))
+    forget_tree(path_s)
 
     def _do_rmtree() -> None:
         if _is_link(path_s):
@@ -395,7 +398,10 @@ def robust_copytree(
     -------
     Path to the destination directory.
     """
+    from apm_cli.utils.file_digest_memo import forget_tree
+
     src_s, dst_s = str(src), str(dst)
+    forget_tree(dst_s)
 
     def _do_copytree() -> str:
         return shutil.copytree(

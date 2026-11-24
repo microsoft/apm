@@ -117,6 +117,11 @@ def record_before_write(
     """
     if _planning:
         raise PlannedWriteError(f"Install planned a write to {path} before its preflight passed")
+    from apm_cli.utils.file_digest_memo import forget
+
+    forget(path)
+    if follow:
+        forget(os.path.realpath(path))
     recorder = _recorder
     if recorder is not None:
         recorder(Path(path), True, expected)

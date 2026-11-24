@@ -80,11 +80,18 @@ def _hash_package_tree(
     """Feed only the requested streams; an unrequested stream returns ``""``."""
     if not package_path.is_dir():
         return (_EMPTY_HASH if legacy else ""), (_EMPTY_HASH if framed else "")
+    from apm_cli.utils.file_digest_memo import lookup as verified_digest
+
     legacy_hasher = hashlib.sha256() if legacy else None
     framed_hasher = hashlib.sha256() if framed else None
     for rel_path in _package_files(package_path):
         if exclude and rel_path.as_posix() in exclude:
             continue
+        if legacy_hasher is None and framed_hasher is not None:
+            digest = verified_digest(package_path / rel_path)
+            if digest is not None:  # verified this command and unchanged since
+                framed_hasher.update(rel_path.as_posix().encode("utf-8") + b"\0" + digest)
+                continue
         payload = (package_path / rel_path).read_bytes()
         if legacy_hasher is not None:
             legacy_hasher.update(rel_path.as_posix().encode("utf-8"))
