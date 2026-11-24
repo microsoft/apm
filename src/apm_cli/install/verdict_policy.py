@@ -141,9 +141,15 @@ def _discovery_unproven(root: Path, identity: Any) -> bool:
     org, host, _port = identity
     if is_azure_devops_hostname(host) or is_gitlab_hostname(host):
         from apm_cli.core.policy_fetch_ledger import fetch_attempts
+        from apm_cli.install.verdict_inputs import policy_cache_shape
         from apm_cli.install.verdict_record import _ENTRY_TIME
 
-        return len(_ENTRY_TIME) < 2 or fetch_attempts() != _ENTRY_TIME[1]
+        # The cache discovery read must still be the cache the record keys.
+        return (
+            len(_ENTRY_TIME) < 3
+            or fetch_attempts() != _ENTRY_TIME[1]
+            or policy_cache_shape() != _ENTRY_TIME[2]
+        )
     refs = candidate_refs(org, host, discovery._policy_repo_candidates(host))
     pin = read_project_policy_hash_pin(root)
     expected = pin.normalized if pin is not None else None

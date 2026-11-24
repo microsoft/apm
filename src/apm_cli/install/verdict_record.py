@@ -298,7 +298,7 @@ def _env_log() -> Iterator[None]:
 _PROVEN_LOCK: list[bytes | None] = []
 # apm.yml and the lock as the run found them (W3d R4), and its start (verdict_inputs).
 _ENTRY_FILES: list[bytes | None] = []
-_ENTRY_TIME: list[float] = []
+_ENTRY_TIME: list[Any] = []
 
 
 def _entry_bytes(name: str) -> bytes | None:

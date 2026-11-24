@@ -151,11 +151,27 @@ def _key_modules(digest: Any, root: Path) -> None:
         stack += [(f"{rel}/{e.name}", e.path) for e in entries if e.is_dir(follow_symlinks=False)]
 
 
-def entry_stamp() -> list[float]:
-    """The recorded run's start: its wall time, and the org-policy fetch attempts
-    this process had made, so the writer knows whether the run's discovery fetched."""
+def entry_stamp() -> list[Any]:
+    """The recorded run's start: its wall time, the org-policy fetch attempts this
+    process had made, and the policy cache's shape, so the writer knows whether the
+    run's discovery fetched and whether the cache it read is still the one keyed."""
     import time
 
     from apm_cli.core.policy_fetch_ledger import fetch_attempts
 
-    return [time.time(), float(fetch_attempts())]
+    return [time.time(), fetch_attempts(), policy_cache_shape()]
+
+
+def policy_cache_shape() -> str:
+    """Every policy cache file's path, size and mtime (the cache discovery reads)."""
+    from apm_cli.install.verdict_record import _cache_root
+
+    cache = _cache_root()
+    if cache is None:
+        return ""
+    rows = []
+    for rel, files, _dirs in _tree(str(cache / "policy_v1")):
+        for entry in files:
+            info = entry.stat(follow_symlinks=False)
+            rows.append(f"{rel}/{entry.name}:{info.st_size}:{info.st_mtime_ns}")
+    return "\n".join(rows)

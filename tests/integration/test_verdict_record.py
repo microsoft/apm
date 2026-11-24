@@ -9,6 +9,7 @@ APM_HOME state, policy cache, allowlisted environment) misses when it changes.
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import os
 import re
@@ -1046,5 +1047,49 @@ def test_a_gitlab_or_ado_run_that_attempted_a_policy_fetch_never_records(
         sys.stdout.write(_OUTPUT)
         note_fetch_attempt(host)
         verdict_record.note_verified_noop()
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_a_pinned_gitlab_project_never_records_even_with_a_fresh_cache(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A policy.hash pin makes GitLab discovery read the source, never the cache (W3d R1)."""
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+
+    def _offline(*_args, **_kwargs):
+        raise OSError("offline")
+
+    _hosted_project(project, "gitlab")
+    (project / "apm.yml").write_text(
+        f"name: demo\nversion: 1.0.0\npolicy:\n  hash: sha256:{'a' * 64}\n", encoding="utf-8"
+    )
+    policy, _warnings = load_policy("enforcement: warn\ncache:\n  ttl: 3600\n")
+    discovery._write_cache("gitlab.com/acme/apm-policy", policy, project)
+    monkeypatch.setattr("apm_cli.core.auth.AuthResolver.try_with_fallback", _offline)
+    with verdict_record.recording(["install"]):
+        with contextlib.suppress(OSError):  # the stubbed transport fails; the run goes on
+            discovery.discover_policy(project, expected_hash=f"sha256:{'a' * 64}")
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_a_policy_cache_changed_after_discovery_is_never_recorded(project: Path) -> None:
+    """The cache discovery read must still be the one the record keys (Copilot, #5331)."""
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+
+    _hosted_project(project, "ado")
+    policy, _warnings = load_policy("enforcement: warn\ncache:\n  ttl: 3600\n")
+    discovery._write_cache("dev.azure.com/acme/apm/apm-policy", policy, project)
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+        shutil.rmtree(project.parent / "cache" / "policy_v1")
 
     assert not (_home(project) / "verdicts").exists()
