@@ -513,17 +513,22 @@ def release_held(under: object = None) -> None:
     """
     if not ENABLED or not (_held or _registered or _root):
         return
+    base = None
+    if under is not None:
+        try:
+            base = os.path.abspath(os.fspath(under)).rstrip("\\")  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            base = None
+        if base is not None and not plain_win32(base):
+            base = None  # another spelling (\\?\, UNC, 8.3) cannot be matched: release all
+        base = base.lower() if base is not None else None
     with _lock:
-        if under is None:
+        if base is None:
             taken = list(_held.values())
             _held.clear()
             _registered.clear()
             _root.clear()
         else:
-            try:
-                base = os.path.abspath(os.fspath(under)).lower().rstrip("\\")  # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                return
             dropped = {
                 root
                 for root in _registered
