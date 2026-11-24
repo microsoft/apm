@@ -65,3 +65,13 @@ def test_the_message_names_the_first_linked_component_at_any_depth(tmp_path: Pat
     assert str(refused.value).startswith(
         "Refusing deployment through a symlinked path component: plain/linked. "
     )
+
+
+def test_the_refusal_names_a_link_as_printable_ascii() -> None:
+    """A link name with control characters is rendered printable before display (#5215)."""
+    from apm_cli.utils.path_security import symlinked_deploy_refusal
+
+    message = symlinked_deploy_refusal("skills\x1b[31m\u202e")
+
+    assert message.isascii() and message.isprintable()
+    assert "\x1b" not in message and "\u202e" not in message
