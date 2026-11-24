@@ -253,19 +253,6 @@ _USER_INVOCABLE_REDERIVE_PATTERN = (
 )
 
 
-_CLAUDE_TOOLS_OWNER = "src/apm_cli/integration/claude_frontmatter.py"
-_CLAUDE_TOOLS_CONSUMER = "src/apm_cli/integration/agent_integrator.py"
-_CLAUDE_TOOLS_OWNED_DEFS: tuple[str, ...] = (
-    "is_claude_tool",
-    "check_claude_tools",
-    "claude_tools_messages",
-    "claude_unverified_message",
-)
-# One per Claude agent write path: the claude_agent mapping loop and the
-# .claude/agents auto-copy, each binding the diagnostic as on_identical.
-_CLAUDE_TOOLS_MIN_BINDINGS = 2
-
-
 _APM_HOME_OWNER = "src/apm_cli/core/scope.py"
 
 
@@ -1469,58 +1456,6 @@ def _check_user_invocable_resolution(provider: FactsProvider) -> Iterable[Violat
     return findings
 
 
-def _check_claude_agent_tools_diagnostic(provider: FactsProvider) -> Iterable[Violation]:
-    """Claude agent tool-name classification has one owner bound to every write path.
-
-    ``integration/claude_frontmatter.py`` alone decides which ``tools`` entries
-    resolve to a Claude Code tool and renders the req-tg-006 message; the
-    agent integrator must bind ``_warn_claude_frontmatter`` into each Claude
-    agent write path so a retained identical file is diagnosed too (#5356).
-    """
-    rule_id = "registry_delegation.claude_agent_tools_diagnostic"
-    facts_by_path, failures = _read_required(
-        provider, rule_id, (_CLAUDE_TOOLS_OWNER, _CLAUDE_TOOLS_CONSUMER)
-    )
-    if failures:
-        return failures
-
-    findings: list[Violation] = []
-    for name in _CLAUDE_TOOLS_OWNED_DEFS:
-        definers, def_failures = _defining_files(provider, rule_id, name, kinds=("function",))
-        if def_failures:
-            findings.extend(def_failures)
-            continue
-        if definers != frozenset({_CLAUDE_TOOLS_OWNER}):
-            findings.append(
-                violation(
-                    rule_id,
-                    _CLAUDE_TOOLS_OWNER,
-                    f"{name} must be defined only by integration/claude_frontmatter.py",
-                )
-            )
-
-    consumer = facts_by_path[_CLAUDE_TOOLS_CONSUMER]
-    if not _has_fixed(consumer, "check_claude_tools("):
-        findings.append(
-            violation(
-                rule_id,
-                _CLAUDE_TOOLS_CONSUMER,
-                "agent integrator must classify Claude tools through check_claude_tools()",
-            )
-        )
-    bindings = _count_fixed_lines(consumer, "self._warn_claude_frontmatter,")
-    if bindings < _CLAUDE_TOOLS_MIN_BINDINGS:
-        findings.append(
-            violation(
-                rule_id,
-                _CLAUDE_TOOLS_CONSUMER,
-                "every Claude agent write path must bind _warn_claude_frontmatter as "
-                f"on_identical (found {bindings}, need {_CLAUDE_TOOLS_MIN_BINDINGS})",
-            )
-        )
-    return findings
-
-
 def _check_apm_home_resolution(provider: FactsProvider) -> Iterable[Violation]:
     """APM-owned user metadata must consume one canonical home resolver."""
     rule_id = "registry_delegation.apm_home_resolution"
@@ -2045,16 +1980,6 @@ RULES: tuple[Rule, ...] = (
             "primitives/models.py (resolve_user_invocable)."
         ),
         check=_check_user_invocable_resolution,
-    ),
-    Rule(
-        id="registry_delegation.claude_agent_tools_diagnostic",
-        group=GROUP,
-        guard_ids=("registry-delegation-claude-agent-tools-diagnostic",),
-        description=(
-            "Claude agent tools classification and its req-tg-006 diagnostic route "
-            "through integration/claude_frontmatter.py on every Claude write path."
-        ),
-        check=_check_claude_agent_tools_diagnostic,
     ),
     Rule(
         id="registry_delegation.install_layering",

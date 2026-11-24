@@ -3832,14 +3832,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The Build ID owner loses its canonical verification entry point.",
     ),
     MutationCase(
-        guard_id="registry-delegation-claude-agent-tools-diagnostic",
-        rule_id="registry_delegation.claude_agent_tools_diagnostic",
-        path="src/apm_cli/integration/claude_frontmatter.py",
-        old="def check_claude_tools(fm: dict | None) -> ClaudeToolsCheck:",
-        new="def _check_claude_tools_removed(fm: dict | None) -> ClaudeToolsCheck:",
-        intent="The Claude tools diagnostic owner loses its classification entry point.",
-    ),
-    MutationCase(
         guard_id="registry-delegation-cli-startup-import-budget",
         rule_id="registry_delegation.cli_startup_imports",
         path="src/apm_cli/cli.py",

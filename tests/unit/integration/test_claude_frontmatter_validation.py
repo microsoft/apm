@@ -1,20 +1,28 @@
-"""Pure tests for Claude Code ``tools`` allowlist classification and messages (req-tg-006, #5356)."""
+"""Tests for the Claude Code ``tools`` allowlist diagnostic (req-tg-006, #5356)."""
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
+from apm_cli.integration import AgentIntegrator
 from apm_cli.integration.claude_frontmatter import (
     MAX_UNRECOGNIZED_SHOWN,
     check_claude_tools,
     claude_tools_messages,
     is_claude_tool,
 )
+from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.utils.diagnostics import (
+    CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_WARNING,
+    DiagnosticCollector,
+)
 
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.promise("req-tg-006", "P-OWN-claude-agent-tools-diagnostic"),
-]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("req-tg-006")]
 
 
 class TestIsClaudeTool:
@@ -24,6 +32,8 @@ class TestIsClaudeTool:
             "Bash",
             "Read",
             "Agent",
+            "TaskCreate",
+            "TaskUpdate",
             "mcp__github",
             "mcp__github__*",
             "mcp__github__get_issue",
@@ -90,4 +100,86 @@ class TestClaudeToolsMessages:
     def test_malformed_message(self):
         message, detail = claude_tools_messages(check_claude_tools({"tools": {"a": 1}}), "d.md")
         assert "could not be verified" in message
-        assert "Fix:" in message and detail == ""
+        assert detail.startswith("Fix:")
+
+
+def _make_package_info(pkg_dir: Path) -> PackageInfo:
+    package = APMPackage(name="test-pkg", version="1.0.0", package_path=pkg_dir)
+    ref = ResolvedReference(
+        original_ref="main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit="abc",
+        ref_name="main",
+    )
+    return PackageInfo(
+        package=package,
+        install_path=pkg_dir,
+        resolved_reference=ref,
+        installed_at="2024-01-01T00:00:00",
+    )
+
+
+class TestClaudeInstallEmitsDiagnostic:
+    """integrate_agents_for_target(claude) emits req-tg-006 diagnostics without altering the file."""
+
+    def setup_method(self):
+        self.project_root = Path(tempfile.mkdtemp())
+        self.integrator = AgentIntegrator()
+        # The claude target is detect_by_dir; create the marker so integration runs.
+        (self.project_root / ".claude").mkdir()
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.project_root, ignore_errors=True)
+
+    def _write_agent(self, frontmatter: str) -> Path:
+        pkg = self.project_root / "package"
+        agents_dir = pkg / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "demo.agent.md").write_text(f"---\n{frontmatter}\n---\n\n# Demo\n")
+        return pkg
+
+    def _run(self, frontmatter: str) -> DiagnosticCollector:
+        diagnostics = DiagnosticCollector()
+        result = self.integrator.integrate_agents_for_target(
+            KNOWN_TARGETS["claude"],
+            _make_package_info(self._write_agent(frontmatter)),
+            self.project_root,
+            diagnostics=diagnostics,
+        )
+        assert result.files_integrated == 1
+        return diagnostics
+
+    def test_foreign_tools_emit_lossy_diagnostic_and_keep_file_verbatim(self):
+        diagnostics = self._run("name: demo\ntools: [bash, view, edit]\n")
+        losses = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(losses) == 1
+        assert "test-pkg" in losses[0].package
+        assert "demo.agent.md" in losses[0].message and "bash, view, edit" in losses[0].message
+        assert losses[0].detail.startswith("Fix:")
+        deployed = (self.project_root / ".claude" / "agents" / "demo.md").read_text()
+        assert "tools: [bash, view, edit]" in deployed
+
+    def test_claude_tools_are_silent(self):
+        diagnostics = self._run("name: demo\ntools:\n  - Read\n  - Bash(git *)\n  - mcp__gh__*\n")
+        assert not diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION)
+        assert not [
+            d
+            for d in diagnostics.by_category().get(CATEGORY_WARNING, [])
+            if "Claude agent" in d.message
+        ]
+
+    def test_no_tools_field_is_silent(self):
+        diagnostics = self._run("name: demo\ndescription: d\n")
+        assert not diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION)
+
+    def test_malformed_tools_emit_warning_not_lossy(self):
+        diagnostics = self._run("name: demo\ntools:\n  Read: true\n")
+        assert not diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION)
+        warnings = [
+            d
+            for d in diagnostics.by_category().get(CATEGORY_WARNING, [])
+            if "Claude agent" in d.message
+        ]
+        assert len(warnings) == 1 and "could not be verified" in warnings[0].message

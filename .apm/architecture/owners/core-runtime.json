@@ -119,16 +119,10 @@
       "selectors": [
         "src/apm_cli/primitives/models.py",
         "src/apm_cli/primitives/parser.py",
-        "src/apm_cli/integration/agent_integrator.py"
+        "src/apm_cli/integration/agent_integrator.py",
+        "src/apm_cli/integration/claude_frontmatter.py"
       ],
       "guards": ["registry-delegation-user-invocable-resolution"]
-    },
-    {
-      "id": "claude-agent-tools-diagnostic",
-      "decision": "Which Claude agent tools allowlist entries resolve to a Claude Code tool, and the names-only req-tg-006 diagnostic emitted from every Claude agent write path when some do not (#5356)",
-      "owner": "integration/claude_frontmatter.py (is_claude_tool, check_claude_tools, claude_tools_messages, claude_unverified_message) consumed by AgentIntegrator._warn_claude_frontmatter from the claude_agent mapping and the .claude/agents auto-copy, including retained identical files",
-      "selectors": ["src/apm_cli/integration/claude_frontmatter.py"],
-      "guards": ["registry-delegation-claude-agent-tools-diagnostic"]
     },
     {
       "id": "cli-version-rendering",

@@ -7,9 +7,7 @@ See skill-strategy.md for the full architectural rationale (T5).
 
 from __future__ import annotations
 
-import functools
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,18 +26,14 @@ from apm_cli.install.primitive_classification import (
 )
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.integration.claude_frontmatter import (
-    check_claude_tools,
-    claude_tools_messages,
-    claude_unverified_message,
-)
+from apm_cli.integration.claude_frontmatter import check_claude_tools, claude_tools_messages
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
 from apm_cli.integration.write_seam import write_text_lf
 from apm_cli.primitives.models import resolve_user_invocable
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.yaml_io import load_yaml_str, read_frontmatter_block, yaml_to_str
+from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.cleanup import DeploymentEvidence
@@ -349,20 +343,6 @@ class AgentIntegrator(BaseIntegrator):
                 else:
                     rendered, links_resolved = self._render_copy_agent(source_file, target_path)
 
-            # A retained identical Claude agent (adopted or receipted unchanged)
-            # is still the file Claude Code will load, so its tools diagnostic
-            # must fire on reinstall too; planning, collision and kept-edit
-            # skips stay silent.
-            warn_claude = (
-                functools.partial(
-                    self._warn_claude_frontmatter,
-                    source_file,
-                    diagnostics,
-                    package_info.package.name,
-                )
-                if mapping.format_id == "claude_agent"
-                else None
-            )
             outcome = self._deploy_rendered_agent(
                 target_path,
                 source_file,
@@ -372,7 +352,6 @@ class AgentIntegrator(BaseIntegrator):
                 force=force,
                 diagnostics=diagnostics,
                 target_paths=target_paths,
-                on_identical=warn_claude,
             )
             if outcome == _ADOPTED:
                 files_adopted += 1
@@ -382,8 +361,8 @@ class AgentIntegrator(BaseIntegrator):
                 continue
             if mapping.format_id == "opencode_agent":
                 self._warn_opencode_frontmatter(source_file, diagnostics, package_info.package.name)
-            if warn_claude is not None:
-                warn_claude()
+            if mapping.format_id == "claude_agent":
+                self._warn_claude_frontmatter(source_file, diagnostics, package_info.package.name)
             total_links_resolved += links_resolved
             files_integrated += 1
 
@@ -481,7 +460,6 @@ class AgentIntegrator(BaseIntegrator):
         force: bool,
         diagnostics,
         target_paths: list,
-        on_identical: Callable[[], None] | None = None,
     ) -> str:
         """Adopt, skip, or write an already-rendered agent (render, then adopt).
 
@@ -504,7 +482,6 @@ class AgentIntegrator(BaseIntegrator):
             diagnostics,
             target_paths,
             expected_content=rendered,
-            on_identical=on_identical,
         )
         if skip:
             return _ADOPTED if adopted else _SKIPPED
@@ -566,57 +543,36 @@ class AgentIntegrator(BaseIntegrator):
         The file is copied verbatim; Claude Code resolves ``tools`` against
         its own names, so entries written for another harness match nothing
         and the agent ends up with narrower (possibly zero) tool access
-        (issue #5356). Frontmatter that cannot be parsed into a mapping gets
-        a default-visible "could not be verified" warning instead, like the
-        Codex path. Names-only: the message names the agent, the field and
+        (issue #5356). Names-only: the message names the agent, the field and
         the unresolvable entries (bounded), never other frontmatter values.
         """
-        if diagnostics is None:
+        if diagnostics is None or source.is_symlink():
             return
         try:
-            # BOM-stripped, bounded read of the fenced block (never a link or FIFO).
-            block = read_frontmatter_block(source)
-        except (OSError, UnicodeError):
+            content = source.read_text(encoding="utf-8")
+        except OSError:
             return
-        fm_match = AgentIntegrator._FRONTMATTER_RE.match(block)
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if not fm_match:
             return
-        display_name = printable_ascii_text(source.name)
-        display_package = printable_ascii_text(package_name)
         try:
-            fm = load_yaml_str(fm_match.group(1))
+            fm = load_yaml_str(fm_match.group(1)) or {}
         except yaml.YAMLError:
-            diagnostics.warn(
-                message=claude_unverified_message(
-                    display_name,
-                    "invalid YAML frontmatter was ignored",
-                    "repair the frontmatter and reinstall the package",
-                ),
-                package=display_package,
-            )
-            return
-        if fm is None:
             return
         if not isinstance(fm, dict):
-            diagnostics.warn(
-                message=claude_unverified_message(
-                    display_name,
-                    "frontmatter is not a YAML mapping",
-                    "write the frontmatter as key: value pairs and reinstall the package",
-                ),
-                package=display_package,
-            )
             return
         check = check_claude_tools(fm)
-        rendered = claude_tools_messages(check, display_name)
+        rendered = claude_tools_messages(check, printable_ascii_text(source.name))
         if rendered is None:
             return
         message, detail = rendered
         if check.malformed:
-            diagnostics.warn(message=message, package=display_package)
+            diagnostics.warn(
+                message=message, package=printable_ascii_text(package_name), detail=detail
+            )
         else:
             diagnostics.lossy_agent_compilation(
-                message=message, package=display_package, detail=detail
+                message=message, package=printable_ascii_text(package_name), detail=detail
             )
 
     # ------------------------------------------------------------------
@@ -1243,12 +1199,6 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 claude_rendered, _ = self._render_copy_agent(source_file, claude_path)
-                warn_claude = functools.partial(
-                    self._warn_claude_frontmatter,
-                    source_file,
-                    diagnostics,
-                    package_info.package.name,
-                )
                 claude_outcome = self._deploy_rendered_agent(
                     claude_path,
                     source_file,
@@ -1258,12 +1208,13 @@ class AgentIntegrator(BaseIntegrator):
                     force=force,
                     diagnostics=diagnostics,
                     target_paths=target_paths,
-                    on_identical=warn_claude,
                 )
                 if claude_outcome == _ADOPTED:
                     files_adopted += 1
-                elif claude_outcome == _WRITTEN:
-                    warn_claude()
+                elif claude_outcome != _SKIPPED:
+                    self._warn_claude_frontmatter(
+                        source_file, diagnostics, package_info.package.name
+                    )
 
             if cursor_agents_dir:
                 cursor_target = KNOWN_TARGETS["cursor"]
