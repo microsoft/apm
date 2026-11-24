@@ -38,9 +38,11 @@ dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
 A package removed from `apm.yml` by hand that another installed package still
-declares is kept; the next `apm install` records it as transitive. If a
-retained package's manifest cannot be read, prune keeps such packages rather
-than guess.
+declares is kept; the next `apm install` records it as transitive. A
+transitive local package that no remaining package declares is orphaned: its
+lock entry goes, and its deployed files go only where APM can prove it wrote
+them. If a retained package's manifest cannot be read, prune keeps such
+packages rather than guess, and names each one it kept.
 
 Switching a whole-repository dependency such as `owner/repo` to `path:`
 dependencies on the same repository needs no prune: the next `apm install` or

@@ -236,6 +236,56 @@ def plan_local_reanchor(
     )
 
 
+def reparent_rows(
+    lockfile,
+    walk,
+    keys,
+    renames: dict[str, str] | None = None,
+    *,
+    skip=frozenset(),
+    locked_identity: bool = False,
+) -> tuple[dict[str, tuple[str, str | None]], dict[str, str | None]]:
+    """The parent install records for each of *keys*, from a complete walk.
+
+    Returns ``(declaring_parents, resolved_by)`` for :class:`LocalReanchorPlan`:
+    a local row takes the first shallowest declaring edge, and every row the
+    nearest parent, ties to the lowest key as install ranks them (#4833).
+    ``apm prune`` re-parents a survivor whose recorded parent it removes (#4989);
+    with *locked_identity* a parent that keeps its lock row is named by that
+    row, so a parent reached through a symlink alias names its own row.
+    """
+    from ...deps.lockfile import lockfile_parent_identity
+
+    renames = renames or {}
+    declaring_parents: dict[str, tuple[str, str | None]] = {}
+    resolved_by: dict[str, str | None] = {}
+    for key in keys:
+        nearest = _nearest_parents(walk, key)
+        if not nearest:
+            continue
+        edges = walk.declaring_edges[key]
+        # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
+        parent_key = min(nearest, key=lambda parent: renames.get(parent, parent))
+        resolved_by[key] = edges[parent_key][0]
+        parent_row = lockfile.dependencies.get(parent_key) if locked_identity else None
+        if parent_row is not None:
+            resolved_by[key] = lockfile_parent_identity(parent_row, lockfile.replacements)
+        row = lockfile.get_dependency(key)
+        # A legacy local row (no declaring_parent) re-parented by prune takes
+        # the new parent's local_path too, or it would resolve elsewhere.
+        if (
+            row is not None
+            and row.source == "local"
+            and key not in skip
+            and (row.declaring_parent or locked_identity)
+        ):
+            # A legacy row resolves local_path against resolved_by, so it takes
+            # that parent's edge; others keep install's first shallowest edge.
+            first = nearest[0] if row.declaring_parent else parent_key
+            declaring_parents[key] = (renames.get(first, first), edges[first][1])
+    return declaring_parents, resolved_by
+
+
 def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> tuple:
     """Moving copies whose hash-excluded files (.git/, __pycache__/) differ from source.
 
@@ -621,6 +671,17 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
 # -- uninstall command steps (#4889) ----------------------------------------
 
 
+def _manifest_declares_replacements(apm_yml_path) -> bool:
+    """Whether apm.yml declares a ``replace`` block; unreadable counts as declared."""
+    from ...utils.yaml_io import load_yaml
+
+    try:
+        data = load_yaml(Path(apm_yml_path))
+    except Exception:
+        return True
+    return bool(data.get("replace")) if isinstance(data, dict) else False
+
+
 def _refuse_unverifiable_local_survivors(
     lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False, quiet: bool = False
 ) -> list:
@@ -657,9 +718,11 @@ def _refuse_unverifiable_local_survivors(
 
     # Replacement rules can turn a remote survivor into a local source; the
     # offline check does not evaluate them, so it cannot prove anything unused.
+    # apm.yml's rules count too: the lock may not record them yet (#5031).
     if (
         not unresolved
         and not lockfile.replacements
+        and not _manifest_declares_replacements(apm_yml_path)
         and not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local))
     ):
         return []
