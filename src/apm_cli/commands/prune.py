@@ -437,6 +437,7 @@ def prune(ctx, dry_run):
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
+        failed_keys: set[str] = set()
         compile_inputs = snapshot_compile_inputs(
             project_root, package_target_selection(apm_package), apm_modules_dir
         )
@@ -455,9 +456,11 @@ def prune(ctx, dry_run):
                 deleted_pkg_paths.append(pkg_path)
             except Exception as e:
                 failed_count += 1
+                failed_keys.update(decision.path_keys[org_repo_name])
                 logger.error(f"Failed to remove {org_repo_name}: {e}")
 
         BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
+        pruned_keys = _keep_failed_chains(decision, lockfile, pruned_keys, failed_keys)
 
         if lockfile is not None:
             cleanup_claims = {
@@ -622,6 +625,20 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _keep_failed_chains(
+    decision, lockfile, pruned_keys: list[str], failed_keys: set[str]
+) -> list[str]:
+    """The pruned keys minus the parent chain of every row whose removal failed (#5238).
+
+    A failed row keeps its pruned parents' lock rows, so the retry can still
+    read the graph and finish instead of retaining the row forever.
+    """
+    if not failed_keys or lockfile is None:
+        return pruned_keys
+    pinned = decision.failed_removal_chains(lockfile, pruned_keys, failed_keys)
+    return [key for key in pruned_keys if key not in pinned]
 
 
 def _cleanup_stale_server_configs(
