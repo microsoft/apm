@@ -29,6 +29,7 @@ so a checkout that changes after verification is never trusted.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import re
 import stat
@@ -625,6 +626,54 @@ def require_verified_copy(
     missing = sorted(rel for rel in manifest.files if rel.startswith(under) and rel not in copied)
     if missing:
         raise CheckoutVerificationError(f"{missing[0]} is missing from the copy")
+
+
+_WRITE_FLAGS = (
+    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+)
+
+
+def materialize_verified_copy(
+    dest: Path,
+    repo: Path,
+    sha: str | None,
+    subdir: str = "",
+    env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Copy *repo*'s verified files (its *subdir*) into the empty directory *dest* in one pass.
+
+    Each source file is read once, as a regular file only, and its bytes are
+    checked against the verification record of *repo* before they are written;
+    the written bytes are those same checked bytes, into new inodes created
+    with ``O_EXCL`` (and ``O_NOFOLLOW``), so the copy needs no re-read. Returns
+    ``{dest-relative POSIX path: SHA-256 hex}`` of what was written.
+    """
+    prefix = subdir.strip("/")
+    manifest = _manifest(repo, sha, [prefix] if prefix else None, env)
+    under = f"{prefix}/" if prefix else ""
+    root = os.fspath(dest)
+    repo_root = os.fspath(repo)
+    made: set[str] = {""}
+    digests: dict[str, str] = {}
+    for source in sorted(manifest.files):
+        if not source.startswith(under):
+            continue
+        rel = source[len(under) :]
+        parts = rel.split("/")
+        if any(_names_git_dir(part) for part in parts):
+            raise CheckoutVerificationError("the copy would hold a .git entry")
+        data, info = _read_regular(source, Path(repo_root, *source.split("/")))
+        _check_bytes(manifest, source, data, info)
+        parent = "/".join(parts[:-1])
+        if parent not in made:
+            os.makedirs(os.path.join(root, *parts[:-1]), exist_ok=True)
+            made.add(parent)
+        fd = os.open(os.path.join(root, *parts), _WRITE_FLAGS, stat.S_IMODE(info.st_mode))
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.utime(os.path.join(root, *parts), ns=(info.st_atime_ns, info.st_mtime_ns))
+        digests[rel] = hashlib.sha256(data).hexdigest()
+    return digests
 
 
 def read_verified_file(
