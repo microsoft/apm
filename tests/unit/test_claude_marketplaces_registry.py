@@ -487,6 +487,25 @@ def test_a_fifo_claude_config_counts_as_untrusted_without_blocking(
     assert len(warnings) == 1 and _HINT in warnings[0]
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+@pytest.mark.parametrize("pipe", ["registry", "receipt"])
+def test_a_fifo_registry_or_receipt_never_blocks_install_or_uninstall(
+    env: Path, tmp_path: Path, pipe: str
+) -> None:
+    path = _registry(tmp_path) if pipe == "registry" else _receipt(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(path)
+
+    install_warnings = _sync(env)
+    uninstall_warnings = _sync(env, declared=False)
+
+    assert stat.S_ISFIFO(path.lstat().st_mode)
+    assert len(install_warnings) == 1 and "cannot be read" in install_warnings[0]
+    # No receipt was recorded beside a FIFO registry, so uninstall has nothing to remove.
+    assert len(uninstall_warnings) == (pipe == "receipt")
+    assert all("cannot be read" in warning for warning in uninstall_warnings)
+
+
 @pytest.mark.windows_compat
 def test_a_forward_slash_trust_key_is_trusted(env: Path, tmp_path: Path) -> None:
     """Claude Code keys projects with forward slashes on Windows."""
