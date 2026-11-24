@@ -1,0 +1,15 @@
+{
+  "issue": 5291,
+  "fixed_in": "Unreleased",
+  "summary": "A refused apm uninstall <bundle> (a user hook still runs a bundle script) had already rewritten apm_modules/.local-bundle-pending.json with the resume note. The in-use refusal now runs before the note is written, so a refused uninstall writes nothing; the note is still written before any hook or script is removed, so an interrupted retirement resumes.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_a_refused_bundle_uninstall_leaves_the_pending_record_untouched",
+    "tests/integration/test_local_bundle_uninstall_resume.py::test_an_uninstall_interrupted_after_its_note_resumes_on_retry"
+  ]
+}

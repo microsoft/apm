@@ -3217,6 +3217,7 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_claude_agent_tools_that_cannot_resolve",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ],
       "conformance_class": "consumer",
@@ -3224,9 +3225,10 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_claude_agent_tools_that_cannot_resolve",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ]
     },

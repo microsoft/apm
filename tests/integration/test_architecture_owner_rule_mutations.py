@@ -912,8 +912,10 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/hook_integrator.py",
-            '                write_seam.write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
-            '                json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
+            "                with provenance.recorded_config_write(json_path):\n"
+            '                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
+            "                with provenance.recorded_config_write(json_path):\n"
+            '                    json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
             id="raw-write-text",
         ),
         pytest.param(
@@ -1450,6 +1452,21 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "src/apm_cli/install/local_bundle_hooks.py",
             "def _retire_bundle_hooks(",
             'def _marker(slug):\n    return "local-bundle::" + slug\n\n\ndef _retire_bundle_hooks(',
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_markdown_hooks.py",
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+            'def _hand_record(files):\n    return {"local-bundle-markdown-hooks": files}\n\n\n'
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_markdown_hooks.py",
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+            "def _hand_write(root):\n"
+            '    (root / "apm-bundle-markdown-hooks.json").write_text("{}")\n\n\n'
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
         ),
         (
             "install-deployment-bundle-user-scope-root",
@@ -2901,6 +2918,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="        if None in keys:\n",
         new="        if not keys:\n",
         intent="A local-bundle hook with no recorded approval key is admitted instead of retired.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-local-reparent-rule",
+        rule_id="install-deployment-local-reparent-rule",
+        path="src/apm_cli/commands/uninstall/local_reanchor.py",
+        old="        edges = walk.declaring_edges[key]\n",
+        new="        edges = walk.declaring_edges[key]\n        ranked = min(nearest, key=str)\n",
+        intent="Uninstall ranks a re-parented row's parent outside reparent_rows (#5161).",
     ),
     MutationCase(
         guard_id="install-deployment-lock-parent-placement",

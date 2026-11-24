@@ -2026,6 +2026,9 @@ def _install_apm_packages(ctx, outcome):
             raise render_apm_dependency_failure(e, logger, verbose=ctx.verbose) from e
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
+        from apm_cli.native_plugins.claude_marketplaces import release_undeclared_marketplaces
+
+        release_undeclared_marketplaces(_cli_project_root, ctx.scope, logger)  # #5258
 
     service_result = reconcile_services.settle(install_result)
     ctx.target_decision = service_result.target_decision

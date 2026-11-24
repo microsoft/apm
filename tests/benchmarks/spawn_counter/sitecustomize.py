@@ -141,6 +141,11 @@ if _LOG:
                 _bump(_fs, key)
                 return real(*a, **k)
 
+            # Keep platform capability checks (``f in os.supports_dir_fd``) true.
+            for name in ("supports_dir_fd", "supports_fd", "supports_follow_symlinks"):
+                capabilities = getattr(os, name, None)
+                if capabilities is not None and real in capabilities:
+                    capabilities.add(wrapper)
             setattr(module, attr, wrapper)
 
         _counted(os.path, "realpath", "realpath_calls")
@@ -175,3 +180,42 @@ if _LOG:
 
         for _name in ("sha256", "sha1", "sha512", "md5"):
             setattr(hashlib, _name, _hash_factory(getattr(hashlib, _name)))
+
+        _real_new = hashlib.new
+
+        def _new(name, *a, **k):
+            # ``hashlib.file_digest`` also builds through the module's ``new``.
+            _bump(_fs, "hash_objects")
+            data = a[0] if a else k.get("data", k.get("string", b""))
+            if data:
+                _bump(_fs, "hashed_bytes", len(data))
+            return _Hash(_real_new(name, *a, **k))
+
+        hashlib.new = _new
+
+
+def _chain_next_sitecustomize():
+    """Run the next ``sitecustomize`` on ``sys.path`` (e.g. a test network guard).
+
+    Prepending this directory shadows it, and the counters must never drop
+    the isolation the measured environment installs.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    found_self = False
+    for entry in sys.path:
+        directory = os.path.abspath(entry or os.curdir)
+        if directory == here:
+            found_self = True
+            continue
+        candidate = os.path.join(directory, "sitecustomize.py")
+        if found_self and os.path.isfile(candidate):
+            import importlib.util
+
+            spec = importlib.util.spec_from_file_location("_chained_sitecustomize", candidate)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            return
+
+
+_chain_next_sitecustomize()

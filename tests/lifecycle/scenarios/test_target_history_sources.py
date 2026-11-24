@@ -170,6 +170,7 @@ _MARKET_UNITS = {
 }
 _CATALOG_CACHE = (
     ".apm/cache/marketplace/version-pins.json",
+    ".apm/cache/marketplace/version-pins.lock",
     *(
         f".apm/cache/marketplace/{name}{suffix}"
         for name, _package in _MARKETPLACES.values()

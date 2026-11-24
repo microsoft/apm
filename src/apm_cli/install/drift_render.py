@@ -25,6 +25,7 @@ from apm_cli.install.local_edits import (
     unedited_modified_paths,
 )
 from apm_cli.utils.console import STATUS_SYMBOLS
+from apm_cli.utils.diagnostics import printable_ascii_text
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -133,9 +134,10 @@ def render_drift_text(
             suffix = f"  [{item.package}]" if item.package else ""
             if item.owned_entries_only:
                 suffix += f" ({RETIRED_HOOK_ENTRIES_CAUSE})"
-            lines.append(f"    - {item.path}{suffix}")
+            # A file name may hold a newline or non-ASCII: one escaped line each (#5279).
+            lines.append(printable_ascii_text(f"    - {item.path}{suffix}"))
             if verbose and item.inline_diff:
-                lines.append(f"      {item.inline_diff}")
+                lines.append(printable_ascii_text(f"      {item.inline_diff}"))
         lines.append("")
 
     unedited = unedited_modified_paths(findings, lockfile, project_root)

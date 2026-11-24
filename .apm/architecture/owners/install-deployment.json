@@ -24,7 +24,7 @@
       "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
       "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner); a still-needed local root re-keys through commands/uninstall/local_reanchor.py from the same walk (#4889), and a path the re-key re-ranks takes the writer install's order selects, proven by an offline audit replay or refused (commands/uninstall/local_reanchor_writers.py, #5048)",
       "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py", "src/apm_cli/commands/uninstall/local_reanchor.py", "src/apm_cli/commands/uninstall/local_reanchor_writers.py"],
-      "guards": ["install-deployment-orphan-selection", "install-deployment-reanchor-writer-prediction"]
+      "guards": ["install-deployment-orphan-selection", "install-deployment-reanchor-writer-prediction", "install-deployment-local-reparent-rule"]
     },
     {
       "id": "immutable-dependency-requirements",
@@ -494,10 +494,13 @@
     {
       "id": "local-bundle-hook-trust",
       "decision": "Whether a deployed local bundle's hooks and canvas extensions are still admitted by the approval key that admitted them, under the current project, user and org trust (#4027)",
-      "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; install/local_bundle_canvas.py gate_bundle_canvas gates a bundle's canvas extensions and retires them with this owner's helpers; 'apm uninstall <bundle>' selects a bundle in commands/uninstall/local_bundle.py and retires its deployed hooks through retire_bundle_hooks (#3700); consumers: commands/install.py, commands/update.py, commands/prune.py, commands/uninstall/local_bundle.py, policy/ci_checks.py",
+      "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); the commands a hook runs and whether one runs a bundle script are install/hook_script_refs.py (hook_commands, runs_script, #5106); whether a hook runs a bundle script through its cwd is install/local_bundle_hook_cwd.py (runs_through_cwd, #5281); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; install/local_bundle_canvas.py gate_bundle_canvas gates a bundle's canvas extensions and retires them with this owner's helpers; 'apm uninstall <bundle>' selects a bundle in commands/uninstall/local_bundle.py and retires its deployed hooks through retire_bundle_hooks (#3700); consumers: commands/install.py, commands/update.py, commands/prune.py, commands/uninstall/local_bundle.py, policy/ci_checks.py",
       "selectors": [
         "src/apm_cli/install/local_bundle_hook_trust.py",
+        "src/apm_cli/install/local_bundle_hook_cwd.py",
+        "src/apm_cli/install/local_bundle_hook_states.py",
         "src/apm_cli/install/hook_script_refs.py",
+        "src/apm_cli/install/local_bundle_markdown_hooks.py",
         "src/apm_cli/install/local_bundle_canvas.py",
         "src/apm_cli/commands/uninstall/local_bundle.py"
       ],
@@ -509,8 +512,8 @@
     {
       "id": "claude-agents-md-instruction-routing",
       "decision": "Which Claude project instructions load from AGENTS.md instead of .claude/rules/, and which hand-authored root files block that route (#3939)",
-      "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
-      "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py"],
+      "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787; uncompiled_routed_instructions names routed instructions no compiled file carries, for the install warning and the audit claude-instructions-compiled check in policy/claude_instructions_check.py #5344); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
+      "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py", "src/apm_cli/policy/claude_instructions_check.py"],
       "guards": ["install-deployment-claude-agents-md-routing"]
     },
     {
