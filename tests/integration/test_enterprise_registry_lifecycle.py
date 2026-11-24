@@ -170,14 +170,15 @@ class EnterpriseRegistryWorld:
         cwd: Path,
         *args: str,
         step: str,
-        allowed: str = REGISTRY_HOST,
+        allowed: str | frozenset[str] = REGISTRY_HOST,
         expect_failure: bool = False,
         token_hosts: frozenset[str] | None = None,
     ) -> CommandResult:
         """Run one networked step; egress is judged before the exit code."""
         proxy.clear()
         result = self.run(env, cwd, *args, step=step, expect=None)
-        foreign = [(o.host, o.method, o.path) for o in proxy.observations if o.host != allowed]
+        hosts = {allowed} if isinstance(allowed, str) else allowed
+        foreign = [(o.host, o.method, o.path) for o in proxy.observations if o.host not in hosts]
         assert foreign == [], f"step={step} reached hosts other than {allowed}: {foreign}"
         assert self.producer_git == [], f"step={step} contacted the producer Git host"
         if token_hosts is not None:
@@ -400,3 +401,42 @@ def test_employee_registers_and_browses_public_https_catalog(
     assert registered["marketplaces"] == [{"name": "corp-catalog", "url": CATALOG_URL, "path": ""}]
     assert not (project / "apm.yml").exists()
     assert not (project / "apm.lock.yaml").exists()
+
+
+@pytest.mark.parametrize("selector", ["catalog-selector", "manifest-selector"])
+def test_catalog_declaration_installs_under_a_default_registry(
+    tmp_path: Path, apm_binary_path: Path, selector: str
+) -> None:
+    """A {name, marketplace} entry resolves through its catalog when
+    ``registries.default`` is set; the default never claims it (#5256)."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    widget = world.catalog["plugins"][0]
+    widget.update(registry=REGISTRY_NAME, version=VERSION)
+    declaration: dict[str, str] = {"name": "widget", "marketplace": "corp-catalog"}
+    if selector == "manifest-selector":
+        declaration["version"] = f"^{VERSION}"
+    with world.serve() as proxy:
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer")
+        consumer["targets"] = ["copilot"]
+        consumer["dependencies"] = {"apm": [declaration]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+        world.egress_step(
+            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
+        )
+        installed = world.egress_step(
+            proxy,
+            env,
+            project,
+            *INSTALL,
+            step="install",
+            allowed=frozenset({CATALOG_HOST, REGISTRY_HOST}),
+        )
+        assert proxy.hosts_receiving(TOKEN) == {REGISTRY_HOST}, _evidence(installed, proxy)
+    assert "_marketplace/" not in installed.stdout + installed.stderr, _evidence(installed)
+    assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == [declaration]
+    _assert_registry_state(project, artifacts, world.registry)
