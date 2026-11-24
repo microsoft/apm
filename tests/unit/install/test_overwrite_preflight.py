@@ -150,7 +150,7 @@ def test_a_pre_existing_gated_file_still_runs_the_planning_pass(
 
     assert "copilot" in ctx.planner.planned
     assert ctx.overwrite_preflight_refused is True
-    assert "Kept review.prompt.md" in _refusal_output(ctx, capsys)
+    assert "Kept .github/prompts/review.prompt.md" in _refusal_output(ctx, capsys)
 
 
 def test_empty_gated_dest_dirs_skip_the_planning_pass(
@@ -185,4 +185,4 @@ def test_the_proof_follows_the_package_targets_not_the_projects(
     found.write_text("mine\n", encoding="utf-8")
     planned = _gate(tmp_path, ["claude"], found)
     assert "claude" in planned.planner.planned
-    assert "Kept reviewer.md" in _refusal_output(planned, capsys)
+    assert "Kept .claude/agents/reviewer.md" in _refusal_output(planned, capsys)
