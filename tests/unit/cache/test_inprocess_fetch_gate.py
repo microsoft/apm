@@ -330,6 +330,69 @@ def test_the_header_is_sent_per_request_and_never_on_the_session(monkeypatch) ->
     assert "Authorization" not in sent["session"].headers
 
 
+@pytest.mark.parametrize("credential", [None, "Authorization: Basic eA=="])
+def test_the_caps_get_sends_the_managed_header_only_per_request(monkeypatch, credential) -> None:
+    """#5377 x #5353: the sparse caps GET carries A' exactly as _post does, or nothing."""
+    sent: dict = {}
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        sent.update(kwargs, session=session_arg, method=method, url=url)
+        yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
+
+    import certifi
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+
+    with pytest.raises(fetch._Refuse, match="auth challenge"):
+        fetch._caps_get(
+            "https://github.com/o/r/git-upload-pack",
+            None,
+            ("file", certifi.where()),
+            b"",
+            credential,
+        )
+
+    refs = "https://github.com/o/r/info/refs?service=git-upload-pack"
+    assert (sent["method"], sent["url"], sent["base_url"]) == ("GET", refs, refs)
+    assert sent["max_hops"] == 0
+    assert sent["ambient_credentials"] is False
+    assert sent["headers"].get("Authorization") == (credential and "Basic eA==")
+    assert "Authorization" not in sent["session"].headers
+
+
+def test_a_sparse_fetch_sends_the_managed_header_on_every_request(monkeypatch, tmp_path) -> None:
+    """The gate sees the env without the header; the caps GET and the pack POSTs carry it."""
+    import certifi
+
+    gated: list = []
+    calls: list = []
+
+    def fake_gate(url, env):
+        gated.append(dict(env))
+        return "https://github.com/o/r/git-upload-pack", None, ("file", certifi.where())
+
+    def fake_admitted(upload_url, proxy, trust, body, credential=None, *, post=None):
+        calls.append((post, credential))
+        if post is fetch._caps_get:
+            return b"0000fetch=shallow filter\n"
+        raise fetch._Refuse("stop after the trees request")
+
+    monkeypatch.setattr(fetch, "_gate", fake_gate)
+    monkeypatch.setattr(fetch, "_admitted_post", fake_admitted)
+    env = _managed_env()
+
+    assert (
+        fetch.fetch_sparse_worktree("https://github.com/o/r", "a" * 40, tmp_path, env, (), ("pkg",))
+        is None
+    )
+    (header,) = {credential for _, credential in calls}
+    assert header is not None and header.startswith("Authorization: Basic ")
+    assert [post for post, _ in calls] == [fetch._caps_get, None]
+    assert fetch._MANAGED_INTENT not in gated[0]
+    assert not any("Authorization" in value for value in gated[0].values())
+
+
 def test_a_carriage_return_in_an_attributes_record_refuses(tmp_path: Path) -> None:
     """git splits records on LF and reads CR as whitespace: ``eol=crlf`` would apply."""
     attributes = tmp_path / "attributes"

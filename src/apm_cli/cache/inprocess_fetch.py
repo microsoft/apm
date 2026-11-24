@@ -1125,17 +1125,35 @@ def _wants_body(oids: list[str], *, trees_only: bool) -> bytes:
 _caps_lock = threading.Lock()
 
 
-def _caps_get(upload_url: str, proxy: str | None, trust: tuple[str, str], _body: bytes) -> bytes:
-    """GET the protocol-v2 capability advertisement for *upload_url*'s repository."""
+def _caps_get(
+    upload_url: str,
+    proxy: str | None,
+    trust: tuple[str, str],
+    _body: bytes,
+    credential: str | None = None,
+) -> bytes:
+    """GET the protocol-v2 capability advertisement for *upload_url*'s repository.
+
+    A' (#5353): APM's managed header goes per request, exact origin, no redirect
+    hop, exactly as :func:`_post` sends it.
+    """
     from ..utils.http_credentials import origin_bounded_request
 
     refs_url = upload_url.removesuffix("/git-upload-pack") + "/info/refs?service=git-upload-pack"
+    headers = {"Git-Protocol": "version=2"}
+    if credential is not None:
+        from ..utils.http_credentials import (
+            credential_header_value,
+            per_request_credential_headers,
+        )
+
+        headers.update(per_request_credential_headers(credential_header_value(credential)))
     with origin_bounded_request(
         _session(trust),
         "GET",
         refs_url,
         base_url=refs_url,
-        headers={"Git-Protocol": "version=2"},
+        headers=headers,
         max_hops=0,
         ambient_credentials=False,
         proxies={"https": proxy} if proxy else {},
@@ -1146,7 +1164,9 @@ def _caps_get(upload_url: str, proxy: str | None, trust: tuple[str, str], _body:
         return response.content[:65536]
 
 
-def _fetch_caps(upload_url: str, proxy: str | None, trust: tuple[str, str]) -> frozenset[str]:
+def _fetch_caps(
+    upload_url: str, proxy: str | None, trust: tuple[str, str], credential: str | None = None
+) -> frozenset[str]:
     """S1: the ``fetch=`` features the server advertises, one GET per repository per command.
 
     The GET goes through :func:`_admitted_post`'s first-answer gate and breaker, and
@@ -1159,7 +1179,7 @@ def _fetch_caps(upload_url: str, proxy: str | None, trust: tuple[str, str]) -> f
     with _caps_lock:
         if memo is not None and upload_url in memo:
             return memo[upload_url]
-        body = _admitted_post(upload_url, proxy, trust, b"", post=_caps_get)
+        body = _admitted_post(upload_url, proxy, trust, b"", credential, post=_caps_get)
         features: frozenset[str] = frozenset()
         for line in body.split(b"\n"):
             text = line[4:].decode("ascii", "replace").strip() if len(line) >= 4 else ""
@@ -1396,21 +1416,25 @@ def fetch_sparse_worktree(
     if _rate_limited():
         return None
     try:
-        upload_url, proxy, trust = _gate(url, env if env is not None else os.environ)
-        features = _fetch_caps(upload_url, proxy, trust)
+        credential, env = _split_managed_auth(env if env is not None else os.environ)
+        upload_url, proxy, trust = _gate(url, env)
+        features = _fetch_caps(upload_url, proxy, trust, credential)
         if "filter" not in features or "shallow" not in features:
             raise _Refuse("server does not advertise fetch filter and shallow")
-        body = _admitted_post(upload_url, proxy, trust, _wants_body([sha], trees_only=True))
+        trees_body = _wants_body([sha], trees_only=True)
+        body = _admitted_post(upload_url, proxy, trust, trees_body, credential)
         objects = parse_pack(_pack_from_response(body))
         files, trees = _sparse_plan(objects, sha, cones)
         objects = {oid: objects[oid] for oid in trees}
         wanted = sorted({oid for _, oid, _ in files})
         if wanted:
-            body = _admitted_post(upload_url, proxy, trust, _wants_body(wanted, trees_only=False))
+            blobs_body = _wants_body(wanted, trees_only=False)
+            body = _admitted_post(upload_url, proxy, trust, blobs_body, credential)
             blobs = parse_pack(_pack_from_response(body))
             if set(blobs) != set(wanted) or any(kind != "blob" for kind, _ in blobs.values()):
                 raise _Refuse("blob response differs from the wanted set")
             objects.update(blobs)
+        del credential
         if not _cone_attributes_ok(objects, sha, files):
             raise _Refuse("an in-cone .gitattributes may change checkout bytes")
         root = str(staged)
