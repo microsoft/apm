@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.bak
+*.v1bak
+report.html
+runs/
+art/

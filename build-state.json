@@ -1,0 +1,11 @@
+{
+ "srcs": {
+  "install": "final",
+  "auth": "final",
+  "lifecycle": "final",
+  "compile": "final",
+  "pack": "final"
+ },
+ "new": "deadbeef",
+ "final_rows": 162
+}
