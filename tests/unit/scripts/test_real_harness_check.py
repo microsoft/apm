@@ -72,19 +72,31 @@ def test_committed_expectations_name_only_known_cells() -> None:
     assert {row["verdict"] for row in expected.values()} <= {"LOADS", "PARTIAL", "DOES NOT LOAD"}
 
 
+TOKEN = "github_pat_" + "A1b2C3d4E5" * 8 + "xyz"
+
+
+def _wrapped(encoded: bytes) -> str:
+    text = encoded.decode()
+    return "\n".join(text[i : i + 76] for i in range(0, len(text), 76))
+
+
 @pytest.mark.parametrize(
     "leak",
     [
-        "TOKEN123abc",
-        base64.b64encode(b"TOKEN123abc").decode(),
-        base64.b64encode(b"x-access-token:TOKEN123abc").decode(),
+        TOKEN,
+        base64.b64encode(TOKEN.encode()).decode(),
+        base64.b64encode(f"x-access-token:{TOKEN}".encode()).decode(),
+        _wrapped(base64.b64encode(f"x-access-token:{TOKEN}".encode())),
+        base64.b64encode(f"Bearer {TOKEN}".encode()).decode(),
+        base64.b64encode(f"user:{TOKEN}".encode()).decode(),
     ],
+    ids=["raw", "base64", "basic-auth", "wrapped-76", "offset-1", "offset-2"],
 )
 def test_scan_finds_the_token_and_its_base64_forms(tmp_path: Path, leak: str) -> None:
     (tmp_path / "clean.log").write_text("nothing here", encoding="utf-8")
     (tmp_path / "nested").mkdir()
     (tmp_path / "nested" / "leak.log").write_text(f"auth: {leak}\n", encoding="utf-8")
-    assert probe.scan([tmp_path], "TOKEN123abc") == [tmp_path / "nested" / "leak.log"]
+    assert probe.scan([tmp_path], TOKEN) == [tmp_path / "nested" / "leak.log"]
 
 
 def test_scan_without_a_token_finds_nothing(tmp_path: Path) -> None:

@@ -722,26 +722,40 @@ def summarize(out: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def secret_needles(token: str) -> list[bytes]:
-    """The token as written, and its base64 forms (bare and as a basic-auth pair)."""
+def secret_needles(token: str) -> tuple[list[bytes], list[bytes]]:
+    """The token as written, and its base64 forms at every byte alignment.
+
+    A token inside a longer base64 stream ("Bearer <t>", "<user>:<t>") encodes
+    differently depending on its offset modulo 3. For each offset, encode
+    ``NUL * offset + text`` and keep only the characters the text alone
+    determines: drop the leading ones mixed with the prefix and the trailing
+    ones mixed with whatever follows. Returns (raw needles, base64 needles).
+    """
     if not token:
-        return []
-    needles = [token.encode()]
-    for plain in (token, f"x-access-token:{token}"):
-        encoded = base64.b64encode(plain.encode()).rstrip(b"=")
-        needles.append(encoded)
-    return needles
+        return [], []
+    encoded = []
+    for text in (token, f"x-access-token:{token}"):
+        for offset, lead in ((0, 0), (1, 2), (2, 3)):
+            data = b"\0" * offset + text.encode()
+            full = base64.b64encode(data)[: (len(data) // 3) * 4]
+            encoded.append(full[lead:])
+    return [token.encode()], encoded
 
 
 def scan(paths: list[Path], token: str) -> list[Path]:
-    """Files under ``paths`` that contain the token in any form (never printed)."""
-    needles = secret_needles(token)
+    """Files under ``paths`` that contain the token in any form (never printed).
+
+    Base64 needles are also matched with line breaks removed, so a wrapped
+    (for example 76-column) base64 block cannot hide the token.
+    """
+    raw, encoded = secret_needles(token)
     hits = []
     for root in paths:
         files = [root] if root.is_file() else sorted(f for f in root.rglob("*") if f.is_file())
         for path in files:
             data = path.read_bytes()
-            if any(needle in data for needle in needles):
+            joined = data.replace(b"\r", b"").replace(b"\n", b"")
+            if any(n in data for n in raw) or any(n in data or n in joined for n in encoded):
                 hits.append(path)
     return hits
 
