@@ -47,8 +47,8 @@ pytestmark = [
 
 _SWAP_HOOK = Path(__file__).with_name("_deploy_swap")
 _AGENT = ".github/agents/pkg-agent.agent.md"
-_PINNED = b"# Grilling\n"
-_TAMPERED = b"# Grillinx\n"
+_PINNED = b"# Grilling"  # no newline: the fixture is CRLF on Windows
+_TAMPERED = b"# Grillinx"
 _VICTIM = b"# not APM's file\n"
 
 
