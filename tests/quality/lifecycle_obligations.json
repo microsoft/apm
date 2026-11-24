@@ -19814,15 +19814,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|LOCK=newer-generator": {
    "family": "pair",
@@ -19844,8 +19846,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|NET=online": {
    "family": "pair",
@@ -19858,8 +19861,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|SCOPE=project": {
    "credited_by": [
@@ -21822,7 +21826,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_modifiers_at_user_scope[no-policy]"
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|SCOPE=user|SELECT=on": {
    "credited_by": [
