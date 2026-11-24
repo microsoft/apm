@@ -7,7 +7,8 @@ the whole walk in one ``open(O_PATH)`` and report the result through
 ``Path.resolve()`` returns, and falls back to it whenever the fast form
 cannot prove that (another OS, no ``/proc``, a dangling link, a loop, an
 access error). Nothing is cached: every call observes the filesystem as
-it is now, the same as ``Path.resolve()``.
+it is now, the same as ``Path.resolve()``. On Windows the exact forms live
+in :mod:`apm_cli.utils.realpath_win`.
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ import os
 import sys
 import threading
 from pathlib import Path, PosixPath
+
+from apm_cli.utils.realpath_win import ENABLED as _WIN_FAST
+from apm_cli.utils.realpath_win import resolve_windows as _resolve_windows
 
 _O_PATH = getattr(os, "O_PATH", 0)
 _FAST = sys.platform.startswith("linux") and bool(_O_PATH)
@@ -109,7 +113,7 @@ def _missing_realpath(text: str, depth: int) -> str | None:
 def resolve_path(path: Path) -> Path:
     """Return ``path.resolve()``, computed in the kernel when that is exact.
 
-    Only a stock ``PosixPath`` takes the fast form: a subclass (which may
+    Only a stock ``PosixPath`` (or ``WindowsPath``) takes a fast form: a subclass (which may
     override ``resolve`` or ``__fspath__``) keeps its own behavior, and any
     failure of the fast form leaves the answer (or the error) to it.
     """
@@ -127,4 +131,8 @@ def resolve_path(path: Path) -> Path:
                 resolved = None
             if resolved is not None:
                 return type(path)(resolved)
+    if _WIN_FAST:
+        fast = _resolve_windows(path)
+        if fast is not None:
+            return fast
     return path.resolve()
