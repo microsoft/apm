@@ -189,6 +189,12 @@ ORPHANED_PACKAGES = _entry(
     "orphaned-packages", "apm install", "remove packages apm.yml no longer declares"
 )
 RESYNC_DEPLOYED = _entry("drift-resync", "apm install", "re-sync deployed files with the lockfile")
+CLAUDE_MARKETPLACE_TRUST = _entry(
+    "claude-marketplace-trust",
+    "apm install",
+    "list the project's marketplace for Claude Code",
+    before="open the folder in Claude and accept the trust prompt",
+)
 RESYNC_UNRECORDED = _entry(
     "drift-unrecorded",
     "apm install",
@@ -1448,6 +1454,11 @@ REPLAY_CACHE_CONTENT_STALE = _entry(
     "replay-cache-content-stale",
     "apm install",
     "refresh the apm_modules cache to the locked content",
+)
+CACHED_CHECKOUT_TAMPERED = _entry(
+    "cached-checkout-tampered",
+    "apm install",
+    "rebuild the cached copy from the locked commit",
 )
 HOOKS_UNAPPROVED = _entry(
     "hooks-unapproved",

@@ -99,6 +99,11 @@ The compiled output is scanned for hidden Unicode before any file is
 written. Critical findings cause the command to exit non-zero. See
 [Drift and secure by default](../../../enterprise/drift-detection/).
 
+Project output is never written through a symlinked directory. If a directory
+on an output path (for example `.github`) is a symlink, that output batch is
+refused before any of it is written and the command exits non-zero; replace the
+symlink with a regular directory and rerun.
+
 ## Options
 
 ### Target selection

@@ -23,7 +23,6 @@ Design
 from __future__ import annotations
 
 import os
-import unicodedata
 import urllib.parse as _up
 from pathlib import Path
 from stat import S_ISLNK
@@ -264,10 +263,11 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
 def _caseless(path: Path) -> str:
     """Return *path* folded for a caseless compare (NFC and NFD spellings agree).
 
-    Decomposing first and recomposing after matches Unicode canonical caseless
-    matching: folding can undo a composition the input had.
+    The shared key of :func:`apm_cli.utils.paths.caseless`.
     """
-    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", str(path)).casefold())
+    from .paths import caseless
+
+    return caseless(str(path))
 
 
 def filesystem_containment(path: Path, root: Path) -> bool | None:
@@ -294,12 +294,31 @@ def filesystem_containment(path: Path, root: Path) -> bool | None:
     return False
 
 
+def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str] | None:
+    """Collapse ``..`` below *base_dir*; ``None`` when it escapes or steps back over a link."""
+    kept: list[str] = []
+    for part in parts:
+        if part == "..":
+            if not kept or base_dir.joinpath(*kept).is_symlink():
+                return None
+            kept.pop()
+        elif part != ".":
+            kept.append(part)
+    return kept
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
-    """Reject linked components, optionally preserving access errors for diagnostics."""
+    """Reject linked components, optionally preserving access errors for diagnostics.
+
+    ``..`` is collapsed first, so a missing directory followed by ``..``
+    cannot hide a linked component after it.
+    """
     try:
-        relative = path.relative_to(base_dir)
+        parts = _collapse_relative_parts(base_dir, path.relative_to(base_dir).parts)
+        if parts is None:
+            return True
         current = base_dir
-        for part in relative.parts:
+        for part in parts:
             current /= part
             try:
                 linked = S_ISLNK(current.lstat().st_mode)
