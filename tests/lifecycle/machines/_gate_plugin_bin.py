@@ -35,6 +35,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
+from tests.lifecycle.machines._gate_matrix import _mcp_servers, mcp_install_problems
 from tests.lifecycle.machines._kit import Bench, KnownCell, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
@@ -66,6 +67,10 @@ _RESOLVE_BLOCKED = r"Blocked by org policy at .*\(dependency-denylist\)\. Nothin
 # approve under an org dependency deny says "approved" and points at apm install,
 # which refuses: the approval names no org block (#5236).
 _ORG_BLOCK_NAMED = r"(?i)org policy"
+# The tracked misleading approval itself: it succeeds, announces the approval and
+# points at an install that the org policy will refuse.
+_APPROVED = rf"\[\+\] Approved \S*{PLUGIN} "
+_INSTALL_HINT = r"Run 'apm install' to deploy the approved executables"
 # pack refuses a project whose native plugin it cannot verify, and its "run apm install"
 # remedy does not change that (#5253): pack must exit 0 and carry the plugin.
 _PACK_REFUSED = r"records no deployed files for it"
@@ -148,6 +153,7 @@ class GatePluginBin(StepRunner):
         self.credited: set[str] = set()
         # Every file of the deployed plugin root, bin/ included (set by a deploy).
         self.root_files: frozenset[str] = frozenset()
+        self._mcp_before: frozenset[str] | None = None
 
     def run(
         self, op: str, *words: str, retires: bool = False, exits=(0,), says: tuple[str, ...] = ()
@@ -159,6 +165,9 @@ class GatePluginBin(StepRunner):
             cell += "|plugin"
         self.credited.add(cell)
         requested = self._requested(op, retires)
+        self._mcp_before = (
+            _mcp_servers(self.bench.deploy_root) if not self.dry and op == "mcp-install" else None
+        )
         if not self.dry and cell in KNOWN_PLUGIN:
             self._known(cell, words, requested)
         elif not self.dry:
@@ -197,6 +206,16 @@ class GatePluginBin(StepRunner):
                 f"{cell} now names the org block: remove it from KNOWN_PLUGIN "
                 f"({KNOWN_PLUGIN[cell]})\n{output}"
             )
+            # Only the tracked misleading approval counts; any other outcome is a new cause.
+            tracked = (
+                step.result.returncode == 0
+                and re.search(_APPROVED, output)
+                and re.search(_INSTALL_HINT, " ".join(output.split()))
+            )
+            assert tracked, (
+                f"{cell} no longer shows the approval {KNOWN_PLUGIN[cell]} tracks "
+                f"(exit {step.result.returncode}): re-key or remove the cell\n{output}"
+            )
         assert set(step.after.deployed) == set(step.before.deployed), cell
         self.expected_seen.add(cell)
 
@@ -234,6 +253,19 @@ class GatePluginBin(StepRunner):
                 files = {entry.split(":", 1)[0] for entry in self._declarations()}
                 assert files == set(SETTINGS), f"install declared it in {sorted(files)}"
             return
+        if op == "mcp-install":
+            # U7 keeps bin/ (below); the command itself must still install the server.
+            servers = _mcp_servers(self.bench.deploy_root)
+            problems = mcp_install_problems(
+                self._mcp_before or frozenset(),
+                servers,
+                self.bench.manifest(),
+                step.after.lock,
+                self._mcp_before or frozenset(),
+            )
+            assert not problems, f"mcp-install: {problems}"
+        if op == "uninstall":
+            self._check_uninstalled(step)
         if not retires:
             assert after == set(step.before.deployed), f"{op} changed bin/: {sorted(after)}"
             return
@@ -259,6 +291,18 @@ class GatePluginBin(StepRunner):
         assert kept and rows == kept, f"prune changed the rows: {sorted(kept)} -> {sorted(rows)}"
         records = [k for k in rows if lock.dependencies[k].native_plugin]
         assert not records, f"prune kept the native plugin record: {records}"
+
+    def _check_uninstalled(self, step: Step) -> None:
+        """Uninstall drops the declaration and the lock row a prune kept, not only bin/."""
+        before = step.before.lock
+        assert before is not None and any(PLUGIN in k for k in before.dependencies), (
+            "uninstall ran with no lock row for the plugin to remove"
+        )
+        declared = (self.bench.manifest().get("dependencies") or {}).get("apm") or []
+        assert not [d for d in declared if PLUGIN in str(d)], f"uninstall kept {declared}"
+        lock = step.after.lock
+        rows = [k for k in lock.dependencies if PLUGIN in k] if lock is not None else []
+        assert not rows, f"uninstall kept lock rows: {rows}"
 
     def _credit(
         self,

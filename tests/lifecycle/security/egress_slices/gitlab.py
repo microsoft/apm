@@ -16,6 +16,7 @@ SLICE = HostSlice(
     base="https://gitlab.com/lifecycle/group",
     spec="https://gitlab.com/lifecycle/group/p-skill#v1.0.0",
     pat_env="GITLAB_APM_PAT",
+    api_abbreviated=True,
     rows=(
         EgressRow("EP|CRED=PAT|HOST=GitLab", "PAT", "clone", smoke=True),
         EgressRow("EP|CRED=helper|HOST=GitLab", "helper", "clone"),
