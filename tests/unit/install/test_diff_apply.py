@@ -590,6 +590,39 @@ def test_a_lost_create_race_keeps_the_file_that_won(
     assert theirs.read_text(encoding="utf-8") == "someone else\n", "what it did not create stays"
 
 
+def test_a_fast_apply_undo_never_cleans_through_a_linked_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Undoing what an apply created keeps and reports a path below a parent
+    that became a link; it never removes a directory through it (#5207)."""
+    import shutil
+
+    from apm_cli.install.transaction import ApplyRestoreIncomplete
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    target = project / ".github" / "prompts" / "a.prompt.md"
+    outside = tmp_path / "outside"
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+
+    def render() -> None:
+        shutil.rmtree(project / ".github")
+        (outside / "prompts").mkdir(parents=True)
+        try:
+            (project / ".github").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+        raise OSError("disk full")
+
+    files = [(target, b"x\n", _digest(b"x\n"), "o/p")]
+    with pytest.raises(ApplyRestoreIncomplete) as caught:
+        diff_apply._commit(project, None, [], files, [], session, False, render)
+
+    assert (outside / "prompts").is_dir()
+    assert target in [path for path, _reason in caught.value.issues]
+
+
 def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
     target = tmp_path / "x.md"
     target.write_text("user\n", encoding="utf-8")
