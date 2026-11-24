@@ -68,12 +68,12 @@ class _World:
             _lsp_package(self.project / "vendor" / name, name)
         self.runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
 
-    def manifest(self, packages: tuple[str, ...]) -> None:
+    def manifest(self, packages: tuple[str, ...], targets: tuple[str, ...] = ("copilot",)) -> None:
         dump_yaml(
             {
                 "name": "proj",
                 "version": "1.0.0",
-                "targets": ["copilot"],
+                "targets": list(targets),
                 "dependencies": {"apm": [f"./vendor/{name}" for name in packages]},
             },
             self.project / "apm.yml",
@@ -157,3 +157,44 @@ def test_prune_keeps_an_unreadable_lsp_config_and_its_lock_records(
     assert "Prune incomplete: package removal completed, but LSP cleanup failed" in pruned
     assert (world.project / _LSP).read_text(encoding="ascii") == "{not json\n"
     assert "lsppkg-server" in (world.lock().get("lsp_servers") or []), pruned
+
+
+def test_prune_keeps_a_user_edited_lsp_entry_and_reports_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An entry the user edited after install is kept and named, not deleted (#5263)."""
+    world = _World(tmp_path, apm_binary_path, ("lsppkg",))
+    world.manifest(("lsppkg",))
+    world.apm("install")
+    servers = world.servers()
+    servers["lsppkg-server"]["command"] = "hand-edited"
+    (world.project / _LSP).write_text(json.dumps({"lspServers": servers}) + "\n", encoding="ascii")
+    edited = (world.project / _LSP).read_bytes()
+    world.manifest(())
+
+    pruned = world.apm("prune")
+
+    assert (world.project / _LSP).read_bytes() == edited, pruned
+    assert "lsppkg-server" in pruned, pruned
+    assert "lsppkg-server" not in (world.lock().get("lsp_servers") or []), pruned
+
+
+_CONFIGS = (".claude/skills/apm-lsp/.claude-plugin/plugin.json", _LSP, "opencode.json")
+
+
+def test_prune_changes_no_lsp_config_when_a_later_one_is_unreadable(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Every config is read before the first change: one unreadable config changes none (#5263)."""
+    targets = ("claude", "copilot", "opencode")
+    world = _World(tmp_path, apm_binary_path, ("lsppkg",))
+    world.manifest(("lsppkg",), targets)
+    world.apm("install")
+    world.manifest((), targets)
+    (world.project / "opencode.json").write_text("{not json\n", encoding="ascii")
+    before = {rel: (world.project / rel).read_bytes() for rel in _CONFIGS}
+
+    pruned = world.apm("prune", expect=1)
+
+    assert "LSP cleanup failed" in pruned, pruned
+    assert {rel: (world.project / rel).read_bytes() for rel in _CONFIGS} == before

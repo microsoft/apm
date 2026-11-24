@@ -1956,14 +1956,16 @@ def test_a_blocked_socket_upgrade_keeps_opencodes_entry(lifecycle_world) -> None
     tree.assert_intact("blocked socket upgrade")
     scenario.finish()
 
-    # Not blocked: the upgrade replaces Copilot's entry and drops OpenCode's.
+    # Not blocked: the upgrade replaces Copilot's entry. OpenCode cannot express
+    # it, and its entry is the user's edit, so cleanup keeps and names it (#5263).
     config = json.loads((world.project / _LSP).read_text(encoding="utf-8"))
     del config["lspServers"]["root-s"]
     (world.project / _LSP).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    scenario.run("install")
+    step = scenario.run("install")
     servers = json.loads((world.project / _LSP).read_text(encoding="utf-8"))["lspServers"]
     assert servers["root-s"]["transport"] == "socket"
-    assert set(_opencode_servers(world)) == {"root-b"}
+    assert _opencode_servers(world)["root-s"] == opencode, "OpenCode's edited entry changed"
+    assert "Kept LSP server root-s in " in step.output, step.output
     scenario.finish()
 
 
