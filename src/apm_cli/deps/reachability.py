@@ -949,19 +949,28 @@ def _retain_alias_anchors(
     anchor_ids = {lockfile_parent_identity(row, lockfile.replacements) for row in rows}
     ends = [row for row in rows if row.resolved_by not in anchor_ids]
     tops = [row for row in ends if row.resolved_by is None]
+    pending = candidates - retained
     if len(tops) < len(ends):
-        pending = candidates - retained
         retained |= pending
         reasons.update(dict.fromkeys(pending, "an anchored package has no root-declared top"))
         return
-    _retain_reached_from(
+    # The tops' walk must still reach every kept anchor below them; one an
+    # edited manifest no longer declares has children this walk cannot see.
+    below = {key for key in anchors if lockfile.dependencies[key].resolved_by is not None}
+    reach = compute_forward_reachable_keys(
         lockfile,
         project_root,
         apm_modules_dir,
-        [top.to_dependency_ref() for top in tops],
-        candidates,
-        retained,
-        reasons,
+        [row.to_dependency_ref() for row in tops],
+        frozenset(pending | below),
+    )
+    if reach.complete and below <= reach.reachable:
+        retained |= pending & reach.reachable
+        return
+    retained |= pending
+    detail = "; ".join(f"{name}: {reason}" for name, reason in reach.unverifiable)
+    reasons.update(
+        dict.fromkeys(pending, detail or "a kept parent no longer declares a kept package")
     )
 
 
