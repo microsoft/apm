@@ -1305,3 +1305,57 @@ def test_approve_refuses_a_package_the_org_dependency_denylist_blocks(
             assert (
                 "evil/repo" in yaml.safe_load(Path("apm.yml").read_text())["executables"]["allow"]
             )
+
+
+def test_approve_all_skips_a_package_the_org_dependency_policy_blocks() -> None:
+    """#5407 review: --all grants only admitted packages and names each blocked one."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.policy.schema import DependencyPolicy
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_manifest(".")
+        _create_pkg_with_hooks(Path("apm_modules/evil"), "repo")
+        _create_pkg_with_hooks(Path("apm_modules/good"), "repo")
+        lockfile = LockFile()
+        for owner in ("evil", "good"):
+            lockfile.add_dependency(
+                LockedDependency(repo_url=f"{owner}/repo", version="1.0", name="repo")
+            )
+        lockfile.write(Path("apm.lock.yaml"))
+        policy = ApmPolicy(enforcement="block", dependencies=DependencyPolicy(deny=("evil/*",)))
+
+        with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
+            result = runner.invoke(approve_cmd, ["--all"])
+
+        flat = " ".join(result.output.split())
+        assert result.exit_code == 0, result.output
+        assert (
+            "evil/repo is denied by org policy (dependency-denylist: denied by pattern: "
+            "evil/*); approving cannot lift it"
+        ) in flat
+        allow = yaml.safe_load(Path("apm.yml").read_text())["executables"]["allow"]
+        assert set(allow) == {"good/repo"}
+
+
+def test_approve_refuses_a_denylisted_local_replacement() -> None:
+    """#5407 review: a local dependency's source directory is matched like the scanner's."""
+    from apm_cli.policy.schema import DependencyPolicy
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_manifest(".")
+        _write_local_replacement()
+        before = Path("apm.yml").read_bytes()
+        policy = ApmPolicy(
+            enforcement="block", dependencies=DependencyPolicy(deny=("./local-hooky",))
+        )
+
+        with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
+            result = runner.invoke(approve_cmd, ["acme/hooky#1.0.0"])
+
+        flat = " ".join(result.output.split())
+        assert result.exit_code == 1, result.output
+        assert "is denied by org policy (dependency-denylist: denied by pattern:" in flat
+        assert "approving cannot lift it" in flat
+        assert Path("apm.yml").read_bytes() == before
