@@ -256,29 +256,55 @@ def require_private_store(store: Path) -> None:
 
 
 def _user_private_group(gid: int) -> bool:
-    """Whether group *gid* is verifiably private to this user (#5313).
+    """Whether group *gid* is verifiably private to this user (#5313, #5371).
 
     It is this user's primary group, lists no other member, and is no other
-    account's primary group. Any lookup that fails or is unavailable answers
-    ``False`` (fail closed). Cost, paid only for a group-writable APM_HOME on
-    replay: one group lookup and one enumeration of the account database, which
-    under NSS (LDAP, SSSD) may be slow; an account NSS does not enumerate is not
-    seen.
+    account's primary group. Membership evidence must be complete: an account
+    enumeration counts only when :func:`_local_account_databases` holds and it
+    lists this user, since NSS may return an incomplete or empty list without an
+    error. Any lookup that fails or is unavailable answers ``False`` (fail
+    closed). Cost, paid only for a group-writable APM_HOME on replay: one small
+    file read, one group lookup and one enumeration of local account files.
     """
     try:
         import grp
         import pwd
 
         me = pwd.getpwuid(os.geteuid())
-        if me.pw_gid != gid:
+        if me.pw_gid != gid or not _local_account_databases():
             return False
         if set(grp.getgrgid(gid).gr_mem) - {me.pw_name}:
             return False
+        accounts = pwd.getpwall()
+        if not any(account.pw_uid == me.pw_uid for account in accounts):
+            return False  # the enumeration does not even list this user
         return not any(
-            account.pw_gid == gid and account.pw_uid != me.pw_uid for account in pwd.getpwall()
+            account.pw_gid == gid and account.pw_uid != me.pw_uid for account in accounts
         )
-    except (ImportError, KeyError, OSError):
+    except (ImportError, KeyError, OSError, UnicodeError):
         return False
+
+
+# Name service sources whose account enumeration is complete: local files, and
+# systemd's, which enumerates the records it serves (#5371).
+_COMPLETE_SOURCES = frozenset({"files", "systemd"})
+
+
+def _local_account_databases() -> bool:
+    """Whether the passwd and group databases come only from complete local sources.
+
+    A missing or unreadable name service switch configuration (macOS reads its
+    directory service instead), a database it does not name, a remote source
+    (``sss``, ``ldap``, ``nis``, ``compat``) or an action such as
+    ``[NOTFOUND=return]`` answers ``False``.
+    """
+    from apm_cli.utils.name_service import database_sources
+
+    sources = database_sources()
+    return sources is not None and all(
+        sources.get(database) and set(sources[database]) <= _COMPLETE_SOURCES
+        for database in ("passwd", "group")
+    )
 
 
 def read_private_journal(path: Path, *, first_line: bool = False) -> str:
