@@ -1449,6 +1449,11 @@ REPLAY_CACHE_CONTENT_STALE = _entry(
     "apm install",
     "refresh the apm_modules cache to the locked content",
 )
+CACHED_CHECKOUT_TAMPERED = _entry(
+    "cached-checkout-tampered",
+    "apm install",
+    "rebuild the cached copy from the locked commit",
+)
 HOOKS_UNAPPROVED = _entry(
     "hooks-unapproved",
     "apm approve {package}",

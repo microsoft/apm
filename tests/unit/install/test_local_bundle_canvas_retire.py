@@ -116,3 +116,31 @@ def test_recording_the_canvas_classifies_an_unrecorded_hook_record_file(
 
     assert config_file_origin(sidecar) is Origin.PREEXISTING
     assert sidecar.read_text(encoding="utf-8") != ""
+
+
+def test_recording_the_canvas_at_user_scope_classifies_against_the_user_installation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At user scope the hook record file is classified against ``$APM_HOME``'s lockfile."""
+    import json
+
+    home = tmp_path / "apm-home"
+    home.mkdir()
+    (home / "apm.lock.yaml").write_text(
+        "lockfile_version: '1'\ndependencies: []\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("APM_HOME", str(home))
+    project = tmp_path / "p"
+    sidecar = project / ".github" / "apm-hooks.json"
+    sidecar.parent.mkdir(parents=True)
+    sidecar.write_text(json.dumps({"hooks": {"Stop": [{"command": "x"}]}}) + "\n", encoding="utf-8")
+    row = f"{_ROOT}extension.mjs"
+    (project / row).parent.mkdir(parents=True)
+    (project / row).write_text("export default 'first';\n", encoding="utf-8")
+
+    record_bundle_canvas(project, _TARGETS, "first", None, [row], user_scope=True)
+
+    from apm_cli.integration.config_file_provenance import Origin, config_file_origin
+
+    assert config_file_origin(sidecar) is Origin.LEGACY
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["hooks"]["Stop"] == [{"command": "x"}]

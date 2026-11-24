@@ -15,15 +15,19 @@ import stat
 from unittest.mock import patch
 
 
-def _accept_worktree(repo, _sha, _scope, _cone, _git_exe, _env):
+def _accept_worktree(repo, sha, _scope, _cone, _git_exe, _env):
     from apm_cli.cache import checkout_verify
+    from apm_cli.utils.git_object_id import git_object_id, object_format
 
+    try:
+        fmt = object_format(sha)
+    except ValueError:
+        fmt = "sha1"  # an abbreviated id: git's default object format
     files = {}
     for rel, path in checkout_verify._worktree_files(repo):
         executable = os.name != "nt" and bool(os.lstat(path).st_mode & stat.S_IXUSR)
-        digest = checkout_verify._object_id("sha1", "blob", path.read_bytes())
-        files[rel] = (digest, executable)
-    return checkout_verify._Manifest("sha1", files)
+        files[rel] = (git_object_id(fmt, "blob", path.read_bytes()), executable)
+    return checkout_verify._Manifest(fmt, files)
 
 
 def trust_checkout_contents():
