@@ -69,8 +69,10 @@ def record_compiled_outputs(root: Path, written) -> None:
     outputs = {rel for rel in read_compiled_outputs(base) if os.path.lexists(base / rel)}
     for path in written:
         target = Path(path).absolute()
-        if target.is_relative_to(base):
-            outputs.add(portable_relpath(target, base))
+        # An output outside the project keeps its absolute path; the scan reads it as is.
+        outputs.add(
+            portable_relpath(target, base) if target.is_relative_to(base) else target.as_posix()
+        )
     path = _record_path(base, _OUTPUTS)
     try:
         mkdir(path.parent, parents=True, exist_ok=True)
