@@ -72,6 +72,7 @@ HARNESSES = ("claude", "copilot")
 # "distinct": different plugin names; "same": one plugin name from two packages.
 COLLISION_ENVS = ("collision-distinct", "collision-same")
 COLLIDING = "analyze"
+COLLISION_MARKERS = {"rh-a": "RH_A_BODY", "rh-b": "RH_B_BODY"}
 SESSION_SECONDS = 45
 
 _AGENT_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
@@ -857,14 +858,36 @@ class CollisionCell(Cell):
         return out
 
     def loads(self, seen: dict, names: set[str]) -> bool:
-        """Each named plugin contributes a distinguishable `analyze` skill."""
+        """Each named plugin contributes a distinguishable `analyze` skill (and command)."""
         if self.harness == "claude":
-            return all(f"{name}:{COLLIDING}" in seen["skills"] for name in names)
+            return all(
+                f"{name}:{COLLIDING}" in seen["skills"]
+                and f"{name}:{COLLIDING}" in seen["commands"]
+                for name in names
+            )
         # Copilot qualifies a skill name only while it is ambiguous, so each
         # package's skill is identified by the body marker in its description.
-        markers = {"rh-a": "RH_A_BODY", "rh-b": "RH_B_BODY"}
         joined = "\n".join(seen["skills"])
-        return all(name in seen["plugins"] and markers[name] in joined for name in names)
+        return all(name in seen["plugins"] and COLLISION_MARKERS[name] in joined for name in names)
+
+    def gone(self, seen: dict, name: str) -> bool:
+        """No trace of the plugin: not registered, no skill, no command."""
+        if self.harness == "claude":
+            qualified = f"{name}:{COLLIDING}"
+            registered = any(p.startswith(f"{name}@") for p in seen["plugins"])
+            return not registered and qualified not in seen["skills"] + seen["commands"]
+        joined = "\n".join(seen["skills"])
+        return name not in seen["plugins"] and COLLISION_MARKERS[name] not in joined
+
+    def settings_untouched(self) -> bool:
+        """No harness settings file declares the refused plugin name."""
+        files = [
+            self.project / ".claude" / "settings.json",
+            self.project / ".github" / "copilot" / "settings.json",
+            self.home / ".claude" / "settings.json",
+            self.home / ".copilot" / "settings.json",
+        ]
+        return not any("rh-dup" in _read(path) for path in files)
 
     def execute(self) -> dict:
         name_a, name_b = self.plugin_names()
@@ -888,7 +911,15 @@ class CollisionCell(Cell):
         )
         if self.env == "collision-same" and install.returncode != 0:
             refusal = [line for line in output.splitlines() if "[x]" in line]
-            return self.finish("REFUSED", f"exit {install.returncode}: {' | '.join(refusal)[:300]}")
+            detail = f"exit {install.returncode}: {' | '.join(refusal)[:300]}"
+            clean = (
+                install.returncode == 1
+                and "Native plugin name collision" in output
+                and not self.evidence["plugins_dir"]
+                and self.settings_untouched()
+            )
+            # Only the collision diagnostic with nothing deployed is the expected refusal.
+            return self.finish("REFUSED" if clean else "ERROR", detail)
         if install.returncode != 0:
             return self.finish("ERROR", f"apm install exit {install.returncode}")
         before = self.observe("both")
@@ -912,7 +943,7 @@ class CollisionCell(Cell):
         b_ok = (
             uninstall.returncode == 0
             and self.loads(after, {name_b})
-            and not self.loads(after, {name_a})
+            and self.gone(after, name_a)
             and self.evidence["bytes_intact_b_after"]
         )
         reason = (
