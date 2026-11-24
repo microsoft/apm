@@ -1018,3 +1018,289 @@ def _redact(value: object) -> str:
     from ..utils.git_env import redact_git_diagnostic
 
     return redact_git_diagnostic(str(value))
+
+
+# --- Sparse (monorepo subdirectory) deps: the pin's trees, then exactly the cone's blobs ---
+
+_CAPS_MEMO = "inprocess-fetch-v2-caps"
+_MAX_WANTS = 200_000
+
+
+def _wants_body(oids: list[str], *, trees_only: bool) -> bytes:
+    lines = [_pkt("no-progress\n"), _pkt("ofs-delta\n")]
+    if trees_only:
+        lines += [_pkt("deepen 1\n"), _pkt("filter blob:none\n")]
+    lines += [_pkt(f"want {oid}\n") for oid in oids]
+    return _pkt("command=fetch\n") + b"0001" + b"".join(lines) + _pkt("done\n") + b"0000"
+
+
+def _fetch_caps(upload_url: str, proxy: str | None, trust: tuple[str, str]) -> frozenset[str]:
+    """S1: the protocol-v2 ``fetch=`` features the server advertises (one GET per origin per command)."""
+    from ..core.invocation_memo import invocation_memo
+    from ..utils.http_credentials import origin_bounded_request
+
+    memo = invocation_memo(_CAPS_MEMO)
+    if memo is not None and upload_url in memo:
+        return memo[upload_url]
+    refs_url = upload_url.removesuffix("/git-upload-pack") + "/info/refs?service=git-upload-pack"
+    with origin_bounded_request(
+        _session(trust),
+        "GET",
+        refs_url,
+        base_url=refs_url,
+        headers={"Git-Protocol": "version=2"},
+        max_hops=0,
+        ambient_credentials=False,
+        proxies={"https": proxy} if proxy else {},
+        verify=trust[1] if trust[0] == "file" else True,
+        timeout=_TIMEOUT,
+    ) as response:
+        _admit(response.status_code, response.headers)
+        body = response.content[:65536]
+    features: frozenset[str] = frozenset()
+    for line in body.split(b"\n"):
+        text = line[4:].decode("ascii", "replace").strip() if len(line) >= 4 else ""
+        if text.startswith("fetch="):
+            features = frozenset(text[len("fetch=") :].split())
+    if memo is not None:
+        memo[upload_url] = features
+    return features
+
+
+def _in_cone(path: str, cones: tuple[str, ...]) -> bool:
+    """``git sparse-checkout --cone``: files directly in the root or in any ancestor
+    of a cone (the cone itself included), and every file under a cone."""
+    parent = path.rpartition("/")[0]
+    for cone in cones:
+        if path.startswith(cone + "/"):
+            return True
+        if not parent or cone == parent or cone.startswith(parent + "/"):
+            return True
+    return False
+
+
+def sparse_checkout_file(cones: tuple[str, ...]) -> str:
+    """The ``.git/info/sparse-checkout`` git writes for ``sparse-checkout set --cone``."""
+    parents: set[str] = set()
+    for cone in cones:
+        parts = cone.split("/")
+        for i in range(1, len(parts)):
+            parents.add("/".join(parts[:i]))
+    leaves = set(cones)
+    lines = ["/*", "!/*/"]
+    for directory in sorted(parents | leaves):
+        lines.append(f"/{directory}/")
+        if directory in parents and directory not in leaves:
+            lines.append(f"!/{directory}/*/")
+    return "\n".join(lines) + "\n"
+
+
+_KNOWN_ATTRIBUTES = frozenset(
+    {"text", "eol", "crlf", "filter", "ident", "working-tree-encoding", *_INERT_ATTRIBUTES}
+)
+
+
+class _PlannedObjects:
+    """``checkout_verify``'s object source over objects whose ids were computed in process."""
+
+    def __init__(self, objects: dict[str, tuple[str, bytes]]) -> None:
+        self._objects = objects
+
+    def read(self, oid: str, kind: str) -> bytes:
+        from .checkout_verify import CheckoutVerificationError
+
+        found = self._objects.get(oid)
+        if found is None or found[0] != kind:
+            raise CheckoutVerificationError(f"object {oid[:12]} is not a planned {kind}")
+        return found[1]
+
+
+def _cone_attributes_ok(
+    objects: dict[str, tuple[str, bytes]], sha: str, files: list[tuple[str, str, bool]]
+) -> bool:
+    """T1'/U1-U5: no written file's attribute state can change its checkout bytes."""
+
+    from .checkout_verify import _Attributes, _FoldedAttributes, _Tree
+
+    sources = [
+        objects[oid][1] for rel, oid, _ in files if rel.rpartition("/")[2] == ".gitattributes"
+    ]
+    if not sources:
+        return True
+    for data in sources:  # U2: wholesale refusals before any matching
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith(("[attr]", '"')):
+                return False
+            for token in line.split()[1:]:
+                name = token.lstrip("-!").split("=", 1)[0].lower()
+                if name not in _KNOWN_ATTRIBUTES and not name.startswith("linguist-"):
+                    return False
+    root = objects[sha][1].split(b"\n", 1)[0][5:].decode("ascii")
+    source = _PlannedObjects(objects)
+
+    engines = (
+        _Attributes(_Tree(source, root, 20), source),
+        _FoldedAttributes(_Tree(source, root, 20), source),
+    )
+    transforms = ("filter", "ident", "working-tree-encoding")
+    for rel, _, _ in files:
+        for engine in engines:
+            state = engine.state(rel)
+            if state is None:
+                return False
+            if state.get("eol") not in (None, "lf") or "crlf" in state:
+                return False
+            if any(state.get(name) not in (None, False) for name in transforms):
+                return False
+    return True
+
+
+_IGNORABLE = dict.fromkeys(
+    map(
+        ord,
+        "\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u206a\u206b\u206c\u206d\u206e\u206f\ufeff",
+    )
+)
+
+
+def _aliases_gitattributes(raw: bytes) -> bool:
+    """T3: a name some filesystem resolves to ``.gitattributes`` (case, 8.3, dots, HFS ignorables)."""
+    try:
+        name = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    folded = name.translate(_IGNORABLE).lower().rstrip(". ")
+    if folded == ".gitattributes":
+        return True
+    short = name.lower()
+    return short.startswith("gitatt~") and short[7:8].isdigit()
+
+
+def _sparse_plan(
+    objects: dict[str, tuple[str, bytes]], sha: str, cones: tuple[str, ...]
+) -> tuple[list[tuple[str, str, bool]], set[str]]:
+    """``([(path, blob id, exec)] in the cone, every tree id)`` of the pinned commit."""
+    commit = objects.get(sha)
+    if commit is None or commit[0] != "commit":
+        raise _Refuse("pinned commit not in pack")
+    first = commit[1].split(b"\n", 1)[0]
+    if not first.startswith(b"tree "):
+        raise _Refuse("commit names no tree")
+    files: list[tuple[str, str, bool]] = []
+    trees = {sha}
+    stack = [("", first[5:].decode("ascii"))]
+    entries = 0
+    while stack:
+        prefix, tree_id = stack.pop()
+        trees.add(tree_id)
+        tree = objects.get(tree_id)
+        if tree is None or tree[0] != "tree":
+            raise _Refuse("tree missing")
+        for mode, raw_name, oid in _tree_entries(tree[1]):
+            entries += 1
+            if entries > _MAX_ENTRIES:
+                raise _Refuse("worktree entry count exceeds the cap")
+            if len(prefix) + len(raw_name) > _MAX_PATH:
+                raise _Refuse("worktree path exceeds the length cap")
+            path = prefix + raw_name.decode("utf-8", "replace")
+            if mode == "40000":
+                stack.append((path + "/", oid))
+                continue
+            if not _in_cone(path, cones):
+                continue
+            if raw_name == b".gitattributes":
+                # T3/T4: only the exact name, only as a regular blob.
+                if mode not in ("100644", "100755"):
+                    raise _Refuse(".gitattributes is not a regular blob")
+                files.append((prefix + ".gitattributes", oid, False))
+                continue
+            if _aliases_gitattributes(raw_name):
+                raise _Refuse("an alias of .gitattributes needs git's handling")
+            name = _safe_name(raw_name)
+            if mode not in ("100644", "100755"):
+                raise _Refuse(f"mode {mode} in the cone needs git's handling")
+            files.append((prefix + name, oid, mode == "100755"))
+    if len(files) > _MAX_WANTS:
+        raise _Refuse("cone blob count exceeds the cap")
+    return files, trees
+
+
+def fetch_sparse_worktree(
+    url: str,
+    sha: str,
+    staged: Path,
+    env: Mapping[str, str] | None,
+    pins: tuple[tuple[str, str], ...],
+    cones: tuple[str, ...],
+) -> dict[str, tuple[str, bool]] | None:
+    """Write the cone of commit *sha* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``.
+
+    Two requests, after the same gate as :func:`fetch_worktree`: the pinned commit
+    and all its trees (``deepen 1``, ``filter blob:none``), then exactly the blobs
+    ``git sparse-checkout --cone`` would write. Every object id is computed here; a
+    response that is not exactly the wanted set, a link, gitlink or ``.gitattributes``
+    alias in the cone, or an in-cone attribute that could change bytes sends the
+    dependency to git.
+    """
+    if len(sha) != 40 or not cones or os.environ.get("APM_NO_INPROCESS_SPARSE"):
+        return None
+    if _rate_limited():
+        return None
+    try:
+        upload_url, proxy, trust = _gate(url, env if env is not None else os.environ)
+        features = _fetch_caps(upload_url, proxy, trust)
+        if "filter" not in features or "shallow" not in features:
+            raise _Refuse("server does not advertise fetch filter and shallow")
+        body = _admitted_post(upload_url, proxy, trust, _wants_body([sha], trees_only=True))
+        objects = parse_pack(_pack_from_response(body))
+        files, trees = _sparse_plan(objects, sha, cones)
+        objects = {oid: objects[oid] for oid in trees}
+        wanted = sorted({oid for _, oid, _ in files})
+        if wanted:
+            body = _admitted_post(upload_url, proxy, trust, _wants_body(wanted, trees_only=False))
+            blobs = parse_pack(_pack_from_response(body))
+            if set(blobs) != set(wanted) or any(kind != "blob" for kind, _ in blobs.values()):
+                raise _Refuse("blob response differs from the wanted set")
+            objects.update(blobs)
+        if not _cone_attributes_ok(objects, sha, files):
+            raise _Refuse("an in-cone .gitattributes may change checkout bytes")
+        root = str(staged)
+        made = {root}
+        manifest: dict[str, tuple[str, bool]] = {}
+        for rel, oid, executable in files:
+            parts = rel.split("/")
+            directory = root
+            for part in parts[:-1]:
+                directory = os.path.join(directory, part)
+                if directory not in made:
+                    os.mkdir(directory, 0o755)
+                    made.add(directory)
+            _write_file(os.path.join(directory, parts[-1]), objects[oid][1], executable)
+            manifest[rel] = (oid, executable)
+        sparse_pins = (
+            *pins,
+            ("core.sparseCheckout", "true"),
+            ("core.sparseCheckoutCone", "true"),
+            ("apm.sparseMaterialization", "complete"),
+        )
+        _write_git_dir(staged, url, sha, objects, set(objects), sparse_pins)
+        info = os.path.join(root, ".git", "info")
+        os.makedirs(info, exist_ok=True)
+        _write_file(
+            os.path.join(info, "sparse-checkout"), sparse_checkout_file(cones).encode(), False
+        )
+        _note(url, "sparse hit")
+        return manifest
+    except _Refuse as reason:
+        _note(url, f"sparse fallback: {reason}")
+        return None
+    except Exception as exc:
+        _note(url, f"sparse fallback: {type(exc).__name__}: {exc}")
+        return None
