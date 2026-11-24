@@ -125,32 +125,24 @@ def test_a_directory_with_an_explicit_ace_on_an_entry_is_kept_with_its_acl(
 
 
 def test_paths_whose_aces_are_all_inherited_restore_as_before(
-    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, apm_home: Path
 ) -> None:
     """The no-ACL control: a file and a directory unit both restore, and the restored
-    directory takes only inherited ACEs (staging adds no DACL of its own)."""
+    directory has the ACL it had before the kill (staging adds no DACL of its own).
+
+    The oracle compares icacls listings, not the "(I)" marker: under a parent
+    created with mode 0o700 (pytest's tmp_path on Python 3.12.4+) icacls lists
+    the inherited entries without it.
+    """
     config, config_ledger = _killed_config(apm_home, tmp_path / "file")
     skill, skill_ledger = _killed_skill(apm_home, tmp_path / "dir")
-    listings = {
-        str(path): _acl(path)
-        for path in (tmp_path, tmp_path / "dir", skill.parent, skill, skill / "SKILL.md")
-    }
-    real_replace = os.replace
-
-    def replace(source, destination, *args, **kwargs):
-        if Path(destination) == skill:
-            listings[f"staged {source}"] = _acl(Path(source))
-        return real_replace(source, destination, *args, **kwargs)
+    before = _acl(skill)
 
     file_outcome = _replay(apm_home, tmp_path / "file", config_ledger)
-    monkeypatch.setattr(os, "replace", replace)
     dir_outcome = _replay(apm_home, tmp_path / "dir", skill_ledger)
-    monkeypatch.undo()
-    listings[f"restored {skill}"] = _acl(skill)
-    evidence = sys.version + "\n" + "\n".join(f"{k}:\n{v}" for k, v in listings.items())
 
     assert (file_outcome.restored, file_outcome.kept) == (1, ())
     assert config.read_bytes() == _CONFIG_BYTES
-    assert (dir_outcome.restored, dir_outcome.kept) == (1, ()), evidence
+    assert (dir_outcome.restored, dir_outcome.kept) == (1, ())
     assert (skill / "SKILL.md").read_bytes() == b"prior\n"
-    assert all("(I)" in line for line in _acl(skill).splitlines()), evidence
+    assert _acl(skill) == before, f"{sys.version}\nbefore:\n{before}"
