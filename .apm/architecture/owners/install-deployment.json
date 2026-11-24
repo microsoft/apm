@@ -134,14 +134,21 @@
     },
     {
       "id": "install-entry-routing",
-      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage; the one exception is the locked fast path (install/fast_entry.py then install/diff_apply.py), which serves only a bare 'apm install' or 'apm install --frozen', writes only files the verified lockfile, caches and package-bound records prove, never deletes, and runs the full pipeline on any doubt",
+      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage; the one exception is the locked fast path (install/fast_entry.py then install/diff_apply.py), which serves only a bare 'apm install' or 'apm install --frozen', writes only files the verified lockfile, caches and package-bound records prove, never deletes, and runs the full pipeline on any doubt; a bare install may instead replay the verified-state record (install/verdict_record.py), which writes nothing and replays only when an HMAC under a per-user key matches every live verdict input",
       "owner": "install/pipeline_entry.py (pipeline_preview, PipelinePreview, record_preview_resolution): run_install_pipeline is entered only through install/service.py InstallService, from a closed list of _install_apm_dependencies callers (commands/install.py, update.py, lock.py, deps/cli.py); dry_run=True stops before the first write and the preview projects its plan; install --mcp and apm mcp install hand their server to install/service_integration.py run_service_integrations, whose run_mcp_integration installs and records only that entry (install/mcp/entry_integration.py), so the command keeps no integrator or lockfile writes",
       "selectors": [
         "src/apm_cli/install/diff_apply.py",
         "src/apm_cli/install/fast_entry.py",
         "src/apm_cli/install/fast_output.py",
         "src/apm_cli/install/noop_diff.py",
-        "src/apm_cli/install/pipeline_entry.py"
+        "src/apm_cli/install/pipeline_entry.py",
+        "src/apm_cli/install/verdict_git.py",
+        "src/apm_cli/install/verdict_inputs.py",
+        "src/apm_cli/install/verdict_key.py",
+        "src/apm_cli/install/verdict_key_windows.py",
+        "src/apm_cli/install/verdict_policy.py",
+        "src/apm_cli/install/verdict_record.py",
+        "src/apm_cli/integration/mcp_install_summary.py"
       ],
       "guards": ["install-deployment-install-entry-routing"]
     },
@@ -395,7 +402,7 @@
       "decision": "Reading and parsing the project git remote for org-policy discovery",
       "owner": "policy/_remote.py (_git_remote_origin_url, _remote_url_parts, _parse_remote_url, _extract_org_host_port_from_git_remote)",
       "selectors": ["src/apm_cli/policy/_remote.py"],
-      "guards": ["install-deployment-policy-remote-origin-owner"]
+      "guards": ["install-deployment-policy-remote-origin-owner", "install-deployment-remote-read-reuse"]
     },
     {
       "id": "policy-mcp-transport-projection",
