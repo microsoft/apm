@@ -633,9 +633,14 @@ PER_FILE_BUNDLE_RECORDS = "local-bundle-hooks"
 _RECORD_HOOK_FILES = "hook_files"
 BUNDLE_RECORD_HOOKS = "hooks"
 BUNDLE_RECORD_CANVAS = "canvas"
+# Bundle Markdown with frontmatter hooks is recorded in its own committed file
+# at the target root: a merged hook sidecar is rebuilt from config entries.
+BUNDLE_RECORD_MARKDOWN = "markdown"
+BUNDLE_MARKDOWN_RECORD_FILE = "apm-bundle-markdown-hooks.json"
 _RECORD_KINDS = {
     BUNDLE_RECORD_HOOKS: (PER_FILE_BUNDLE_RECORDS, _RECORD_HOOK_FILES),
     BUNDLE_RECORD_CANVAS: ("local-bundle-canvas", "canvas_files"),
+    BUNDLE_RECORD_MARKDOWN: ("local-bundle-markdown-hooks", "markdown_files"),
 }
 
 

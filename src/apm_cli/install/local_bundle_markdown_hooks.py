@@ -1,64 +1,71 @@
 """Bundle Markdown whose frontmatter declares hooks, retired with its approval (#5254).
 
 An approved local bundle may deploy Markdown files (a command ``.md``, a
-``SKILL.md``) whose frontmatter declares ``hooks`` (#5248). Install records
-those files with the bundle's exact-content approval key in the scope's
-``apm_modules/``; every later install, update and prune re-checks the key
-and retires the recorded files when current trust no longer grants it.
+``SKILL.md``) whose frontmatter declares ``hooks`` (#5248). As for canvas
+extensions, the lockfile's local-bundle rows are the source of truth: every
+row whose deployed file declares frontmatter hooks must be admitted by a
+committed approval record (``apm-bundle-markdown-hooks.json`` at the target
+root) whose key current trust still grants. Every install, update and prune
+retires the rest; a row no record names fails closed.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Collection
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_RECORD = Path("apm_modules") / ".local-bundle-markdown-hooks.json"
+from .local_bundle_hook_trust import REASON_NOT_GRANTED, REASON_UNRECORDED
 
 
-def _record_path(scope_dir: Path) -> Path:
-    return Path(scope_dir) / _RECORD
+@dataclass
+class _Holding:
+    """Hooked Markdown rows retired under one bundle and reason."""
+
+    slug: str | None
+    reason: str
+    files: set[str] = field(default_factory=set)
 
 
-def _read(scope_dir: Path) -> dict[str, dict]:
-    try:
-        data = json.loads(_record_path(scope_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    bundles = data.get("bundles") if isinstance(data, dict) else None
-    return bundles if isinstance(bundles, dict) else {}
+def _record_path(project_root: Path, target: Any) -> Path:
+    from ..integration.hook_ownership import BUNDLE_MARKDOWN_RECORD_FILE
+
+    return Path(project_root) / target.root_dir / BUNDLE_MARKDOWN_RECORD_FILE
 
 
-def _write(scope_dir: Path, bundles: dict[str, dict]) -> None:
-    from ..integration import write_seam
-    from ..utils.path_security import PathTraversalError, has_symlink_component
-
-    path = _record_path(scope_dir)
-    if has_symlink_component(Path(scope_dir), path):
-        raise PathTraversalError(f"Refusing to write {_RECORD.as_posix()} through a linked path")
-    if not bundles:
-        write_seam.unlink(path, missing_ok=True)
-        return
-    write_seam.mkdir(path.parent, parents=True, exist_ok=True)
-    write_seam.atomic_write_text(
-        path, json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n"
-    )
+def _prefix(target: Any) -> str:
+    return Path(target.root_dir).as_posix().rstrip("/") + "/"
 
 
-def _spelled(project_root: Path, value: str) -> Path:
-    return Path(value) if Path(value).is_absolute() else Path(project_root) / value
+def _records(project_root: Path, targets: Any) -> dict[str, tuple[set, set[str]]]:
+    """Return ``slug -> (keys, files)`` from every target's committed record.
 
+    An unreadable record grants nothing, so its rows fail closed.
+    """
+    from ..integration.hook_ownership import BUNDLE_RECORD_MARKDOWN, per_file_bundle_hook_keys
+    from .local_bundle_hook_trust import _relative_value
 
-def _scope_dir(scope: Any, project_root: Path) -> Path:
-    from ..core.scope import InstallScope, get_apm_dir
-
-    return get_apm_dir(InstallScope.USER) if scope == InstallScope.USER else Path(project_root)
+    found: dict[str, tuple[set, set[str]]] = {}
+    for target in targets or ():
+        path = _record_path(project_root, target)
+        if not path.is_file():
+            continue
+        try:
+            records = per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN)
+        except (OSError, ValueError, TypeError):
+            continue
+        for slug, (key, files) in records.items():
+            keys, held = found.setdefault(slug, (set(), set()))
+            keys.add(key)
+            held.update(_relative_value(value, Path(project_root)) for value in files)
+    return found
 
 
 def record_bundle_markdown_hooks(
     scope: Any,
     project_root: Path,
+    targets: Any,
     slug: str,
     approval_key: str | None,
     deployed: Collection[str],
@@ -67,50 +74,102 @@ def record_bundle_markdown_hooks(
     """Record the hooked Markdown this install of *slug* deployed, with its key.
 
     Hooked Markdown deploys only under an approved key (#5248), so any it
-    deployed was admitted by *approval_key*. An install that deployed none
-    keeps the earlier record, so a withdrawn key still retires what it
-    admitted; a dry run records nothing.
+    deployed was admitted by *approval_key*. A target where this install
+    deployed none keeps its earlier record; a dry run records nothing.
     """
     if dry_run or not approval_key:
         return
+    from ..core.scope import InstallScope
+    from ..integration.hook_ownership import BUNDLE_RECORD_MARKDOWN, write_per_file_bundle_record
+    from .local_bundle_hook_trust import _relative_value
     from .local_bundle_paths import markdown_declares_hooks
 
-    files = sorted(
-        value for value in deployed if markdown_declares_hooks(_spelled(project_root, value))
+    root = Path(project_root)
+    hooked = {
+        _relative_value(value, root)
+        for value in deployed
+        if markdown_declares_hooks(Path(value) if Path(value).is_absolute() else root / value)
+    }
+    for target in targets or ():
+        files = sorted(value for value in hooked if value.startswith(_prefix(target)))
+        if files:
+            write_per_file_bundle_record(
+                _record_path(root, target),
+                slug,
+                approval_key,
+                files,
+                kind=BUNDLE_RECORD_MARKDOWN,
+                project_root=root,
+                user_scope=scope == InstallScope.USER,
+            )
+
+
+def _hooked_rows(project_root: Path, targets: Any, lock_paths: Collection[str]) -> set[str]:
+    """Return the local-bundle lock rows, inside a target root, that declare hooks."""
+    from .local_bundle_hook_trust import _relative_value, contained_bundle_path
+    from .local_bundle_paths import markdown_declares_hooks
+
+    prefixes = tuple(_prefix(target) for target in targets or ())
+    rows: set[str] = set()
+    for value in lock_paths:
+        path = contained_bundle_path(project_root, value, prefixes)
+        if path is not None and path.is_file() and markdown_declares_hooks(path):
+            rows.add(_relative_value(value, Path(project_root)))
+    return rows
+
+
+def _unadmitted(
+    project_root: Path,
+    targets: Any,
+    allow_executables: Callable[[], dict[str, dict[str, bool]]],
+    lock_paths: Collection[str],
+) -> list[_Holding]:
+    rows = _hooked_rows(project_root, targets, lock_paths)
+    if not rows:
+        return []
+    allow_map = allow_executables()
+    from ..security.executables import (
+        EXEC_TYPE_HOOKS,
+        exec_map_authorizes_all,
+        package_type_approved,
     )
-    if not files:
-        return
-    scope_dir = _scope_dir(scope, project_root)
-    bundles = _read(scope_dir)
-    bundles[slug] = {"approval_key": approval_key, "files": files}
-    _write(scope_dir, bundles)
+
+    if exec_map_authorizes_all(allow_map):
+        return []
+    records = _records(project_root, targets)
+    granted = {
+        slug
+        for slug, (keys, _files) in records.items()
+        if keys
+        and None not in keys
+        and all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys)
+    }
+    holdings: dict[tuple[str | None, str], _Holding] = {}
+    for row in sorted(rows):
+        owners = [slug for slug, (_keys, files) in records.items() if row in files]
+        if any(slug in granted for slug in owners):
+            continue  # another still-granted bundle admits this path
+        slug = owners[0] if owners else None
+        reason = REASON_NOT_GRANTED if owners else REASON_UNRECORDED
+        holdings.setdefault((slug, reason), _Holding(slug, reason)).files.add(row)
+    return list(holdings.values())
 
 
-def _remove_unedited(project_root: Path, files: Collection[str], recorded: dict[str, str]):
-    """Remove each recorded hooked file whose bytes still match the lock.
+def _remove_exact(project_root: Path, files: Collection[str], recorded: dict[str, str]):
+    """Remove each file whose bytes match its lock hash exactly; return ``(removed, kept)``.
 
-    Returns ``(removed, kept)``; a recorded file that no longer declares hooks
-    is in neither, so it leaves the record but keeps its file and lock row.
+    A file with no lock hash, or edited outside APM, is kept.
     """
     from ..integration import write_seam
     from ..utils.content_hash import compute_file_hash
-    from ..utils.path_security import has_symlink_component
-    from .local_bundle_paths import markdown_declares_hooks
 
     removed: set[str] = set()
     kept: set[str] = set()
     for value in files:
-        path = _spelled(project_root, value)
-        if not path.exists() and not path.is_symlink():
-            removed.add(value)
-            continue
-        if has_symlink_component(Path(project_root), path) or not path.is_file():
+        path = Path(project_root) / value
+        digest = recorded.get(value)
+        if digest is None or digest != compute_file_hash(path):
             kept.add(value)
-            continue
-        if not markdown_declares_hooks(path):
-            continue  # no longer hooked (a newer bundle replaced it): file and row stay
-        if recorded.get(value) not in (None, compute_file_hash(path)):
-            kept.add(value)  # edited outside APM: the user's bytes stay
             continue
         try:
             write_seam.unlink(path)
@@ -121,66 +180,99 @@ def _remove_unedited(project_root: Path, files: Collection[str], recorded: dict[
     return removed, kept
 
 
+def _forget(project_root: Path, targets: Any, slug: str, removed: set[str], scope: Any) -> None:
+    """Drop *removed* from *slug*'s records; an emptied record is removed."""
+    from ..core.scope import InstallScope
+    from ..integration.hook_ownership import (
+        BUNDLE_RECORD_MARKDOWN,
+        per_file_bundle_hook_keys,
+        write_per_file_bundle_record,
+    )
+
+    for target in targets or ():
+        path = _record_path(project_root, target)
+        if not path.is_file():
+            continue
+        records = per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN)
+        if slug not in records:
+            continue
+        key, files = records[slug]
+        write_per_file_bundle_record(
+            path,
+            slug,
+            key,
+            [value for value in files if value not in removed],
+            kind=BUNDLE_RECORD_MARKDOWN,
+            project_root=Path(project_root),
+            user_scope=scope == InstallScope.USER,
+        )
+
+
 def retire_unadmitted_bundle_markdown(
     project_root: Path,
+    targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]]],
     *,
     lock_dir: Path,
+    scope: Any = None,
     logger: Any = None,
     dry_run: bool = False,
 ) -> list[str]:
-    """Retire recorded hooked Markdown whose bundle key trust no longer grants.
+    """Retire hooked bundle Markdown current trust no longer admits; return its paths.
 
-    Returns the slugs whose Markdown was retired (or, on a dry run, would be).
-    A file edited outside APM is kept, stays recorded, and is named.
+    A file is removed only when its bytes match its lock hash exactly; a file
+    with no hash or edited outside APM is kept and named.
     """
-    bundles = _read(lock_dir)
-    if not bundles:
-        return []
-    allow_map = allow_executables()
     from ..core.remediation import BUNDLE_HOOKS_RETIRED
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from ..security.executables import (
-        EXEC_TYPE_HOOKS,
-        exec_map_authorizes_all,
-        package_type_approved,
-    )
-    from .local_bundle_hook_trust import _drop_lock_rows
+    from .local_bundle_hook_trust import _drop_lock_rows, local_bundle_paths
 
-    if exec_map_authorizes_all(allow_map):
+    root = Path(project_root)
+    holdings = _unadmitted(root, targets, allow_executables, local_bundle_paths(lock_dir))
+    if not holdings:
         return []
     lockfile = LockFile.read(get_lockfile_path(lock_dir))
-    recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
+    recorded = {}
+    if lockfile is not None:
+        from .local_bundle_hook_trust import _relative_value
+
+        recorded = {
+            _relative_value(value, root): digest
+            for value, digest in lockfile.local_deployed_file_hashes.items()
+        }
     retired: list[str] = []
-    for slug, entry in sorted(bundles.items()):
-        key = entry.get("approval_key") if isinstance(entry, dict) else None
-        files = [str(f) for f in entry.get("files") or []] if isinstance(entry, dict) else []
-        if isinstance(key, str) and package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS):
-            continue
-        retired.append(slug)
+    for holding in holdings:
+        label = f"local bundle '{holding.slug}'" if holding.slug else "a local bundle"
         if dry_run:
             if logger is not None:
                 logger.warning(
-                    f"Would retire {len(files)} Markdown file(s) with frontmatter hooks "
-                    f"from local bundle '{slug}'."
+                    f"Would retire {len(holding.files)} Markdown file(s) with frontmatter "
+                    f"hooks from {label} ({holding.reason})."
                 )
             continue
-        removed, kept = _remove_unedited(project_root, files, recorded)
+        removed, kept = _remove_exact(root, holding.files, recorded)
         if removed:
-            _drop_lock_rows(lock_dir, removed)
-        if kept:
-            bundles[slug] = {"approval_key": key, "files": sorted(kept)}
-        else:
-            del bundles[slug]
+            _drop_lock_rows(
+                lock_dir, {v for v in local_bundle_paths(lock_dir) if _rel(v, root) in removed}
+            )
+            if holding.slug:
+                _forget(root, targets, holding.slug, removed, scope)
+        retired.extend(sorted(removed))
         if logger is not None:
             message = (
-                f"Retired {len(removed)} Markdown file(s) with frontmatter hooks from local "
-                f"bundle '{slug}' (approval no longer granted). "
-                f"To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
+                f"Retired {len(removed)} Markdown file(s) with frontmatter hooks from {label} "
+                f"({holding.reason}). To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
             )
             if kept:
-                message += f" Kept edited file(s): {', '.join(sorted(kept))}."
+                message += (
+                    " Kept, as they are edited or have no recorded hash; review and "
+                    f"remove them by hand: {', '.join(sorted(kept))}."
+                )
             logger.warning(message)
-    if retired and not dry_run:
-        _write(lock_dir, bundles)
     return retired
+
+
+def _rel(value: str, root: Path) -> str:
+    from .local_bundle_hook_trust import _relative_value
+
+    return _relative_value(value, root)

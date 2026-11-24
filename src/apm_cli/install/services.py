@@ -1153,7 +1153,7 @@ def integrate_local_bundle(
             project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope
         )
 
-    _record_md_hooks(scope, project_root, str(slug), approval_key, deployed_files, dry_run)
+    _record_md_hooks(scope, project_root, targets, str(slug), approval_key, deployed_files, dry_run)
     from .local_bundle_hooks import integrate_local_bundle_hooks
 
     hook_result = integrate_local_bundle_hooks(
