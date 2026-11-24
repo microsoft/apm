@@ -322,9 +322,9 @@ class _Store:
             info = os.stat(path)
             current = _regular_bytes(path)
         except OSError:
-            return False
+            return True  # an identity that cannot be read keeps the file
         if current is None:
-            return False
+            return True
         identity, digest = [info.st_dev, info.st_ino], _digest(current)
         return any(
             row.get("identity") == identity and row.get("hash") == digest
