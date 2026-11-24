@@ -212,6 +212,8 @@ def test_a_link_free_path_resolves_without_the_proc_name(
     plain, linked = tree / "dir" / "sub", tree / "link_dir" / "sub"
     missing = tree / "dir" / "missing" / "x.md"
     expected = [plain.resolve(), missing.resolve(), linked.resolve()]
+    if realpath._link_free(os.fspath(plain)) is not True:
+        pytest.skip("openat2 cannot prove a link-free path here (seccomp or kernel)")
     readlinks: list[str] = []
     readlink = os.readlink
 
