@@ -114,7 +114,7 @@
       "id": "checkout-commit-verification",
       "decision": "Package checkouts are verified against their commit: objects re-hashed, working-tree bytes matched, nothing untracked",
       "owner": "cache/checkout_verify.py (verify_checkout / require_verified_checkout); utils/git_object_id.py (object_format / git_object_id: git's object ids, not a security hash)",
-      "selectors": ["src/apm_cli/cache/checkout_verify.py", "src/apm_cli/utils/git_object_id.py"],
+      "selectors": ["src/apm_cli/cache/checkout_verify.py", "src/apm_cli/utils/git_object_id.py", "src/apm_cli/cache/inprocess_fetch.py"],
       "guards": ["transport-platform-checkout-verified"]
     },
     {

@@ -408,9 +408,11 @@ class TestInitCommand:
         assert result.exit_code == 0
 
     def test_plugin_with_invalid_name_exits(self, tmp_path):
+        from apm_cli.cli import cli
+
         with self.runner.isolated_filesystem(temp_dir=tmp_path):
-            os.rename if hasattr(os, "rename") else None
-            # Create a dir with invalid plugin name (contains uppercase)
-            self._run("--plugin", "--yes", "Invalid_Plugin_Name")
-        # Should exit with error due to invalid plugin name
-        # (implementation may vary based on validation logic)
+            # Invalid plugin name: uppercase letters and underscores.
+            # `apm init --plugin` was removed in 0.37; `apm plugin init` validates the name.
+            result = self.runner.invoke(cli, ["plugin", "init", "Invalid_Plugin_Name", "--yes"])
+        assert result.exit_code == 1
+        assert "Invalid plugin name" in result.output
