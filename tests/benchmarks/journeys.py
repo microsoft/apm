@@ -12,7 +12,8 @@ Fixtures: ``tree-10``, ``tree-50``, ``tree-200`` (scaling curve),
 ``monorepo-4`` (several ``apm.yml`` roots) and ``real`` (curated public
 packages on github.com, real network). Enterprise shapes: ``tree-N-multi``
 (packages spread over GitHub, GHE Cloud, GitLab and Azure DevOps),
-``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
+``tree-N-ghe`` / ``tree-N-gitlab`` (every package on one non-github.com host,
+so installs take the git path), ``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
 suffix on any offline fixture (the project's git remote points at an org
 whose blocking policy is served, so discovery and enforcement run). Offline fixtures are served by a local
 mirror whose RTT is injected per round trip (``--rtt 0,30,100``).
