@@ -2239,3 +2239,55 @@ def test_a_journal_that_is_a_directory_is_kept_and_reported(tmp_path: Path, apm_
 
     assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
     assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO")
+def test_a_journal_that_is_a_fifo_never_blocks_install(tmp_path: Path, apm_home: Path) -> None:
+    import threading
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError, has_abandoned_journals
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    (store / "journal.jsonl").unlink()
+    os.mkfifo(store / "journal.jsonl", 0o600)
+    found: list[bool] = []
+    probe = threading.Thread(
+        target=lambda: found.append(has_abandoned_journals(store.parent, project)), daemon=True
+    )
+
+    probe.start()
+    probe.join(timeout=10)
+
+    assert found == [True]
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_linked_journal_naming_another_project_is_kept_not_skipped(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The link is never followed, so it cannot pass the store off as another project's."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError, has_abandoned_journals
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    lines = (store / "journal.jsonl").read_text(encoding="utf-8").splitlines(keepends=True)
+    header = json.loads(lines[0])
+    elsewhere = str(tmp_path / "elsewhere")
+    header.update(root=elsewhere, workspace=elsewhere)
+    planted = tmp_path / "planted.jsonl"
+    planted.write_text(json.dumps(header) + "\n" + "".join(lines[1:]), encoding="utf-8")
+    (store / "journal.jsonl").unlink()
+    (store / "journal.jsonl").symlink_to(planted)
+
+    assert has_abandoned_journals(store.parent, project)
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
