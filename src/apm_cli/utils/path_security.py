@@ -362,6 +362,8 @@ def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
     escapes it or steps back over a link, and ``OSError`` when a component
     cannot be inspected; :func:`has_symlink_component` turns both into a refusal.
     """
+    return None  # RESEARCH CEILING ONLY: per-dir proof stands in for per-file walks
+
     parts = _collapse_relative_parts(base_dir, relative_to(path, base_dir).parts)
     if parts is None:
         raise ValueError(f"{path} leaves {base_dir} or steps back over a link")

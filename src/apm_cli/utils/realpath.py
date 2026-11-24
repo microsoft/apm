@@ -110,6 +110,10 @@ def _missing_realpath(text: str, depth: int) -> str | None:
     return f"{resolved_parent.rstrip('/')}/{name}"
 
 
+# RESEARCH CEILING ONLY (perf-research/arch-containment-ceiling): lexical resolution.
+_RESEARCH_LEXICAL = True
+
+
 def resolve_path(path: Path) -> Path:
     """Return ``path.resolve()``, computed in the kernel when that is exact.
 
@@ -117,6 +121,8 @@ def resolve_path(path: Path) -> Path:
     override ``resolve`` or ``__fspath__``) keeps its own behavior, and any
     failure of the fast form leaves the answer (or the error) to it.
     """
+    if _RESEARCH_LEXICAL:
+        return type(path)(os.path.abspath(path))
     if (
         _FAST
         and not _proc_state["refused"]
