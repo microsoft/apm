@@ -260,3 +260,38 @@ def test_bundle_txt_command_with_frontmatter_hooks_is_parked(
     assert list((consumer / ".claude" / "commands").glob("run.txt*")) == []
     rows = world.lock(consumer).get("local_deployed_files") or []
     assert not any("run.txt" in str(row) for row in rows), rows
+
+
+@pytest.mark.parametrize("withdrawal", ["revoked", "denied"])
+def test_withdrawn_approval_retires_deployed_markdown_with_frontmatter_hooks(
+    tmp_path: Path, apm_binary_path: Path, withdrawal: str
+) -> None:
+    """#5254: the next install retires hooked Markdown a withdrawn key admitted."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    consumer = _consumer(world, "retire-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    hooked, plain = consumer / _DEPLOYED["command"], consumer / _DEPLOYED["skill"]
+    assert hooked.is_file() and plain.is_file()
+    before = tree_bytes(consumer / ".claude")
+
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {} if withdrawal == "revoked" else {"deny": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    text = output(world.apm(consumer, "install", "--no-policy"))
+
+    assert "Retired 1 Markdown file(s) with frontmatter hooks from local bundle 'fmpkg'" in text
+    assert not hooked.exists()
+    after = tree_bytes(consumer / ".claude")
+    assert {rel: data for rel, data in before.items() if rel != "commands/run.md"} == after
+    lock = world.lock(consumer)
+    assert _DEPLOYED["command"] not in lock["local_deployed_files"]
+    assert _DEPLOYED["skill"] in lock["local_deployed_files"]
+
+    # Converged: the next install retires nothing more and changes no bytes.
+    again = output(world.apm(consumer, "install", "--no-policy"))
+    assert "Retired" not in again, again
+    assert tree_bytes(consumer / ".claude") == after
