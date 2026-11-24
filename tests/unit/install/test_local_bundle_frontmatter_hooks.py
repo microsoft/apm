@@ -143,3 +143,74 @@ def test_frontmatter_block_is_read_by_the_yaml_owner(
 
 def _assert_block(actual: str, expected: str) -> None:
     assert actual == expected
+
+
+def _claude_record(project: Path, slug: str, key: str, files: list[str]) -> None:
+    from apm_cli.integration.hook_ownership import (
+        BUNDLE_MARKDOWN_RECORD_FILE,
+        BUNDLE_RECORD_MARKDOWN,
+        write_per_file_bundle_record,
+    )
+
+    write_per_file_bundle_record(
+        project / ".claude" / BUNDLE_MARKDOWN_RECORD_FILE,
+        slug,
+        key,
+        files,
+        kind=BUNDLE_RECORD_MARKDOWN,
+    )
+
+
+def _assert_unadmitted(project: Path, allow: dict, rows: list[str], expected: dict) -> None:
+    from apm_cli.install.local_bundle_markdown_hooks import _unadmitted
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    holdings = _unadmitted(project, [KNOWN_TARGETS["claude"]], lambda: allow, rows)
+    assert {(h.slug, h.reason): sorted(h.files) for h in holdings} == expected
+
+
+def test_a_path_another_granted_bundle_records_is_never_retired(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    shared = ".claude/commands/run.md"
+    own = ".claude/commands/own.md"
+    for rel in (shared, own):
+        (project / rel).parent.mkdir(parents=True, exist_ok=True)
+        (project / rel).write_bytes(b"---\nhooks: {}\n---\nRun.\n")
+    _claude_record(project, "revoked", "revoked@1:sha256:aa", [shared, own])
+    _claude_record(project, "granted", "granted@1:sha256:bb", [shared])
+    allow = {"granted@1:sha256:bb": {"hooks": True}}
+
+    _assert_unadmitted(
+        project,
+        allow,
+        [shared, own],
+        {("revoked", "approval no longer granted"): [own]},
+    )
+
+
+def test_a_hooked_row_no_record_names_fails_closed(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    row = ".claude/commands/run.md"
+    (project / row).parent.mkdir(parents=True)
+    (project / row).write_bytes(b"---\nhooks: {}\n---\nRun.\n")
+
+    _assert_unadmitted(project, {}, [row], {(None, "no approval record"): [row]})
+
+
+def test_a_file_without_an_exact_lock_hash_is_kept(tmp_path: Path) -> None:
+    from apm_cli.install.local_bundle_markdown_hooks import _remove_exact
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    exact, unhashed, edited = "exact.md", "unhashed.md", "edited.md"
+    for name in (exact, unhashed, edited):
+        (tmp_path / name).write_bytes(b"---\nhooks: {}\n---\n")
+    recorded = {exact: compute_file_hash(tmp_path / exact), edited: "sha256:" + "0" * 64}
+
+    removed, kept = _remove_exact(tmp_path, [exact, unhashed, edited], recorded)
+
+    _assert_partition(tmp_path, removed, kept, {exact}, {unhashed, edited})
+
+
+def _assert_partition(root: Path, removed, kept, want_removed, want_kept) -> None:
+    assert (set(removed), set(kept)) == (want_removed, want_kept)
+    assert {p.name for p in root.iterdir()} == want_kept

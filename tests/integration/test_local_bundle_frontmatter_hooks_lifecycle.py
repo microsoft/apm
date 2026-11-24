@@ -286,7 +286,12 @@ def test_withdrawn_approval_retires_deployed_markdown_with_frontmatter_hooks(
     assert "Retired 1 Markdown file(s) with frontmatter hooks from local bundle 'fmpkg'" in text
     assert not hooked.exists()
     after = tree_bytes(consumer / ".claude")
-    assert {rel: data for rel, data in before.items() if rel != "commands/run.md"} == after
+    # Only the retired file and its emptied approval record leave .claude/.
+    record = "apm-bundle-markdown-hooks.json"
+    assert record in before and record not in after
+    assert {
+        rel: data for rel, data in before.items() if rel not in {"commands/run.md", record}
+    } == after
     lock = world.lock(consumer)
     assert _DEPLOYED["command"] not in lock["local_deployed_files"]
     assert _DEPLOYED["skill"] in lock["local_deployed_files"]
@@ -316,6 +321,34 @@ def test_withdrawn_approval_keeps_hooked_markdown_edited_outside_apm(
     dump_yaml(manifest, consumer / "apm.yml")
     text = output(world.apm(consumer, "install", "--no-policy"))
 
-    assert f"Kept edited file(s): {_DEPLOYED['command']}" in text, text
+    assert "Kept, as they are edited or have no recorded hash" in text, text
+    assert _DEPLOYED["command"] in text, text
     assert hooked.read_bytes() == edited
     assert _DEPLOYED["command"] in world.lock(consumer)["local_deployed_files"]
+
+
+@pytest.mark.parametrize("withdrawn", [False, True], ids=["still-approved", "withdrawn"])
+def test_fresh_clone_without_apm_modules_keeps_or_retires_by_the_committed_record(
+    tmp_path: Path, apm_binary_path: Path, withdrawn: bool
+) -> None:
+    """#5254 R3: the approval record is committed, so a fresh clone needs no apm_modules."""
+    import shutil
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    consumer = _consumer(world, "clone-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    shutil.rmtree(consumer / "apm_modules", ignore_errors=True)
+    hooked = consumer / _DEPLOYED["command"]
+    if withdrawn:
+        manifest["executables"] = {}
+        dump_yaml(manifest, consumer / "apm.yml")
+
+    text = output(world.apm(consumer, "install", "--no-policy"))
+
+    assert hooked.exists() is not withdrawn, text
+    assert ("Retired 1 Markdown file(s) with frontmatter hooks" in text) is withdrawn, text
+    assert (consumer / _DEPLOYED["skill"]).is_file()
