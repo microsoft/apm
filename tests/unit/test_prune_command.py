@@ -259,6 +259,29 @@ class TestPruneCommand:
             assert result.exit_code == 0
             assert not orphan_dir.exists(), "Orphaned package dir should be removed"
 
+    def test_prune_refuses_before_any_change_when_its_graph_check_fails(self):
+        """The pre-pass fails closed (#5140): no reconciliation, no removal."""
+        reconciled: list[object] = []
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            orphan_dir = _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            with (
+                patch(
+                    "apm_cli.commands.prune.decide_orphan_removal",
+                    side_effect=RuntimeError("graph unreadable"),
+                ),
+                patch(
+                    "apm_cli.install.local_bundle_hook_trust.reconcile_scope_bundle_hooks",
+                    side_effect=lambda *a, **k: reconciled.append(a),
+                ),
+            ):
+                result = self.runner.invoke(cli, ["prune"])
+            assert result.exit_code == 1, result.output
+            assert "could not be checked (graph unreadable)" in result.output
+            assert "Nothing was changed." in result.output
+            assert reconciled == [], "the refusal comes before bundle reconciliation"
+            assert orphan_dir.is_dir()
+
     def test_prune_keeps_declared_packages(self):
         """prune must not remove packages that are declared in apm.yml."""
         with self._chdir_tmp() as tmp:

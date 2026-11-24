@@ -65,6 +65,28 @@ def file_mode(path: Path) -> int:
     return stat.S_IMODE(path.lstat().st_mode)
 
 
+def valid_state(state: Any, *, entry: bool) -> bool:
+    """Whether *state* has the shape :func:`path_state` (or :func:`entry_state`) records."""
+    if entry:
+        return isinstance(state, str)
+    if not isinstance(state, dict):
+        return False
+    if state in (ABSENT, OTHER):
+        return True
+    if set(state) == {"link"}:
+        return isinstance(state["link"], str)
+    if set(state) == {"file", "mode"}:
+        return isinstance(state["file"], str) and type(state["mode"]) is int
+    if set(state) == {"dir", "mode"}:
+        entries = state["dir"]
+        return (
+            isinstance(entries, dict)
+            and all(isinstance(k, str) and isinstance(v, str) for k, v in entries.items())
+            and type(state["mode"]) is int
+        )
+    return False
+
+
 def ensure_listable(path: Path) -> None:
     """Raise ``OSError`` when a directory below *path* cannot be listed.
 

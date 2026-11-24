@@ -632,7 +632,8 @@ class GitReferenceResolver:
                 if not (ref or "").startswith("refs/"):
                     try:
                         shallow = self._resolve_shallow(dep_ref, ref, temp_dir)
-                    except git_command_error():
+                    except (git_command_error(), RuntimeError):
+                        # The clone engine reports a failed plan as RuntimeError.
                         shallow = None
                 if shallow is not None:
                     ref_type, resolved_commit, ref_name = shallow
