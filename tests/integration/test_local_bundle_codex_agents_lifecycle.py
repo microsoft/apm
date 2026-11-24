@@ -202,17 +202,20 @@ def test_codex_bundle_agent_through_a_user_agents_link_loop_is_refused(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="needs an unprivileged symlink")
-def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_is_skipped(
+def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_writes_nothing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """Pinned as today: the agent is skipped with a warning and nothing is written
-    through the link (#5287); whether the install should fail is tracked separately."""
+    """Nothing is written through the link and no user lock records it (#5287);
+    the exit code and text are the #5300 strict cell's."""
     world, install, outside = _symlinked_user_agents(tmp_path, apm_binary_path, "outside")
 
-    text = _output(world.apm(world.root, *install))
+    world.apm(world.root, *install, expect=None)
 
-    assert "Skipped unsafe bundle entry 'agents/rev.agent.md'" in text, text
     assert not any(outside.iterdir())
+    lockfile = world.isolated.config_root / "apm.lock.yaml"
+    lock = (load_yaml(lockfile) or {}) if lockfile.exists() else {}
+    claims = [*(lock.get("local_deployed_files") or []), *(lock.get("deployments") or [])]
+    assert not any(".codex/agents" in str(claim) for claim in claims), claims
 
 
 _OUT_OF_SCOPE_EXITS_ZERO = KnownFailure(
