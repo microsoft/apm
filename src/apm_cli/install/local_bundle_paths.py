@@ -312,6 +312,38 @@ def _deploy_relative_candidate(
     return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
 
 
+_FRONTMATTER_PREFIX_BYTES = 4096
+
+
+def _frontmatter_text(path: Path) -> str:
+    """Return *path*'s frontmatter block, through its closing fence, as text.
+
+    A 4 KiB prefix is read; the whole file only when the fence is still open
+    at the end of the prefix. Text after the closing fence is never decoded
+    strictly, so only the frontmatter can make the file unreadable. A file
+    without frontmatter yields ``""``.
+    """
+    from frontmatter.default_handlers import YAMLHandler
+
+    with path.open("rb") as handle:
+        data = handle.read(_FRONTMATTER_PREFIX_BYTES)
+        complete = len(data) < _FRONTMATTER_PREFIX_BYTES
+        while True:
+            text = data.decode("utf-8", errors="surrogateescape").removeprefix("\ufeff")
+            if not YAMLHandler.FM_BOUNDARY.match(text):
+                return ""
+            fences = YAMLHandler.FM_BOUNDARY.finditer(text)
+            next(fences)
+            closing = next(fences, None)
+            if complete or (closing is not None and closing.end() < len(text)):
+                break
+            data += handle.read()
+            complete = True
+    block = text[: closing.end()] if closing is not None else text
+    block.encode("utf-8")  # undecodable frontmatter bytes raise UnicodeEncodeError
+    return block
+
+
 def markdown_declares_hooks(path: Path, *, unreadable: bool = True) -> bool:
     """Whether a packed Markdown file's frontmatter declares ``hooks``.
 
@@ -326,7 +358,7 @@ def markdown_declares_hooks(path: Path, *, unreadable: bool = True) -> bool:
     from ..utils.yaml_io import loads_frontmatter
 
     try:
-        metadata = loads_frontmatter(path.read_text(encoding="utf-8")).metadata
+        metadata = loads_frontmatter(_frontmatter_text(path)).metadata
     except (OSError, ValueError, yaml.YAMLError):
         return unreadable
     return not isinstance(metadata, dict) or "hooks" in metadata
