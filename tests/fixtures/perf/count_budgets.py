@@ -8,7 +8,7 @@ required check. ``tests/perf/count_budgets.json`` holds one row per journey and
 counter: ``{"budget", "measured", "reason", "pr"}``, with
 ``budget = measured + slack(measured)``. Any counter over its budget fails, and
 so does a counter with no row (an unbudgeted cost). A counter that drops below
-its budget by more than the slack yields a "tighten" note, so budgets ratchet
+its measured count by more than the slack yields a "tighten" note, so budgets ratchet
 down in an explicit PR.
 """
 
@@ -69,7 +69,8 @@ def compare(
                 f"{journey} {counter}: {label}, observed {value} (+{value - budget}); "
                 "a regression, or a justified change that needs a budget row with reason and pr"
             )
-        elif row and budget - value > slack(value):
+        elif row and value < int(row["measured"]) - slack(int(row["measured"])):
+            # Below the measured baseline by more than its slack: a real drop, not jitter.
             tighten.append(
                 f"{journey} {counter}: observed {value}, budget {budget}: tighten to "
                 f"{value + slack(value)} in a PR"

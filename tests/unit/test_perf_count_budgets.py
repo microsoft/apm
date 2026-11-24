@@ -73,11 +73,10 @@ def test_a_counter_well_under_budget_is_a_tighten_note_not_a_failure() -> None:
     assert tighten == [
         "install-noop fs.stat_calls: observed 900, budget 1050: tighten to 945 in a PR"
     ]
-    # Within the slack: neither.
-    assert compare("install-noop", {"fs.stat_calls": 1000}, {"fs.stat_calls": _row(1000)}) == (
-        [],
-        [],
-    )
+    # Within the slack of the measured count (run-to-run jitter): neither.
+    for jitter in (1000, 960, 1049):
+        rows = {"fs.stat_calls": _row(1000)}
+        assert compare("install-noop", {"fs.stat_calls": jitter}, rows) == ([], []), jitter
 
 
 def test_flatten_names_git_verbs_http_and_fs_counters() -> None:
