@@ -1148,9 +1148,8 @@ def _cone_attributes_ok(
     objects: dict[str, tuple[str, bytes]], sha: str, files: list[tuple[str, str, bool]]
 ) -> bool:
     """T1'/U1-U5: no written file's attribute state can change its checkout bytes."""
-    import re
 
-    from .checkout_verify import _Attributes, _Tree
+    from .checkout_verify import _Attributes, _FoldedAttributes, _Tree
 
     sources = [
         objects[oid][1] for rel, oid, _ in files if rel.rpartition("/")[2] == ".gitattributes"
@@ -1177,22 +1176,9 @@ def _cone_attributes_ok(
     root = objects[sha][1].split(b"\n", 1)[0][5:].decode("ascii")
     source = _PlannedObjects(objects)
 
-    class _Folded(_Attributes):
-        """U3: core.ignorecase matching, casefolded path against casefolded patterns."""
-
-        def _load(self, directory: str) -> None:
-            fresh = directory not in self._rules
-            super()._load(directory)
-            rules = self._rules.get(directory)
-            if fresh and rules is not None:
-                self._rules[directory] = [
-                    (anchored, re.compile(regex.pattern, re.IGNORECASE), attrs)
-                    for anchored, regex, attrs in rules
-                ]
-
     engines = (
         _Attributes(_Tree(source, root, 20), source),
-        _Folded(_Tree(source, root, 20), source),
+        _FoldedAttributes(_Tree(source, root, 20), source),
     )
     transforms = ("filter", "ident", "working-tree-encoding")
     for rel, _, _ in files:
