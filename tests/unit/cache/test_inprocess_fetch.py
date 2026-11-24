@@ -195,3 +195,24 @@ def test_a_missing_repository_falls_back_without_tripping_the_breaker() -> None:
             fetch._admit(404, {})
         fetch._admit(200, {"X-RateLimit-Remaining": "59"})
         assert not fetch._rate_limited()
+
+
+def test_only_the_fresh_landing_skips_verification(tmp_path: Path) -> None:
+    from apm_cli.cache.checkout_verify import (
+        forget_verdicts,
+        inprocess_verified,
+        register_inprocess_manifest,
+    )
+
+    sha = "c" * 40
+    repo = tmp_path / sha / "full"
+    repo.mkdir(parents=True)
+    register_inprocess_manifest(repo, sha, {"SKILL.md": ("b" * 40, False)})
+    try:
+        assert inprocess_verified(repo, sha, use="verify")
+        assert inprocess_verified(repo, use="links")
+        # Every later read of the cache verifies (a child edit keeps the dir's inode).
+        assert not inprocess_verified(repo, sha, use="verify")
+        assert not inprocess_verified(repo, use="links")
+    finally:
+        forget_verdicts()

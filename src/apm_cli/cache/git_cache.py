@@ -383,8 +383,8 @@ class GitCache:
                 url, ref, locked_sha=locked_sha, env=env, sparse_paths=sparse_paths
             )
             sha = checkout.parent.name
-            if not sparse_paths and inprocess_verified(checkout, sha):
-                # This process hashed every byte to its object id while writing this very directory.
+            if not sparse_paths and inprocess_verified(checkout, sha, use="verify"):
+                # The fresh landing: every byte was hashed to its object id as written.
                 return checkout
             verify_env = git_subprocess_env(env)
             cone = bool(sparse_paths)

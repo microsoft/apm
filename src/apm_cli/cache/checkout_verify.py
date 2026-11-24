@@ -657,28 +657,35 @@ def require_verified_bytes(
         raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
 
 
-_INPROCESS: dict[tuple[str, str], tuple[int, int]] = {}
+# Guarantees the fresh landing proved while writing, each usable by ONE read.
+_FRESH_USES = frozenset({"verify", "links"})
+_INPROCESS: dict[tuple[str, str], tuple[int, int, set[str]]] = {}
 
 
 def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str, bool]]) -> None:
     """Record the verdict an in-process fetch reached while writing *repo*.
 
-    Bound to the landed directory's (dev, ino): a swapped directory misses and is verified.
+    The manifest stays for copy verification. The skip of the commit verify and
+    of the link scan applies once each, to the read of this fresh landing, and
+    only while *repo* is the same directory (dev, ino); every later read of the
+    cache verifies as usual.
     """
     key = _key(repo, sha)
     info = os.lstat(repo)
     with _MANIFEST_LOCK:
         _MANIFESTS[key] = _Manifest(object_format(sha), dict(files))
-        _INPROCESS[key] = (info.st_dev, info.st_ino)
+        _INPROCESS[key] = (info.st_dev, info.st_ino, set(_FRESH_USES))
 
 
-def inprocess_verified(repo: Path, sha: str | None = None) -> bool:
-    """Whether this process wrote and verified this very *repo* in-process."""
+def inprocess_verified(repo: Path, sha: str | None = None, *, use: str) -> bool:
+    """Whether this read is the first *use* of a directory this process wrote and verified."""
     key = _key(repo, sha or Path(repo).parent.name)
     with _MANIFEST_LOCK:
-        identity = _INPROCESS.get(key)
-        if identity is None or key not in _MANIFESTS:
+        entry = _INPROCESS.get(key)
+        if entry is None or key not in _MANIFESTS or use not in entry[2]:
             return False
+        entry[2].discard(use)
+        identity = entry[:2]
     try:
         info = os.lstat(repo)
     except OSError:

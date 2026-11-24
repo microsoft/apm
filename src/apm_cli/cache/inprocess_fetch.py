@@ -178,8 +178,12 @@ def _apply_delta(base: bytes, delta: bytes, budget: list[int]) -> bytes:
             length = length or 0x10000
             if offset + length > len(base):
                 raise _Refuse("delta copy out of range")
+            if len(out) + length > dst_size:
+                raise _Refuse("delta result size mismatch")
             out += base[offset : offset + length]
         elif op:
+            if len(out) + op > dst_size:
+                raise _Refuse("delta result size mismatch")
             out += delta[pos : pos + op]
             pos += op
         else:
@@ -190,10 +194,9 @@ def _apply_delta(base: bytes, delta: bytes, budget: list[int]) -> bytes:
 
 
 def _object_id(kind: str, data: bytes) -> str:
-    digest = hashlib.new("sha1", usedforsecurity=False)
-    digest.update(b"%s %d\x00" % (kind.encode("ascii"), len(data)))
-    digest.update(data)
-    return digest.hexdigest()
+    from ..utils.git_object_id import git_object_id
+
+    return git_object_id("sha1", kind, data)
 
 
 def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
@@ -497,6 +500,7 @@ def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
     from ..deps.anonymous_ref_listing import _session_for_refs
     from ..utils.http_credentials import origin_bounded_request
 
+    deadline = time.monotonic() + _DEADLINE_SECONDS
     with origin_bounded_request(
         _session_for_refs(ca),
         "POST",
@@ -519,17 +523,25 @@ def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
         kind = response.headers.get("Content-Type", "").split(";")[0].strip()
         if kind != "application/x-git-upload-pack-result":
             raise _Refuse("not an upload-pack result")
+        if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+            raise _Refuse("encoded response")
+        read1 = getattr(response.raw, "read1", None)
+        if not callable(read1):
+            raise _Refuse("no single-read body access")
+        # One socket read per step, so a trickling server costs at most the
+        # deadline plus one read timeout.
         chunks = []
         total = 0
-        deadline = time.monotonic() + _DEADLINE_SECONDS
-        for chunk in response.iter_content(65536):
+        while True:
             if time.monotonic() > deadline:
                 raise _Refuse("fetch exceeds the wall deadline")
+            chunk = read1(65536, decode_content=False)
+            if not chunk:
+                return b"".join(chunks)
             total += len(chunk)
             if total > _MAX_BODY:
                 raise _Refuse("pack exceeds the size cap")
             chunks.append(chunk)
-        return b"".join(chunks)
 
 
 def _write_file(path: str, data: bytes, executable: bool) -> None:
@@ -597,6 +609,8 @@ def fetch_worktree(
         return None
     try:
         upload_url, proxy, ca = _gate(url, env if env is not None else os.environ)
+        if _rate_limited():  # another download tripped it while this one was gated
+            raise _Refuse("rate limited earlier in this command")
         body = _post(upload_url, proxy, ca, _request_body(sha))
         objects = parse_pack(_pack_from_response(body))
         files, reached = _plan(objects, sha)
@@ -620,8 +634,14 @@ def fetch_worktree(
                 raise _Refuse("staged root changed")
         return manifest
     except _Refuse as reason:
-        _log.debug("in-process fetch falls back to git for %s: %s", url, reason)
+        _log.debug("in-process fetch falls back to git for %s: %s", _redact(url), _redact(reason))
         return None
     except Exception as exc:
-        _log.debug("in-process fetch falls back to git for %s: %r", url, exc)
+        _log.debug("in-process fetch falls back to git for %s: %s", _redact(url), _redact(exc))
         return None
+
+
+def _redact(value: object) -> str:
+    from ..utils.git_env import redact_git_diagnostic
+
+    return redact_git_diagnostic(str(value))
