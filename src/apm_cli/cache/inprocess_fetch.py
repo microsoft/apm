@@ -943,8 +943,12 @@ def fetch_worktree(
     staged: Path,
     env: Mapping[str, str] | None,
     pins: tuple[tuple[str, str], ...],
-) -> dict[str, tuple[str, bool]] | None:
-    """Write commit *sha* of *url* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``."""
+) -> tuple[dict[str, tuple[str, bool]], list[tuple[str, bytes, bool]]] | None:
+    """Write commit *sha* of *url* into empty *staged*: ``(manifest, payload)`` or ``None``.
+
+    *payload* is ``[(posix path, verified bytes, executable)]``: the blob bytes
+    whose ids were computed here, for materializing the package without a re-read.
+    """
     if len(sha) != 40:
         return None
     if _rate_limited():
@@ -958,6 +962,7 @@ def fetch_worktree(
         root = str(staged)
         made = {root}
         manifest: dict[str, tuple[str, bool]] = {}
+        payload: list[tuple[str, bytes, bool]] = []
         for rel, oid, executable in files:
             parts = rel.split("/")
             directory = root
@@ -968,16 +973,39 @@ def fetch_worktree(
                     made.add(directory)
             _write_file(os.path.join(directory, parts[-1]), objects[oid][1], executable)
             manifest[rel] = (oid, executable)
+            payload.append((rel, objects[oid][1], executable))
         _write_git_dir(staged, url, sha, objects, reached, pins)
         if os.name != "nt":
             info = os.lstat(root)
             if not stat.S_ISDIR(info.st_mode):
                 raise _Refuse("staged root changed")
         _note(url, "hit")
-        return manifest
+        return manifest, payload
     except _Refuse as reason:
         _note(url, f"fallback: {reason}")
         return None
     except Exception as exc:
         _note(url, f"fallback: {type(exc).__name__}")
         return None
+
+
+def materialize_payload(target: Path, payload: list[tuple[str, bytes, bool]]) -> None:
+    """Write verified in-memory bytes into empty *target* (no copy, no re-read).
+
+    The bytes are the objects this command hashed to their ids while fetching,
+    so the package equals the verified commit by construction. Same writer as
+    the checkout: a directory per mkdir, every file O_CREAT|O_EXCL|O_NOFOLLOW.
+    """
+    root = str(target)
+    if os.listdir(root):
+        raise _Refuse("target is not empty")
+    made = {root}
+    for rel, data, executable in payload:
+        parts = rel.split("/")
+        directory = root
+        for part in parts[:-1]:
+            directory = os.path.join(directory, part)
+            if directory not in made:
+                os.mkdir(directory, 0o755)
+                made.add(directory)
+        _write_file(os.path.join(directory, parts[-1]), data, executable)
