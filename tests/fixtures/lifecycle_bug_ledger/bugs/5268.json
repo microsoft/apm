@@ -1,0 +1,15 @@
+{
+  "issue": 5268,
+  "fixed_in": "Unreleased",
+  "summary": "The bundle frontmatter reader opened every packed file with a plain open(), so a named pipe could block apm install and a symlinked packed file was followed; it now reads only regular files, never through a link.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_local_bundle_frontmatter_hooks.py::test_a_packed_file_that_is_not_regular_is_never_read_and_counts_as_hooks",
+    "tests/integration/test_local_bundle_frontmatter_hooks_lifecycle.py::test_a_fifo_in_the_pack_list_is_refused_by_name_without_blocking"
+  ]
+}
