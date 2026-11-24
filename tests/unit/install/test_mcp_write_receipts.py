@@ -310,17 +310,37 @@ def test_evidence_bound_to_another_installation_is_set_aside_once(project: Path)
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
 
 
-def test_corrupt_evidence_is_never_set_aside_by_an_install(project: Path) -> None:
-    """Only evidence provably bound to another installation rotates; anything else refuses."""
+def _null_root_identity(data: dict) -> None:
+    data["root_identity"] = None
+
+
+def _another_uuid_no_writes(data: dict) -> None:
+    data["installation"] = "0" * 32
+    del data["writes"]
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    ["text", _null_root_identity, _another_uuid_no_writes],
+    ids=["not-json", "null-root-identity", "another-uuid-no-writes"],
+)
+def test_corrupt_evidence_is_never_set_aside_by_an_install(project: Path, corrupt) -> None:
+    """Only well-formed evidence provably bound to another installation rotates."""
     _install_write(project, _Logger())
     path = McpWriteReceipts.open(project, user_scope=False).path
-    path.write_text("{not json")
+    if corrupt == "text":
+        path.write_text("{not json")
+    else:
+        data = json.loads(path.read_text())
+        corrupt(data)
+        path.write_text(json.dumps(data))
+    before = path.read_bytes()
     logger = _Logger()
 
     _retire(project, logger)
 
     assert SERVER in _servers(project)
-    assert path.read_text() == "{not json", "corrupt evidence stays in place"
+    assert path.read_bytes() == before, "corrupt evidence stays in place"
     assert not path.with_name(path.name + ".superseded").exists()
     assert logger.warnings and "Kept every MCP entry" in logger.warnings[0]
 

@@ -196,10 +196,7 @@ class McpWriteReceipts:
                 data = json.loads(store.path.read_text(encoding="utf-8"))
                 if not session.binds(data):
                     raise ValueError("it belongs to another checkout or installation")
-                if not isinstance(data["writes"], list):
-                    raise TypeError("writes must be a list")
-                for row in data["writes"]:
-                    write = McpWrite.from_row(row)
+                for write in _parse_writes(data):
                     store.writes[_ident(write)] = write
             except (KeyError, TypeError, UnicodeError, ValueError) as exc:
                 raise McpWriteEvidenceError(
@@ -729,6 +726,13 @@ def _note_unusable(project_root: Path, *, user_scope: bool, reason: str) -> None
         _log.debug("Could not note unusable MCP write evidence", exc_info=True)
 
 
+def _parse_writes(data: Any) -> list[McpWrite]:
+    """The write records of evidence *data*; raises on any malformed record."""
+    if not isinstance(data["writes"], list):
+        raise TypeError("writes must be a list")
+    return [McpWrite.from_row(row) for row in data["writes"]]
+
+
 def _supersede_other_installation(project_root: Path, *, user_scope: bool) -> Path | None:
     """Rename evidence provably bound to another installation of this root; else None.
 
@@ -746,7 +750,9 @@ def _supersede_other_installation(project_root: Path, *, user_scope: bool) -> Pa
         path = session.mcp_state_path
         if path.is_symlink() or not path.is_file():
             return None
-        if not session.another_installation(json.loads(path.read_text(encoding="utf-8"))):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        _parse_writes(data)  # malformed write records stay in place and keep refusing
+        if not session.another_installation(data):
             return None  # this installation's own evidence, or not provably another's
         base = path.parent.parent.parent.parent  # the evidence owner's anchor (_note_unusable)
         for n in range(100):
