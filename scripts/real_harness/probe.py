@@ -49,9 +49,10 @@ ENVS = ("normal", "worktree", "headless")
 # Claude-only diagnostics at project scope: a second session in the same HOME, the
 # marketplace path made absolute, no folder trust (headless and TUI), and the
 # native oracle (Claude's own `plugin marketplace add` + `plugin install --scope
-# project`, then the user plugin state wiped to simulate a fresh clone). Worktree diagnostics: apm installs
-# only on the worktree's branch (main checkout has no .agents/plugins), or a
-# session runs in the main checkout before the first session in a worktree.
+# project`, then the user plugin state wiped to simulate a fresh clone).
+# Worktree diagnostics: apm installs only on the worktree's branch (main checkout
+# has no .agents/plugins), or a session runs in the main checkout before the
+# first session in a worktree.
 DIAG_ENVS = (
     "tui-untrusted",
     "headless-rerun",
