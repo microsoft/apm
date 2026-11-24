@@ -2220,7 +2220,7 @@ def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
     monkeypatch.setattr(pwd, "getpwuid", lambda uid: me)
     monkeypatch.setattr(pwd, "getpwall", lambda: [me, other])
     monkeypatch.setattr(grp, "getgrgid", getgrgid)
-    _local_account_databases(tmp_path, monkeypatch, "files systemd")
+    _local_account_databases(tmp_path, monkeypatch, "files")
 
     if private:
         outcome = _replay(apm_home, project, lambda: ledger)
@@ -2233,13 +2233,16 @@ def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
     assert config.read_bytes() == b"killed\n"
 
 
-def _local_account_databases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sources) -> None:
+def _local_account_databases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sources, initgroups: str | None = None
+) -> None:
     """Point the name service switch at a file listing *sources* (``None``: no file)."""
     nsswitch = tmp_path / "nsswitch.conf"
     if sources is not None:
-        nsswitch.write_text(
-            f"passwd: {sources}\ngroup: {sources}\nhosts: files dns\n", encoding="utf-8"
-        )
+        lines = f"passwd: {sources}\ngroup: {sources}\nhosts: files dns\n"
+        if initgroups is not None:
+            lines += f"initgroups: {initgroups}\n"
+        nsswitch.write_text(lines, encoding="utf-8")
     monkeypatch.setattr("apm_cli.utils.name_service.NSSWITCH", nsswitch)
 
 
@@ -2247,13 +2250,23 @@ def _local_account_databases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, so
 @pytest.mark.parametrize(
     ("accounts", "sources"),
     [
-        ("empty", "files systemd"),
-        ("without-me", "files systemd"),
+        ("empty", "files"),
+        ("without-me", "files"),
         ("complete", "files sss"),
         ("complete", "files [NOTFOUND=return] ldap"),
         ("complete", None),
+        ("complete", "files systemd"),
+        ("complete", "files+remote-initgroups"),
     ],
-    ids=["empty-enumeration", "partial-enumeration", "sssd", "ldap", "no-nsswitch"],
+    ids=[
+        "empty-enumeration",
+        "partial-enumeration",
+        "sssd",
+        "ldap",
+        "no-nsswitch",
+        "systemd-enumeration",
+        "remote-initgroups",
+    ],
 )
 def test_a_group_writable_apm_home_needs_a_complete_account_enumeration(
     tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, accounts: str, sources
@@ -2278,7 +2291,11 @@ def test_a_group_writable_apm_home_needs_a_complete_account_enumeration(
     monkeypatch.setattr(
         grp, "getgrgid", lambda wanted: SimpleNamespace(gr_name="me", gr_gid=wanted, gr_mem=[])
     )
-    _local_account_databases(tmp_path, monkeypatch, sources)
+    if sources == "files+remote-initgroups":
+        # Supplementary memberships from SSSD never show in gr_mem or a primary group.
+        _local_account_databases(tmp_path, monkeypatch, "files", initgroups="files sss")
+    else:
+        _local_account_databases(tmp_path, monkeypatch, sources)
 
     with pytest.raises(JournalReplayError) as kept:
         _replay(apm_home, project, lambda: ledger)
