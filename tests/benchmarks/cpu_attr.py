@@ -233,6 +233,9 @@ _leaf_owner = collections.Counter()
 _realpath_calls = collections.Counter()
 _ops = collections.Counter()
 _op_totals = collections.Counter()
+_writes = collections.Counter()
+_writes_owner = collections.Counter()
+_write_paths: dict[str, set] = collections.defaultdict(set)
 _stop = threading.Event()
 
 
@@ -317,6 +320,9 @@ def _report(out: str, wall: float, exit_code) -> None:
         "realpath_calls_total": sum(_realpath_calls.values()),
         "op_totals": dict(_op_totals.most_common()),
         "ops_by_apm_owner": top(_ops, 300),
+        "writes_by_kind": dict(_writes.most_common()),
+        "writes_by_kind_owner": top(_writes_owner, 300),
+        "distinct_write_paths_by_kind": {k: len(v) for k, v in sorted(_write_paths.items())},
     }
     with open(out, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=1)
@@ -371,16 +377,141 @@ def _count_ops() -> None:
 
         setattr(module, attr, counted)
 
-    for attr in ("stat", "lstat", "scandir", "listdir", "open", "mkdir", "rename", "replace", "unlink"):
+    for attr in (
+        "stat",
+        "lstat",
+        "scandir",
+        "listdir",
+        "open",
+        "mkdir",
+        "rename",
+        "replace",
+        "unlink",
+    ):
         wrap(os, attr, f"os.{attr}")
     wrap(builtins, "open", "open")
     for attr in ("sha256", "sha1", "new"):
         wrap(hashlib, attr, f"hashlib.{attr}")
 
 
+_ROOTS: list = []
+
+
+def _norm(path) -> str:
+    try:
+        text = os.fsdecode(os.fspath(path))
+    except TypeError:
+        return ""
+    text = os.path.abspath(text).replace("\\", "/")
+    return text.lower() if _WIN else text
+
+
+def _kind(path) -> str:
+    text = _norm(path)
+    if not text:
+        return "fd/other"
+    base = text.rsplit("/", 1)[-1]
+    tmp = "+tmp" if (base.startswith(("apm-atomic-", "tmp")) or ".tmp" in base) else ""
+    cache, project = _ROOTS
+    if "/deploy-" in text:
+        return "journal-store" + tmp
+    if cache and text.startswith(cache + "/"):
+        rest = text[len(cache) + 1 :]
+        return (
+            "cache:"
+            + rest.split("/", 1)[0]
+            + ("/.git" if "/.git/" in rest or rest.endswith("/.git") else "")
+            + tmp
+        )
+    if project and text.startswith(project + "/"):
+        rest = text[len(project) + 1 :]
+        head = rest.split("/", 1)[0]
+        if head == "apm_modules":
+            return (
+                "apm_modules"
+                + ("/.git" if "/.git/" in rest or rest.endswith("/.git") else "")
+                + tmp
+            )
+        if "/" not in rest:
+            return "project-file:" + head + tmp
+        return "target:" + head + tmp
+    return "elsewhere" + tmp
+
+
+def _record_write(op, path) -> None:
+    kind = _kind(path)
+    _writes[f"{kind}|{op}"] += 1
+    _writes_owner[f"{kind}|{op} <- {_owner(sys._getframe(2))}"] += 1
+    _write_paths[kind].add(_norm(path))
+
+
+def _count_writes() -> None:
+    """Classify every write-side file op (open-for-write, mkdir, replace, link, unlink) by path kind."""
+    import builtins
+    import io
+
+    cache = os.environ.get("APM_CACHE_DIR", "")
+    if not cache:
+        try:
+            from apm_cli.cache.paths import get_cache_root
+
+            cache = str(get_cache_root(ensure=False))
+        except Exception:
+            cache = ""
+    _ROOTS[:] = [_norm(cache) if cache else "", _norm(os.getcwd())]
+    flags_w = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+    def wrap_open(module, attr):
+        original = getattr(module, attr)
+
+        def counted(file, mode="r", *args, **kwargs):
+            if (
+                isinstance(mode, str)
+                and any(c in mode for c in "wax+")
+                and not isinstance(file, int)
+            ):
+                _record_write("open-w", file)
+            return original(file, mode, *args, **kwargs)
+
+        setattr(module, attr, counted)
+
+    wrap_open(builtins, "open")
+    wrap_open(io, "open")
+    os_open = os.open
+
+    def counted_os_open(path, flags, *args, **kwargs):
+        if flags & flags_w:
+            _record_write("os.open-w", path)
+        return os_open(path, flags, *args, **kwargs)
+
+    os.open = counted_os_open
+    for attr, op, idx in (
+        ("mkdir", "mkdir", 0),
+        ("replace", "replace", 1),
+        ("rename", "rename", 1),
+        ("link", "link", 1),
+        ("unlink", "unlink", 0),
+        ("rmdir", "rmdir", 0),
+    ):
+        original = getattr(os, attr, None)
+        if original is None:
+            continue
+
+        def make(original=original, op=op, idx=idx):
+            def counted(*args, **kwargs):
+                if len(args) > idx:
+                    _record_write(op, args[idx])
+                return original(*args, **kwargs)
+
+            return counted
+
+        setattr(os, attr, make())
+
+
 def main() -> int:
     _count_realpath()
     _count_ops()
+    _count_writes()
     args = sys.argv[1:]
     out = args[args.index("-o") + 1]
     del args[args.index("-o") : args.index("-o") + 2]
