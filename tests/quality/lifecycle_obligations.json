@@ -1258,12 +1258,6 @@
     "E3"
    ]
   },
-  "T3|OP=install|SRC=local-bundle|PRIM=bin": {
-   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin",
-   "rules": [
-    "U8"
-   ]
-  },
   "T3|OP=install|SRC=local-bundle|PRIM=canvas": {
    "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=canvas",
    "rules": [
@@ -3681,13 +3675,6 @@
    "status": "required",
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
-  },
-  "T1|OP=bundle-install|PRIM=bin|GATE=denied-dependency": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T1|OP=bundle-install|PRIM=canvas|GATE=allowed": {
    "credited_by": [
@@ -6822,13 +6809,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "T3|OP=approve-deny|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
    "issue": "#4096",
@@ -7286,13 +7266,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=audit|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=audit|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
    "issue": "#4096",
@@ -7681,13 +7654,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=bundle-install|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
     "G1|bundle|canvas|allowed|project",
@@ -7791,13 +7757,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "T3|OP=compile|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -8526,13 +8485,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T3|OP=lock|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -15641,13 +15593,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_a_local_bundle"
-  },
-  "pair|OP=bundle-install|PRIM=bin": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "pair|OP=bundle-install|PRIM=canvas": {
    "credited_by": [
@@ -22875,13 +22820,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_a_local_bundle"
   },
-  "pair|SRC=local-bundle|PRIM=bin": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
     "G1|bundle|canvas|allowed|project",
@@ -26751,11 +26689,15 @@
  },
  "pins": {
   "U-BIN": "9ac0d749836e552b423fe94cf20970c0ed1277c8a7871af859745c477d2a78bd",
+  "U-BIN-BUNDLE": "2117545382f7ccf12caeb9fa9a5dcee3a150497681314b37885a251f60301597",
   "U-USER-SCOPE-ORG-POLICY": "7839bf8d042c59baa029c1323413078d972eebb0c45edfd8e8b14106957fd513"
  },
  "removed": {
   "T1|OP=bundle-install|PRIM=bin|GATE=allowed": [
    "U-BIN-OPS"
+  ],
+  "T1|OP=bundle-install|PRIM=bin|GATE=denied-dependency": [
+   "U-BIN-BUNDLE"
   ],
   "T1|OP=bundle-install|PRIM=bin|GATE=denied-executable": [
    "U-BIN-OPS"
@@ -26820,6 +26762,9 @@
   "T3|OP=approve-deny|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=approve-deny|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "T3|OP=approve-deny|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -26858,6 +26803,9 @@
   ],
   "T3|OP=audit|SRC=inline-mcp|PRIM=skill": [
    "U8"
+  ],
+  "T3|OP=audit|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
   ],
   "T3|OP=audit|SRC=mcp-registry|PRIM=bin": [
    "U8"
@@ -26921,6 +26869,9 @@
   ],
   "T3|OP=bundle-install|SRC=inline-mcp|PRIM=skill": [
    "U8"
+  ],
+  "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
   ],
   "T3|OP=bundle-install|SRC=local-path|PRIM=bin": [
    "U8"
@@ -27087,6 +27038,9 @@
   "T3|OP=compile|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=compile|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "T3|OP=compile|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -27126,6 +27080,9 @@
   "T3|OP=install|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=install|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "T3|OP=install|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -27164,6 +27121,9 @@
   ],
   "T3|OP=lock|SRC=inline-mcp|PRIM=skill": [
    "U8"
+  ],
+  "T3|OP=lock|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
   ],
   "T3|OP=lock|SRC=mcp-registry|PRIM=bin": [
    "U8"
@@ -27852,6 +27812,9 @@
   "pair|LOCK=stale|DEPLOYED=present-provenance-unknown": [
    "U3"
   ],
+  "pair|OP=bundle-install|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "pair|OP=bundle-install|SRC=git": [
    "U8"
   ],
@@ -27957,6 +27920,9 @@
   "pair|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "pair|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "pair|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -28027,6 +27993,15 @@
     "docs/src/content/docs/reference/cli/prune.md"
    ],
    "text": "bin/ reaches project scope only inside a trusted whole Claude plugin: loose bin/ deploys only for a marketplace plugin at user scope with a Claude target that supports skills (plugin_bin_deployable), but a plugin that ships bin/ deploys whole to .agents/plugins/<plugin>/ under its whole-plugin approval and --trust-bin (claude_plugins/admission.py), and prune retires that root, bin/ included (native_plugins/uninstall.py). So every project-scope bin cell is reachable and U-BIN removes none; the M-GATE plugin bin spine witnesses them. Self-reinstating: the generator hashes the pinned elements (generator/bin_pin.py); when the hash differs from U_BIN_PIN the project-scope bin cells become must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
+  },
+  "U-BIN-BUNDLE": {
+   "evidence": [
+    "src/apm_cli/install/services.py::integrate_local_bundle",
+    "src/apm_cli/install/local_bundle_paths.py::bundle_deploy_relative_path",
+    "src/apm_cli/install/local_bundle_paths.py::_lower_to_target",
+    "src/apm_cli/install/exec_gate.py::plugin_bin_deployable"
+   ],
+   "text": "a local bundle never deploys bin/, at any scope or gate level (#4095 lane T-1c, QL ruling): integrate_local_bundle routes every packed file through bundle_deploy_relative_path, which keeps only files under a primitive a target deploys (_lower_to_target, _is_primitive_deploy_path); no target declares a bin primitive, and the only bin/ deploy decision (exec_gate.plugin_bin_deployable) belongs to the package pipeline, which the bundle side door never calls. So every PRIM=bin cell of OP=bundle-install or SRC=local-bundle is vacuous for bin/, the org-policy level included: the bundle spine still witnesses the deny's refusal itself. Self-reinstating: bin_pin.bundle_bin_digest hashes the routing elements; when it differs from U_BIN_BUNDLE_PIN the cells become must-cover, and the tripwire test_no_target_routes_a_bundle_bin_file fails if any target ever routes a bundle bin/ path"
   },
   "U-BIN-OPS": {
    "evidence": [

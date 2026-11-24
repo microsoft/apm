@@ -31,7 +31,7 @@ def test_a_changed_pin_makes_the_project_bin_cells_must_cover(monkeypatch) -> No
 
 
 def test_no_target_routes_a_bundle_bin_file() -> None:
-    """Guard for the proposed U-BIN-BUNDLE rule (#4095 lane T-1c): a local bundle never
+    """Tripwire of the U-BIN-BUNDLE rule (#4095 lane T-1c): a local bundle never
     deploys bin/, at any scope, for any target.
 
     ``integrate_local_bundle`` (install/services.py) routes each packed file through

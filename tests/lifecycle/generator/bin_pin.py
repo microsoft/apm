@@ -14,7 +14,9 @@ dropped, so the digest is stable across Python versions); ``rules.U_BIN_PIN``
 holds the approved value, and a mismatch turns the project-scope bin cells
 into must-cover obligations. ``user_org_policy_digest`` pins
 ``core/scope.policy_discovery_uses_git_remote`` the same way for
-U-USER-SCOPE-ORG-POLICY (``rules.U_USER_ORG_POLICY_PIN``).
+U-USER-SCOPE-ORG-POLICY (``rules.U_USER_ORG_POLICY_PIN``), and
+``bundle_bin_digest`` pins the local bundle's deploy routing for U-BIN-BUNDLE
+(``rules.U_BIN_BUNDLE_PIN``).
 """
 
 from __future__ import annotations
@@ -94,4 +96,20 @@ USER_ORG_POLICY = ("core/scope.py", "policy_discovery_uses_git_remote")
 def user_org_policy_digest(src_root: Path = SRC_ROOT) -> str:
     module, name = USER_ORG_POLICY
     tokens = element_tokens(src_root / module, name)
+    return hashlib.sha256(tokens.encode("utf-8")).hexdigest()
+
+
+# U-BIN-BUNDLE: a local bundle routes only target primitives, so it never deploys bin/.
+BUNDLE_BIN = (
+    ("install/local_bundle_paths.py", "bundle_deploy_relative_path"),
+    ("install/local_bundle_paths.py", "_lower_to_target"),
+    ("install/local_bundle_paths.py", "_is_primitive_deploy_path"),
+)
+
+
+@cache
+def bundle_bin_digest(src_root: Path = SRC_ROOT) -> str:
+    tokens = "\n".join(
+        f"{module}::{name} {element_tokens(src_root / module, name)}" for module, name in BUNDLE_BIN
+    )
     return hashlib.sha256(tokens.encode("utf-8")).hexdigest()
