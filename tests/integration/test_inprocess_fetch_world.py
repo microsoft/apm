@@ -182,29 +182,181 @@ def test_a_rate_limit_mid_install_sends_the_rest_to_git_with_the_same_lockfile(
         assert _tree(project) == _tree(reference)
 
 
-def test_an_authenticated_attempt_never_uses_the_in_process_fetch(
+_TOKEN = "ghp_" + "a" * 36
+_REVOKED = "ghp_" + "r" * 36
+
+
+def _basic(token: str) -> str:
+    import base64
+
+    return "Basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()
+
+
+def _auth_env(world, token: str = _TOKEN) -> dict[str, str]:
+    return {**world.env, "GITHUB_APM_PAT": token, "APM_GITHUB_AUTH_FIRST": "1"}
+
+
+def _private(world, token: str = _TOKEN) -> None:
+    """Every github.com git request without this token's header is a 401 challenge."""
+    expected = _basic(token)
+    world.services.script(
+        "github.com",
+        "/",
+        401,
+        {"WWW-Authenticate": 'Basic realm="GitHub"'},
+        b"",
+        when=lambda request: (request.header("Authorization") or "") != expected,
+    )
+
+
+def _run(apm: Path, project: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(apm), "install"],
+        cwd=project,
+        env={**env, "APM_LOG_LEVEL": "DEBUG"},
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+
+
+def _engaged_or_why(apm: Path, project: Path, env: dict[str, str]) -> int:
+    """Packages fetched in process; on a miss the assertion shows each fallback reason."""
+    result = _run(apm, project, env)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    engaged = result.stderr.count(_ENGAGED)
+    reasons = sorted(
+        {line.strip()[-200:] for line in result.stderr.splitlines() if "in-process fetch" in line}
+    )
+    assert engaged == 10, reasons[:20]
+    return engaged
+
+
+def test_an_authenticated_attempt_fetches_in_process_with_only_apms_header(
+    apm_binary_path: Path, tmp_path: Path
+) -> None:
+    """A': the managed github-basic header goes per request; the lockfile equals git's."""
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        world.services.proxy.clear()
+        fast = tmp_path / "in-process"
+        shutil.copytree(tree.project, fast)
+        assert _engaged_or_why(apm_binary_path, fast, _auth_env(world)) == 10
+        fetches = _fetches(world)
+        assert len(fetches) == 10
+        assert {request.header("Authorization") for request in fetches} == {_basic(_TOKEN)}
+
+        world.clear_cache()
+        slow = tmp_path / "git"
+        shutil.copytree(tree.project, slow)
+        forced = {**_auth_env(world), "APM_NO_INPROCESS_FETCH": "1"}
+        assert _assert_installed(apm_binary_path, slow, forced) == 0
+        assert (fast / "apm.lock.yaml").read_bytes() == (slow / "apm.lock.yaml").read_bytes()
+        assert _tree(fast) == _tree(slow)
+
+
+def test_a_private_repository_installs_in_process_like_git(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
     tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
     with serve_offline(tree, tmp_path / "world") as world:
-        env = {**world.env, "GITHUB_APM_PAT": "ghp_" + "a" * 36, "APM_GITHUB_AUTH_FIRST": "1"}
+        _private(world)
+        fast = tmp_path / "in-process"
+        shutil.copytree(tree.project, fast)
+        assert _engaged_or_why(apm_binary_path, fast, _auth_env(world)) == 10
+
+        world.clear_cache()
+        slow = tmp_path / "git"
+        shutil.copytree(tree.project, slow)
+        forced = {**_auth_env(world), "APM_NO_INPROCESS_FETCH": "1"}
+        assert _assert_installed(apm_binary_path, slow, forced) == 0
+        assert (fast / "apm.lock.yaml").read_bytes() == (slow / "apm.lock.yaml").read_bytes()
+        assert _tree(fast) == _tree(slow)
+
+
+def test_a_revoked_token_fails_exactly_like_git_and_never_leaks(
+    apm_binary_path: Path, tmp_path: Path
+) -> None:
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        _private(world)
+        fast = tmp_path / "in-process"
+        shutil.copytree(tree.project, fast)
+        b1 = _run(apm_binary_path, fast, _auth_env(world, _REVOKED))
+        world.clear_cache()
+        slow = tmp_path / "git"
+        shutil.copytree(tree.project, slow)
+        git = _run(
+            apm_binary_path, slow, {**_auth_env(world, _REVOKED), "APM_NO_INPROCESS_FETCH": "1"}
+        )
+
+    assert b1.returncode != 0
+    assert b1.returncode == git.returncode
+    assert not (fast / "apm.lock.yaml").exists() and not (slow / "apm.lock.yaml").exists()
+    for output in (b1.stdout + b1.stderr, git.stdout + git.stderr):
+        assert _REVOKED not in output
+        assert _basic(_REVOKED).split(" ", 1)[1] not in output
+
+
+def test_a_user_extra_header_sends_the_authenticated_fetch_to_git(
+    apm_binary_path: Path, tmp_path: Path
+) -> None:
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        with open(world.env["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8", newline="\n") as config:
+            config.write('[http "https://github.com/"]\n\textraHeader = X-Corp-Proxy: 1\n')
+        world.services.proxy.clear()
         project = tmp_path / "project"
         shutil.copytree(tree.project, project)
-        world.services.proxy.clear()
 
-        assert _assert_installed(apm_binary_path, project, env) == 0
+        assert _assert_installed(apm_binary_path, project, _auth_env(world)) == 0
         assert _fetches(world) == []
 
-        dep = load_yaml(project / "apm.lock.yaml")["dependencies"][0]
-        url, sha = f"https://github.com/{dep['repo_url']}", dep["resolved_commit"]
-        retry = AuthResolver.build_public_github_authenticated_git_env(
-            "ghp_" + "b" * 36, base_env=dict(world.env)
-        )
-        (tmp_path / "retry").mkdir()
-        assert fetch_worktree(url, sha, tmp_path / "retry", retry, ()) is None
-        assert _fetches(world) == []
-        # Killed control: the anonymous attempt of the same package does fetch in process.
+
+def test_the_token_never_reaches_debug_output(apm_binary_path: Path, tmp_path: Path) -> None:
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        project = tmp_path / "project"
+        shutil.copytree(tree.project, project)
+        result = _run(apm_binary_path, project, _auth_env(world))
+
+    assert result.returncode == 0, result.stderr[-2000:]
+    output = result.stdout + result.stderr
+    assert _TOKEN not in output
+    assert _basic(_TOKEN).split(" ", 1)[1] not in output
+
+
+def test_the_retry_env_fetches_in_process_and_an_anonymous_env_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        # The env builders read the ambient TLS config from this process: make it the world's.
+        for variable, value in world.env.items():
+            monkeypatch.setenv(variable, value)
+        reset_git_cache()
+        name = sorted(tree.packages)[0]
+        url = f"https://github.com/{tree.slug(name)}"
         anonymous = AuthResolver.build_public_github_anonymous_git_env(base_env=dict(world.env))
+        listed = subprocess.run(
+            ["git", "ls-remote", "--tags", url],
+            env=anonymous,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        refs = dict(line.split("\t")[::-1] for line in listed.splitlines() if line)
+        tag = f"refs/tags/{tree.recipe.tag}"
+        sha = refs.get(f"{tag}^{{}}") or refs[tag]
+        retry = AuthResolver.build_public_github_authenticated_git_env(
+            _TOKEN, base_env=dict(world.env)
+        )
+        world.services.proxy.clear()
+        (tmp_path / "retry").mkdir()
+        assert fetch_worktree(url, sha, tmp_path / "retry", retry, ()) is not None
         (tmp_path / "anonymous").mkdir()
         assert fetch_worktree(url, sha, tmp_path / "anonymous", anonymous, ()) is not None
-        assert len(_fetches(world)) == 1
+        assert [request.header("Authorization") for request in _fetches(world)] == [
+            _basic(_TOKEN),
+            None,
+        ]

@@ -2174,18 +2174,62 @@ def test_an_apm_home_others_can_write_is_kept_and_reported(tmp_path: Path, apm_h
     assert config.read_bytes() == b"killed\n"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
-def test_a_group_writable_apm_home_is_still_trusted(tmp_path: Path, apm_home: Path) -> None:
-    """A user-private group (umask 0o002) leaves APM_HOME group writable: still replayed."""
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner, group and mode bits")
+@pytest.mark.parametrize(
+    ("group", "private"),
+    [
+        ("user-private", True),
+        ("another-member", False),
+        ("another-account-primary", False),
+        ("not-the-primary-group", False),
+        ("unknown-group", False),
+    ],
+)
+def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, group: str, private: bool
+) -> None:
+    """#5313: APM_HOME may be group writable only when its group is private to this user."""
+    import grp
+    import pwd
+    from types import SimpleNamespace
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
     project = tmp_path / "project"
     config, ledger = _private_config(project)
     _killed_journal(apm_home, project, config)
     apm_home.chmod(0o775)
+    gid = apm_home.stat().st_gid
+    me = SimpleNamespace(
+        pw_name="me",
+        pw_uid=os.geteuid(),
+        pw_gid=gid + 1 if group == "not-the-primary-group" else gid,
+    )
+    other = SimpleNamespace(
+        pw_name="other",
+        pw_uid=os.geteuid() + 1,
+        pw_gid=gid if group == "another-account-primary" else gid + 1,
+    )
+    members = ["me", "other"] if group == "another-member" else ["me"]
 
-    outcome = _replay(apm_home, project, lambda: ledger)
+    def getgrgid(wanted: int):
+        if group == "unknown-group":
+            raise KeyError(wanted)
+        return SimpleNamespace(gr_name="me", gr_gid=wanted, gr_mem=members)
 
-    assert (outcome.restored, outcome.kept) == (1, ())
-    assert config.read_bytes() == _CONFIG_BYTES
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: me)
+    monkeypatch.setattr(pwd, "getpwall", lambda: [me, other])
+    monkeypatch.setattr(grp, "getgrgid", getgrgid)
+
+    if private:
+        outcome = _replay(apm_home, project, lambda: ledger)
+        assert (outcome.restored, outcome.kept) == (1, ())
+        assert config.read_bytes() == _CONFIG_BYTES
+        return
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
@@ -2658,3 +2702,53 @@ def test_a_child_recreated_in_a_partly_removed_directory_honors_the_umask(
     assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
     assert (skill / "reference.md").stat().st_mode & 0o7777 == 0o644
     assert skill.stat().st_mode & 0o7777 == 0o755
+
+
+def test_a_store_opens_its_journal_once_and_still_retains(tmp_path: Path, apm_home: Path) -> None:
+    """One private fd per store on POSIX (#4939); retain renames the store on every OS."""
+    from apm_cli.install import journal_modes
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from tests.unit.deps.test_lockfile_read_cost import _count_calls
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=tmp_path)
+
+    def record_five() -> None:
+        for index in range(5):
+            target = tmp_path / f"{index}.md"
+            target.write_bytes(b"prior\n")
+            journal.record(target)
+
+    opens = _count_calls(journal_modes.open_private_append.__code__, record_five)
+    lines = (journal.store / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    retained = journal._retain()
+
+    assert len(lines) > 5
+    assert opens == (len(lines) if os.name == "nt" else 1)
+    assert retained.name.startswith("retained-")
+    assert (retained / "journal.jsonl").read_text(encoding="utf-8").splitlines() == lines
+    journal.discard()
+    assert not retained.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows opens the journal per line")
+def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_home: Path) -> None:
+    """The held journal fd closes with its journal, not at process exit (#4939)."""
+    import gc
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=tmp_path)
+    target = tmp_path / "a.md"
+    target.write_bytes(b"prior\n")
+    journal.record(target)
+    manifest = journal.store / "journal.jsonl"
+    fd = journal._held_journal[1]
+    del journal
+    gc.collect()
+
+    try:
+        still_open = os.fstat(fd).st_ino == manifest.stat().st_ino
+    except OSError:
+        still_open = False
+    assert not still_open
+    assert manifest.read_text(encoding="utf-8").count("\n") >= 2

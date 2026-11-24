@@ -27,16 +27,16 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 81282,
-        "measured": 77411,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 15059,
+        "measured": 14341,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.realpath_calls": {
-        "budget": 8554,
-        "measured": 8146,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1185,
+        "measured": 1128,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.stat_calls": {
         "budget": 21960,
@@ -45,10 +45,10 @@
         "pr": "#5338"
       },
       "git.config": {
-        "budget": 55,
-        "measured": 52,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 10,
+        "measured": 9,
+        "reason": "52 -> 9: #5325/#5333 memoized git config reads (52 -> 8), then #5351 adds 1 per command (the in-process attribute gate reads config under the checkout env, a new #5283 memo key); main Smoke 6472a85a -> d62aebe0: 8 -> 9; Full Suite run 45446694499 at c0296fab: 9",
+        "pr": "#5378"
       },
       "git.remote": {
         "budget": 13,
@@ -101,16 +101,16 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 79484,
-        "measured": 75699,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 15826,
+        "measured": 15072,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.realpath_calls": {
-        "budget": 8384,
-        "measured": 7984,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1201,
+        "measured": 1143,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.stat_calls": {
         "budget": 21844,
@@ -221,6 +221,362 @@
         "measured": 0,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
+      }
+    },
+    "outdated": {
+      "fs.files_written": {
+        "budget": 23,
+        "measured": 21,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hash_objects": {
+        "budget": 14,
+        "measured": 13,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 429,
+        "measured": 408,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 2,
+        "measured": 1,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 132,
+        "measured": 125,
+        "reason": "max across CI jobs: Integration shard 13 run 45416492731 at 0c60e291 observed 125, Lifecycle Full Suite run 45409372587 observed 109; the job-environment spread is not yet isolated (tracked under #5339)",
+        "pr": "#5345"
+      },
+      "fs.realpath_calls": {
+        "budget": 33,
+        "measured": 31,
+        "reason": "max across CI jobs: Integration shard 13 run 45416492731 at 0c60e291 observed 31, Lifecycle Full Suite run 45409372587 observed 28; the job-environment spread is not yet isolated (tracked under #5339)",
+        "pr": "#5345"
+      },
+      "fs.stat_calls": {
+        "budget": 174,
+        "measured": 165,
+        "reason": "the TLS probe stamp stats the git config files it names on each probe lookup (W3d cost line): Lifecycle Smoke shard 3, run 45446283432 at 9b26dd0d",
+        "pr": "#5370"
+      },
+      "git.config": {
+        "budget": 4,
+        "measured": 3,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 5,
+        "measured": 4,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.requests": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      }
+    },
+    "update": {
+      "fs.files_written": {
+        "budget": 376,
+        "measured": 358,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hash_objects": {
+        "budget": 873,
+        "measured": 831,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 1089867,
+        "measured": 1037968,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 16,
+        "measured": 15,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 3270,
+        "measured": 3114,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.realpath_calls": {
+        "budget": 243,
+        "measured": 231,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.stat_calls": {
+        "budget": 7819,
+        "measured": 7446,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.cat-file": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.config": {
+        "budget": 9,
+        "measured": 8,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.ls-tree": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.remote": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.version": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 4,
+        "measured": 3,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.requests": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      }
+    },
+    "install-cold-auth": {
+      "fs.files_written": {
+        "budget": 1572,
+        "measured": 1497,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "fs.hash_objects": {
+        "budget": 1979,
+        "measured": 1884,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 3469439,
+        "measured": 3304227,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 16774,
+        "measured": 15975,
+        "reason": "lstat_calls 11802 -> 15975: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
+      },
+      "fs.realpath_calls": {
+        "budget": 1810,
+        "measured": 1723,
+        "reason": "realpath_calls 1202 -> 1723: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
+      },
+      "fs.stat_calls": {
+        "budget": 21899,
+        "measured": 20856,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.cat-file": {
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "git.checkout": {
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "git.clone": {
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "git.config": {
+        "budget": 12,
+        "measured": 11,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "git.ls-remote": {
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "git.ls-tree": {
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "git.remote": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 4,
+        "measured": 3,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "http.requests": {
+        "budget": 21,
+        "measured": 20,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      }
+    },
+    "install-warm-auth": {
+      "fs.files_written": {
+        "budget": 868,
+        "measured": 826,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hash_objects": {
+        "budget": 1943,
+        "measured": 1850,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 3468635,
+        "measured": 3303461,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 16147,
+        "measured": 15378,
+        "reason": "lstat_calls 11199 -> 15378: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
+      },
+      "fs.realpath_calls": {
+        "budget": 1757,
+        "measured": 1673,
+        "reason": "realpath_calls 1150 -> 1673: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
+      },
+      "fs.stat_calls": {
+        "budget": 21825,
+        "measured": 20785,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.cat-file": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.config": {
+        "budget": 9,
+        "measured": 8,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.ls-remote": {
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "git.ls-tree": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.remote": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 2,
+        "measured": 1,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 4,
+        "measured": 3,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
+      },
+      "http.requests": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       }
     }
   }

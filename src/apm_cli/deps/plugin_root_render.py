@@ -51,11 +51,13 @@ def bind_plugin_roots(dependencies: Iterable[Any] | None, package_path: Path) ->
     """Record the materialized package root on declarations that reference it."""
     from apm_cli.utils.realpath import resolve_path
 
-    root = str(resolve_path(package_path))
+    root: str | None = None
     for dependency in dependencies or ():
         to_dict = getattr(dependency, "to_dict", None)
         if hasattr(dependency, "plugin_root") and callable(to_dict):
             if contains_plugin_root(to_dict()):
+                if root is None:  # Resolved only when a declaration references it.
+                    root = str(resolve_path(package_path))
                 dependency.plugin_root = root
 
 

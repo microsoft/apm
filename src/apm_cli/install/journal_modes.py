@@ -10,9 +10,11 @@ permission bits for every staged entry; otherwise the unit is kept and reported.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import stat
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -218,15 +220,58 @@ def private_dir(path: Path) -> None:
             os.chmod(path, stat.S_IMODE(st.st_mode) & ~0o022)
 
 
-def append_private(path: Path, text: str) -> None:
-    """Append *text* to the journal file *path*, which is only ever this user's to write."""
+def open_private_append(path: Path) -> int:
+    """Open the journal file *path* for appending, private to this user; return the fd."""
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
     try:
         if os.name != "nt" and os.fstat(fd).st_mode & 0o077:
             os.fchmod(fd, 0o600)  # set explicitly, never left to the umask
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def append_private(path: Path, text: str) -> None:
+    """Append *text* to the journal file *path*, which is only ever this user's to write."""
+    fd = open_private_append(path)
+    try:
         os.write(fd, text.encode("utf-8"))
     finally:
+        os.close(fd)
+
+
+def append_held(owner: Any, path: Path, text: str) -> None:
+    """Append *text* to *path* through one private fd that *owner* holds (#4939).
+
+    The same open as :func:`append_private`, once per journal file, then one
+    ``write`` per line: record order and durability are unchanged. A new
+    *path* (a renamed store) closes the old fd first. Windows opens per line:
+    a held handle blocks the in-process replay's rename and delete of a store.
+    """
+    if os.name == "nt":
+        append_private(path, text)
+        return
+    held = getattr(owner, "_held_journal", None)
+    if held is None or held[0] != path:
+        close_held(owner)
+        fd = open_private_append(path)
+        # Closed with its owner too: a journal dropped without discard() leaks nothing.
+        held = owner._held_journal = (path, fd, weakref.finalize(owner, _close_quietly, fd))
+    os.write(held[1], text.encode("utf-8"))
+
+
+def close_held(owner: Any) -> None:
+    """Close the journal fd *owner* holds, if any."""
+    held = getattr(owner, "_held_journal", None)
+    owner._held_journal = None
+    if held is not None:
+        held[2]()
+
+
+def _close_quietly(fd: int) -> None:
+    with contextlib.suppress(OSError):
         os.close(fd)
 
 
@@ -236,8 +281,8 @@ def require_private_store(store: Path) -> None:
     The install-snapshots directory and the store must each be a real directory and the
     journal a regular file (never a link), on POSIX owned by this user with no group or
     other write. APM_HOME may be a link (a dotfiles home): its target must be a directory
-    this user owns, which may be group writable (a user-private group's umask), never
-    other writable.
+    this user owns, never other writable, and group writable only when its group is
+    private to this user (:func:`_user_private_group`, #5313).
     """
     home = (store.parent.parent, os.stat, stat.S_ISDIR, 0o002)
     dirs = [(path, os.lstat, stat.S_ISDIR, 0o022) for path in (store.parent, store)]
@@ -251,6 +296,34 @@ def require_private_store(store: Path) -> None:
             raise ValueError(NOT_PRIVATE)
         if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & forbidden):
             raise ValueError(NOT_PRIVATE)
+        if os.name != "nt" and st.st_mode & 0o020 and not _user_private_group(st.st_gid):
+            raise ValueError(NOT_PRIVATE)  # only APM_HOME may get here group writable
+
+
+def _user_private_group(gid: int) -> bool:
+    """Whether group *gid* is verifiably private to this user (#5313).
+
+    It is this user's primary group, lists no other member, and is no other
+    account's primary group. Any lookup that fails or is unavailable answers
+    ``False`` (fail closed). Cost, paid only for a group-writable APM_HOME on
+    replay: one group lookup and one enumeration of the account database, which
+    under NSS (LDAP, SSSD) may be slow; an account NSS does not enumerate is not
+    seen.
+    """
+    try:
+        import grp
+        import pwd
+
+        me = pwd.getpwuid(os.geteuid())
+        if me.pw_gid != gid:
+            return False
+        if set(grp.getgrgid(gid).gr_mem) - {me.pw_name}:
+            return False
+        return not any(
+            account.pw_gid == gid and account.pw_uid != me.pw_uid for account in pwd.getpwall()
+        )
+    except (ImportError, KeyError, OSError):
+        return False
 
 
 def read_private_journal(path: Path, *, first_line: bool = False) -> str:

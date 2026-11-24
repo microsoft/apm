@@ -23,7 +23,6 @@ from tests.integration._install_audit_replay_kit import (
     hooks_package,
     write,
 )
-from tests.lifecycle.known import KnownFailure
 from tests.utils.apm_lifecycle_runner import CommandResult
 
 pytestmark = [
@@ -293,13 +292,6 @@ def test_an_edited_file_with_an_unusual_name_is_reported_on_one_ascii_line(
     assert entry.startswith(head) and entry.removesuffix("  [test/plain]").endswith(tail), output
 
 
-_FIFO_BLOCKS_THE_AUDIT = KnownFailure(
-    "#5280",
-    "audit --ci blocks reading a FIFO at a deployed path",
-    r"audit --ci blocked on the FIFO",
-)
-
-
 def _bounded_audit(world: ReplayWorld, binary: Path, *, records: bool) -> CommandResult:
     """``audit --ci --no-fail-fast`` with a 60 s budget; a block is an assertion failure."""
     env = dict(world.env)
@@ -317,7 +309,6 @@ def _bounded_audit(world: ReplayWorld, binary: Path, *, records: bool) -> Comman
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFOs")
-@_FIFO_BLOCKS_THE_AUDIT.mark()
 def test_a_fifo_at_a_deployed_path_fails_the_audit_without_blocking(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
