@@ -640,6 +640,20 @@ def test_a_fresh_swap_rolled_back_after_the_save_restores_the_original_copy(
     )
     before = (_tree(modules), manifest.read_bytes(), lock.read_bytes())
     manifest.write_text("name: changed\n", encoding="utf-8")
+    target = modules / "_local" / "h1" / "e"
+    observed: list[tuple[bytes | None, bytes | None, bytes]] = []
+
+    def fail_after_the_swap(*_args, **_kwargs):
+        # Recorded, not asserted: the rollback handler would turn a raise here into an exit.
+        aside = modules / "_local" / ".apm-reanchor-aside-e" / ".git/HEAD"
+        observed.append(
+            (
+                (target / ".git/HEAD").read_bytes() if (target / ".git/HEAD").is_file() else None,
+                aside.read_bytes() if aside.is_file() else None,
+                lock.read_bytes(),
+            )
+        )
+        raise RuntimeError("binding failed")
 
     with pytest.raises(SystemExit) as exc:
         _persist_lock_then_resync_native(
@@ -654,7 +668,7 @@ def test_a_fresh_swap_rolled_back_after_the_save_restores_the_original_copy(
                 failed_paths=[],
                 error_count=0,
                 materialization_session=MagicMock(
-                    bind_committed_claims=MagicMock(side_effect=RuntimeError("binding failed"))
+                    bind_committed_claims=MagicMock(side_effect=fail_after_the_swap)
                 ),
             ),
             deploy_root=tmp_path,
@@ -664,6 +678,13 @@ def test_a_fresh_swap_rolled_back_after_the_save_restores_the_original_copy(
             still_needed_repairs=_StillNeededRepair({}, {}, {}, frozenset(), plan),
         )
 
+    # The swap ran before the failure: the fresh HEAD was in place, the old one aside,
+    # and the lock was already saved; only then was everything rolled back.
+    assert len(observed) == 1, observed
+    fresh_head, aside_head, saved_lock = observed[0]
+    assert fresh_head == b"ref: refs/heads/other\n"
+    assert aside_head == b"ref: refs/heads/main\n"
+    assert saved_lock != before[2]
     assert exc.value.code == 1
     assert (_tree(modules), manifest.read_bytes(), lock.read_bytes()) == before
     assert not [p.name for p in (modules / "_local").iterdir() if p.name.startswith(".apm-")]
