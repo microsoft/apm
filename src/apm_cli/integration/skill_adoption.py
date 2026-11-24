@@ -411,6 +411,8 @@ _NON_SKILL_MEMBERS = frozenset({"bin", ".claude-plugin"})
 
 def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple[Any, Path, bool]]:
     """Yield (profile, skills root, legacy layout) for skill targets outside this install."""
+    from apm_cli.utils.realpath import resolve_path
+
     from apm_cli.install.helpers.reconciliation_scope import (
         _scoped_known_targets_for_reconciliation,
     )
@@ -422,7 +424,7 @@ def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple
         getattr(integrator, "_skill_native_harnesses", frozenset())
     )
     active_roots = {
-        target.skills_deploy_path(project_root).resolve()
+        resolve_path(target.skills_deploy_path(project_root))
         for target in targets
         if target.supports("skills")
     }
@@ -439,7 +441,7 @@ def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple
             if legacy and candidate is profile:
                 continue
             root = candidate.skills_deploy_path(project_root)
-            if root.resolve() not in active_roots:
+            if resolve_path(root) not in active_roots:
                 yield candidate, root, legacy
 
 
