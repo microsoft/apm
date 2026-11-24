@@ -27,12 +27,16 @@ that outlives its test logs into the next test's APM home (#4706).
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
 from apm_cli.core.lifecycle_scripts import LifecycleScriptRunner
 
 from .conftest import make_event, make_http_script
+
+# Time every dispatch worker of one fire() may take to start, whatever the runner load.
+_START_BUDGET_SECONDS = 60
 
 pytestmark = pytest.mark.component
 
@@ -117,9 +121,16 @@ class TestDispatchThreadCap:
         with blocking_post() as (release, started, live, lock):
             threads = runner.fire("post-install", make_event())
             try:
-                # Wait until every worker has entered the blocking post.
-                for _ in range(n_entries):
-                    assert started.acquire(timeout=5)
+                # Wait until every worker has entered the blocking post. One budget for
+                # all of them: on a loaded shard a single worker can start seconds late
+                # (#5309), which a per-worker timeout misreads as a missing thread.
+                deadline = time.monotonic() + _START_BUDGET_SECONDS
+                for entered in range(n_entries):
+                    remaining = max(deadline - time.monotonic(), 0)
+                    assert started.acquire(timeout=remaining), (
+                        f"{entered} of {n_entries} dispatch workers started "
+                        f"within {_START_BUDGET_SECONDS} s"
+                    )
                 with lock:
                     assert live["count"] == n_entries
                 assert len(threads) == n_entries
