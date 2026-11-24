@@ -199,3 +199,8 @@
 21:14 | quiet tick | SoL 21:30; Bets k-nowin; E1 L rerun | none
 21:29 | NIGHT MODE: SoL idle (state files/night-state.md), Bets idle (was interrupted; enqueued notice), all ticks -> once 07:00 CET incl mine | resume 07:00 | none
 00:39 | GODSPEED until 07:00 (CEO 00:26): woke Bets (#5382 K win32-off after #5374; #5377 rebase+QL fixes -> train 05:30) + SoL (records cut iff W3d-safe by 05:30; locked-warm deletion); all ticks 10 min; pulses 30 min | first pulse 01:30 | none
+00:45 | PROTECTION: notes pushed perf-research/arch-notes 4e99e0ff; worktree clean (no WIP); SoL/Bets told to push WIP+notes every 30 min | SHAs from SoL/Bets in 15 min | none
+00:47 | Bets pushed wip-5377 9ae2a685, wip-5382 4737862e, bets-notes 3ff69a8e; #5377 H8-ready ~45 min; #5382 bench ~40 min -> VP | SoL SHAs pending | none
+00:48 | VP gates: #5377 final-head bench (real fixture L+W schannel + t50 neutral <=1.010), #5382 stack on #5374 427c0876; H8 by 05:00 -> Bets | Bets | none
+00:51 | SoL notes 692b3bac; hooks/MCP <3%; warm stub missed -> re-aim; records split running -> VP | SoL W3d ping 01:25; Bets benches ~01:30 | none
+00:51 | VP: hooks/MCP closed; warm re-aim after records; E1 owns W update residual (+45 spawns) -> SoL to cross-check + tell E1 | SoL W3d ping 01:25 | none
