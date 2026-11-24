@@ -6,15 +6,12 @@ APM is invoked from within a git repository's hook or worktree).
 
 Preserved variables (user-controlled config for proxy/auth):
 - GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS, SSH_ASKPASS
-- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT
-- GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
+- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT, GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
 
 Git state variables stripped after external-process sanitization:
-- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE
-- GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
-- GIT_COMMON_DIR, GIT_NAMESPACE, GIT_INDEX_VERSION
-- GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
-- GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
+- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR
+- GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_INDEX_VERSION, GIT_CEILING_DIRECTORIES
+- GIT_DISCOVERY_ACROSS_FILESYSTEM, GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
 - GIT_IMPLICIT_WORK_TREE, GIT_NO_REPLACE_OBJECTS, GIT_PREFIX
 """
 
@@ -32,6 +29,7 @@ from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.utils import git_config_once as _config_once
 from apm_cli.utils.path_security import filesystem_containment
 from apm_cli.utils.subprocess_env import external_process_env
 
@@ -901,6 +899,7 @@ def _has_applicable_http_authorization(
     return any(_is_credential_bearing_http_header(value) for value in active)
 
 
+@_config_once.urlmatch_first
 def _urlmatched_header_group(
     remote_url: str,
     headers: Sequence[GitConfigEntry],
@@ -1592,6 +1591,7 @@ def git_network_env(
     return env
 
 
+@_config_once.config_once_first
 def git_clone_env(
     remote_url: str,
     overrides: dict[str, object] | None,
