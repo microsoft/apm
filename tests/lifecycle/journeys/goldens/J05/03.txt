@@ -10,6 +10,7 @@ $ apm install commit-commands@claude-code-plugins
 [i] Targets: claude  (source: apm.yml)
   [+] github.com/anthropics/claude-plugins-official/plugins/commit-commands #main @<SHA8>
 [i] Added apm_modules/ to .gitignore
+[!] APM did not list marketplace 'apm-p-2f4bb778' for Claude Code: Claude Code does not trust <PROJECT> yet. Open the folder in Claude and accept the trust prompt, then run 'apm install' to list the project's marketplace for Claude Code.
 1 native plugin(s) deployed to .agents/plugins/ and declared in .claude/settings.json (Claude Code) and .github/copilot/settings.json (GitHub Copilot). Start a new session, or run /reload-plugins in Claude, to load them.
   [!] [anthropics/claude-plugins-official/plugins/commit-commands] installed as a native plugin. Native plugins are reported not to load in git worktrees, in non-interactive claude -p runs (including claude-code-action) and in Copilot CLI 1.0.106.
 [*] Installed 1 APM dependency in <DUR>.
