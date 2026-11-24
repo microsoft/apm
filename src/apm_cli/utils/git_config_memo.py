@@ -285,3 +285,55 @@ def forget() -> None:
     if memo is not None:
         with _lock:
             memo.clear()
+
+
+_TLS_STAMP_ENV = (
+    "HOME",
+    "USERPROFILE",
+    "XDG_CONFIG_HOME",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "PREFIX",
+)
+
+
+def ambient_tls_stamp() -> tuple:
+    """What the ambient TLS probe read: its env, the config files it names, user-code runs.
+
+    A kept answer is reused only while this is unchanged, so a lifecycle
+    script that edits ``~/.gitconfig`` (``forget_invocation_memos``), a new
+    HOME or a changed config file all re-probe.
+    """
+    from apm_cli.core.invocation_memo import forget_epoch
+
+    environ = os.environ
+    named = tuple((name, environ.get(name)) for name in _TLS_STAMP_ENV)
+    value = dict(named)
+    home = value["HOME"] or value["USERPROFILE"]
+    xdg = value["XDG_CONFIG_HOME"] or (os.path.join(home, ".config") if home else None)
+    candidates = (
+        value["GIT_CONFIG_GLOBAL"],
+        value["GIT_CONFIG_SYSTEM"],
+        os.path.join(home, ".gitconfig") if home else None,
+        os.path.join(xdg, "git", "config") if xdg else None,
+    )
+    files = []
+    for path in candidates:
+        if not path:
+            continue
+        try:
+            info = os.stat(path)
+            files.append((path, info.st_ino, info.st_size, info.st_mtime_ns))
+        except OSError:
+            files.append((path, None))
+    carried = tuple(
+        sorted(
+            (name, value)
+            for name, value in environ.items()
+            if name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+        )
+    )
+    return (forget_epoch(), named, carried, tuple(files))

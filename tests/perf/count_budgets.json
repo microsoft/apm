@@ -261,10 +261,10 @@
         "pr": "#5345"
       },
       "fs.stat_calls": {
-        "budget": 163,
-        "measured": 155,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 174,
+        "measured": 165,
+        "reason": "the TLS probe stamp stats the git config files it names on each probe lookup (W3d cost line): Lifecycle Smoke shard 3, run 45446283432 at 9b26dd0d",
+        "pr": "#5370"
       },
       "git.config": {
         "budget": 4,
