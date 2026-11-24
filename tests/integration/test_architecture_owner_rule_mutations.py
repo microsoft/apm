@@ -3152,6 +3152,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A re-anchored owner's receipts lose their hash history (#4889).",
     ),
     MutationCase(
+        guard_id="install-deployment-reanchor-writer-prediction",
+        rule_id="install-deployment-reanchor-writer-prediction",
+        path="src/apm_cli/commands/uninstall/local_reanchor_writers.py",
+        old="    ordered, _winners = _select_dependency_winners(nodes)\n",
+        new=(
+            "    ordered = sorted(nodes, key=lambda node: "
+            "(node.depth, node.dependency_ref.repo_url))\n"
+        ),
+        intent="A re-anchor orders shared-path writers by replay order, not install's (#5048).",
+    ),
+    MutationCase(
         guard_id="install-deployment-receipt-collection",
         rule_id="install-deployment-receipt-collection",
         path="src/apm_cli/install/pipeline.py",
@@ -5248,6 +5259,30 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="    return rebuild_retired_kinds(deployed, retired, dep.deployed_files)\n",
         new="    return tuple(sorted(retired))\n",
         intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/utils/git_env.py",
+        old="    return filesystem_containment(path, root) is not False",
+        new="    return os.path.samefile(path, root) or filesystem_containment(path, root) is not False",
+        intent="Helper exclusion computes containment itself beside the path_security owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/utils/path_security.py",
+        old="def filesystem_containment(path: Path, root: Path) -> bool | None:",
+        new="def _filesystem_containment(path: Path, root: Path) -> bool | None:",
+        intent="The path_security owner stops defining filesystem-aware containment.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-local-bundle-hook-trust",
+        rule_id="install-deployment-local-bundle-hook-trust",
+        path="src/apm_cli/install/services.py",
+        old="        record_bundle_canvas(\n            project_root, targets",
+        new="        write_canvas_record(\n            project_root, targets",
+        intent="A local-bundle install records its canvas through another call than the owner.",
     ),
 )
 

@@ -82,6 +82,7 @@ def _save(sources: list[MarketplaceSource]) -> None:
     # A root project's ``marketplaces:`` map is never registered (#2903 D3).
     if any(s.origin not in PERSISTED_ORIGINS for s in sources):
         raise ValueError("Project-declared marketplaces are never written to the registry")
+    _adopt_ref_pins(_leaving(_load(), sources))
     from ..config import CONFIG_DIR
 
     # Only the directory: config.json is written by 'apm config set' alone.
@@ -125,6 +126,37 @@ def get_marketplace_by_name(name: str) -> MarketplaceSource:
     from ..utils.github_host import default_host
 
     raise MarketplaceNotFoundError(name, host=default_host())
+
+
+def _leaving(
+    before: Sequence[MarketplaceSource], after: Sequence[MarketplaceSource]
+) -> list[MarketplaceSource]:
+    """Registrations whose name is removed or now names another catalog."""
+    from .source_identity import catalog_pin_identity
+
+    def identity(source: MarketplaceSource) -> str | None:
+        try:
+            return catalog_pin_identity(source)
+        except ValueError:
+            return None
+
+    kept = {(s.name.lower(), identity(s)) for s in after}
+    return [s for s in before if (s.name.lower(), identity(s)) not in kept]
+
+
+def _adopt_ref_pins(leaving: Sequence[MarketplaceSource]) -> None:
+    """Move legacy alias pins to the catalog each leaving registration names (#4966)."""
+    if not leaving:
+        return
+    from .source_identity import catalog_pin_identity
+    from .version_pins import adopt_alias_ref_pins
+
+    for source in leaving:
+        try:
+            catalog = catalog_pin_identity(source)
+        except ValueError:
+            continue
+        adopt_alias_ref_pins(source.name, catalog)
 
 
 def add_marketplace(source: MarketplaceSource) -> None:

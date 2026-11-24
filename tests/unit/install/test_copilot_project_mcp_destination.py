@@ -103,6 +103,35 @@ def test_receipt_proves_an_entry_whose_launcher_moved(tmp_path: Path) -> None:
     assert state("sha256:other") is NativeMcpConnectionState.CONFLICT
 
 
+def test_heal_of_an_unrecorded_file_records_it_for_crash_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The heal's rewrite of a file an older APM wrote is recorded as legacy (#5038)."""
+    from apm_cli.integration.config_file_provenance import (
+        Origin,
+        config_file_origin,
+        vouches_for_current_bytes,
+    )
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home" / ".apm"))
+    retired = tmp_path / ".github/mcp.json"
+    _write(retired, {"mcpServers": {"echo": _LEGACY_COPILOT, "user": {"command": "u"}}})
+    before = retired.read_bytes()
+
+    heal = heal_retired_project_mcp_destinations(
+        {"copilot": {"echo"}},
+        stored_configs={"echo": _ECHO},
+        native_hashes={},
+        project_root=tmp_path,
+        keep_signal_files=False,
+    )
+
+    assert heal.removed == {"copilot": {"echo"}}
+    assert set(json.loads(retired.read_text(encoding="utf-8"))["mcpServers"]) == {"user"}
+    assert config_file_origin(retired) is Origin.LEGACY
+    assert vouches_for_current_bytes(retired, before) is True
+
+
 def test_heal_removes_only_proven_apm_entries_and_keeps_the_file(tmp_path: Path) -> None:
     edited = {**_LEGACY_COPILOT, "args": ["--mine"]}
     _write(

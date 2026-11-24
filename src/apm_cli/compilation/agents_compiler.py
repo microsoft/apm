@@ -812,7 +812,7 @@ class AgentsCompiler:
             from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
             try:
-                CompiledOutputWriter().write_many(
+                CompiledOutputWriter(self.base_dir).write_many(
                     pending_outputs,
                     preserve_line_endings=preserve_line_endings,
                 )
@@ -1125,7 +1125,7 @@ class AgentsCompiler:
         critical_security_found = False
         from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
-        writer = CompiledOutputWriter()
+        writer = CompiledOutputWriter(self.base_dir)
         pending_outputs: dict[Path, str] = {}
         for claude_path, content in claude_result.content_map.items():
             final_content = content
@@ -1304,7 +1304,7 @@ class AgentsCompiler:
         files_written = 0
         from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
-        writer = CompiledOutputWriter()
+        writer = CompiledOutputWriter(self.base_dir)
         try:
             writer.write_many(gemini_result.content_map)
             files_written = len(gemini_result.content_map)
@@ -1603,7 +1603,7 @@ class AgentsCompiler:
         try:
             from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
-            verdict = CompiledOutputWriter().write(output_path, content)
+            verdict = CompiledOutputWriter(self.base_dir).write(output_path, content)
             actionable = verdict.critical_count + verdict.warning_count
             if actionable:
                 result.warnings.append(
@@ -1737,7 +1737,7 @@ class AgentsCompiler:
         from .output_writer import CompiledOutputWriter
 
         try:
-            CompiledOutputWriter().write(Path(output_path), content)
+            CompiledOutputWriter(self.base_dir).write(Path(output_path), content)
         except OSError as e:
             self.errors.append(f"Failed to write output file {output_path}: {e!s}")
 
@@ -1760,7 +1760,7 @@ class AgentsCompiler:
         target = Path(output_path)
         content = self._prepare_output_content_with_config(output_path, content, config)
         try:
-            CompiledOutputWriter().write(
+            CompiledOutputWriter(self.base_dir).write(
                 target,
                 content,
                 preserve_line_endings=config.agents_md_mode == "managed_section"
@@ -1944,7 +1944,7 @@ class AgentsCompiler:
         if prepared_content is None:
             return
 
-        CompiledOutputWriter().write(
+        CompiledOutputWriter(self.base_dir).write(
             agents_path,
             prepared_content,
             preserve_line_endings=config.agents_md_mode == "managed_section"

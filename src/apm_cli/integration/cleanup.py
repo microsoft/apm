@@ -799,12 +799,22 @@ def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
 
 
 def _render_locked(
-    lockfile: LockFile, owner: str | None, lockfile_root: Path, user_scope: bool, diagnostics
+    lockfile: LockFile,
+    owner: str | None,
+    lockfile_root: Path,
+    user_scope: bool,
+    diagnostics,
+    *,
+    cache_only: bool = False,
+    on_package=None,
+    records: bool = True,
 ) -> Path | None:
     """Render the locked packages (or only *owner*) into a private scratch tree.
 
     The replay uses every target the lock recorded as well as the current
     manifest's, so files of a target the manifest just dropped stay provable.
+    *cache_only* never fetches; *on_package* is the replay's per-package hook,
+    which needs *records* off so every package renders live.
     """
     from apm_cli.install.drift import (
         CheckLogger,
@@ -822,7 +832,9 @@ def _render_locked(
     config = ReplayConfig(
         project_root=lockfile_root,
         lockfile_path=snapshot,
-        cache_only=False,
+        cache_only=cache_only,
+        records=records,
+        on_package=on_package,
         scratch_root=scratch,
         modules_root=scratch / "apm_modules",
         user_scope=user_scope,

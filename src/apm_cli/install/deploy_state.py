@@ -63,3 +63,19 @@ def entry_state(path: Path) -> str:
 
 def file_mode(path: Path) -> int:
     return stat.S_IMODE(path.lstat().st_mode)
+
+
+def ensure_listable(path: Path) -> None:
+    """Raise ``OSError`` when a directory below *path* cannot be listed.
+
+    ``Path.rglob`` skips such a subtree silently, so its fingerprint would
+    omit entries a user may have changed.
+    """
+    if not path.is_dir() or path.is_symlink():
+        return
+
+    def fail(exc: OSError) -> None:
+        raise exc
+
+    for _ in os.walk(path, onerror=fail):
+        pass
