@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -124,18 +125,32 @@ def test_a_directory_with_an_explicit_ace_on_an_entry_is_kept_with_its_acl(
 
 
 def test_paths_whose_aces_are_all_inherited_restore_as_before(
-    tmp_path: Path, apm_home: Path
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The no-ACL control: a file and a directory unit both restore, and the restored
     directory takes only inherited ACEs (staging adds no DACL of its own)."""
     config, config_ledger = _killed_config(apm_home, tmp_path / "file")
     skill, skill_ledger = _killed_skill(apm_home, tmp_path / "dir")
+    listings = {
+        str(path): _acl(path)
+        for path in (tmp_path, tmp_path / "dir", skill.parent, skill, skill / "SKILL.md")
+    }
+    real_replace = os.replace
+
+    def replace(source, destination, *args, **kwargs):
+        if Path(destination) == skill:
+            listings[f"staged {source}"] = _acl(Path(source))
+        return real_replace(source, destination, *args, **kwargs)
 
     file_outcome = _replay(apm_home, tmp_path / "file", config_ledger)
+    monkeypatch.setattr(os, "replace", replace)
     dir_outcome = _replay(apm_home, tmp_path / "dir", skill_ledger)
+    monkeypatch.undo()
+    listings[f"restored {skill}"] = _acl(skill)
+    evidence = sys.version + "\n" + "\n".join(f"{k}:\n{v}" for k, v in listings.items())
 
     assert (file_outcome.restored, file_outcome.kept) == (1, ())
     assert config.read_bytes() == _CONFIG_BYTES
-    assert (dir_outcome.restored, dir_outcome.kept) == (1, ())
+    assert (dir_outcome.restored, dir_outcome.kept) == (1, ()), evidence
     assert (skill / "SKILL.md").read_bytes() == b"prior\n"
-    assert all("(I)" in line for line in _acl(skill).splitlines()), _acl(skill)
+    assert all("(I)" in line for line in _acl(skill).splitlines()), evidence
