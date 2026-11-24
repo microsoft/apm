@@ -22,7 +22,10 @@ plugin) and ``denied-dependency`` (org policy denies the plugin). Every
 deploying install passes ``--trust-bin`` so the gate alone decides bin/.
 Each prune that retires the plugin must remove every file of its root and
 its ``enabledPlugins`` keys and drop its lockfile record; every step runs
-I1-I9. ``plugin_bin_cells`` labels the same script statically.
+I1-I9. At ``allowed`` the deployed plugin is re-installed with each modifier
+(``--frozen``, ``--update``, ``--force``, ``--dry-run``, ``--target``); each keeps
+bin/ byte-identical, so it proves PRIM=bin with that modifier (``bin_context``).
+``plugin_bin_cells`` labels the same script statically.
 """
 
 from __future__ import annotations
@@ -73,6 +76,7 @@ _ORG_BLOCK_NAMED = r"(?i)org policy"
 # points at an install that the org policy will refuse.
 _APPROVED = rf"\[\+\] Approved \S*{PLUGIN} "
 _INSTALL_HINT = r"Run 'apm install' to deploy the approved executables"
+_PACK_BLOCKED = r"Pack blocked by org policy: \S*p-native-claude-bin\. Nothing was packed"
 KNOWN_PLUGIN: dict[str, str] = {"G1|approve|bin|denied-dependency|project": "#5236"}
 # The same cells for the known-cell issue snapshot (tests/quality/known_cell_issues.py).
 KNOWN_CELLS = (
@@ -84,11 +88,12 @@ KNOWN_CELLS = (
         lambda *_args: False,
     ),
 )
-# The project gate matrix already labels its p-exec steps under the org deny with these
-# ops (its bin/ never deploys, so it credits no bin cell, #4981); this spine's steps carry
-# a ``plugin`` suffix there so each machine id keeps one witness.
+# The project gate matrix (and the pack spine, for pack) already label their steps under
+# the org deny with these ops (their bin/ never deploys, so they credit no bin cell,
+# #4981); this spine's steps carry a ``plugin`` suffix there so each machine id keeps one
+# witness.
 _MATRIX_DENIED_OPS = frozenset(
-    {"audit-ci", "compile", "install", "install-frozen", "lock", "mcp-install", "update"}
+    {"audit-ci", "compile", "install", "install-frozen", "lock", "mcp-install", "pack", "update"}
 )
 
 
@@ -109,6 +114,7 @@ class PluginBinState:
     revoked: bool = False
     deployed: bool = False
     denied_by_policy: bool = False
+    targets: frozenset[str] = TARGETS
 
     def gate(self) -> str:
         if self.denied_by_policy:
@@ -129,7 +135,7 @@ class PluginBinState:
             declared=frozenset({PLUGIN}) if self.declared else frozenset(),
             decisions={(PLUGIN, "bin"): self.decision} if self.decision else {},
             revoked=frozenset({(PLUGIN, "bin")}) if self.revoked else frozenset(),
-            targets=TARGETS,
+            targets=self.targets,
             exec_gate=self.gate_on,
         )
         return model.with_policy(DENY_POLICY, [PLUGIN]) if self.denied_by_policy else model
@@ -210,6 +216,9 @@ class GatePluginBin(StepRunner):
         if op == "install":
             state.declared = True
             state.deployed = state.allows()
+        elif op in CONTEXT_INSTALLS or op == MULTI_INSTALL:
+            # A re-install of the converged plugin keeps exactly what it had.
+            assert state.declared and state.deployed == state.allows(), (op, state)
         if op == "uninstall":
             state.declared = state.revoked = state.deployed = False
         if op == "approve" and not state.denied_by_policy:
@@ -224,7 +233,9 @@ class GatePluginBin(StepRunner):
 
     def _check_outcome(self, op: str, requested: PluginBinState, step: Step, retires: bool) -> None:
         """What I1-I9 cannot see: the whole root and its declarations go or stay together."""
-        if op == "pack":
+        if op == "pack" and not requested.denied_by_policy:
+            # An admitted pack leaves the plugin out; under the org deny it refuses
+            # (its message is the step's ``says``) and changes nothing, checked below.
             self._check_pack(step)
             return
         after = set(step.after.deployed)
@@ -357,7 +368,8 @@ class GatePluginBin(StepRunner):
             matches = (*says, _RETIRED)
         elif op != "install":
             # A catalog command leaves every project byte alone; approve leaves the root.
-            unchanged["project"] = ("*",) if op in ("marketplace", "pack") else (ROOT, *SETTINGS)
+            whole = op in ("marketplace", "install-dry-run", "pack")
+            unchanged["project"] = ("*",) if whole else (ROOT, *SETTINGS)
         if not retires and step.after.deployed:
             present["project"] = [BIN_PATH]
         evidence = Evidence(
@@ -422,6 +434,17 @@ class GatePluginBin(StepRunner):
         self._edit_manifest("undeclare-" + PLUGIN, lambda data: data["dependencies"].update(apm=[]))
         self.state.declared = False
 
+    def set_targets(self, *targets: str) -> None:
+        """Declare *targets* in apm.yml (an input edit); the model and the observer follow."""
+
+        def change(data: dict) -> None:
+            data["targets"] = sorted(targets)
+
+        self._edit_manifest("targets-" + "-".join(sorted(targets)), change)
+        self.state.targets = frozenset(targets)
+        if not self.dry:
+            self.model = replace(self.model, targets=frozenset(targets))
+
     def gate_on(self) -> None:
         """An empty executables block turns the gate on over the deployed plugin."""
         self._edit_manifest("gate-on", lambda data: data.update(executables={}))
@@ -461,6 +484,14 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("install", *install)
     machine.run("audit-ci", "audit", "--ci")
     machine.run("prune", "prune")
+    for op, (flags, _factors) in CONTEXT_INSTALLS.items():
+        machine.run(op, *install, *flags)
+    # Widen to claude and copilot (a target change), re-install unchanged, narrow back.
+    machine.set_targets("claude", "copilot")
+    machine.run("install", *install)
+    machine.run(MULTI_INSTALL, *install)
+    machine.set_targets(*sorted(TARGETS))
+    machine.run("install", *install)
     # revoked-after-deploy: a deny over the deployed root; prune retires it.
     machine.run("deny", "deny", PLUGIN)
     machine.run("audit-ci", "audit", "--ci", exits=AUDIT_GATED, says=(_STALE_DECISION,))
@@ -481,9 +512,43 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("approve", "approve", PLUGIN)
     machine.run("compile", "compile", exits=COMPILE_DENIED, says=(_COMPILE_BLOCKED,))
     machine.run("lock", "lock", exits=LOCK_DENIED, says=(_RESOLVE_BLOCKED,))
+    machine.run("pack", "pack", "--dry-run", exits=(1,), says=(_PACK_BLOCKED,))
     machine.run("mcp-install", "install", "--mcp", REGISTRY_SERVER)
     machine.run("prune", "prune", retires=True)
     machine.run("uninstall", "uninstall", machine.spec())
+
+
+# Re-installs of the deployed, approved plugin that differ only by a modifier: each keeps
+# bin/ byte-identical (the dry run writes nothing at all), so each proves PRIM=bin with
+# that modifier on an online, single-unchanged-target project whose bin/ is clean.
+CONTEXT_INSTALLS: Mapping[str, tuple[tuple[str, ...], Mapping[str, str]]] = {
+    "install-frozen": (("--frozen",), {"FROZEN": "on"}),
+    "install-update": (("--update",), {"UPDATE": "on"}),
+    "install-force": (("--force",), {"FORCE": "on"}),
+    "install-dry-run": (("--dry-run",), {"DRYRUN": "on"}),
+    "install-select": (("--target", "claude"), {"SELECT": "on"}),
+}
+# A converged re-install with claude and copilot both declared keeps bin/.
+MULTI_INSTALL = "install-multi"
+_CONTEXT = {"DEPLOYED": "clean", "NET": "online", "TGT": "single-unchanged"}
+
+
+def bin_context(cell: str) -> Mapping[str, str] | None:
+    """The factor context a step of this spine proves for PRIM=bin at project scope.
+
+    A deploying install (gate off or allowed) proves bin/ deployed; a context
+    re-install of the deployed plugin also proves its modifier. Any other step,
+    or one under another gate level, proves no bin context (``None``).
+    """
+    parts = cell.split("|")
+    op, gate = parts[1], parts[3]
+    if op == "install" and gate in ("none", "allowed"):
+        return {}
+    if op in CONTEXT_INSTALLS and gate == "allowed":
+        return {**_CONTEXT, **CONTEXT_INSTALLS[op][1]}
+    if op == MULTI_INSTALL and gate == "allowed":
+        return {**_CONTEXT, "TGT": "multi-unchanged"}
+    return None
 
 
 def plugin_bin_cells() -> frozenset[str]:
@@ -494,6 +559,5 @@ def plugin_bin_cells() -> frozenset[str]:
 
 
 def deploys_bin(cell: str) -> bool:
-    """Whether the step behind *cell* deploys the plugin's bin/ at project scope."""
-    parts = cell.split("|")
-    return parts[1] == "install" and parts[3] in ("none", "allowed")
+    """Whether the step behind *cell* deploys (or keeps) the plugin's bin/ at project scope."""
+    return bin_context(cell) is not None

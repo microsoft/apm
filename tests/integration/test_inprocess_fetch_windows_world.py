@@ -23,6 +23,7 @@ from tests.fixtures.perf import TREE_RECIPES, build_tree, serve_offline
 
 pytestmark = [
     pytest.mark.component,
+    pytest.mark.windows_compat,
     pytest.mark.promise("P-OWN-git-transport-selection"),
 ]
 
