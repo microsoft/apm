@@ -162,7 +162,15 @@ _O_IDS = frozenset({*(f"O{i}" for i in range(1, 14) if i != 8), "O8a", "O8b"})
 _O_LAWS = _O_IDS | {"KEY", "FORBID"}
 _ADVICE_LAWS = frozenset({"O8a", "O8b"})
 # HOME paths a project command may write: receipts and bookkeeping (as in rows.py).
-_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
+_HOME_ALLOWED = (
+    ".apm/deployment-receipts",
+    ".apm-local",
+    ".local/state/gh",
+    ".cache/apm",
+    # Claude Code's marketplace registry and APM's record of its entry (#5176).
+    ".claude/plugins/known_marketplaces.json",
+    ".apm/claude-known-marketplaces.json",
+)
 # $APM_HOME entries that user-configuration commands own (declared write set for I5).
 _APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
     "marketplace": ("marketplaces.json", "marketplaces.lock", "cache"),
