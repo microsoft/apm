@@ -378,7 +378,7 @@ def test_a_reanchor_whose_project_skill_links_into_the_moving_copy_refuses(
 
 
 def _project_skill_world(
-    tmp_path: Path, apm_binary_path: Path, body: str, before_install=None
+    tmp_path: Path, apm_binary_path: Path, body: str, before_install=None, name: str = "e"
 ) -> ReplayWorld:
     """e -> f direct, dev d -> e, plus the project's own skill with *body*."""
     world = ReplayWorld.create(tmp_path, apm_binary_path)
@@ -386,8 +386,8 @@ def _project_skill_world(
         before_install(world.project)
     vendor = world.project / "vendor"
     _skill_package(vendor / "f", "f")
-    _skill_package(vendor / "e", "e", ("../f",))
-    _skill_package(vendor / "d", "d", ("../e",))
+    _skill_package(vendor / name, "e", ("../f",))
+    _skill_package(vendor / "d", "d", (f"../{name}",))
     own = world.project / ".apm/skills/proj-skill/SKILL.md"
     own.parent.mkdir(parents=True, exist_ok=True)
     own.write_text(
@@ -398,7 +398,7 @@ def _project_skill_world(
             "name": "proj",
             "version": "1.0.0",
             "targets": ["claude"],
-            "dependencies": {"apm": ["./vendor/e"]},
+            "dependencies": {"apm": [f"./vendor/{name}"]},
             "devDependencies": {"apm": ["./vendor/d"]},
         },
         world.project / "apm.yml",
@@ -455,12 +455,12 @@ def test_a_reanchor_with_a_recorded_path_outside_the_project_refuses(
 # -- Equivalent spellings of a link into the moving copy (#5133) -----------------
 
 
-def _assert_refused_unchanged(world: ReplayWorld) -> None:
+def _assert_refused_unchanged(world: ReplayWorld, name: str = "e") -> None:
     from tests.integration._install_audit_replay_kit import tree_digest
 
     before = (tree_digest(world.project), _modules(world.project))
 
-    refused = world.apm("uninstall", "./vendor/e", expect=1)
+    refused = world.apm("uninstall", f"./vendor/{name}", expect=1)
 
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "links into its apm_modules copy" in output, output
@@ -522,6 +522,54 @@ def test_a_dot_dot_link_through_a_symlinked_apm_modules_root_refuses(
     assert (world.project.parent / "store/_local/e").is_dir()
 
     _assert_refused_unchanged(world)
+
+
+# -- Case and Unicode variants of a link into the moving copy (#5158) ------------
+
+
+def test_a_case_variant_link_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``_LOCAL/E`` is refused like ``_local/e``: it names the copy on a case-insensitive volume."""
+    world = _project_skill_world(
+        tmp_path, apm_binary_path, "See [package](../../../apm_modules/_LOCAL/E)."
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "apm_modules/_LOCAL/E)" in deployed, deployed
+
+    _assert_refused_unchanged(world)
+
+
+def test_an_nfd_variant_link_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An NFD spelling of an NFC-named copy is refused like the exact spelling."""
+    nfc, nfd = "caf\u00e9", "cafe\u0301"
+    world = _project_skill_world(
+        tmp_path, apm_binary_path, f"See [package](../../../apm_modules/_local/{nfd}).", name=nfc
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert f"apm_modules/_local/{nfd})" in deployed, ascii(deployed)
+    assert any(p.name == nfc for p in (world.project / "apm_modules/_local").iterdir())
+
+    _assert_refused_unchanged(world, nfc)
+
+
+def test_a_re_decomposing_variant_link_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """U+0390 named copy, link spelled NFD capital iota + U+0308 + U+0301: one key."""
+    composed, decomposed = "\u0390", "\u0399\u0308\u0301"
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        f"See [package](../../../apm_modules/_local/{decomposed}).",
+        name=composed,
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert f"apm_modules/_local/{decomposed})" in deployed, ascii(deployed)
+
+    _assert_refused_unchanged(world, name=composed)
 
 
 def test_an_angle_bracket_link_with_a_space_into_the_moving_copy_refuses(
@@ -614,7 +662,7 @@ def test_an_untracked_user_link_into_the_copy_is_never_read_or_written(
     _assert_no_frozen_rewrites_nothing(world)
 
 
-# -- Open follow-ups, pinned as strict known cells (#5097, #5102) -------------------
+# -- Open follow-ups, pinned as strict known cells (#5097) -------------------------
 #
 # Each cell is red until its fix lands; the fix PR flips it to required.
 
@@ -635,11 +683,6 @@ _LEDGER_ONLY_LINK = KnownFailure(
     "#5097",
     "a canonical ledger-only claim is outside the scanned view: its link dangles",
     r"dangles after the re-anchor",
-)
-_STALE_EXCLUDED = KnownFailure(
-    "#5102",
-    "the re-anchor moves a copy whose hash-excluded files went stale",
-    r"the next install rewrote the re-anchored copy",
 )
 
 
@@ -732,16 +775,20 @@ def test_a_ledger_only_claim_linking_into_the_moving_copy_keeps_resolving(
     _assert_link_resolves(world, skill + "/SKILL.md")
 
 
-@_STALE_EXCLUDED.mark()
+@pytest.mark.parametrize("pin", [False, True], ids=["plain", "with-a-pin-marker"])
 def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, pin: bool
 ) -> None:
-    """#5102: e's .git/HEAD (hash-excluded) changes after install; e re-anchors."""
+    """#5102: e's .git/HEAD (hash-excluded) changes after install; e re-anchors with a
+    fresh copy, so the next install rewrites nothing and no copy is left aside."""
 
     def git_head(project: Path) -> None:
         head = project / "vendor/e/.git/HEAD"
         head.parent.mkdir(parents=True)
         head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+        if pin:
+            # Install drops this marker from a local copy; a fresh copy must too.
+            (project / "vendor/e/.apm-pin").write_text("{}\n", encoding="utf-8")
 
     world = _docs_world(tmp_path, apm_binary_path, git_head)
     (world.project / "vendor/e/.git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
@@ -757,3 +804,4 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     )
     assert lock_bytes(world.project) == lock, "the next install rewrote the lockfile"
     assert not changed, f"the next install rewrote the re-anchored copy: {changed}"
+    assert not [key for key in modules if ".apm-reanchor-" in key], sorted(modules)

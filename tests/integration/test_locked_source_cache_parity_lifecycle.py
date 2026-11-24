@@ -9,10 +9,12 @@ SCOPE=project LOCK=unchanged DEPLOYED=warm CACHE=every-copy-differs|commit-unava
 
 When the project copy under ``apm_modules`` and the persistent git checkout
 both differ from the locked commit, every command still reads the locked
-source through the same cache. A writing command rebuilds the cache copy from
-the commit and says so with a warning; the ``apm_modules`` copy is then
-detected and restored as when it alone differs, and ``audit --ci`` and
-``install --frozen`` agree. When the commit can no longer be fetched, the
+source through the same cache. ``audit --ci`` is read-only: it names the
+mismatch, reports the cache copy that does not match its commit and fails
+without repairing anything (#5159). A writing command rebuilds the cache copy
+from the commit and says so with a warning; the ``apm_modules`` copy is then
+detected and restored as when it alone differs, and a later ``audit --ci``
+passes. When the commit can no longer be fetched, the
 cache copy cannot be rebuilt: every command refuses, names the package, and
 leaves the project, the lockfile and ``apm_modules`` byte for byte as they were.
 """
@@ -121,7 +123,7 @@ def _rebuilt(result: CommandResult) -> bool:
     """The warning that names the cache copy rebuilt from its commit."""
     return (
         re.search(
-            r"Cached copy of \S*test/pkg\S* @ [0-9a-f]{12} failed verification against its commit",
+            r"Cached copy of test/pkg \(\S+ @ [0-9a-f]{12}\) failed verification against its commit",
             _text(result),
         )
         is not None
@@ -161,13 +163,15 @@ def test_audit_ci_and_frozen_agree_when_every_copy_differs(
     before = _durable(world)
     project_before = before[0]
 
-    # I3 paired probe on one state. audit --ci never writes, not even the cache.
+    # Paired probe on one state. audit --ci never writes, not even the cache:
+    # it reports the tampered cache and fails; the writer rebuilds it (#5159).
     audit = world.apm("audit", "--ci", expect=None)
     assert _durable(world) == before, "I5: audit --ci changed durable state"
+    assert audit.returncode != 0, _evidence(audit)
+    assert not _rebuilt(audit), _evidence(audit)
     frozen = world.apm("install", "--frozen", expect=None)
-    assert audit.returncode == frozen.returncode, (_evidence(audit), _evidence(frozen))
+    assert frozen.returncode == 0, _evidence(frozen)
     for result in (audit, frozen):
-        assert result.returncode == 0, _evidence(result)
         # The apm_modules copy is named as when it alone differs.
         assert _names_mismatch(result, expected), _evidence(result)
 
@@ -249,7 +253,9 @@ def test_every_copy_differs_converges_without_a_remedy(
     world = _installed(tmp_path, apm_binary_path)
     _edit_every_copy(world)
 
-    audit = world.apm("audit", "--ci")
+    audit = world.apm("audit", "--ci", expect=None)
+    # Read-only: the tampered cache is reported, never rebuilt (#5159).
+    assert audit.returncode != 0, _evidence(audit)
     # RA-005: one finding prints once.
     assert _mismatch_count(audit) == 1, _evidence(audit)
     rebuilt = world.apm("install")

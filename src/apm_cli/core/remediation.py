@@ -741,6 +741,14 @@ PRUNE_PARTIAL = _entry(
     "finish the filesystem cleanup",
     then="run 'apm audit'",
 )
+PRUNE_REPLACED_PARENT = _entry(
+    "prune-replaced-parent",
+    "apm install",
+    "rebuild the lockfile",
+    before="remove the replaced dependency's replace entry from apm.yml, or keep the "
+    "package that declares it",
+    then="run 'apm prune'",
+)
 PRUNE_NATIVE_GATE_UNCHECKED = _entry(
     "prune-native-gate-unchecked",
     "apm prune",
@@ -1448,6 +1456,11 @@ REPLAY_CACHE_CONTENT_STALE = _entry(
     "replay-cache-content-stale",
     "apm install",
     "refresh the apm_modules cache to the locked content",
+)
+CACHED_CHECKOUT_TAMPERED = _entry(
+    "cached-checkout-tampered",
+    "apm install",
+    "rebuild the cached copy from the locked commit",
 )
 HOOKS_UNAPPROVED = _entry(
     "hooks-unapproved",

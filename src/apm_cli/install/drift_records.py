@@ -447,15 +447,43 @@ class ReplayRecords:
         return True
 
     def intact(self) -> bool:
-        """Every served destination still holds exactly the bytes served to it."""
-        for rel, digest in self._served.items():
-            try:
-                with open(self._scratch_root / rel, "rb") as handle:
-                    if hashlib.file_digest(handle, "sha256").hexdigest() != digest:
-                        return False
-            except OSError:
-                return False
-        return True
+        """Every served destination is still a regular file holding the bytes served to it."""
+        return all(
+            _regular_file_digest(self._scratch_root / rel) == digest
+            for rel, digest in self._served.items()
+        )
+
+
+# A FIFO at a served destination must read as not intact, not block the replay.
+_SCRATCH_OPEN = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+def _regular_file_digest(path: Path) -> str | None:
+    """The sha256 of *path* if it is a regular file that is not a link, else ``None``.
+
+    Opens without following a link and without blocking, then checks the open
+    descriptor's type, as the deploy store reads its entries (#5103).
+    """
+    try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            return None
+        fd = os.open(path, _SCRATCH_OPEN)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            return hashlib.file_digest(handle, "sha256").hexdigest()
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
 
 
 _LAST_SUMMARY: tuple[int, int] | None = None

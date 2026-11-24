@@ -472,3 +472,19 @@ def _replay_frame(
         _depth, root, target, relative = max(frames, key=lambda frame: frame[0])
         return root, external_replay_root(scratch_root, target), relative.as_posix()
     return deploy_root, scratch_root, value
+
+
+def finish_replayed_package(
+    result: dict, lock_dep: Any, frame: tuple, config: Any, live_targets: Iterable[TargetProfile]
+) -> None:
+    """Carry kept loose files into the replay, then report the package's output (#5048).
+
+    *frame* is ``(package key, deploy root, scratch root)``; ``config.on_package``
+    reads each package's own output before a later package overwrites it.
+    """
+    dep_key, deploy_root, scratch_root = frame
+    carry_kept_loose_into_replay(
+        result, lock_dep, deploy_root, scratch_root, config.user_scope, live_targets
+    )
+    if config.on_package is not None:
+        config.on_package(dep_key, list(result.get("deployed_files") or ()), scratch_root)
