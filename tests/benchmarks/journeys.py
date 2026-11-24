@@ -548,6 +548,10 @@ class Context:
         self.world.apm_home.mkdir(parents=True, exist_ok=True)
 
     def fresh_project(self) -> None:
+        # A fresh checkout gets a fresh user home too: deployment receipts and
+        # verified-state records of the previous checkout at this path would
+        # otherwise read as "another checkout" (the download cache stays).
+        self.fresh_user_state()
         remove_tree(self.project)
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
@@ -714,14 +718,11 @@ _KEEP_INSTALLED = ("install-noop-replay",)
 def _setup_replay(ctx: Context) -> None:
     """A converged repeat-user state: installed, one no-op that records, one that hits.
 
-    The first sample starts from a clean user state: earlier journeys in this
-    world leave deployment receipts for a project checkout ``fresh_project``
-    has since replaced, and the no-op would never converge against them. On a
+    ``fresh_project`` starts it from a clean user home (earlier journeys' receipts
+    would read as another checkout and the no-op would never converge). On a
     CLI with the record, the last untimed no-op must replay; otherwise the cell
     fails instead of timing a full re-proof.
     """
-    if not ctx.is_installed:
-        ctx.fresh_user_state()
     ctx.installed()
     for root in ctx.roots():
         ctx.checked(["install"], root)
@@ -975,8 +976,7 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             return _measure(ctx, journey, args)
     finally:
         # Installed state kept between one journey's samples never leaks into the next.
-        if journey.name in _KEEP_INSTALLED:
-            ctx.is_installed = False
+        ctx.is_installed = False
 
 
 def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
