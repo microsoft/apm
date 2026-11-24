@@ -244,6 +244,7 @@ def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
     if pos != len(buf):
         raise _Refuse("trailing pack bytes")
     resolved: dict[int, tuple[str, bytes]] = {}
+    depth: dict[int, int] = {}  # deltas between each resolved object and its full base
     by_id: dict[str, tuple[str, bytes]] = {}
     offset_of_id: dict[str, int] = {}
 
@@ -255,6 +256,7 @@ def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
             kind, data, base = raw[current]
             if kind in _TYPES:
                 resolved[current] = (_TYPES[kind], data)
+                depth[current] = 0
                 break
             chain.append(current)
             if len(chain) > _MAX_DELTA_DEPTH:
@@ -268,9 +270,12 @@ def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
                     raise _Pending
                 current = offset_of_id[base]
         base_kind, content = resolved[current]
+        if depth[current] + len(chain) > _MAX_DELTA_DEPTH:
+            raise _Refuse("delta chain exceeds the depth cap")
         for link in reversed(chain):
             content = _apply_delta(content, raw[link][1], budget)
             resolved[link] = (base_kind, content)
+            depth[link] = depth[current] + len(chain) - chain.index(link)
         return resolved[start]
 
     pending: list[int] = []
@@ -401,9 +406,9 @@ _attr_lock = threading.Lock()
 def _attribute_sources(child_env: Mapping[str, str]) -> bool:
     """Whether any attributes source outside the commit could change git's checkout bytes (F7).
 
-    APM's git checkout always runs with ``-c core.autocrlf=false -c core.eol=lf
-    -c core.symlinks=false`` (``_safe_git_args``), which outrank system and
-    global config, so git writes raw blob bytes unless an attribute says
+    APM's git checkout always runs with the line-ending and symlink pins of
+    ``utils/git_env`` (``_safe_git_args``), which outrank system and global
+    config, so git writes raw blob bytes unless an attribute says
     ``text``/``eol``/``filter``. The commit's own ``.gitattributes`` refuses
     in the plan and a fresh staged clone has no ``info/attributes``; what is
     left is the global attributes file (``core.attributesFile`` or its XDG
@@ -459,6 +464,39 @@ def _require_no_attribute_sources(child_env: Mapping[str, str]) -> None:
         raise _Refuse("an attributes source outside the commit may change checkout bytes")
 
 
+_BREAKER_MEMO = "inprocess-fetch-rate-limited"
+
+
+def _rate_limited() -> bool:
+    """Whether github.com rate-limited an in-process fetch earlier in this command."""
+    from ..core.invocation_memo import invocation_memo
+
+    memo = invocation_memo(_BREAKER_MEMO)
+    return bool(memo)
+
+
+def _admit(status: int, headers: Mapping[str, str]) -> None:
+    """Refuse a non-200 answer; a rate-limit answer also sends the rest of the command to git.
+
+    429, 403, ``Retry-After`` or ``X-RateLimit-Remaining: 0`` trip the breaker:
+    no retry, no sleep, and no further in-process request in this command.
+    """
+    from ..core.invocation_memo import invocation_memo
+
+    limited = (
+        status in (403, 429)
+        or headers.get("Retry-After") is not None
+        or (headers.get("X-RateLimit-Remaining") or "").strip() == "0"
+    )
+    if limited:
+        memo = invocation_memo(_BREAKER_MEMO)
+        if memo is not None:
+            memo["tripped"] = True
+        raise _Refuse(f"rate limited (HTTP {status}); git serves the rest of this command")
+    if status != 200:
+        raise _Refuse(f"HTTP {status}")
+
+
 def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
     from ..deps.anonymous_ref_listing import _session_for_refs
     from ..utils.http_credentials import origin_bounded_request
@@ -481,8 +519,7 @@ def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
         timeout=_TIMEOUT,
         stream=True,
     ) as response:
-        if response.status_code != 200:
-            raise _Refuse(f"HTTP {response.status_code}")
+        _admit(response.status_code, response.headers)
         kind = response.headers.get("Content-Type", "").split(";")[0].strip()
         if kind != "application/x-git-upload-pack-result":
             raise _Refuse("not an upload-pack result")
@@ -558,6 +595,9 @@ def fetch_worktree(
 ) -> dict[str, tuple[str, bool]] | None:
     """Write commit *sha* of *url* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``."""
     if len(sha) != 40:
+        return None
+    if _rate_limited():
+        _log.debug("in-process fetch skipped: rate limited earlier in this command")
         return None
     try:
         upload_url, proxy, ca = _gate(url, env if env is not None else os.environ)

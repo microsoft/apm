@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.cache import inprocess_fetch as fetch
+from apm_cli.core.invocation_memo import invocation_scope
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-git-transport-selection")]
 
@@ -37,7 +38,7 @@ def _header(kind: int, size: int) -> bytes:
 def _pack(entries: list[bytes]) -> bytes:
     count = len(entries).to_bytes(4, "big")
     body = b"PACK" + (2).to_bytes(4, "big") + count + b"".join(entries)
-    return body + hashlib.sha1(body).digest()
+    return body + hashlib.new("sha1", body, usedforsecurity=False).digest()
 
 
 def _obj(kind: str, data: bytes, *, declared: int | None = None) -> bytes:
@@ -46,7 +47,8 @@ def _obj(kind: str, data: bytes, *, declared: int | None = None) -> bytes:
 
 
 def _oid(kind: str, data: bytes) -> str:
-    return hashlib.sha1(b"%s %d\x00" % (kind.encode(), len(data)) + data).hexdigest()
+    data = b"%s %d\x00" % (kind.encode(), len(data)) + data
+    return hashlib.new("sha1", data, usedforsecurity=False).hexdigest()
 
 
 def _repo(blob: bytes = b"# skill\n", name: bytes = b"SKILL.md"):
@@ -161,3 +163,35 @@ def test_a_symlink_or_submodule_entry_falls_back_to_git() -> None:
 def test_a_non_github_or_non_sha1_pin_never_fetches(tmp_path: Path) -> None:
     pin = "ab" * 32  # a SHA-256 object id: never served in process
     assert fetch.fetch_worktree("https://github.com/o/r", pin, tmp_path, os.environ, ()) is None
+
+
+@pytest.mark.parametrize(
+    ("status", "headers"),
+    [
+        (429, {}),
+        (403, {}),
+        (503, {"Retry-After": "60"}),
+        (200, {"X-RateLimit-Remaining": "0"}),
+    ],
+)
+def test_a_rate_limit_answer_sends_the_rest_of_the_command_to_git(
+    status: int, headers: dict[str, str], tmp_path: Path
+) -> None:
+    sha = "a" * 40
+    with invocation_scope():
+        with pytest.raises(fetch._Refuse, match="rate limited"):
+            fetch._admit(status, headers)
+        # No gate, request, retry or sleep: the next fetch is git's at once.
+        assert fetch.fetch_worktree("https://github.com/o/r", sha, tmp_path, {}, ()) is None
+        assert fetch._rate_limited()
+    assert list(tmp_path.iterdir()) == []
+    with invocation_scope():
+        assert not fetch._rate_limited(), "the breaker lasts one command"
+
+
+def test_a_missing_repository_falls_back_without_tripping_the_breaker() -> None:
+    with invocation_scope():
+        with pytest.raises(fetch._Refuse, match="HTTP 404"):
+            fetch._admit(404, {})
+        fetch._admit(200, {"X-RateLimit-Remaining": "59"})
+        assert not fetch._rate_limited()
