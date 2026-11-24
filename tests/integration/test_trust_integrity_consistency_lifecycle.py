@@ -305,7 +305,7 @@ def test_update_refuses_a_modified_cache_copy_it_cannot_rebuild(
 
         text = " ".join(output(result).split())
         assert re.search(
-            r"Cached copy of \S*pkg-a\S* @ [0-9a-f]{12} failed verification against its commit",
+            r"Cached copy of \S*pkg-a \(\S+ @ [0-9a-f]{12}\) failed verification against its commit",
             text,
         ), output(result)
         assert re.search(r"\[x\][^\[]*contoso/pkg-a", text), output(result)

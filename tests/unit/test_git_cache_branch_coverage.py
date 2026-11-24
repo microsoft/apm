@@ -455,31 +455,31 @@ class TestPrune:
 
 
 # ---------------------------------------------------------------------------
-# _dir_size
+# dir_size
 # ---------------------------------------------------------------------------
 
 
 class TestDirSize:
     def test_empty_dir_is_zero(self, tmp_path):
-        from apm_cli.cache.git_cache import _dir_size
+        from apm_cli.cache.git_cache import dir_size
 
         d = tmp_path / "empty"
         d.mkdir()
-        assert _dir_size(d) == 0
+        assert dir_size(d) == 0
 
     def test_counts_file_sizes(self, tmp_path):
-        from apm_cli.cache.git_cache import _dir_size
+        from apm_cli.cache.git_cache import dir_size
 
         d = tmp_path / "data"
         d.mkdir()
         (d / "file.txt").write_bytes(b"hello")
-        result = _dir_size(d)
+        result = dir_size(d)
         assert result == 5
 
     def test_nonexistent_dir_returns_zero(self, tmp_path):
-        from apm_cli.cache.git_cache import _dir_size
+        from apm_cli.cache.git_cache import dir_size
 
-        result = _dir_size(tmp_path / "nonexistent")
+        result = dir_size(tmp_path / "nonexistent")
         assert result == 0
 
 

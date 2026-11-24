@@ -607,6 +607,50 @@ def test_a_shared_config_a_user_edits_after_the_kill_is_kept(
     assert _text(result).isascii(), _evidence(result)
 
 
+# -- cleanup rewrites of files the records do not know yet (#5038) ---------------------
+#
+# An install before the config file records existed left hook settings with no
+# record. A later install's cleanup that rewrites them records them as legacy, so a
+# kill after that rewrite is restored on the next install like any recorded write.
+
+_USERS_SETTINGS = {"permissions": {"allow": ["Bash(ls)"]}}
+
+
+def test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    chain = Chain(tmp_path / "cleanup", apm_binary_path, dirs=(".claude", ".github"))
+    settings = chain.project / _SETTINGS
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps(_USERS_SETTINGS, indent=2) + "\n", encoding="utf-8")
+    _write_root_hook(chain, "v1")
+    chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    assert "lint-v1" in settings.read_text(encoding="utf-8")
+    # Installed before the records existed: nothing vouches for the settings yet.
+    shutil.rmtree(Path(chain.env["APM_HOME"]) / "deployment-receipts" / "config-files")
+
+    # Dropping Claude cleans APM's hook out of the shared settings; kill after that
+    # write is done (and recorded), before the sidecar is touched.
+    chain.write_manifest([], apm=[], targets=["copilot"], includes="auto")
+    _kill_mid_refusal(chain, "deploy+kill", APM_TEST_DEPLOY_KILL_BEFORE=_SIDECAR)
+    journal = _journal(_abandoned(chain))
+    assert _unit(journal, _SETTINGS)["path"] == _SETTINGS, journal
+    assert _SIDECAR not in {line.get("path") for line in journal}, journal
+    assert json.loads(settings.read_text(encoding="utf-8")) == _USERS_SETTINGS
+    chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "Kept" not in _text(result), _evidence(result)
+    assert "interrupted install" in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+
+
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
