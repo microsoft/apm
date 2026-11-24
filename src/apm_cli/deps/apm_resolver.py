@@ -2076,3 +2076,10 @@ class APMDependencyResolver:
         lines.append(f"  Status: {'[+] Valid' if summary['is_valid'] else '[x] Invalid'}")
 
         return "\n".join(lines)
+
+from apm_cli import _research_spans as _rs  # noqa: E402  RESEARCH ONLY
+
+_rs.patch(APMDependencyResolver, "resolve_dependencies", "resolver.resolve_dependencies")
+_rs.patch(APMDependencyResolver, "build_dependency_tree", "resolver.build_dependency_tree")
+_rs.patch(APMDependencyResolver, "_load_work_item", "resolver._load_work_item")
+_rs.patch(APMDependencyResolver, "_try_load_dependency_package", "resolver._try_load_dependency_package")

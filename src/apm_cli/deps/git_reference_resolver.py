@@ -718,3 +718,7 @@ class GitReferenceResolver:
             if commit:
                 return ref_type, commit
         raise ValueError(f"Reference '{ref}' not found in repository {dep_ref.repo_url}")
+
+from apm_cli import _research_spans as _rs  # noqa: E402  RESEARCH ONLY
+
+_rs.patch(GitReferenceResolver, "resolve_commit_sha_for_ref", "ref.resolve_commit_sha_for_ref")

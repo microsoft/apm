@@ -109,10 +109,12 @@ def _run_phase(name: str, phase, ctx):
     CI logs) can locate the phase responsible for a slow install
     without instrumenting individual sources.
     """
+    from apm_cli import _research_spans as _rs  # RESEARCH ONLY
+
     logger = getattr(ctx, "logger", None)
     verbose = bool(getattr(ctx, "verbose", False))
     if not verbose or logger is None:
-        return phase.run(ctx)
+        return _rs.wrap(f"phase.{name}", phase.run)(ctx)
     started = time.perf_counter()
     try:
         return phase.run(ctx)

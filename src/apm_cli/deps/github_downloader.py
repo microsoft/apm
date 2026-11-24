@@ -2078,3 +2078,7 @@ class GitHubPackageDownloader:
                 print(f"\r Cloning: {message} ({cur_count})", end="", flush=True)
 
         return progress_callback
+
+from apm_cli import _research_spans as _rs  # noqa: E402  RESEARCH ONLY
+
+_rs.patch(GitHubPackageDownloader, "download_package", "downloader.download_package")
