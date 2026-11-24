@@ -31,12 +31,15 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
+import shlex
 import shutil
 import sys
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -611,7 +614,26 @@ def test_company_catalog_selection_drives_update_not_newest_registry_version(
 
 UPDATE = ("update", "--yes", "--target", "copilot")
 REBIND = ("marketplace", "add", PARTNER_URL, "--name", CATALOG_NAME)
-KEEP_HINT = f"apm marketplace add {CATALOG_URL} --name {CATALOG_NAME}"
+_ORIGIN_MOVED = re.compile(
+    r"now points at (?P<now>\S+?), but apm\.lock\.yaml recorded '(?P<plugin>[^']+)' "
+    r"from (?P<recorded>\S+?)\. "
+)
+_KEEP_HINT = re.compile(r"run '(?P<command>apm marketplace add [^']+)' to keep the locked")
+
+
+def _same_url(actual: str, expected: str) -> bool:
+    a, e = urlparse(actual), urlparse(expected)
+    return (a.scheme, a.hostname, a.port, a.path, a.query) == (
+        e.scheme,
+        e.hostname,
+        e.port,
+        e.path,
+        e.query,
+    )
+
+
+class _KnownRestoreRefusal(AssertionError):
+    """The printed restore command was refused (#5264)."""
 
 
 class _RebindWorld:
@@ -653,15 +675,24 @@ class _RebindWorld:
         )
         return " ".join((result.stdout + result.stderr).split())
 
-    def rebind_and_refuse(self, name: str) -> str:
-        """Consented rebind; ``update`` then refuses and changes nothing."""
+    def rebind_and_refuse(self, name: str) -> tuple[str, list[str]]:
+        """Consented rebind; ``update`` then refuses and changes nothing.
+
+        Returns the refusal and the printed restore command's arguments.
+        """
         self.step(*REBIND, "--yes", name=f"{name}-rebind")
         refusal = self.step(*UPDATE, name=f"{name}-update-refused", fail=True)
-        assert f"now points at {PARTNER_URL}" in refusal, refusal
-        assert f"recorded 'widget' from {CATALOG_URL}" in refusal, refusal
+        moved = _ORIGIN_MOVED.search(refusal)
+        assert moved is not None, refusal
+        assert _same_url(moved["now"], PARTNER_URL), refusal
+        assert _same_url(moved["recorded"], CATALOG_URL), refusal
+        assert moved["plugin"] == "widget", refusal
         assert "Nothing was changed." in refusal, refusal
-        assert f"run '{KEEP_HINT}' to keep the locked marketplace" in refusal, refusal
-        return refusal
+        hint = _KEEP_HINT.search(refusal)
+        assert hint is not None, refusal
+        argv = shlex.split(hint["command"])
+        assert argv[:3] == ["apm", "marketplace", "add"], argv
+        return refusal, argv[1:]
 
 
 def test_consented_catalog_rebind_refuses_update_and_switches_only_on_purpose(
@@ -685,7 +716,7 @@ def test_consented_catalog_rebind_refuses_update_and_switches_only_on_purpose(
         assert "Re-run with --yes to replace it" in refused, refused
         assert registrations.read_bytes() == registered
 
-        refusal = rw.rebind_and_refuse("rebind")
+        refusal, _keep = rw.rebind_and_refuse("rebind")
         assert _state(rw.project) == rw.before
         for name, args in (("frozen", (*INSTALL, "--frozen")), ("reinstall", INSTALL)):
             rw.step(*args, name=name)
@@ -711,30 +742,33 @@ def test_consented_catalog_rebind_restores_the_locked_catalog(
 ) -> None:
     """Restoring the recorded catalog after a rebind keeps the locked package.
 
-    The printed restore command fails as printed (#5264); the rebound alias is
-    freed first, as the follow-up refusal says, then the recorded catalog is
-    added back and ``apm update`` proceeds on the locked package.
+    The rebound alias is removed and the recorded catalog added back under it;
+    ``apm update`` then proceeds on the locked package.
     """
     world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
     with world.serve() as proxy:
         rw = _RebindWorld(world, proxy)
         rw.rebind_and_refuse("rebind")
-        freed = rw.step(*KEEP_HINT.split()[1:], "--yes", name="keep-refused", fail=True)
-        assert f"Run 'apm marketplace remove {CATALOG_NAME}'" in freed, freed
-        rw.step("marketplace", "remove", CATALOG_NAME, "--yes", name="keep-free-alias")
-        rw.step(*KEEP_HINT.split()[1:], name="keep")
+        rw.step("marketplace", "remove", CATALOG_NAME, "--yes", name="free-alias")
+        rw.step("marketplace", "add", CATALOG_URL, "--name", CATALOG_NAME, name="restore")
         rw.step(*UPDATE, name="update-kept")
         _assert_selected(rw.project, rw.widget, world.registry)
         assert _state(rw.project) == rw.before
 
 
-@pytest.mark.xfail(strict=True, reason="#5264: the origin-restore hint omits --yes")
+@pytest.mark.xfail(
+    strict=True,
+    raises=_KnownRestoreRefusal,
+    reason="#5264: the printed origin-restore command is refused as printed",
+)
 def test_origin_restore_hint_runs_as_printed(tmp_path: Path, apm_binary_path: Path) -> None:
     """The printed 'keep the locked marketplace' command works exactly as printed."""
     world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
     with world.serve() as proxy:
         rw = _RebindWorld(world, proxy)
-        rw.rebind_and_refuse("rebind")
-        rw.step(*KEEP_HINT.split()[1:], name="keep-hint-verbatim")
+        _refusal, keep = rw.rebind_and_refuse("rebind")
+        result = world.run(rw.env, rw.project, *keep, step="keep-hint-verbatim", expect=None)
+        if result.returncode != 0:
+            raise _KnownRestoreRefusal(_evidence(result))
         rw.step(*UPDATE, name="update-kept")
         _assert_selected(rw.project, rw.widget, world.registry)
