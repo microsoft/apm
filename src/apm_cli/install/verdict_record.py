@@ -296,10 +296,9 @@ def _env_log() -> Iterator[None]:
 
 
 _PROVEN_LOCK: list[bytes | None] = []
-# apm.yml and the lock as the run found them: an edit while the run was proving
-# its verdict (an editor saving apm.yml) means its verdict is not the record's (W3d R4).
+# apm.yml and the lock as the run found them (W3d R4), and its start (verdict_inputs).
 _ENTRY_FILES: list[bytes | None] = []
-_ENTRY_TIME: list[float] = []
+_ENTRY_TIME: list[Any] = []
 
 
 def _entry_bytes(name: str) -> bytes | None:
@@ -803,7 +802,9 @@ def recording(argv: list[str]) -> Iterator[None]:
     _ENV_READS.clear()
     entry = (_env_snapshot(), _presentation())
     _ENTRY_FILES[:] = [_entry_bytes("apm.yml"), _entry_bytes("apm.lock.yaml")]
-    _ENTRY_TIME[:] = [time.time()]
+    from apm_cli.install.verdict_inputs import entry_stamp
+
+    _ENTRY_TIME[:] = entry_stamp()
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
     _ACTIVE.append(out)
@@ -865,8 +866,7 @@ def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
     from apm_cli.core.lifecycle_scripts import discover_scripts
 
     if discover_scripts(str(Path.cwd())):
-        # Scripts fire on every install (and may change any input after it was read);
-        # a replay fires none, so a run with scripts is never recorded (W3d R1).
+        # Scripts fire on every install; a replay fires none, so never record (W3d R1).
         _trace("no record (lifecycle scripts)")
         return
     lock = _committed_lock()
