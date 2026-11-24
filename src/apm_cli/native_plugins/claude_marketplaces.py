@@ -27,7 +27,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import stat
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -81,10 +80,18 @@ def _text(value: Any) -> str:
     return printable_ascii_text(str(value))
 
 
+def _regular_bytes(path: Path) -> bytes:
+    """Read *path* only as a regular file: a FIFO or device never blocks the read."""
+    from apm_cli.utils.path_security import open_regular_file
+
+    with open_regular_file(path) as handle:
+        return handle.read()
+
+
 def _read(path: Path) -> tuple[bytes | None, dict[str, Any]]:
     """``(raw bytes, object)``: ``(None, {})`` when absent; ``_Skip`` when unusable."""
     try:
-        raw = path.read_bytes()
+        raw = _regular_bytes(path)
     except FileNotFoundError:
         return None, {}
     except OSError as exc:
@@ -96,37 +103,6 @@ def _read(path: Path) -> tuple[bytes | None, dict[str, Any]]:
     if not isinstance(data, dict):
         raise _Skip(f"{_text(path)} does not hold a JSON object")
     return raw, data
-
-
-def _stage(path: Path, data: dict[str, Any], mode: int | None = None) -> Path:
-    """Write *data* to a temporary file beside *path*, ready to replace it.
-
-    *mode* fixes the published file's permissions; by default the existing
-    file's mode is kept, or the umask applies to a new file.
-    """
-    import tempfile
-
-    from apm_cli.utils.atomic_io import umask_file_mode
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if mode is None:
-        try:
-            mode = stat.S_IMODE(path.stat().st_mode)
-        except FileNotFoundError:
-            mode = umask_file_mode(path)
-    descriptor, name = tempfile.mkstemp(prefix=".apm-", suffix=".tmp", dir=path.parent)
-    staged = Path(name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write((json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
-            handle.flush()
-            os.fsync(handle.fileno())
-        if mode is not None:
-            os.chmod(staged, mode)
-    except BaseException:
-        staged.unlink(missing_ok=True)
-        raise
-    return staged
 
 
 def _refuse_linked(path: Path, root: Path) -> None:
@@ -150,21 +126,32 @@ def _merge(
     replace; if another writer (Claude Code) changed it meanwhile, the merge is
     redone once on the new content, else skipped and the staged file removed.
     """
+    from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
+
     for _attempt in range(2):
         raw, data = _read(path)
         if not change(data):
             return False
         if path.exists() and not os.access(path, os.W_OK):
             raise _Skip(f"{_text(path)} is read-only")
-        staged = _stage(path, data, mode)
-        try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        def unchanged(raw: bytes | None = raw) -> bool:
             # Checked again after staging: a directory linked meanwhile is never published to.
             _refuse_linked(path, root)
-            if _read(path)[0] == raw:
-                os.replace(staged, path)
-                return True
-        finally:
-            staged.unlink(missing_ok=True)
+            return _read(path)[0] == raw
+
+        if atomic_write_text(
+            path,
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            new_file_mode=umask_file_mode(path) if mode is None else mode,
+            file_mode=mode,
+            normalize_line_endings=False,
+            temp_prefix=".apm-",
+            temp_suffix=".tmp",
+            before_publish=unchanged,
+        ):
+            return True
     raise _Skip(f"{_text(path)} kept changing while APM updated it")
 
 
@@ -233,14 +220,8 @@ def claude_trusts(checkout: Path) -> bool:
     path = _claude_trust_file()
     if user_config_crosses_link(path, path.parent):
         return False
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        # Non-blocking, then judged on the opened file: a FIFO or device never blocks a read.
-        descriptor = os.open(path, flags)
-        with os.fdopen(descriptor, "rb") as handle:
-            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                return False
-            data = json.loads(handle.read().decode("utf-8"))
+        data = json.loads(_regular_bytes(path).decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return False
     projects = data.get("projects") if isinstance(data, dict) else None
@@ -353,6 +334,58 @@ def unregister_project_marketplace(name: str, root: Path, logger: Any = None) ->
 
     _merge(target, remove, root=target.parents[1])
     _record(key, None)
+
+
+def _receipt_names_for(root: Path) -> list[str]:
+    """Names APM's receipt records for this checkout's *root* in the current registry."""
+    if not _receipt_path().exists():
+        return []
+    location = str(Path(root).absolute())
+    try:
+        registry = str(_registry().absolute())
+        return [
+            key.split("@", 1)[0]
+            for key, record in _owned().items()
+            if record.get("root") == location and record.get("registry") == registry
+        ]
+    except (_Skip, OSError, ValueError):
+        return []  # a declaring command names an unusable registry or receipt
+
+
+def project_release_pending(project_root: Path) -> bool:
+    """Whether APM still records a registry entry for *project_root*'s plugins (#5258).
+
+    A fast install path declines while one does: only the full run releases it.
+    """
+    from apm_cli.native_plugins.layout import plugins_root
+
+    return bool(_receipt_names_for(plugins_root(Path(project_root))))
+
+
+def release_project_marketplaces(root: Path, *, user_scope: bool, logger: Any = None) -> None:
+    """Remove every entry APM's receipt records for this checkout's *root* (#5258).
+
+    Called when the scope declares no native plugin, so a registry entry an
+    earlier uninstall could not remove (its receipt kept) converges on the
+    next command. Only receipt-owned entries for this root and the current
+    registry are touched; without a readable receipt nothing is.
+    """
+    if user_scope:
+        return
+    for name in _receipt_names_for(root):
+        sync_project_marketplace(name, root, user_scope=False, claude_declared=False, logger=logger)
+
+
+def release_undeclared_marketplaces(deploy_root: Path, scope: Any, logger: Any = None) -> None:
+    """:func:`release_project_marketplaces` for a scope that declares no dependency (#5258)."""
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.native_plugins.layout import plugins_root
+
+    release_project_marketplaces(
+        plugins_root(Path(deploy_root).absolute()),
+        user_scope=is_user_scope(scope),
+        logger=logger,
+    )
 
 
 def _warn(logger: Any, message: str) -> None:

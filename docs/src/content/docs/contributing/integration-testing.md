@@ -86,7 +86,7 @@ APM uses a tiered approach to integration testing:
 ### 5. **Real Harness** (nightly, manual, native-plugin PRs; not required)
 - **Location**: `scripts/real_harness/probe.py`, `.github/workflows/real-harness.yml`; harness pins are npm lockfiles under `scripts/real_harness/npm/`
 - **Purpose**: Prove that pinned Claude Code and Copilot CLI releases actually load a plugin APM installs natively, not only that the files exist
-- **Cells**: harness x environment (TUI in tmux, git worktree, `-p`) x scope (user, project), plus Claude diagnostic cells (second session, absolute path, no folder trust, native `claude plugin install`, worktree branches)
+- **Cells**: harness x environment (TUI in tmux, git worktree, `-p`) x scope (user, project), plus Claude diagnostic cells (second session, absolute path, no folder trust, native `claude plugin install`, worktree branches), and two #1120 cells: two packages whose native plugins ship the same skill name, and the same plugin name from two packages (refused)
 - **Evidence**: the plugin's SessionStart hook marker, its stdio MCP server's JSON-RPC log, the skill in the `claude -p` init event or `copilot skill list`. Claude never reaches a model; Copilot sessions need the `real-harness` environment token, available only to schedule and dispatch runs on main, so those cells report BLOCKED elsewhere
 - **Verdicts**: `scripts/real_harness/expected.json` records each cell's expected verdict, known bugs included. `probe.py check` fails on any divergence except BLOCKED; a fix flips its cells
 

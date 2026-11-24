@@ -125,11 +125,6 @@ def resolve_frozen(
     return True
 
 
-def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
-    """One ``--frozen`` refusal line for an unrecorded service claim."""
-    return f"  - {service} server {name!a} target {target!a} ownership is not recorded in apm.lock.yaml"
-
-
 def frozen_services_error(reasons: list[str]) -> Exception:
     """The ``--frozen`` refusal for service claims the lockfile cannot replay."""
     from apm_cli.install.errors import FrozenInstallError
@@ -220,6 +215,7 @@ class InstallService:
         this same error otherwise.
         """
         from apm_cli.adapters.client._remote_shapes import may_refuse_remote
+        from apm_cli.install.errors import frozen_unrecorded_reason
         from apm_cli.install.mcp.native_entry import (
             native_mcp_entry_matches_declaration,
             native_mcp_entry_present,
@@ -938,12 +934,14 @@ class InstallService:
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.local_edits import edited_file_remediations
         from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
+        from apm_cli.policy.ci_checks import resolve_claim_targets as claims  # #5312
 
         lockfile_path = _frozen_lockfile_path(request)
         committed = committed or LockFile.read(lockfile_path)
         if committed is None:  # nothing declared, nothing locked (#4050)
             return
         deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
+        targets = claims(lockfile_path.parent, committed, user_scope=user_scope, targets=targets)
         drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)
         if not deployed and drifted:
             # Stale APM output (receipt-proven) is replaced, then re-verified.
