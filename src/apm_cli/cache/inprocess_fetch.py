@@ -638,11 +638,15 @@ def _split_managed_auth(env: Mapping[str, str]) -> tuple[str | None, dict[str, s
         entries.append((key, value))
         stripped.pop(f"GIT_CONFIG_KEY_{index}", None)
         stripped.pop(f"GIT_CONFIG_VALUE_{index}", None)
-    # set_git_authorization_header appends the managed header last.
-    if not entries or entries[-1][0].lower() != "http.extraheader":
+    managed = [
+        index
+        for index, (key, value) in enumerate(entries)
+        if key.lower() == "http.extraheader" and value.startswith(_MANAGED_PREFIX)
+    ]
+    if len(managed) != 1:
         raise _Refuse("managed auth header is not APM's")
-    header = entries[-1][1]
-    if not header.startswith(_MANAGED_PREFIX) or "\r" in header or "\n" in header:
+    header = entries[managed[0]][1]
+    if "\r" in header or "\n" in header:
         raise _Refuse("managed auth header is not github-basic")
     try:
         decoded = base64.b64decode(header[len(_MANAGED_PREFIX) :], validate=True)
@@ -650,7 +654,8 @@ def _split_managed_auth(env: Mapping[str, str]) -> tuple[str | None, dict[str, s
         raise _Refuse("managed auth header is not github-basic") from None
     if not decoded.startswith(b"x-access-token:") or len(decoded) <= len(b"x-access-token:"):
         raise _Refuse("managed auth header is not github-basic")
-    kept = entries[:-1]
+    # Only the managed entry goes; any other extraHeader stays and sends the fetch to git.
+    kept = [entry for index, entry in enumerate(entries) if index != managed[0]]
     stripped.pop("GIT_CONFIG_COUNT", None)
     if kept:
         stripped["GIT_CONFIG_COUNT"] = str(len(kept))
