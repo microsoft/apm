@@ -621,7 +621,7 @@ def _commit(
     staging = ResolutionStagingSession(modules)
     created: list[_Created] = []
     try:
-        with held_output() as held, journaled_apply() as journal:
+        with held_output() as held, journaled_apply(project_root) as journal:
             # The services phase may rewrite the lock outside the write seam.
             journal.record(get_lockfile_path(project_root))
             # A killed run's inactive staging roots go silently, as at the full
