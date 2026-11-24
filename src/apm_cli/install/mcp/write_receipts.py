@@ -151,7 +151,9 @@ def journal_mcp_writes(project_root: Path, *, user_scope: bool, logger: Any) -> 
         writes = _journal.get() or []
         _journal.reset(token)
         try:
-            store = McpWriteReceipts.open(project_root, user_scope=user_scope)
+            store = McpWriteReceipts.open_for_install(
+                project_root, user_scope=user_scope, logger=logger
+            )
             store.record(writes)
             store.forget_absent()
             store.save()
@@ -205,6 +207,32 @@ class McpWriteReceipts:
                     "are kept; remove that file to start a new record."
                 ) from exc
         return store
+
+    @classmethod
+    def open_for_install(
+        cls, project_root: Path, *, user_scope: bool, logger: Any
+    ) -> McpWriteReceipts:
+        """:meth:`open` for an install, which may start this installation's evidence.
+
+        Evidence another installation of this same root wrote (a re-clone or a
+        recreated checkout) can never bind here again, so it is set aside once,
+        renamed and never deleted, and this installation records its own writes
+        (#5396). The entries it lists are left as they are: nothing proves APM
+        wrote them for this installation, so none is ever removed. Any other
+        unusable evidence still refuses, exactly as :meth:`open`.
+        """
+        try:
+            return cls.open(project_root, user_scope=user_scope)
+        except McpWriteEvidenceError:
+            aside = _supersede_other_installation(project_root, user_scope=user_scope)
+            if aside is None:
+                raise
+        logger.warning(
+            f"Set aside MCP write evidence another checkout of this project wrote: {aside}. "
+            "The MCP entries it lists are left as they are."
+        )
+        _clear_unusable_note(project_root, user_scope=user_scope)
+        return cls.open(project_root, user_scope=user_scope)
 
     # -- runtime configs ---------------------------------------------------------
 
@@ -542,7 +570,9 @@ def retire_undeclared_mcp_writes(
             flagged=_flag_runtimes(target_decision, user_scope=user_scope),
         )
     try:
-        store = McpWriteReceipts.open(project_root, user_scope=user_scope)
+        store = McpWriteReceipts.open_for_install(
+            project_root, user_scope=user_scope, logger=logger
+        )
     except (OSError, ValueError):
         reason = unusable_mcp_evidence(project_root, user_scope=user_scope)
         if reason is None:
@@ -696,6 +726,41 @@ def _note_unusable(project_root: Path, *, user_scope: bool, reason: str) -> None
         atomic_write_text(path, reason + "\n", new_file_mode=0o600, create_only=True)
     except (OSError, ValueError):
         _log.debug("Could not note unusable MCP write evidence", exc_info=True)
+
+
+def _supersede_other_installation(project_root: Path, *, user_scope: bool) -> Path | None:
+    """Rename evidence provably bound to another installation of this root; else None.
+
+    The ledger owner decides provability (DeploymentMaterializationSession.
+    another_installation). Anything unreadable, foreign or ambiguous is left in
+    place and keeps refusing.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
+
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    try:
+        session = DeploymentMaterializationSession(Path(project_root), scope, None)
+        path = session.mcp_state_path
+        if path.is_symlink() or not path.is_file():
+            return None
+        if not session.another_installation(json.loads(path.read_text(encoding="utf-8"))):
+            return None  # this installation's own evidence, or not provably another's
+        base = path.parent.parent.parent.parent  # the evidence owner's anchor (_note_unusable)
+        for n in range(100):
+            aside = path.with_name(f"{path.name}.superseded" + (f".{n}" if n else ""))
+            if not os.path.lexists(aside):
+                break
+        else:
+            return None
+        ensure_path_within(aside, base)
+        if has_symlink_component(base, aside, raise_on_error=True):
+            return None
+        os.rename(path, aside)  # never deleted: audit and the user can still read it
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError):
+        return None
+    return aside
 
 
 def _clear_unusable_note(project_root: Path, *, user_scope: bool) -> None:
