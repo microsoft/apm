@@ -179,3 +179,13 @@ def test_a_checkout_install_lists_its_own_plugin_root(
     text = " ".join(f"{result.stdout}\n{result.stderr}".split())
     assert (f"[!] {_WORKTREE_NOTICE}" in text) is (checkout == "worktree"), text
     assert text.count(_WORKTREE_NOTICE) <= 1, text
+
+
+def test_a_dry_run_install_writes_no_registry_entry(tmp_path: Path, apm_binary_path: Path) -> None:
+    """``apm install --dry-run`` previews; it writes neither the registry nor APM's record."""
+    world = _World(tmp_path, apm_binary_path)
+
+    world.ok("install", "--dry-run", "--no-policy")
+
+    assert not world.known.exists()
+    assert not (world.isolated.home / ".apm" / "claude-known-marketplaces.json").exists()

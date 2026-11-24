@@ -1,0 +1,16 @@
+{
+  "issue": 5176,
+  "fixed_in": "Unreleased",
+  "summary": "A project install declared native plugins only under the committed relative marketplace path, which Claude Code fully loads only after a first session; install now also lists the marketplace with its absolute path in Claude's user registry.",
+  "failure_modes": [
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_known_marketplace_lifecycle.py::test_project_install_lists_the_marketplace_for_claude_with_its_absolute_path",
+    "tests/integration/test_claude_known_marketplace_lifecycle.py::test_install_and_uninstall_touch_only_apms_entry"
+  ]
+}
