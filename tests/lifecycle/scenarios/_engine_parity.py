@@ -21,7 +21,7 @@ the state oracle are shared with W4's incremental-vs-fresh suite.
 DECISIONS (engine contract agreed with the no-op and diff-apply owners):
 ``no-op (...)``, ``applied a verified diff (<n> files)`` or ``full run
 (<reason>)``. A cell names the decision it requires, so it is red while the
-engine owning that decision is absent: a ``KnownFailure`` (tracking #4770,
+engine owning that decision is absent: a ``KnownFailure`` (tracking the engine's issue: #4939 for fresh-apply,
 signature: the missing decision) until the engine module exists, then required. Only
 the missing decision is the expected failure: a parity break or a failed
 command fails the cell even at main.
@@ -120,7 +120,7 @@ class MissingDecision(AssertionError):
     """The fast world did not take the decision the cell requires."""
 
 
-_ENGINE_ISSUE = "#4770"
+_ENGINE_ISSUE = "#4939"  # the only absent engine is fresh-apply (#4770 shipped no-op and diff)
 
 
 _MISSING = r"expected a [a-z/-]+ decision, got"
