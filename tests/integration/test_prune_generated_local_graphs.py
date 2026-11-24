@@ -556,32 +556,45 @@ def test_a_diamond_records_one_parent_whatever_the_manifest_order(
     assert second == first
 
 
+@pytest.mark.parametrize("alias", [None, "d-copy"], ids=["plain", "alias-on-c"])
 def test_prune_reparents_a_three_parent_survivor_as_install_records_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, alias: str | None
 ) -> None:
     """#5386: a, c and b each declare d; dropping a leaves c (met first) and b (lowest key).
 
-    Prune re-parents d under the parent install records, so install leaves the
-    lockfile unchanged.
+    Plain: prune re-parents d under the parent install records, so install
+    leaves the lockfile unchanged. alias-on-c: c's edge carries an alias the
+    locked row does not, so the next install would record c's alias; prune
+    keeps a's chain fail-closed and names it, writing no lock change.
     """
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     project = tmp_path / "proj"
     (project / ".claude").mkdir(parents=True)
+    c_edge = "../d" if alias is None else {"path": "../d", "alias": alias}
     graph = _Graph(
         names=["a", "c", "b", "d"],
-        edges={"a": [("d", "../d")], "c": [("d", "../d")], "b": [("d", "../d")], "d": []},
+        edges={"a": [("d", "../d")], "c": [("d", c_edge)], "b": [("d", "../d")], "d": []},
         roots=["a", "c", "b"],
     )
     for name in graph.names:
         _write_package(project / "vendor", graph, name)
     _write_project(project, graph)
     installed = _run(project, "install")
+    before = (project / "apm.lock.yaml").read_bytes()
     graph.roots.remove("a")
     _write_project(project, graph)
 
     pruned = _run(project, "prune")
     lock = (project / "apm.lock.yaml").read_bytes()
+    output = " ".join(pruned.output.split())
+    if alias is not None:
+        monkeypatch.chdir(tmp_path)
+        assert installed.exit_code == 0, installed.output
+        assert pruned.exit_code == 0, pruned.output
+        assert "Retained _local/a:" in output, output
+        assert lock == before
+        return
     clear_apm_yml_cache()
     reinstalled = _run(project, "install", "--no-frozen")
     monkeypatch.chdir(tmp_path)
