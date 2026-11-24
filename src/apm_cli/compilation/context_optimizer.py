@@ -70,6 +70,24 @@ PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
 )
 
 
+def hidden_tool_root(relative_parts: tuple[str, ...], hidden_roots: frozenset[str]) -> bool:
+    """Whether *relative_parts* names a top-level hidden tool root in *hidden_roots*."""
+    return len(relative_parts) == 1 and relative_parts[0] in hidden_roots
+
+
+def placement_prunes_dir(name: str, *, outside_tool_roots: bool) -> bool:
+    """Whether placement traversal prunes the directory *name* (one owner).
+
+    Default exclusions are always pruned; a hidden directory is pruned when it
+    is *outside_tool_roots*, the top-level hidden tool roots a compile's
+    applyTo expressions target. Readers of compiled outputs (#5097) count every
+    root in ``PLACEMENT_HIDDEN_TOOL_TREES``.
+    """
+    if name in DEFAULT_EXCLUDED_DIRNAMES:
+        return True
+    return name.startswith(".") and outside_tool_roots
+
+
 def _has_text_outside_managed_section(content: str, start_marker: str, end_marker: str) -> bool:
     """Return whether authored text surrounds a complete managed-section block."""
     start = content.find(start_marker)
@@ -645,24 +663,18 @@ class ContextOptimizer:
         if self._should_exclude_path(path):
             return True
 
-        # Also check if subdirectory is a default exclusion
-        dir_name = path.name
-        if dir_name in DEFAULT_EXCLUDED_DIRNAMES:
-            return True
-
         # Only roots named by this compile's applyTo expressions participate.
         # Every other hidden directory remains excluded from placement traversal.
-        return dir_name.startswith(".") and not self._is_supported_hidden_tool_root(path)
+        return placement_prunes_dir(
+            path.name, outside_tool_roots=not self._is_supported_hidden_tool_root(path)
+        )
 
     def _is_supported_hidden_tool_root(self, path: Path) -> bool:
         """Return whether ``path`` is a top-level hidden root targeted this run."""
         relative_path = self._relative_path(path)
         if relative_path is None:
             return False
-        return (
-            len(relative_path.parts) == 1
-            and relative_path.parts[0] in self._placement_hidden_tool_trees
-        )
+        return hidden_tool_root(relative_path.parts, self._placement_hidden_tool_trees)
 
     def _contains_unsupported_hidden_directory(
         self, path: Path, relative_path: Path | None = None
