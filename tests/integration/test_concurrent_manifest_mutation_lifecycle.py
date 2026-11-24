@@ -119,8 +119,8 @@ def _hook_package(root: Path, name: str) -> None:
     (hooks / f"{name}.json").write_text(json.dumps(document), encoding="ascii")
 
 
-def _hook_project(tmp_path: Path, apm_binary_path: Path):
-    """A claude project with user settings and alpha installed; beta, gamma ready."""
+def _hook_project(tmp_path: Path, apm_binary_path: Path, target: str = "claude"):
+    """A *target* project with alpha installed; beta and gamma ready to add."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     project = isolated.work_root / "consumer"
@@ -134,7 +134,7 @@ def _hook_project(tmp_path: Path, apm_binary_path: Path):
         {
             "name": "consumer",
             "version": "0.1.0",
-            "targets": ["claude"],
+            "targets": [target],
             "dependencies": {"apm": ["./pkgs/alpha"]},
             "executables": {"allow": allow},
         },
@@ -187,29 +187,93 @@ def test_concurrent_hook_installs_keep_every_shared_settings_entry(
     )
 
 
-@pytest.mark.xfail(
+_KNOWN_5285 = pytest.mark.xfail(
     strict=True,
-    reason="#5285: incremental hook installs order .claude/settings.json unlike a full install",
+    reason="#5285: incremental hook installs order a merged hook config unlike a full install",
+)
+
+
+def _project_bytes(project: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*"))
+        if path.is_file() and not {"apm_modules", "pkgs"} & set(path.relative_to(project).parts)
+    }
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "copilot",
+        pytest.param("claude", marks=_KNOWN_5285),
+        pytest.param("cursor", marks=_KNOWN_5285),
+        pytest.param("codex", marks=_KNOWN_5285),
+        pytest.param("gemini", marks=_KNOWN_5285),
+    ],
 )
 def test_incremental_hook_installs_in_any_order_pass_audit(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, target: str
 ) -> None:
     """``apm install <pkg>`` additions out of name order leave a converged
     project: ``audit --ci`` agrees and a plain install changes no byte (I2, I3)."""
-    runner, env, project, settings = _hook_project(tmp_path, apm_binary_path)
+    runner, env, project, _settings = _hook_project(tmp_path, apm_binary_path, target)
     for name in ("gamma", "beta"):
         added = runner.run(("install", "--no-policy", f"./pkgs/{name}"), cwd=project, env=env)
         assert added.returncode == 0, added.stdout + added.stderr
-    before = settings.read_bytes()
+    before = _project_bytes(project)
     audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
     rerun = runner.run(("install", "--no-policy"), cwd=project, env=env)
     assert rerun.returncode == 0, rerun.stdout + rerun.stderr
-    assert (settings.read_bytes(), audit.returncode) == (before, 0), (
-        f"before={_hook_commands_from(before)} after={_hook_commands(settings)}\n"
-        f"{audit.stdout[-1200:]}"
+    after = _project_bytes(project)
+    changed = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
+    assert (changed, audit.returncode) == ([], 0), audit.stdout[-1200:]
+
+
+def _mcp_package(root: Path, name: str) -> None:
+    root.mkdir(parents=True)
+    server = {
+        "name": f"srv-{name}",
+        "registry": False,
+        "transport": "stdio",
+        "command": "echo",
+        "args": [name],
+    }
+    dump_yaml(
+        {"name": name, "version": "1.0.0", "dependencies": {"mcp": [server]}}, root / "apm.yml"
     )
 
 
-def _hook_commands_from(data: bytes) -> list[str]:
-    parsed = json.loads(data)
-    return [h["command"] for e in parsed["hooks"]["PreToolUse"] for h in e["hooks"]]
+@pytest.mark.parametrize("target", ["claude", "copilot", "cursor"])
+def test_incremental_mcp_installs_in_any_order_pass_audit(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    """Cut probe (#5285 sibling): MCP servers merged into one config by
+    incremental installs converge with a full install (I2, I3)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    for name in _PACKAGES:
+        _mcp_package(project / "pkgs" / name, name)
+    allow = {f"./pkgs/{name}": {"mcp": True} for name in _PACKAGES}
+    dump_yaml(
+        {
+            "name": "consumer",
+            "version": "0.1.0",
+            "targets": [target],
+            "dependencies": {"apm": ["./pkgs/alpha"]},
+            "executables": {"allow": allow},
+        },
+        project / "apm.yml",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=240)
+    trust = ("--no-policy", "--trust-transitive-mcp")
+    for extra in ((), ("./pkgs/gamma",), ("./pkgs/beta",)):
+        added = runner.run(("install", *trust, *extra), cwd=project, env=env)
+        assert added.returncode == 0, added.stdout + added.stderr
+    before = _project_bytes(project)
+    assert any("mcp" in key for key in before), sorted(before)
+    audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
+    assert audit.returncode == 0, audit.stdout[-1200:]
+    rerun = runner.run(("install", *trust), cwd=project, env=env)
+    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+    assert _project_bytes(project) == before
