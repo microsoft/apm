@@ -1,0 +1,32 @@
+name: Perf SoL unit-cost microbench (research)
+
+on:
+  push:
+    branches: [perf-research/arch-sol-ubench]
+
+permissions:
+  contents: read
+
+jobs:
+  ubench:
+    name: ubench ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - name: Microbench
+        shell: bash
+        run: python scripts/perf/sol_ubench.py "ubench-${{ matrix.os }}.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ubench-${{ matrix.os }}
+          path: ubench-${{ matrix.os }}.json
