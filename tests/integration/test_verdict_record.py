@@ -1142,3 +1142,152 @@ def test_an_unreadable_policy_cache_at_entry_records_nothing_and_runs_on(
 
     assert capsys.readouterr().out == _OUTPUT
     assert not (_home(project) / "verdicts").exists()
+
+
+def _target_line(project: Path) -> str:
+    """The target line the full install announces for *project* (its owner's resolution)."""
+    from apm_cli.core.target_detection import format_provenance, resolve_targets
+    from apm_cli.models.apm_package import APMPackage, package_target_declaration
+
+    manifest = APMPackage.from_apm_yml(project / "apm.yml")
+    restriction = package_target_declaration(manifest).restriction()
+    return format_provenance(resolve_targets(project, yaml_targets=restriction))
+
+
+def _attest(project: Path, line: str | None = None, during=None) -> None:
+    """A converged full install: it announced its targets and attested the state."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write("[+] Installed 1 APM dependency.\n")
+        verdict_record.note_run_targets(line if line is not None else _target_line(project))
+        verdict_record.note_attested_install()
+        if during is not None:
+            during()
+
+
+def _attested_hit(argv: list[str] | None = None) -> bool:
+    """What the next install's engine sees, inside its own recorded run."""
+    with verdict_record.recording(argv or ["install"]):
+        return verdict_record.attested_state(argv or ["install"], Path.cwd())
+
+
+def _stored(project: Path) -> dict:
+    import json
+
+    (path,) = (_home(project) / "verdicts").rglob("*.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_an_attested_install_lets_the_next_unchanged_install_skip_the_proof(
+    project: Path, capsys
+) -> None:
+    """W3d attested-record ruling: a converged full install attests what it committed;
+    the next unchanged install matches it, and nothing replays its output (A5)."""
+    _attest(project)
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+    assert _attested_hit() is True
+    assert (_stored(project)["kind"], _stored(project)["provenance"]) == ("attested", "attested")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "manifest",
+        "lock",
+        "deployed bytes",
+        "package copy",
+        "unmanaged file",
+        "planted link",
+        "approvals",
+        "policy cache",
+        "allowlisted env",
+        "lifecycle script",
+    ],
+)
+def test_a_tree_changed_after_the_attested_install_never_skips_the_proof(
+    project: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    """A8: anything changed after run 1 makes run 2 prove its verdict itself."""
+    _attest(project)
+    prompts = project / ".github" / "prompts"
+    if change == "manifest":
+        (project / "apm.yml").write_text("name: demo\nversion: 1.0.0\n# edited\n", encoding="utf-8")
+    elif change == "lock":
+        with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
+            handle.write("# edited\n")
+    elif change == "deployed bytes":
+        (project / _REL).write_bytes(b"# tampered\n")
+    elif change == "package copy":
+        (project / "apm_modules" / "o" / "p" / "apm.yml").write_text("name: q\n", encoding="utf-8")
+    elif change == "unmanaged file":
+        (prompts / "extra.prompt.md").write_text("x\n", encoding="utf-8")
+    elif change == "planted link":
+        if os.name == "nt":
+            pytest.skip("symlink creation needs privileges on Windows")
+        (prompts / "link.prompt.md").symlink_to(project / "apm.yml")
+    elif change == "approvals":
+        (_home(project) / "approvals.yml").write_text("approved: [o/p]\n", encoding="utf-8")
+    elif change == "policy cache":
+        policy = project.parent / "cache" / "policy_v1" / "k"
+        policy.mkdir(parents=True)
+        (policy / "p.yml").write_text("enforcement: block\n", encoding="utf-8")
+    elif change == "allowlisted env":
+        monkeypatch.setenv("APM_VERBOSE", "1")
+    elif change == "lifecycle script":
+        (project / "apm.yml").write_text(
+            "name: demo\nversion: 1.0.0\nlifecycle:\n  post-install:\n    - run: echo done\n",
+            encoding="utf-8",
+        )
+
+    assert _attested_hit() is False
+
+
+def test_a_target_set_widened_by_the_install_is_never_attested(project: Path) -> None:
+    """A1: run 1 announced one target set, and discovery at its end finds another."""
+    _attest(project, line="Targets: none  (source: test)")
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_run_with_lifecycle_scripts_is_never_attested(project: Path) -> None:
+    """A4: scripts fire on every install; skipping the proof would skip them."""
+    (project / "apm.yml").write_text(
+        "name: demo\nversion: 1.0.0\nlifecycle:\n  post-install:\n    - run: echo done\n",
+        encoding="utf-8",
+    )
+    _attest(project)
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_lock_changed_after_the_install_committed_is_never_attested(project: Path) -> None:
+    """A6: the record keys only the lock bytes the install committed under its lock."""
+
+    def edit() -> None:
+        with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
+            handle.write("# edited after commit\n")
+
+    _attest(project, during=edit)
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_output_recorded_after_an_attested_hit_stays_attested(project: Path, capsys) -> None:
+    """A5: provenance never upgrades; the replayable record a matched run writes
+    says it rests on an attestation, not on a proof."""
+    _attest(project)
+    assert _attested_hit() is True
+    _record_attested_noop()
+    capsys.readouterr()
+
+    assert (_stored(project)["kind"], _stored(project)["provenance"]) == ("output", "attested")
+    assert verdict_record.replay(["install"]) is True
+    assert "up to date in " in capsys.readouterr().out
+
+
+def _record_attested_noop() -> None:
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop(verdict_record.ATTESTED)

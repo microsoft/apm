@@ -894,12 +894,14 @@ def recording(argv: list[str]) -> Iterator[None]:
     finally:
         _ACTIVE.remove(out)
         sys.stdout, sys.stderr = out.stream, err.stream
-        if _UNKNOWN:
+        if code == 0 and _ATTESTED_INSTALL and not _VERIFIED_NOOP:
+            # No output is recorded, so an unknown no-op form does not matter:
+            # every attested hit renders its output live.
+            _record_locked(argv, entry, out, err, attested=True)
+        elif _UNKNOWN:
             _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
         elif code == 0 and _VERIFIED_NOOP:
             _record_locked(argv, entry, out, err)
-        elif code == 0 and _ATTESTED_INSTALL:
-            _record_locked(argv, entry, out, err, attested=True)
         else:
             _trace("no record (not a verified no-op)")
 
