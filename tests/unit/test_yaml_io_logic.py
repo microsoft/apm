@@ -1,5 +1,7 @@
 """Tests for apm_cli.utils.yaml_io -- cross-platform UTF-8 YAML I/O (pure logic cases)."""
 
+import re
+
 import pytest
 import yaml
 
@@ -99,3 +101,18 @@ class TestBoundedMergeHappyPath:
         text = "a: &a\n  x: 1\nbad:\n  <<: [*a, plainscalar]\n"
         with pytest.raises(yaml.YAMLError):
             load_yaml_str(text)
+
+
+@pytest.mark.parametrize(
+    ("key", "label"),
+    [
+        ("1: x", "1"),
+        ("? 0x" + "f" * 5000 + "\n: x", "<int>"),
+        ("? !!binary G1szMW1yZWQ=\n: x", re.escape("b'\\x1b[31mred'")),
+    ],
+    ids=["int", "int-too-large-to-render", "binary-esc"],
+)
+def test_a_non_string_frontmatter_key_is_a_named_yaml_error(key: str, label: str) -> None:
+    """Every caller gets the loader's own YAMLError, never a bare TypeError (#5028)."""
+    with pytest.raises(yaml.YAMLError, match=rf"^non-string frontmatter key\(s\): {label}$"):
+        loads_frontmatter(f"---\n{key}\ndescription: d\n---\nbody\n")
