@@ -2004,14 +2004,16 @@ class APMDependencyResolver:
         the materialized package location; repository-relative expansion derives
         separate source-coordinate anchors.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         if dep_ref.replacement is not None and dep_ref.is_local:
             return dep_ref.replacement.local_source_path()
         if dep_ref.is_local and dep_ref.local_path:
             local = Path(dep_ref.local_path).expanduser()
             if not local.is_absolute() and parent_pkg is not None and parent_pkg.source_path:
-                return (parent_pkg.source_path / local).resolve()
-            return local.resolve()
-        return install_path.resolve()
+                return resolve_path(parent_pkg.source_path / local)
+            return resolve_path(local)
+        return resolve_path(install_path)
 
     @staticmethod
     def _download_dedup_key(dep_ref: DependencyReference, parent_pkg: APMPackage | None) -> str:

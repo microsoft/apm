@@ -169,6 +169,16 @@ def _certainly_elsewhere(word: str, paths: frozenset, bases: tuple, moved: bool)
     return all(_normalized(f"{base.as_posix()}/{relative}") not in paths for base in bases)
 
 
+def script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
+    """Return each script row under *target_root*, spelled relative to it."""
+    tails = []
+    for value in scripts:
+        spelled = Path(value) if Path(value).is_absolute() else project_root / value
+        if spelled.is_relative_to(target_root):
+            tails.append(spelled.relative_to(target_root).as_posix())
+    return tails
+
+
 def hook_commands(document: Any) -> list[str]:
     """Commands a per-file hook document runs, read from handler positions only (#5136).
 
