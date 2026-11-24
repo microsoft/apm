@@ -18,6 +18,7 @@ from apm_cli.utils.yaml_io import load_yaml
 from tests.integration.test_required_lifecycle_state_machine import (
     _INSTALL_ARGS,
     _OWNER,
+    _PARALLEL_INSTALL_ARGS,
     _instruction,
     _new_scenario,
     _publish,
@@ -223,7 +224,11 @@ def test_pack_refuses_routed_rules_from_an_apm_modules_copy_the_lock_does_not_at
 def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A routed rule never vanishes behind another dependency's same-path rule."""
+    """Same-named instructions from two packages never vanish silently (#5343).
+
+    Install keeps the first-declared package's rule whatever the fetch
+    order, names both packages, and pack refuses the bundle.
+    """
     scenario = _new_scenario(tmp_path / "shared-path", apm_binary_path)
     routed = _publish(scenario, "guard-kit", instruction="guard")
     scoped = _publish(
@@ -238,8 +243,30 @@ def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
     environment = scenario.repositories.url_rewrite_subprocess_env_many(
         ((routed.repository, routed.remote_url), (scoped.repository, scoped.remote_url))
     )
-    _run_success(scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install")
-    assert "**/*.py" in (producer.root / _RULE).read_text(encoding="ascii")
+    collision = (
+        f"{_RULE}: guard-kit and python-kit both ship an instruction named 'guard'; kept "
+        "guard-kit's (declared first), skipped python-kit's. Rename one of the instruction files."
+    )
+    first = _run_success(
+        scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install"
+    )
+    assert collision in " ".join((first.stdout + first.stderr).split()), first.stdout
+    rule = (producer.root / _RULE).read_bytes()
+    assert b'- "**"' in rule and b"**/*.py" not in rule
+
+    # Refetch the first-declared package, in parallel, while the other stays
+    # cached: a different fetch order keeps the same winner.
+    (kit,) = [path for path in (producer.root / "apm_modules").rglob("guard-kit") if path.is_dir()]
+    shutil.rmtree(kit)
+    again = _run_success(
+        scenario,
+        producer,
+        _PARALLEL_INSTALL_ARGS,
+        environment=environment,
+        scenario_id="install-refetch",
+    )
+    assert collision in " ".join((again.stdout + again.stderr).split()), again.stdout
+    assert (producer.root / _RULE).read_bytes() == rule
 
     out = tmp_path / "bundles"
     result = scenario.runner.run(
@@ -251,6 +278,8 @@ def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode != 0, output
     assert f"Cannot pack {_RULE}" in output, output
+    assert "guard-kit" in output and "python-kit" in output, output
+    assert "Rename one of the instruction files." in output, output
     assert not out.exists() or not any(out.iterdir())
 
 
