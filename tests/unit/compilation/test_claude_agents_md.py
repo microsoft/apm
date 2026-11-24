@@ -740,8 +740,10 @@ class TestRoutingFollowUps:
         ("use tabs", "**", False),
         ("never use tabs", "**", True),
         ("never use tabs", None, False),
+        ("Keep it short.", "**", False),
+        ("Keep it short.\nUse ASCII.", "**", True),
     ],
-    ids=["substring", "whole-block", "other-scope-section"],
+    ids=["substring", "whole-block", "other-scope-section", "shortened-body", "long-block"],
 )
 def test_a_fresh_clone_reads_a_compiled_body_only_as_whole_lines_in_its_scope(
     tmp_path, body, apply_to, carried
@@ -754,7 +756,8 @@ def test_a_fresh_clone_reads_a_compiled_body_only_as_whole_lines_in_its_scope(
     project.mkdir()
     (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
     (project / "AGENTS.md").write_text(
-        "# AGENTS.md\n\n## Files matching `**`\n\n<!-- Source: style -->\nnever use tabs\n\n",
+        "# AGENTS.md\n\n## Files matching `**`\n\n<!-- Source: style -->\nnever use tabs\n\n"
+        "Keep it short.\nUse ASCII.\n\n",
         encoding="utf-8",
     )
 
