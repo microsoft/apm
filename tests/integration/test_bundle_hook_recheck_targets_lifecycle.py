@@ -64,6 +64,11 @@ def _matchers(claude_root: Path) -> list[str]:
     return [entry["matcher"] for entry in hooks.get("PreToolUse", [])]
 
 
+def _assert_no_bundle_hook(claude_root: Path) -> None:
+    """The bundle's PreToolUse entry is gone from the target's settings.json."""
+    assert _matchers(claude_root) == []
+
+
 def _set_executables(manifest_path: Path, executables: dict) -> None:
     manifest = load_yaml(manifest_path)
     manifest["executables"] = executables
@@ -102,10 +107,13 @@ def test_hook_recheck_after_withdrawal_covers_targets_outside_the_manifest(
         _set_executables(manifest_path, {})
     if scope == "project-target-flag":
         audit = world.apm(cwd, "audit", "--ci", "--no-policy", expect=1)
-        assert "hookpkg" in output(audit), output(audit)
-    text = output(world.apm(cwd, "install", *flags, "--no-policy"))
+        assert audit.returncode == 1
+        assert "hookpkg" in audit.stdout + audit.stderr, output(audit)
+    installed = world.apm(cwd, "install", *flags, "--no-policy")
 
-    assert _matchers(claude_root) == [], text
-    assert "Retired hooks from local bundle 'hookpkg'" in text, text
+    assert installed.returncode == 0, output(installed)
+    assert "Retired hooks from local bundle 'hookpkg'" in installed.stdout + installed.stderr
+    _assert_no_bundle_hook(claude_root)
     if scope == "project-target-flag":
-        world.apm(cwd, "audit", "--ci", "--no-policy")
+        audit = world.apm(cwd, "audit", "--ci", "--no-policy")
+        assert audit.returncode == 0, output(audit)
