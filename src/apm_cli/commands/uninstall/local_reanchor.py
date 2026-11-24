@@ -966,16 +966,21 @@ def _marked_regular_file(path: Path, markers, section: bytes = b"") -> bytes | N
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
         head = os.read(fd, 4096)
-        marked = has_generated_marker_header(decode_utf8_prefix(head), markers)
-        chunks = [head]
-        found = marked or (bool(section) and section in head)
+        found = has_generated_marker_header(decode_utf8_prefix(head), markers) or (
+            bool(section) and section in head
+        )
+        # Only a rolling tail is kept while searching; the content is read on a match.
         tail = head[-len(section) :] if section else b""
+        while not found and section and (chunk := os.read(fd, 1 << 16)):
+            found = section in tail + chunk
+            tail = (tail + chunk)[-len(section) :]
+        if not found:
+            return None
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks = []
         while chunk := os.read(fd, 1 << 16):
             chunks.append(chunk)
-            if not found and section:
-                found = section in tail + chunk
-                tail = (tail + chunk)[-len(section) :]
-        return b"".join(chunks) if found else None
+        return b"".join(chunks)
     finally:
         os.close(fd)
 

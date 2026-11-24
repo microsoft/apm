@@ -51,3 +51,15 @@ def test_a_final_link_is_never_followed(tmp_path: Path) -> None:
 
     assert _marked_regular_file(tmp_path / "AGENTS.md", _MARKERS) is None
     assert _marked_regular_file(target, _MARKERS) == target.read_bytes()
+
+
+def test_a_managed_section_far_into_a_file_is_found_and_read_whole(tmp_path: Path) -> None:
+    """The begin marker is searched across chunk boundaries; the whole file is returned."""
+    from apm_cli.commands.uninstall.local_reanchor import _marked_regular_file
+
+    agents = tmp_path / "AGENTS.md"
+    body = b"x" * ((1 << 16) + 4090) + b"<!-- apm:start -->\nlink\n<!-- apm:end -->\n"
+    agents.write_bytes(body)
+
+    assert _marked_regular_file(agents, _MARKERS, b"<!-- apm:start -->") == body
+    assert _marked_regular_file(agents, _MARKERS, b"<!-- not:here -->") is None
