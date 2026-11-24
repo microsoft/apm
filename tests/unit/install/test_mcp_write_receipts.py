@@ -290,8 +290,11 @@ def test_a_kept_record_is_forgotten_once_its_entry_is_removed(project: Path) -> 
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
 
 
-def test_evidence_bound_to_another_installation_is_unusable(project: Path) -> None:
+def test_evidence_bound_to_another_installation_is_set_aside_once(project: Path) -> None:
+    """#5396: evidence another installation wrote is renamed once, never trusted or deleted."""
     _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    old = path.read_bytes()
     identity = project / ".apm-local" / "installation"
     identity.write_text("0" * 32 + "\n")
     logger = _Logger()
@@ -299,10 +302,33 @@ def test_evidence_bound_to_another_installation_is_unusable(project: Path) -> No
     with pytest.raises(ValueError, match="Invalid MCP write evidence"):
         McpWriteReceipts.open(project, user_scope=False)
     _retire(project, logger)
+    _retire(project, again := _Logger())
 
-    assert SERVER in _servers(project), "unusable evidence must not remove anything"
-    assert logger.warnings and "Kept every MCP entry" in logger.warnings[0]
+    assert SERVER in _servers(project), "set-aside evidence must not remove anything"
+    _assert_set_aside(logger.warnings, path, old)
+    assert again.warnings == [], "the set-aside is reported once"
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
+
+
+def test_corrupt_evidence_is_never_set_aside_by_an_install(project: Path) -> None:
+    """Only evidence provably bound to another installation rotates; anything else refuses."""
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    path.write_text("{not json")
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert SERVER in _servers(project)
+    assert path.read_text() == "{not json", "corrupt evidence stays in place"
+    assert not path.with_name(path.name + ".superseded").exists()
+    assert logger.warnings and "Kept every MCP entry" in logger.warnings[0]
+
+
+def _assert_set_aside(warnings: list[str], path: Path, old: bytes) -> None:
+    aside = path.with_name(path.name + ".superseded")
+    assert len(warnings) == 1 and "Set aside MCP write evidence" in warnings[0], warnings
+    assert aside.read_bytes() == old, "the old evidence is kept byte for byte"
 
 
 def test_a_corrupt_evidence_file_is_rejected(project: Path) -> None:

@@ -229,7 +229,8 @@ class McpWriteReceipts:
                 raise
         logger.warning(
             f"Set aside MCP write evidence another checkout of this project wrote: {aside}. "
-            "The MCP entries it lists are left as they are."
+            "APM no longer manages the MCP entries it lists; "
+            "remove any you no longer want from your MCP config."
         )
         _clear_unusable_note(project_root, user_scope=user_scope)
         return cls.open(project_root, user_scope=user_scope)

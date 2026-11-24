@@ -346,20 +346,16 @@ class DeploymentMaterializationSession:
 
     def another_installation(self, data: Mapping[str, Any]) -> bool:
         """Whether well-formed receipt *data* for this root path and scope belongs to another
-        installation: another (or no) UUID here, or a recreated root (not a device-only move)."""
+        installation: another (or no) UUID here, or a recreated root (not a device-only move).
+        :meth:`binds` stays the single binding decision; this only adds well-formedness."""
         recorded = data["installation"]
-        if (
-            data["version"] != 1
-            or data["root"] != self.root.as_posix()
-            or data["scope"] != self.scope.value
-            or not isinstance(recorded, str)
-            or uuid.UUID(hex=recorded).hex != recorded
-        ):
-            return False
-        recreated = data["root_identity"] != self._root_identity() and not (
-            self._root_device_changed_only(data)
+        return (
+            [data["version"], data["root"], data["scope"]]
+            == [1, self.root.as_posix(), self.scope.value]
+            and isinstance(recorded, str)
+            and uuid.UUID(hex=recorded).hex == recorded
+            and not self.binds(data)
         )
-        return self._installation != recorded or recreated
 
     def _encode(
         self, candidate: Path, target: TargetProfile, root: Path | None = None
