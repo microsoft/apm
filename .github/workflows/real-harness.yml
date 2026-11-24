@@ -109,6 +109,11 @@ jobs:
           print(name, version, lock["packages"][f"node_modules/{name}"]["integrity"])
           PY
           )
+          # The pin lockfiles were written by npm 10.9.9; fail fast if the toolchain drifts.
+          if [ "$(node --version)" != v22.23.5 ] || [ "$(npm --version)" != 10.9.9 ]; then
+            echo "::error::expected node v22.23.5 and npm 10.9.9, got $(node --version) and npm $(npm --version)"
+            exit 1
+          fi
           PUBLISHED=$(npm view "${PACKAGE}@${VERSION}" dist.integrity)
           if [ "$PUBLISHED" != "$PINNED" ]; then
             echo "::error::${PACKAGE}@${VERSION} integrity ${PUBLISHED} does not match the pinned ${PINNED}"
