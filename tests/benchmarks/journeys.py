@@ -535,6 +535,18 @@ class Context:
 
     # state helpers (untimed)
 
+    def fresh_user_state(self) -> None:
+        """Empty the isolated user home (APM home included); keep its git config."""
+        home = self.world.isolated.home
+        for entry in home.iterdir():
+            if entry.name == ".gitconfig":
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                remove_tree(entry)
+            else:
+                entry.unlink()
+        self.world.apm_home.mkdir(parents=True, exist_ok=True)
+
     def fresh_project(self) -> None:
         remove_tree(self.project)
         shutil.copytree(self.fixture.template, self.project)
@@ -700,10 +712,22 @@ _KEEP_INSTALLED = ("install-noop-replay",)
 
 
 def _setup_replay(ctx: Context) -> None:
-    """Installed, then one untimed no-op that proves it and writes the record."""
+    """A converged repeat-user state: installed, one no-op that records, one that hits.
+
+    The first sample starts from a clean user state: earlier journeys in this
+    world leave deployment receipts for a project checkout ``fresh_project``
+    has since replaced, and the no-op would never converge against them. The
+    last untimed no-op must replay; otherwise the cell fails instead of timing
+    a full re-proof.
+    """
+    if not ctx.is_installed:
+        ctx.fresh_user_state()
     ctx.installed()
     for root in ctx.roots():
         ctx.checked(["install"], root)
+        outcome = _replay_outcome(ctx.run(["install"], root).stderr)
+        if outcome != "hit":
+            raise RuntimeError(f"setup no-op did not converge in {root}: replay {outcome or '-'}")
 
 
 def _replay_outcome(tail: str) -> str:
