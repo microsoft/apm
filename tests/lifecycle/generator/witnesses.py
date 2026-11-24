@@ -353,16 +353,11 @@ def machine_cells() -> list[MachineCell]:
                 # step's evidence names bin/ present, so it proves the OP x PRIM pair.
                 context = {"OP": "mcp-install", "PRIM": "bin"}
                 cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
-            if (
-                witness == GATE_PLUGIN_BIN_SPINE
-                and key.split("|")[1] == "pack"
-                and assignment["GATE"] in ("none", "allowed")
+            if witness == GATE_PACK_SPINE or (
+                witness == GATE_PLUGIN_BIN_SPINE and assignment["OP"] == "pack"
             ):
-                # pack over a project whose whole plugin carries bin/ (#5253 tracks it).
-                context = {"OP": "pack", "PRIM": "bin"}
-                cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
-            if witness == GATE_PACK_SPINE:
-                # A real pack over the primitive also proves the OP x PRIM pair.
+                # A real pack over the primitive also proves the OP x PRIM pair; the
+                # plugin bin spine's pack runs over a deployed plugin bin/ (#5253).
                 context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
                 cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
             if witness == GATE_BUNDLE_SPINE and assignment["GATE"] in ("none", "allowed"):
