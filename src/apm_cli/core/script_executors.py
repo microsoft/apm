@@ -1537,6 +1537,33 @@ def dispatch_http_batch(
 # -- Command executor ------------------------------------------------------
 
 
+@contextlib.contextmanager
+def _interrupts_deferred():
+    """Hold Ctrl+C and SIGTERM until the spawned script's handle is assigned.
+
+    The script runs in its own session, so only APM can stop it. Popen
+    returns after the child has exec'd; an interrupt raised inside Popen would
+    leave no handle to reap, and the script would outlive the command (#5303).
+    A deferred signal is re-raised through the restored handler on exit.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    pending: list[int] = []
+    saved: dict[int, object] = {}
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(ValueError, OSError):
+            saved[signum] = signal.signal(signum, lambda num, _frame: pending.append(num))
+    try:
+        yield
+    finally:
+        for signum, handler in saved.items():
+            if handler is not None:
+                signal.signal(signum, handler)
+        if pending:
+            signal.raise_signal(pending[0])
+
+
 def _execute_command(
     script: ScriptEntry,
     event: LifecycleEvent,
@@ -1568,17 +1595,18 @@ def _execute_command(
         # spawns) in its OWN process group, so a timeout can reap the
         # whole tree via killpg instead of orphaning backgrounded
         # grandchildren (subprocess.run's timeout kills only the shell).
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-            start_new_session=True,
-        )
+        with _interrupts_deferred():
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=cwd,
+                start_new_session=True,
+            )
         stdout, stderr, capped = _capture_bounded(proc, event.to_json(), timeout)
         returncode = proc.returncode
         if capped:
