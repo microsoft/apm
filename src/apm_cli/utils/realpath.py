@@ -196,7 +196,7 @@ def resolve_path(path: Path) -> Path:
     and any failure of a fast form leaves the answer (or the error) to it.
     """
     stock = type(path) in (PosixPath, WindowsPath) and type(path).resolve is _STOCK_RESOLVE
-    proofs = _memo(_PROOFS) if stock else None
+    proofs = _memo(_PROOFS) if stock and not _WINDOWS else None
     text = str(path)
     if proofs is not None:
         answer = _proven_answer(text, proofs)
