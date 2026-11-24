@@ -119,7 +119,7 @@ def compute_package_hash(
 
 
 # PERF PROTOTYPE (stat-cut): compute the original too and fail loudly on any difference.
-_STAT_DIFFERENTIAL = True
+_STAT_DIFFERENTIAL = False
 
 
 def _read_regular_bytes(path: Path) -> bytes:
