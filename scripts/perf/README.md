@@ -25,6 +25,20 @@ overhead <= 1%").
 4. **Pass, fail or inconclusive.** A cell passes at paired p50 <= 1.010; p50 above
    1.010 on any cell is a FAIL. If any
    cell's 95% upper bound is above 1.020 the run is INCONCLUSIVE, not a pass:
-   rerun once with 30 pairs (`PAIRS=10`), and that result is final.
-5. **Pre-register.** This method is merged (or at the merge desk) before a PR
+   rerun once with 30 pairs, and that result is final, judged on p50.
+   `perf-bench.yml` accepts `PAIRS` 1-9 per runner on 3 runners, so request 30
+   pairs as two simultaneous `PAIRS=5` requests (3 runners each) and pool their
+   pairs into one statistic per cell.
+5. **The band.** Pair key: (runner shard, pair index); a pair is the base and
+   new CPU of the same journey and fixture on the same runner, and every pair
+   is pooled across runners (and across the two requests of a 30-pair rerun)
+   with no grouping term. The ratio is new/base per pair. The 95% band is the
+   distribution-free order-statistic interval for the median of those n
+   ratios: sorted ratios at ranks floor(n/2 - 1.96 * sqrt(n) / 2) and
+   ceil(n/2 + 1.96 * sqrt(n) / 2) - 1 (0-based, clamped to [0, n-1]); no
+   bootstrap. To reproduce it, run `gh run download <run> --pattern
+   'perf-bench-shard-*'`, read `runs/<side>-<i>/*.json` in each shard (the
+   first sample with returncode 0 gives `cpu_s`), pair base and new by
+   (shard, i), and apply the ranks above.
+6. **Pre-register.** This method is merged (or at the merge desk) before a PR
    claims a pass with it.
