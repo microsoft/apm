@@ -1899,13 +1899,22 @@ class GitHubPackageDownloader:
                 # A shard keeps unresolvable links as text; the clone path
                 # below then raises the strict diagnostic (#3457).
                 validate_cached_links(_cached, None, self._git_env_dict())
-                from ..utils.file_ops import robust_copy_entry
+                from ..cache.checkout_verify import inprocess_payload
 
-                for item in _cached.iterdir():
-                    if item.name == ".git":
-                        continue
-                    robust_copy_entry(_cached / item.name, target_path / item.name)
-                require_verified_copy(target_path, _cached, _cached.parent.name)
+                _payload = inprocess_payload(_cached)
+                if _payload is not None:
+                    # PERF B3 PROTOTYPE: verified by construction (B1-fetched this command).
+                    from ..cache.inprocess_fetch import materialize_payload
+
+                    materialize_payload(target_path, _payload)
+                else:
+                    from ..utils.file_ops import robust_copy_entry
+
+                    for item in _cached.iterdir():
+                        if item.name == ".git":
+                            continue
+                        robust_copy_entry(_cached / item.name, target_path / item.name)
+                    require_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)

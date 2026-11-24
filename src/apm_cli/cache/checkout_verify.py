@@ -658,9 +658,15 @@ def require_verified_bytes(
 
 
 _INPROCESS: dict[tuple[str, str], tuple[int, int]] = {}
+_PAYLOADS: dict[tuple[str, str], list[tuple[str, bytes, bool]]] = {}
 
 
-def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str, bool]]) -> None:
+def register_inprocess_manifest(
+    repo: Path,
+    sha: str,
+    files: dict[str, tuple[str, bool]],
+    payload: list[tuple[str, bytes, bool]] | None = None,
+) -> None:
     """PERF PROTOTYPE: record the verdict an in-process fetch reached while writing *repo*.
 
     Bound to the landed directory's (dev, ino): a swapped directory misses and is verified.
@@ -670,6 +676,16 @@ def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str
     with _MANIFEST_LOCK:
         _MANIFESTS[key] = _Manifest(object_format(sha), dict(files))
         _INPROCESS[key] = (info.st_dev, info.st_ino)
+        if payload is not None:
+            _PAYLOADS[key] = payload
+
+
+def inprocess_payload(repo: Path, sha: str | None = None) -> list[tuple[str, bytes, bool]] | None:
+    """PERF B3 PROTOTYPE: the verified bytes B1 wrote for *repo* this command, or ``None``."""
+    if not inprocess_verified(repo, sha):
+        return None
+    with _MANIFEST_LOCK:
+        return _PAYLOADS.get(_key(repo, sha or Path(repo).parent.name))
 
 
 def inprocess_verified(repo: Path, sha: str | None = None) -> bool:
@@ -691,3 +707,4 @@ def forget_verdicts() -> None:
     with _MANIFEST_LOCK:
         _MANIFESTS.clear()
         _INPROCESS.clear()
+        _PAYLOADS.clear()

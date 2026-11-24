@@ -548,8 +548,11 @@ def fetch_worktree(
     staged: Path,
     env: Mapping[str, str] | None,
     pins: tuple[tuple[str, str], ...],
-) -> dict[str, tuple[str, bool]] | None:
-    """Write commit *sha* of *url* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``."""
+) -> tuple[dict[str, tuple[str, bool]], list[tuple[str, bytes, bool]]] | None:
+    """Write commit *sha* of *url* into empty *staged*: ``(manifest, payload)`` or ``None``.
+
+    *payload* is ``[(posix path, verified bytes, executable)]`` (PERF B3 prototype).
+    """
     if len(sha) != 40:
         return None
     try:
@@ -560,6 +563,7 @@ def fetch_worktree(
         root = str(staged)
         made = {root}
         manifest: dict[str, tuple[str, bool]] = {}
+        payload: list[tuple[str, bytes, bool]] = []
         for rel, oid, executable in files:
             parts = rel.split("/")
             directory = root
@@ -570,15 +574,56 @@ def fetch_worktree(
                     made.add(directory)
             _write_file(os.path.join(directory, parts[-1]), objects[oid][1], executable)
             manifest[rel] = (oid, executable)
+            payload.append((rel, objects[oid][1], executable))
         _write_git_dir(staged, url, sha, objects, reached, pins)
         if os.name != "nt":
             info = os.lstat(root)
             if not stat.S_ISDIR(info.st_mode):
                 raise _Refuse("staged root changed")
-        return manifest
+        return manifest, payload
     except _Refuse as reason:
         _log.debug("in-process fetch falls back to git for %s: %s", url, reason)
         return None
     except Exception as exc:
         _log.debug("in-process fetch falls back to git for %s: %r", url, exc)
         return None
+
+
+def materialize_payload(target: Path, payload: list[tuple[str, bytes, bool]]) -> None:
+    """PERF B3 PROTOTYPE: write a verified in-memory tree into empty *target*.
+
+    The bytes are the objects B1 hashed to their ids this command, so the copy
+    equals the verified commit by construction (no copy-then-re-read). Records
+    a within-command stat proof plus the bytes so the package content hash is
+    computed from memory while nothing on disk changed.
+    """
+    root = str(target)
+    if os.listdir(root):
+        raise _Refuse("target is not empty")
+    made = {root}
+    files: dict[str, tuple[int, int, int, int, int]] = {}
+    for rel, data, executable in payload:
+        parts = rel.split("/")
+        directory = root
+        for part in parts[:-1]:
+            directory = os.path.join(directory, part)
+            if directory not in made:
+                os.mkdir(directory, 0o755)
+                made.add(directory)
+        path = os.path.join(directory, parts[-1])
+        fd = os.open(path, _WRITE_FLAGS, 0o755 if executable else 0o644)
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view) :]
+            info = os.fstat(fd)
+        finally:
+            os.close(fd)
+        files[rel] = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    dirs = {}
+    for directory in made:
+        info = os.lstat(directory)
+        dirs[directory] = (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns)
+    from ..utils.content_hash import seed_package_tree
+
+    seed_package_tree(root, payload, files, dirs)

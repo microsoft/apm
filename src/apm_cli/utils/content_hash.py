@@ -3,6 +3,7 @@
 import hashlib
 import os
 import stat
+import threading
 from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,10 +76,75 @@ def compute_package_digests(
     return PackageDigests(legacy_digest, framed)
 
 
+_SEEDS: dict[str, tuple] = {}
+_SEED_LOCK = threading.Lock()
+
+
+def seed_package_tree(root: str, payload, files: dict, dirs: dict) -> None:
+    """PERF B3 PROTOTYPE: bytes APM wrote into *root* this command, with a stat proof."""
+    with _SEED_LOCK:
+        _SEEDS[os.path.abspath(root)] = (payload, files, dirs)
+
+
+def _seeded_tree(
+    package_path: Path, exclude: Collection[str], *, legacy: bool, framed: bool
+) -> tuple[str, str] | None:
+    """Digests from the seeded bytes while every file and directory is unchanged, else ``None``."""
+    with _SEED_LOCK:
+        seed = _SEEDS.get(os.path.abspath(package_path))
+    if seed is None:
+        return None
+    payload, files, dirs = seed
+    try:
+        for directory, proof in dirs.items():
+            info = os.lstat(directory)
+            if (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns) != proof:
+                return None
+        root = os.path.abspath(package_path)
+        for rel, proof in files.items():
+            info = os.lstat(os.path.join(root, *rel.split("/")))
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or (
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                )
+                != proof
+            ):
+                return None
+    except OSError:
+        return None
+    legacy_hasher = hashlib.sha256() if legacy else None
+    framed_hasher = hashlib.sha256() if framed else None
+    for rel, data, _executable in sorted(payload, key=lambda item: item[0]):
+        parts = rel.split("/")
+        if any(part in _EXCLUDED_DIRS for part in parts):
+            continue
+        if len(parts) == 1 and parts[0] in _EXCLUDED_ROOT_FILES:
+            continue
+        if exclude and rel in exclude:
+            continue
+        if legacy_hasher is not None:
+            legacy_hasher.update(rel.encode("utf-8"))
+            legacy_hasher.update(data)
+        if framed_hasher is not None:
+            framed_hasher.update(_frame_entry(Path(rel), data))
+    return (
+        f"sha256:{legacy_hasher.hexdigest()}" if legacy_hasher else "",
+        f"sha256:{framed_hasher.hexdigest()}" if framed_hasher else "",
+    )
+
+
 def _hash_package_tree(
     package_path: Path, exclude: Collection[str], *, legacy: bool, framed: bool
 ) -> tuple[str, str]:
     """Feed only the requested streams; an unrequested stream returns ``""``."""
+    seeded = _seeded_tree(package_path, exclude, legacy=legacy, framed=framed)
+    if seeded is not None:
+        return seeded
     if not package_path.is_dir():
         return (_EMPTY_HASH if legacy else ""), (_EMPTY_HASH if framed else "")
     legacy_hasher = hashlib.sha256() if legacy else None
