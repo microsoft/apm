@@ -848,11 +848,13 @@ def _cleanup_stale_lsp(
     deploy_root: Any,
     user_scope: bool,
     logger: Any,
+    command: str = "Uninstall",
 ) -> tuple[bool, Exception | None]:
-    """Reconcile LSP state after uninstall and render an actionable failure.
+    """Reconcile LSP state after uninstall or prune and render an actionable failure.
 
     The post-removal manifest is loaded here when MCP cleanup did not already
-    load it, so LSP-only scopes reconcile too (#4045, #3768).
+    load it, so LSP-only scopes reconcile too (#4045, #3768). ``apm prune``
+    calls it for the packages it removes (#5250).
     """
     try:
         from ...install.lsp.integration import (
@@ -878,7 +880,7 @@ def _cleanup_stale_lsp(
     except Exception as cleanup_error:
         recovery_command = "apm install --global" if user_scope else "apm install"
         logger.error(
-            "Uninstall incomplete: package removal completed, but LSP cleanup "
+            f"{command} incomplete: package removal completed, but LSP cleanup "
             f"failed: {cleanup_error}. Fix the LSP config path, then run "
             f"'{recovery_command}' to reconcile stale entries."
         )
