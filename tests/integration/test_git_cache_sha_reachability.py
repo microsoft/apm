@@ -1153,3 +1153,37 @@ def test_a_commit_only_a_mirror_holds_is_never_recorded_as_the_origins_verdict(
     markers = list((tmp_path / "cache" / "reachability").rglob(f"verified-v2/{only_mirror}"))
     recorded = [m.read_text(encoding="utf-8").splitlines()[-1] for m in markers]
     assert recorded == [normalize_repo_url(mirror.as_uri())]
+
+
+def test_a_resolved_tip_probe_carries_no_credential_and_runs_untranslated(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: the probe behind recording a tip only learns a URL, so it gets no token."""
+    from apm_cli.cache.commit_reachability import admit_pinned_commit
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    git_env = importlib.import_module("apm_cli.utils.git_env")
+    envs: list[dict[str, str]] = []
+    real_init_run = git_env._git_init_run
+
+    def _capture(args, *rest, **kwargs):
+        envs.append(dict(kwargs.get("env") or {}))
+        return real_init_run(args, *rest, **kwargs)
+
+    monkeypatch.setattr("apm_cli.utils.git_env._git_init_run", _capture)
+    config = tmp_path / "global.gitconfig"
+    config.write_text('[includeIf "gitdir:/nonexistent/"]\n\tpath = /x\n', encoding="ascii")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_sentinel")
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+    downloader.git_env = {"GH_TOKEN": "gh_sentinel"}
+    downloader._tiered_resolver = _RemotelyResolved()
+    resolved = ResolvedReference("main", GitReferenceType.BRANCH, origin.m2, "main")
+
+    admit_pinned_commit(downloader, _ref("main"), "main", resolved=resolved)
+
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
+    assert marker.name == origin.m2
+    assert len(envs) == 2
+    assert not [e for e in envs if {"GITHUB_TOKEN", "GH_TOKEN"} & e.keys()]
+    assert all(e.get("LC_ALL") == "C" and e.get("LANGUAGE") == "C" for e in envs)

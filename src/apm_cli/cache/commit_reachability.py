@@ -400,7 +400,7 @@ def _record_tip(downloader, dep_ref, sha: str) -> None:
     # activate a remote-dependent rewrite; which one is unknown here. A tip is
     # recorded only when both name the same server, else it is verified at
     # the fetch destination when next admitted.
-    transport = getattr(downloader, "git_env", None)
+    transport = _url_only_env(getattr(downloader, "git_env", None))
     try:
         probed = _probed_listing_env(contact, transport)
     except _Unverified:
@@ -409,6 +409,16 @@ def _record_tip(downloader, dep_ref, sha: str) -> None:
     if key is None or key != _verdict_key(origin, contact, transport):
         return
     _record(_marker(root, cache_shard_key(origin), sha.lower()), key)
+
+
+def _url_only_env(env) -> dict[str, str]:
+    """*env* without credentials, untranslated: enough to tell which URL git contacts."""
+    from ..utils.git_env import clear_git_auth_env, clear_git_platform_token_env
+
+    scrubbed = {**os.environ, **(env or {}), "LC_ALL": "C", "LANGUAGE": "C"}
+    clear_git_platform_token_env(scrubbed, remove=True)
+    clear_git_auth_env(scrubbed)
+    return scrubbed
 
 
 def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> None:
