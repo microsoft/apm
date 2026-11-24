@@ -299,6 +299,34 @@ class _LinkResolver:
             ) from None
 
 
+def _plan_key(repo_dir: Path, paths, extra_git_args) -> tuple | None:
+    """The memo key of a link plan: the detached commit id ``ls-tree HEAD`` resolves.
+
+    ``None`` (no memo) unless ``.git/HEAD`` is a regular file naming a commit id
+    and no replace ref or graft can change which tree that id names.
+    """
+    git_dir = Path(repo_dir) / ".git"
+    try:
+        if not stat.S_ISREG(os.lstat(git_dir / "HEAD").st_mode):
+            return None
+        head = (git_dir / "HEAD").read_text(encoding="ascii").strip()
+        if (git_dir / "refs" / "replace").exists() or (git_dir / "info" / "grafts").exists():
+            return None
+        packed = git_dir / "packed-refs"
+        if packed.exists() and b" refs/replace/" in packed.read_bytes():
+            return None
+    except (OSError, UnicodeDecodeError):
+        return None
+    from apm_cli.utils.git_object_id import object_format
+
+    try:
+        oid_format = object_format(head)
+    except ValueError:
+        return None
+    scope = tuple(paths) if paths is not None else None
+    return (oid_format, head, scope, tuple(extra_git_args or ()))
+
+
 def _plan_tracked_symlinks(
     git_exe: str,
     repo_dir: Path,
@@ -308,7 +336,56 @@ def _plan_tracked_symlinks(
     timeout: int,
     extra_git_args: list[str] | None,
 ) -> tuple[dict[str, list[_LinkWrite]], dict[str, Exception]]:
-    """Plan link materialization; the common no-link case costs one ``ls-tree``."""
+    """Plan link materialization; the common no-link case costs one ``ls-tree``.
+
+    The plan is a pure function of the commit's tree, so within one command it is
+    computed once per commit id and paths (``invocation_memo``); each caller gets
+    its own copy, and link writes and containment still run per repository.
+    """
+    from apm_cli.core.invocation_memo import invocation_memo
+
+    memo = invocation_memo("git_sparse.link_plans")
+    key = _plan_key(repo_dir, paths, extra_git_args) if memo is not None else None
+    args = (git_exe, repo_dir, paths)
+    kwargs = {"env": env, "timeout": timeout, "extra_git_args": extra_git_args}
+    if key is not None and key in memo:
+        if os.environ.get("APM_DEBUG"):
+            fresh = _plan_tracked_symlinks_uncached(*args, **kwargs)
+            if _plan_shape(fresh) != _plan_shape(memo[key]):
+                raise AssertionError("memoized link plan differs from ls-tree")
+        return _copy_plan(memo[key])
+    result = _plan_tracked_symlinks_uncached(*args, **kwargs)
+    if key is not None:
+        memo[key] = _copy_plan(result)
+    return result
+
+
+def _plan_shape(plan) -> tuple:
+    writes, failures = plan
+    return writes, {link: (type(exc), str(exc)) for link, exc in failures.items()}
+
+
+def _copy_plan(plan):
+    """A caller's own copy: lists of frozen writes, and fresh exception objects."""
+    import copy
+
+    writes, failures = plan
+    return (
+        {link: list(items) for link, items in writes.items()},
+        {link: copy.copy(exc) for link, exc in failures.items()},
+    )
+
+
+def _plan_tracked_symlinks_uncached(
+    git_exe: str,
+    repo_dir: Path,
+    paths: list[str] | None,
+    *,
+    env: dict[str, str] | None,
+    timeout: int,
+    extra_git_args: list[str] | None,
+) -> tuple[dict[str, list[_LinkWrite]], dict[str, Exception]]:
+    """One ``ls-tree`` (plus link blobs when links exist) for the HEAD tree."""
     scoped = _tree_entries(
         git_exe,
         repo_dir,

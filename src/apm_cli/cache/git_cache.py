@@ -927,9 +927,13 @@ class GitCache:
         reports the missing commit as before.
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
+        from . import pack_index
 
         if _is_ref_tip(staged, sha):
             return  # a ref of the clone names it, so the commit is present
+        packed = pack_index.packed_commit(staged, sha)
+        if packed and not pack_index.differential():
+            return  # the pack already holds the commit
         try:
             probe = run_git_text(
                 [
@@ -942,7 +946,9 @@ class GitCache:
                 env=cached_repo_env(git_subprocess_env(env)),
                 stdin=subprocess.DEVNULL,
             )
-            if probe.returncode != 0 or "commit" not in probe.stdout:
+            spawned = probe.returncode == 0 and "commit" in probe.stdout
+            pack_index.check(packed, spawned)
+            if not spawned:
                 self._fetch_sha_into(staged, url, sha, env=env, partial=partial)
         except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
             _log.debug("Tag-only commit fetch skipped for %s: %s", _sanitize_url(url), exc)
@@ -1241,6 +1247,11 @@ class GitCache:
 
         if not self._bare_trusted(bare_dir, url=url, env=env):
             return False
+        from . import pack_index
+
+        known = pack_index.packed_commit(bare_dir, sha)
+        if known is not None and not pack_index.differential():
+            return known
         git_exe = get_git_executable()
         subprocess_env = git_subprocess_env(env)
         subprocess_env = cached_repo_env(subprocess_env)
@@ -1252,7 +1263,9 @@ class GitCache:
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
             )
-            return result.returncode == 0 and "commit" in result.stdout.strip()
+            spawned = result.returncode == 0 and "commit" in result.stdout.strip()
+            pack_index.check(known, spawned)
+            return spawned
         except (subprocess.TimeoutExpired, OSError):
             return False
 
