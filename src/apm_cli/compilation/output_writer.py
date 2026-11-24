@@ -58,84 +58,34 @@ class CompiledOutputLinkError(OSError):
     """Raised before mutation when a compiled output path crosses a symlink."""
 
 
-def _refuse_linked(target: Path, root: Path) -> None:
-    # Lexical relative path: resolving would follow the link being reported.
-    shown = target.relative_to(root).as_posix()
-    raise CompiledOutputLinkError(
-        f"Refusing deployment through a symlinked path component: {shown}. "
-        "Replace the symlink with a regular directory or remove it, then retry."
-    )
+def _output_root(base_dir: Path, target: Path) -> Path | None:
+    """Return the ancestor of *target* that spells *base_dir*, if any.
 
-
-class _LinkedParentCheck:
-    """Refuse outputs reached through a linked directory.
-
-    ``reject`` is the batch preflight: the project root is resolved once, and
-    a directory proven free of links (with its ancestors) is not checked again
-    for later outputs in the batch. The proof is keyed by exact spelling, so a
-    case or Unicode respelling misses and is checked afresh; ``..`` paths are
-    never cached. ``confirm`` re-checks one output's full directory chain
-    right before it is written, so a directory swapped for a link after the
-    preflight is still refused.
+    The project may be spelled resolved or through a linked alias on either
+    side; only an output outside every spelling (an explicit ``--output``
+    elsewhere) has no root.
     """
+    spellings = {base_dir.absolute(), base_dir.resolve()}
+    for ancestor in target.parents:
+        if ancestor in spellings:
+            return ancestor
+    resolved_root = base_dir.resolve()
+    for ancestor in target.parents:
+        if ancestor.resolve() == resolved_root:
+            return ancestor
+    return None
 
-    def __init__(self, base_dir: Path):
-        resolved = base_dir.resolve()
-        self._spellings = {base_dir.absolute(), resolved}
-        self._resolved_root = resolved
-        self._verified: set[str] = {str(spelling) for spelling in self._spellings}
-        self._roots: dict[Path, Path] = {}
 
-    def _output_root(self, target: Path) -> Path | None:
-        """Return the ancestor of *target* that spells the project root, if any.
-
-        The project may be spelled resolved or through a linked alias on either
-        side; only an output outside every spelling (an explicit ``--output``
-        elsewhere) has no root.
-        """
-        for ancestor in target.parents:
-            if ancestor in self._spellings:
-                return ancestor
-        # Not cached: Path keys compare case-insensitively on Windows, so a
-        # cached resolution could be reused for a distinct, differently cased link.
-        for ancestor in target.parents:
-            if ancestor.resolve() == self._resolved_root:
-                return ancestor
-        return None
-
-    def _checked_ancestor(self, root: Path, parent: Path) -> Path:
-        for ancestor in (parent, *parent.parents):
-            if str(ancestor) in self._verified or ancestor == root:
-                return ancestor
-        return root
-
-    def reject(self, path: Path) -> None:
-        target = path.absolute()
-        root = self._output_root(target)
-        if root is None:
-            return
-        self._roots[path] = root
-        parent = target.parent
-        # ``..`` is collapsed by the full check, so only plain paths are memoized.
-        plain = ".." not in parent.relative_to(root).parts
-        start = self._checked_ancestor(root, parent) if plain else root
-        if start == parent:
-            return
-        if has_symlink_component(start, parent):
-            _refuse_linked(target, root)
-        if plain:
-            self._verified.add(str(parent))
-            self._verified.update(
-                str(ancestor) for ancestor in parent.parents if ancestor.is_relative_to(root)
-            )
-
-    def confirm(self, path: Path) -> None:
-        root = self._roots.get(path)
-        if root is None:
-            return
-        target = path.absolute()
-        if target.parent != root and has_symlink_component(root, target.parent):
-            _refuse_linked(target, root)
+def _reject_linked_parent(base_dir: Path, path: Path) -> None:
+    target = path.absolute()
+    root = _output_root(base_dir, target)
+    if root is not None and has_symlink_component(root, target.parent):
+        # Lexical relative path: resolving would follow the link being reported.
+        shown = target.relative_to(root).as_posix()
+        raise CompiledOutputLinkError(
+            f"Refusing deployment through a symlinked path component: {shown}. "
+            "Replace the symlink with a regular directory or remove it, then retry."
+        )
 
 
 class CompiledOutputWriter:
@@ -182,14 +132,15 @@ class CompiledOutputWriter:
         mapping selects that behavior per output while preserving a single
         validate-then-write batch.
         """
-        check = _LinkedParentCheck(self._base_dir) if self._base_dir is not None else None
-        if check is not None:
+        if self._base_dir is not None:
             for path in outputs:
-                check.reject(path)
+                _reject_linked_parent(self._base_dir, path)
         prepared, verdict = self.prepare(outputs)
         for path, final in prepared.items():
-            if check is not None:
-                check.confirm(path)
+            if self._base_dir is not None:
+                # Re-checked right before the write: a directory replaced by a
+                # link after the batch preflight must still be refused.
+                _reject_linked_parent(self._base_dir, path)
             path.parent.mkdir(parents=True, exist_ok=True)
             preserve = (
                 preserve_line_endings.get(path, False)

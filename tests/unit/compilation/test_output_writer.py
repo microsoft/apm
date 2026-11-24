@@ -186,7 +186,9 @@ def test_refuses_batch_when_missing_directory_and_dotdot_reach_a_linked_director
     assert list(outside.iterdir()) == []
 
 
-def test_batch_checks_each_directory_once(tmp_path: Path, monkeypatch):
+def test_each_output_is_checked_in_the_preflight_and_again_before_its_write(
+    tmp_path: Path, monkeypatch
+):
     import apm_cli.compilation.output_writer as ow
 
     project = tmp_path / "project"
@@ -208,9 +210,8 @@ def test_batch_checks_each_directory_once(tmp_path: Path, monkeypatch):
 
     CompiledOutputWriter(base_dir=project).write_many(outputs)
 
-    preflight = [(".", "a/b"), ("a", "a/c")]
-    at_write = [(".", "a/b"), (".", "a/b"), (".", "a/c")]
-    assert checked == preflight + at_write
+    per_output = [(".", "."), (".", "a/b"), (".", "a/b"), (".", "a/c")]
+    assert checked == per_output + per_output
     assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
 
 
