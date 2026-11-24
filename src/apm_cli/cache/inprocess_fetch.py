@@ -451,16 +451,99 @@ def _frozen_entries(child_env: Mapping[str, str]):
     return entries
 
 
+_NETWORK_ENV_MEMO = "inprocess-fetch-network-env"
+_network_env_lock = threading.Lock()
+_PROBE_URL = "https://github.com/apm/probe"
+
+
+def _config_stamp(paths: tuple[str, ...]) -> tuple | None:
+    """SHA-256 identity of every config file git reads; ``None`` when an include could add more."""
+    import hashlib
+
+    stamp = []
+    for path in paths:
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except FileNotFoundError:
+            stamp.append((path, None))
+            continue
+        except OSError:
+            return None
+        if b"include" in data.lower():
+            return None
+        stamp.append((path, hashlib.sha256(data).hexdigest()))
+    return tuple(stamp)
+
+
+def _config_paths(env: Mapping[str, str]) -> tuple[str, ...] | None:
+    """System and global config files git reads under *env*, shared with the #5283 memo's cache."""
+    from ..core.invocation_memo import invocation_memo
+    from ..utils import git_config_memo
+    from ..utils.git_env import get_git_executable
+
+    memo = invocation_memo(git_config_memo._MEMO)
+    key = (
+        "paths",
+        get_git_executable(),
+        tuple((name, env.get(name)) for name in git_config_memo._PATH_ENV),
+    )
+    if memo is not None:
+        with git_config_memo._lock:
+            known = memo.get(key)
+        if known is not None:
+            return known
+    paths = git_config_memo.git_config_paths(env)
+    if paths is not None and memo is not None:
+        with git_config_memo._lock:
+            memo[key] = paths
+    return paths
+
+
+def _network_env(env: Mapping[str, str]) -> dict[str, str]:
+    """``git_network_env`` for the probe URL, kept for one command while its config files are unchanged.
+
+    Same rule as the #5283 config memo: the key is the exact input env, every
+    config file git reads (child and parent env) is re-hashed on each lookup,
+    and any include disables keeping. Only the frozen env is kept; the caller
+    classifies it on every call. Single-flight, so racing workers probe once.
+    """
+    from ..core.invocation_memo import invocation_memo
+    from ..utils.git_env import git_network_env, git_subprocess_env
+
+    memo = invocation_memo(_NETWORK_ENV_MEMO)
+    if memo is None:
+        return git_network_env(_PROBE_URL, dict(env))
+    key = tuple(sorted(env.items()))
+    with _network_env_lock:
+        paths = memo.get(("paths", key))
+        if paths is None:
+            child = _config_paths(env)
+            parent = _config_paths(git_subprocess_env())
+            if child is None or parent is None:
+                return git_network_env(_PROBE_URL, dict(env))
+            paths = tuple(sorted({*child, *parent}))
+            memo[("paths", key)] = paths
+        before = _config_stamp(paths)
+        kept = memo.get(key)
+        if kept is not None and before is not None and kept[0] == before:
+            return dict(kept[1])
+        child_env = git_network_env(_PROBE_URL, dict(env))
+        if before is not None and _config_stamp(paths) == before:
+            memo[key] = (before, dict(child_env))
+        return child_env
+
+
 def _effective(env: Mapping[str, str]) -> tuple:
     """``(trust values, child env, insteadOf prefixes, entries)`` for git's fetch under *env*.
 
     Classified on every call (W3d R1): the user's config is re-read through
     ``git_network_env`` each time; no verdict is kept.
     """
-    from ..utils.git_env import _read_effective_git_config, git_network_env
+    from ..utils.git_env import _read_effective_git_config
 
     try:
-        child_env = git_network_env("https://github.com/apm/probe", dict(env))
+        child_env = _network_env(env)
         entries = _frozen_entries(child_env)
         if entries is None:
             entries = _read_effective_git_config(child_env).entries
@@ -591,6 +674,7 @@ def _attribute_files(child_env: Mapping[str, str], entries) -> list[tuple[str, s
 
 
 _system_paths: dict[str, str] = {}
+_system_paths_lock = threading.Lock()
 
 
 def _system_attributes_path(child_env: Mapping[str, str]) -> str:
@@ -598,9 +682,22 @@ def _system_attributes_path(child_env: Mapping[str, str]) -> str:
     from ..utils.git_env import get_git_executable
 
     git = get_git_executable()
-    with _attr_lock:
+    # Single-flight: one probe per git binary per process, also on the fallback path.
+    with _system_paths_lock:
         known = _system_paths.get(git)
-    if known is None:
+        if known is None:
+            known = _probe_system_attributes(git, child_env)
+            _system_paths[git] = known
+    if not known:
+        raise _Refuse("system attributes path unknown (git var GIT_ATTR_SYSTEM)")
+    if os.name == "nt" and known.startswith("/"):
+        raise _Refuse(f"system attributes path not a Windows path: {known}")
+    return known
+
+
+def _probe_system_attributes(git: str, child_env: Mapping[str, str]) -> str:
+    """``git var GIT_ATTR_SYSTEM``, or ``""`` when this git cannot name it (kept: no re-probe)."""
+    try:
         probe = subprocess.run(
             [git, "var", "GIT_ATTR_SYSTEM"],
             env=dict(child_env),
@@ -610,14 +707,9 @@ def _system_attributes_path(child_env: Mapping[str, str]) -> str:
             check=False,
             stdin=subprocess.DEVNULL,
         )
-        known = probe.stdout.strip()
-        if probe.returncode != 0 or not known:
-            raise _Refuse("system attributes path unknown (git var GIT_ATTR_SYSTEM)")
-        with _attr_lock:
-            _system_paths[git] = known
-    if os.name == "nt" and known.startswith("/"):
-        raise _Refuse(f"system attributes path not a Windows path: {known}")
-    return known
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return probe.stdout.strip() if probe.returncode == 0 else ""
 
 
 def _require_inert_attributes(child_env: Mapping[str, str], entries) -> None:

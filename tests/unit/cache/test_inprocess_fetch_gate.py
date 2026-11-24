@@ -177,3 +177,35 @@ def test_a_401_challenge_falls_back_without_sending_credentials(monkeypatch) -> 
     assert "Authorization" not in sent["headers"]
     assert sent["ambient_credentials"] is False
     assert sent["max_hops"] == 0
+
+
+def test_the_frozen_network_env_is_reused_only_while_config_files_are_unchanged(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    config = tmp_path / "gitconfig"
+    config.write_text("[user]\n\tname = a\n", encoding="utf-8")
+    built: list[str] = []
+
+    def fake_network_env(url, env):
+        built.append(url)
+        return {"GIT_CONFIG_NOSYSTEM": "1", "BUILT": str(len(built))}
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_network_env", fake_network_env)
+    monkeypatch.setattr(fetch, "_config_paths", lambda env: (str(config),))
+    env = {"HOME": str(tmp_path)}
+
+    with invocation_scope():
+        first = fetch._network_env(env)
+        assert fetch._network_env(env) == first
+        assert len(built) == 1
+
+        config.write_text("[http]\n\textraHeader = x\n", encoding="utf-8")
+        fetch._network_env(env)
+        assert len(built) == 2
+
+        config.write_text("[include]\n\tpath = other\n", encoding="utf-8")
+        fetch._network_env(env)
+        fetch._network_env(env)
+        assert len(built) == 4
