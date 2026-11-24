@@ -11,6 +11,7 @@
     "claude-headless-abspath-project": {"verdict": "LOADS", "note": "apm settings with an absolute marketplace path"},
     "claude-headless-native-project": {"verdict": "LOADS", "note": "oracle: claude plugin marketplace add + plugin install --scope project"},
     "claude-headless-untrusted-project": {"verdict": "DOES NOT LOAD", "note": "Claude's folder-trust gate: an untrusted project loads no project plugins"},
+    "claude-tui-untrusted-project": {"verdict": "DOES NOT LOAD", "note": "folder-trust gate in the interactive TUI: the trust dialog is left unanswered"},
     "claude-headless-wt-branch-project": {"verdict": "DOES NOT LOAD", "issue": 5180},
     "claude-headless-wt-after-main-project": {"verdict": "PARTIAL", "issue": 5180, "note": "loads the main checkout's copy"},
     "copilot-normal-user": {"verdict": "LOADS"},
