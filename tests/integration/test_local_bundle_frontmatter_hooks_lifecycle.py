@@ -9,6 +9,7 @@ deploys it. Markdown without frontmatter ``hooks`` deploys as before.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -50,7 +51,11 @@ _DEPLOYED = {
 
 
 def _bundle(
-    world: MarketplacePackWorld, tmp_path: Path, hooked: str | None, name: str = "fmpkg"
+    world: MarketplacePackWorld,
+    tmp_path: Path,
+    hooked: str | None,
+    name: str = "fmpkg",
+    hook_config: bool = False,
 ) -> tuple[Path, str]:
     """Pack a command and a skill; give *hooked*'s packed file frontmatter hooks."""
     producer = world.isolated.work_root / name
@@ -62,6 +67,16 @@ def _bundle(
     write(producer / ".apm" / "prompts" / "run.prompt.md", _COMMAND.format(hooks=""))
     write(producer / ".apm" / "skills" / "hs" / "SKILL.md", _SKILL.format(hooks=""))
     write(producer / ".apm" / "agents" / "helper.agent.md", _AGENT.format(hooks=""))
+    if hook_config:
+        config = {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": "./scripts/x.sh"}]}
+                ]
+            }
+        }
+        write(producer / ".apm" / "hooks" / "hooks.json", json.dumps(config))
+        write(producer / ".apm" / "hooks" / "scripts" / "x.sh", "#!/bin/sh\necho hi\n").chmod(0o755)
     (producer / ".claude").mkdir()
     world.apm(producer, "install", "--no-policy")
     world.apm(producer, "pack", "-o", str(tmp_path / "out"))
@@ -323,7 +338,7 @@ def test_withdrawn_approval_keeps_hooked_markdown_edited_outside_apm(
     dump_yaml(manifest, consumer / "apm.yml")
     text = output(world.apm(consumer, "install", "--no-policy"))
 
-    assert "Kept, as they are edited or have no recorded hash" in text, text
+    assert "Kept, as they are edited, unreadable or have no recorded hash" in text, text
     assert _DEPLOYED["command"] in text, text
     assert hooked.read_bytes() == edited
     assert _DEPLOYED["command"] in world.lock(consumer)["local_deployed_files"]
@@ -386,10 +401,11 @@ def test_a_shared_hooked_file_follows_the_other_grant_unless_denied(
     ), text
 
 
+@pytest.mark.parametrize("command", ["install", "update", "prune"])
 def test_an_unreadable_record_in_another_target_refuses_before_any_change(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, command: str
 ) -> None:
-    """#5254 R4: every record is read before anything is retired."""
+    """#5254 R4/R6: every record is read before anything is retired, by every command."""
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     bundle, key = _bundle(world, tmp_path, "command")
     consumer = world.consumer("two-target-consumer", targets=("claude", "copilot"))
@@ -404,10 +420,114 @@ def test_an_unreadable_record_in_another_target_refuses_before_any_change(
     before = {root: tree_bytes(consumer / root) for root in (".claude", ".github")}
     lock_before = (consumer / "apm.lock.yaml").read_bytes()
 
-    result = world.apm(consumer, "install", "--no-policy", expect=1)
+    args = (command, "--no-policy") if command == "install" else (command,)
+    result = world.apm(consumer, *args, expect=1)
 
     text = output(result)
     assert "Traceback" not in result.stdout + result.stderr, text
     assert ".github/apm-bundle-markdown-hooks.json" in text, text
     assert {root: tree_bytes(consumer / root) for root in (".claude", ".github")} == before
     assert (consumer / "apm.lock.yaml").read_bytes() == lock_before
+
+
+def test_an_unreadable_record_refuses_before_bundle_hooks_are_retired(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5254 R5: the record preflight runs before the hook and canvas re-checks."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command", hook_config=True)
+    consumer = _consumer(world, "preflight-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    assert (consumer / ".claude" / "settings.json").is_file()
+    (consumer / ".claude" / "apm-bundle-markdown-hooks.json").write_text("{not json\n")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    before = tree_bytes(consumer / ".claude")
+    lock_before = (consumer / "apm.lock.yaml").read_bytes()
+
+    result = world.apm(consumer, "install", "--no-policy", expect=1)
+
+    assert ".claude/apm-bundle-markdown-hooks.json" in output(result), output(result)
+    assert tree_bytes(consumer / ".claude") == before
+    assert (consumer / "apm.lock.yaml").read_bytes() == lock_before
+
+
+def test_retirement_stays_within_its_scope(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#5254: a project re-check never touches user-scope files, and the reverse."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    home = world.isolated.home
+    (home / ".claude").mkdir(exist_ok=True)
+    write(home / ".apm" / "apm.yml", "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    for manifest_path in (home / ".apm" / "apm.yml",):
+        manifest = load_yaml(manifest_path)
+        manifest["executables"] = {"allow": {key: {"hooks": True}}}
+        dump_yaml(manifest, manifest_path)
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle), "--no-policy")
+    consumer = _consumer(world, "scope-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    user_file = home / ".claude" / "commands" / "run.md"
+    project_file = consumer / _DEPLOYED["command"]
+    assert user_file.is_file() and project_file.is_file()
+
+    user_manifest = load_yaml(home / ".apm" / "apm.yml")
+    user_manifest["executables"] = {}
+    dump_yaml(user_manifest, home / ".apm" / "apm.yml")
+    world.apm(world.isolated.work_root, "install", "-g", "--no-policy")
+    assert not user_file.exists()
+    assert project_file.is_file()
+
+    user_manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(user_manifest, home / ".apm" / "apm.yml")
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle), "--no-policy")
+    assert user_file.is_file()
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", "--no-policy")
+    assert not project_file.exists()
+    assert user_file.is_file()
+
+
+@pytest.mark.parametrize(
+    ("install_targets", "after_targets", "hooked", "deployed"),
+    [
+        pytest.param(["codex"], ["codex"], "skill", ".agents/skills/hs/SKILL.md", id="codex-skill"),
+        pytest.param(
+            ["claude"], ["copilot"], "command", ".claude/commands/run.md", id="retargeted"
+        ),
+    ],
+)
+def test_withdrawal_reaches_deploy_roots_and_dropped_targets(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    install_targets: list[str],
+    after_targets: list[str],
+    hooked: str,
+    deployed: str,
+) -> None:
+    """#5254 T2/T3: a primitive deploy_root and a no-longer-named target are re-checked."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, hooked)
+    consumer = world.consumer("roots-consumer", targets=tuple(install_targets))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    assert (consumer / deployed).is_file()
+
+    manifest["executables"] = {}
+    manifest["targets"] = after_targets
+    dump_yaml(manifest, consumer / "apm.yml")
+    for marker in {"copilot": ".github", "codex": ".codex"}.values():
+        (consumer / marker).mkdir(exist_ok=True)
+    text = output(world.apm(consumer, "install", "--no-policy"))
+
+    assert not (consumer / deployed).exists(), text
+    assert "Retired 1 Markdown file(s) with frontmatter hooks" in text, text
