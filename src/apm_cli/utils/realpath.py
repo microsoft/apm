@@ -79,7 +79,7 @@ def _missing_realpath(text: str, depth: int) -> str | None:
 
 _WIN_FAST = sys.platform == "win32"
 # PERF PROTOTYPE: compute Path.resolve() too and fail loudly on any difference.
-_WIN_DIFFERENTIAL = False
+_WIN_DIFFERENTIAL = True
 _WIN_PREFIX = "\\\\?\\"
 _WIN_RESERVED = frozenset(
     ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
@@ -132,6 +132,7 @@ def _win_realpath(text: str) -> str | None:
 # release the holds under the target first (A7); every hold is released before
 # a child process (R4) and at command end (R5).
 _HELD: dict[str, tuple[str, int]] = {}
+_HELD_LOCK = __import__("threading").RLock()
 _REPARSE = 0x400
 _DIRECTORY = 0x10
 _ROOT: list[str] = []
@@ -235,21 +236,23 @@ def _holdable(path: str) -> bool:
 
 def _root() -> tuple[str, str] | None:
     """The project root (cwd), held once (R3: its final path is the root of every proof)."""
-    if not _ROOT:
-        cwd = os.getcwd()
-        if not _plain_win32(cwd):
-            _ROOT.append("")
-            return None
-        held = _hold(cwd)
-        if held is None:
-            _ROOT.append("")
-            return None
-        _HELD[cwd.lower()] = held
-        _ROOT.append(cwd)
-    root = _ROOT[0]
-    if not root or root.lower() not in _HELD:
+    with _HELD_LOCK:
+        if not _ROOT:
+            cwd = os.getcwd()
+            if not _plain_win32(cwd):
+                _ROOT.append("")
+                return None
+            held = _hold(cwd)
+            if held is None:
+                _ROOT.append("")
+                return None
+            _HELD[cwd.lower()] = held
+            _ROOT.append(cwd)
+    root = _ROOT[0] if _ROOT else ""
+    held = _HELD.get(root.lower()) if root else None
+    if held is None:
         return None
-    return root, _HELD[root.lower()][0]
+    return root, held[0]
 
 
 def _held_realpath(text: str) -> str | None:
@@ -295,7 +298,10 @@ def _held_realpath(text: str) -> str | None:
             if held[0] != resolved:  # R3: the held object is the one proven by name
                 _kernel32()[1].CloseHandle(held[1])
                 return None
-            _HELD[path.lower()] = held
+            with _HELD_LOCK:
+                previous = _HELD.setdefault(path.lower(), held)
+            if previous is not held:
+                _kernel32()[1].CloseHandle(held[1])  # another thread holds it already
     return resolved
 
 
@@ -305,19 +311,23 @@ def release_held(under: object = None) -> None:
         return
     k32 = _kernel32()[1]
     if under is None:
-        keys = list(_HELD)
+        with _HELD_LOCK:
+            keys = list(_HELD)
         _ROOT.clear()
     else:
         try:
             base = os.path.abspath(os.fspath(under)).lower().rstrip("\\")
         except TypeError:
             return
-        keys = [k for k in _HELD if k == base or k.startswith(base + "\\")]
+        with _HELD_LOCK:
+            keys = [k for k in _HELD if k == base or k.startswith(base + "\\")]
         if _ROOT and _ROOT[0].lower() in keys:
             _ROOT.clear()
-    for key in keys:
-        _final, handle = _HELD.pop(key)
-        k32.CloseHandle(handle)
+    with _HELD_LOCK:
+        taken = [_HELD.pop(key, None) for key in keys]
+    for item in taken:
+        if item is not None:
+            k32.CloseHandle(item[1])
 
 
 def _resolve_windows(path: Path) -> Path | None:
