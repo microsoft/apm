@@ -127,6 +127,10 @@ def up_to_date(project_root: Path) -> bool:
         return False
     if lock.lsp_servers or lock.local_deployed_files:
         return False
+    from apm_cli.native_plugins.claude_marketplaces import project_release_pending
+
+    if project_release_pending(project_root):
+        return False  # a Claude registry entry a failed uninstall left (#5258)
     admits, fetch = _policy_admits(project_root)
     return (
         admits

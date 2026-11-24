@@ -453,7 +453,8 @@ def _url_only_env(env) -> dict[str, str]:
 
     scrubbed = {**os.environ, **(env or {}), "LC_ALL": "C", "LANGUAGE": "C"}
     clear_git_platform_token_env(scrubbed, remove=True)
-    clear_git_auth_env(scrubbed)
+    # A url rewrite carried in GIT_CONFIG_PARAMETERS still decides the server (#5246).
+    clear_git_auth_env(scrubbed, keep_url_rewrites=True)
     return scrubbed
 
 
@@ -1040,6 +1041,7 @@ def _reached_by_refs(
         RuntimeError: The fetch failed.
     """
     from ..utils.file_ops import robust_rmtree
+    from ..utils.git_config_memo import invalidate as invalidate_git_config
     from ..utils.git_env import get_git_executable, git_network_env, run_git_text
     from .cached_repo import cached_repo_env, cached_repo_is_trusted, inert_git_args
     from .git_cache import _safe_git_args, _sanitize_url
@@ -1082,6 +1084,7 @@ def _reached_by_refs(
                 stdin=subprocess.DEVNULL,
                 check=True,
             )
+            invalidate_git_config(repo)
             run_git_text(
                 [*git, "fetch", "-q", "--filter=tree:0", "--prune", "origin", *_REACH_REFSPECS],
                 capture_output=True,
@@ -1091,6 +1094,7 @@ def _reached_by_refs(
                 check=True,
             )
             _drop_promisor(git, child_env)
+            invalidate_git_config(repo)
             # Only the current heads and tags may answer: never lazy-fetch.
             probe = run_git_text(
                 [

@@ -120,9 +120,13 @@ def deployed_path_entry(
     except (PathTraversalError, ValueError):
         linked = _symlinked_component(target_path, project_root)
         if linked is not None:
+            from apm_cli.utils.diagnostics import printable_ascii_text
+
             # Refused as before; the message names the link and the next step (#5156).
+            # The name comes from a package's directories: never print control bytes (#5215).
             raise RuntimeError(  # noqa: B904
-                f"Refusing deployment through a symlinked path component: {linked}. "
+                "Refusing deployment through a symlinked path component: "
+                f"{printable_ascii_text(linked)}. "
                 "Replace the symlink with a regular directory or remove it, then retry."
             )
         raise RuntimeError(  # noqa: B904

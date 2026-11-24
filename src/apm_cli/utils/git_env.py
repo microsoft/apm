@@ -27,7 +27,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -629,12 +629,19 @@ def clear_git_auth_env(
     env: dict[str, str],
     *,
     remove_helpers: bool = False,
+    keep_url_rewrites: bool = False,
 ) -> None:
-    """Remove inherited Git authorization channels while retaining other config."""
+    """Remove inherited Git authorization channels while retaining other config; with
+    *keep_url_rewrites* only GIT_CONFIG_PARAMETERS ``url.*`` rewrites stay (#5246)."""
+    from apm_cli.utils.git_config_parameters import url_rewrites_only
+
     env.pop(_MANAGED_GIT_AUTH_INTENT_ENV, None)
     env.pop("GIT_TOKEN", None)
     env.pop("GIT_HTTP_EXTRAHEADER", None)
-    env.pop("GIT_CONFIG_PARAMETERS", None)
+    parameters = env.pop("GIT_CONFIG_PARAMETERS", None)
+    rewrites = url_rewrites_only(parameters) if keep_url_rewrites else None
+    if rewrites:
+        env["GIT_CONFIG_PARAMETERS"] = rewrites
     try:
         count = int(env.pop("GIT_CONFIG_COUNT", "0"))
     except ValueError:
@@ -742,16 +749,16 @@ class GitConfigEntry:
 
     scope: str
     key: str
-    value: str
+    value: str = field(repr=False)  # may carry an extraheader credential
 
 
 @dataclass(frozen=True)
 class _GitConfigSnapshot:
     """Configuration facts validated for one Git child."""
 
-    entries: tuple[GitConfigEntry, ...]
-    rewrites: tuple[tuple[str, str], ...]
-    http_headers: tuple[GitConfigEntry, ...]
+    entries: tuple[GitConfigEntry, ...] = field(repr=False)
+    rewrites: tuple[tuple[str, str], ...] = field(repr=False)
+    http_headers: tuple[GitConfigEntry, ...] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -771,7 +778,26 @@ def _read_effective_git_config(
     git_dir: Path | None = None,
     worktree: Path | None = None,
 ) -> _GitConfigSnapshot:
-    """Return the flattened config visible to one Git child."""
+    """Return the flattened config visible to one Git child, probed once per invocation."""
+    from apm_cli.utils import git_config_memo
+
+    return git_config_memo.read(
+        lambda: _probe_effective_git_config(env, git_dir=git_dir, worktree=worktree),
+        env,
+        git=get_git_executable(),
+        git_dir=git_dir,
+        worktree=worktree,
+        config_paths=git_config_memo.git_config_paths,
+    )
+
+
+def _probe_effective_git_config(
+    env: dict[str, str],
+    *,
+    git_dir: Path | None = None,
+    worktree: Path | None = None,
+) -> _GitConfigSnapshot:
+    """Spawn ``git config --list`` for the flattened config visible to one Git child."""
     if git_dir is not None and worktree is not None:
         raise ValueError("git_dir and worktree are mutually exclusive")
     command = [get_git_executable()]
@@ -2054,6 +2080,9 @@ def reset_git_cache() -> None:
     _git_executable = None
     _gh_executable = None
     _real_git_tls_config_cache = None
+    from apm_cli.utils import git_config_memo
+
+    git_config_memo.forget()
 
 
 def git_long_paths_args() -> list[str]:

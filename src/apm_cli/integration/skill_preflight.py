@@ -23,6 +23,7 @@ from apm_cli.integration.skill_adoption import (
 from apm_cli.integration.skill_support import skill_dir_has_content
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens, skill_subset_selects_all
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
+from apm_cli.utils.paths import relative_to
 
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
@@ -281,7 +282,7 @@ def find_unmanaged_conflicts(
                 destination = integrator._target_skill_dir(target, project_root, name)
                 destinations.setdefault(destination.resolve(), (destination, target))
         for source in files:
-            suffix = source.relative_to(source_root)
+            suffix = relative_to(source, source_root)
             parent = source_root
             for part in suffix.parts:
                 if part in ignore(str(parent), [part]):

@@ -137,11 +137,11 @@ def _within(root: Path, rel: str, prefixes: tuple[str, ...] | None = None) -> Pa
         if not BaseIntegrator.validate_deploy_path(rel, root, allowed_prefixes=prefixes):
             raise Decline(f"path outside the target roots {rel!r}")
     path = root / rel
-    current = root
-    for part in rel.split("/")[:-1]:
-        current = current / part
-        if current.is_symlink():
-            raise Decline("symlink in a deployed path")
+    from apm_cli.utils.path_security import has_symlink_component
+
+    # The owner also treats a Windows directory junction as a link (#5229).
+    if has_symlink_component(root, path.parent):
+        raise Decline("symlink in a deployed path")
     return path
 
 
@@ -535,6 +535,11 @@ def _refuse_native_plugins(project_root: Path, lock: Any) -> None:
     if os.path.lexists(ledger_path_for(project_root / APM_MODULES_DIR)):
         # Codex registrations APM owns: the full run refreshes or retires them.
         raise Decline("codex native registrations")
+    from apm_cli.native_plugins.claude_marketplaces import project_release_pending
+
+    if project_release_pending(project_root):
+        # A Claude registry entry a failed uninstall left: the full run releases it (#5258).
+        raise Decline("claude marketplace registration")
     plugins = {PackageType.AGENT_PLUGIN.value, PackageType.MARKETPLACE_PLUGIN.value}
     if any(getattr(dep, "package_type", None) in plugins for dep in lock.dependencies.values()):
         raise Decline("plugin package")
@@ -814,6 +819,11 @@ def try_apply(
         if files or packages
         else "no-op (desired state already deployed)"
     )
+    if not (files or packages):
+        from apm_cli.install import verdict_record
+
+        # An applied diff holds its service output, so only a no-op is recorded (#4977).
+        verdict_record.note_verified_noop()
     return True
 
 

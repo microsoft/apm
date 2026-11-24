@@ -10,6 +10,7 @@ from pathlib import Path
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.paths import relative_to
 
 # Directories excluded from hashing (not relevant to package content)
 _EXCLUDED_DIRS = {".git", "__pycache__"}
@@ -124,7 +125,7 @@ def _package_files(
     regular_files: list[Path] = []
     excluded = {".git"} if native else _EXCLUDED_DIRS
     for item in package_path.rglob("*"):
-        rel = item.relative_to(package_path)
+        rel = relative_to(item, package_path)
         if any(part in excluded for part in rel.parts) or rel.parts[0] in skip_roots:
             continue
         if item.is_symlink():

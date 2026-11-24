@@ -1,0 +1,14 @@
+{
+  "issue": 5289,
+  "fixed_in": "Unreleased",
+  "summary": "At user scope with CLAUDE_CONFIG_DIR outside HOME, hooked bundle Markdown is recorded with absolute lock rows the retirement check never matched, so revoking the bundle's approval left the files deployed; rows are now judged below the relocated root.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_bundle_frontmatter_hooks_lifecycle.py::test_withdrawal_retires_hooked_markdown_under_a_relocated_claude_root"
+  ]
+}
