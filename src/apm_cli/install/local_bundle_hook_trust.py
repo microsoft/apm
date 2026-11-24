@@ -18,7 +18,7 @@ from __future__ import annotations
 import contextlib
 import os
 from collections.abc import Callable, Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,7 @@ from apm_cli.install.hook_script_refs import (
 )
 from apm_cli.install.local_bundle_hook_cwd import runs_through_cwd
 from apm_cli.install.local_bundle_hook_states import (
+    _BundleHookState,
     _merged_hook_documents,
     _merged_hook_states,
     _MergedHookState,
@@ -50,12 +51,6 @@ class UnadmittedBundleHooks:
     slug: str
     reason: str
     hook_files: tuple[str, ...] = ()
-
-
-@dataclass
-class _BundleHookState:
-    keys: set[str | None] = field(default_factory=set)
-    hook_files: set[str] = field(default_factory=set)
 
 
 def _per_file_targets(targets: Any) -> list[Any]:
@@ -89,10 +84,12 @@ def _collect_per_file(
     for target in _per_file_targets(targets):
         target_root = Path(project_root) / target.root_dir
         recorded: set[str] = set()
+        unreadable = None
         try:
             records = per_file_bundle_hook_keys(target_root / _APM_HOOKS_SIDECAR)
         except (OSError, ValueError, TypeError):
             records = {}
+            unreadable = _record_value(target_root / _APM_HOOKS_SIDECAR, Path(project_root))
         for slug, (key, files) in records.items():
             state = found.setdefault(slug, _BundleHookState())
             state.keys.add(key)
@@ -115,6 +112,8 @@ def _collect_per_file(
             state = found.setdefault(slug, _BundleHookState())
             state.keys.add(None)
             state.hook_files.add(value)
+            if unreadable is not None:
+                state.unreadable.add(unreadable)
 
 
 def deployed_bundle_hook_keys(
@@ -183,7 +182,9 @@ def unadmitted_bundle_hooks(
     for slug, state in sorted(deployed.items()):
         keys = state.keys
         files = tuple(sorted(state.hook_files))
-        if None in keys:
+        if state.unreadable:
+            result.append(UnadmittedBundleHooks(slug, state.unreadable_reason(), files))
+        elif None in keys:
             result.append(UnadmittedBundleHooks(slug, REASON_UNRECORDED, files))
         elif not all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys):
             result.append(UnadmittedBundleHooks(slug, REASON_NOT_GRANTED, files))
