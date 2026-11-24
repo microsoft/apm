@@ -103,22 +103,23 @@ def test_bundle_markdown_with_frontmatter_hooks_is_parked_until_approved(
     assert not (consumer / _DEPLOYED[hooked]).exists()
     assert (consumer / _DEPLOYED[other]).is_file()
     assert _DEPLOYED[hooked] not in world.lock(consumer).get("local_deployed_files", [])
-    printed = re.search(r"executables: allow: \"([^\"]+)\": hooks: true", text)
-    assert printed is not None, text
-    assert re.sub(r"\s+", "", printed.group(1)) == key
-
-    manifest = load_yaml(consumer / "apm.yml")
-    manifest["executables"] = {"allow": {key: {"hooks": True}}}
-    dump_yaml(manifest, consumer / "apm.yml")
+    pending = world.apm(consumer, "approve", "--pending")
+    commands = re.findall(r"apm approve '([^']+)'", pending.stdout)
+    assert commands == [key], pending.stdout
+    approved = output(world.apm(consumer, "approve", commands[0]))
+    assert "[+] Approved local bundle 'fmpkg': hooks" in approved, approved
     before = tree_bytes(consumer / ".claude")
     world.apm(consumer, "install", str(bundle), "--no-policy", "--dry-run")
     assert tree_bytes(consumer / ".claude") == before
 
     world.apm(consumer, "install", str(bundle), "--no-policy")
 
+    pending = output(world.apm(consumer, "approve", "--pending"))
+    assert "All packages with executables are approved." in pending, pending
     deployed = consumer / _DEPLOYED[hooked]
     assert deployed.read_bytes() == (bundle / _PACKED[hooked]).read_bytes()
     assert _DEPLOYED[hooked] in world.lock(consumer)["local_deployed_files"]
+    world.apm(consumer, "audit", "--ci", "--no-policy")
 
 
 def test_bundle_markdown_without_frontmatter_hooks_deploys_unapproved(

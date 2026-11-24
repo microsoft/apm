@@ -131,11 +131,13 @@ def bundle_deploy_relative_path(
     hooks_approved: bool,
     canvas_approved: bool,
     rendering_extension: str | None = None,
+    source: Path | None = None,
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root.
 
     Only primitive files the target deploys are routed. Hook and canvas files
-    additionally require *hooks_approved* / *canvas_approved*.
+    additionally require *hooks_approved* / *canvas_approved*; so does a
+    Markdown *source* whose frontmatter declares ``hooks``.
     *rendering_extension* is the extension the packing install gave the file
     (:func:`bundle_rendering_extensions`).
     """
@@ -147,6 +149,13 @@ def bundle_deploy_relative_path(
         return None
     if _unapproved_executable_kind(
         deploy_rel, hooks_approved=hooks_approved, canvas_approved=canvas_approved
+    ) or _declares_unapproved_hooks(
+        rel_path,
+        allowed_prefixes,
+        known_deploy_prefixes,
+        target,
+        source,
+        hooks_approved=hooks_approved,
     ):
         return None
     return _lower_to_target(deploy_rel, target, rendering_extension)
@@ -160,6 +169,7 @@ def bundle_deploy_skip_warning(
     target: TargetProfile | None = None,
     hooks_approved: bool,
     canvas_approved: bool,
+    source: Path | None = None,
 ) -> str | None:
     """Return an explicit warning for a deliberately skipped bundle path."""
     validate_path_segments(rel_path, context="bundle deploy path")
@@ -168,9 +178,19 @@ def bundle_deploy_skip_warning(
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
-    if kind := _unapproved_executable_kind(
+    kind = _unapproved_executable_kind(
         deploy_rel, hooks_approved=hooks_approved, canvas_approved=canvas_approved
+    )
+    if kind is None and _declares_unapproved_hooks(
+        rel_path,
+        allowed_prefixes,
+        known_deploy_prefixes,
+        target,
+        source,
+        hooks_approved=hooks_approved,
     ):
+        kind = "hooks"
+    if kind:
         return (
             f"Skipped packed bundle {kind} file {rel_path!r}: {kind} from this bundle "
             "is not approved for its exact content. Run 'apm policy explain' "
@@ -290,6 +310,46 @@ def _deploy_relative_candidate(
         return None
     matched_prefix = max(allowed_matches, key=len, default="")
     return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
+
+
+def markdown_declares_hooks(path: Path, *, unreadable: bool = True) -> bool:
+    """Whether a packed Markdown file's frontmatter declares ``hooks``.
+
+    Frontmatter that cannot be read or parsed returns *unreadable*: by default
+    it counts as declaring hooks, so it never deploys without the bundle hook
+    approval.
+    """
+    if path.suffix.lower() != ".md":
+        return False
+    import yaml
+
+    from ..utils.yaml_io import loads_frontmatter
+
+    try:
+        metadata = loads_frontmatter(path.read_text(encoding="utf-8")).metadata
+    except (OSError, ValueError, yaml.YAMLError):
+        return unreadable
+    return not isinstance(metadata, dict) or "hooks" in metadata
+
+
+def _declares_unapproved_hooks(
+    rel_path: str,
+    allowed_prefixes: frozenset[str],
+    known_deploy_prefixes: frozenset[str],
+    target: TargetProfile | None,
+    source: Path | None,
+    *,
+    hooks_approved: bool,
+) -> bool:
+    """Whether a packed Markdown *source* declares frontmatter hooks without approval."""
+    if hooks_approved or source is None:
+        return False
+    converted = target is not None and bool(
+        bundle_rule_format_id(rel_path, allowed_prefixes, known_deploy_prefixes, target=target)
+        or bundle_render_format_id(rel_path, allowed_prefixes, known_deploy_prefixes, target=target)
+    )
+    # A converted file that cannot be parsed is skipped by its converter, with the reason.
+    return markdown_declares_hooks(source, unreadable=not converted)
 
 
 def _unapproved_executable_kind(
@@ -490,12 +550,14 @@ def declared_bundle_exec_types(
     from ..core.experimental import is_enabled
     from ..integration.canvas_integrator import is_canvas_bundle_path
 
+    root = Path(bundle_info.source_dir) if bundle_info.source_dir is not None else None
     files = list(bundle_pack_files(bundle_info))
-    if not files and bundle_info.source_dir is not None:
-        root = Path(bundle_info.source_dir)
+    if not files and root is not None:
         files = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
     declared = []
-    if any(is_plugin_hook_path(path) for path in files):
+    if any(is_plugin_hook_path(path) for path in files) or (
+        root is not None and any(markdown_declares_hooks(root / path) for path in files)
+    ):
         declared.append("hooks")
     if mcp_deps:
         declared.append("mcp")

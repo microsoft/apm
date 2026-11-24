@@ -492,7 +492,9 @@ This imperative route deploys Claude plugin bundles (the default `apm pack`
 output). The bundle's `hooks.json` and `hooks/` scripts are registered through
 the same hook merge a source install uses, once the exact bundle key printed by
 `apm install` is approved in `executables.allow`; until then they are skipped
-with one warning. Every later `apm install` (including `--frozen`), `apm update`
+with one warning. A bundle Markdown file, such as a command `.md` or a
+`SKILL.md`, whose frontmatter declares `hooks` (or cannot be parsed) waits for
+the same approval: it is skipped and named until the key is approved. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
 policy and retires the hooks when it no longer holds; `apm audit --ci` reports
 them first. Canvas extensions a bundle deploys (with the `canvas` experimental
