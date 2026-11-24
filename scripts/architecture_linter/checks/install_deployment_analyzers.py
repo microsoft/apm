@@ -275,10 +275,17 @@ from scripts.architecture_linter.checks.install_uninstall_preflight import (
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
-    _rule(
-        GUARD_UNINSTALL_PREFLIGHT,
-        "Uninstall validates recorded paths and survivor trust before its first write.",
-        check_uninstall_preflight,
+    Rule(
+        id=GUARD_UNINSTALL_PREFLIGHT,
+        group="install_deployment",
+        guard_ids=(
+            GUARD_UNINSTALL_PREFLIGHT,
+            f"{GUARD_UNINSTALL_PREFLIGHT}-consent-kept-link-route",
+            f"{GUARD_UNINSTALL_PREFLIGHT}-hook-sync-consent-route",
+            f"{GUARD_UNINSTALL_PREFLIGHT}-hook-sync-route",
+        ),
+        description="Uninstall validates recorded paths and survivor trust before its first write.",
+        check=check_uninstall_preflight,
     ),
     _rule(
         GUARD_INSTALL_LOCKFILE_PREFLIGHT,

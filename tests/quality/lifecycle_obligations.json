@@ -3050,14 +3050,14 @@
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
-    "G1|approve|bin|denied-executable|project"
+    "G1|deny|bin|denied-executable|user"
    ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=none": {
    "credited_by": [
@@ -3071,11 +3071,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|approve|bin|revoked-after-deploy|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=unapproved-exec": {
    "credited_by": [
@@ -4036,11 +4040,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=allowed": {
+   "credited_by": [
+    "G1|compile|bin|allowed|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
@@ -4054,11 +4062,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=denied-executable": {
+   "credited_by": [
+    "G1|compile|bin|denied-executable|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=none": {
    "credited_by": [
@@ -4072,18 +4084,26 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|compile|bin|revoked-after-deploy|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|compile|bin|unapproved-exec|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=compile|PRIM=canvas|GATE=allowed": {
    "family": "T1",
@@ -4253,14 +4273,14 @@
   },
   "T1|OP=install|PRIM=bin|GATE=allowed": {
    "credited_by": [
-    "G1|install|bin|allowed|project"
+    "G1|install|bin|allowed|user"
    ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=install|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
@@ -4579,11 +4599,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=bin|GATE=allowed": {
+   "credited_by": [
+    "G1|lock|bin|allowed|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
@@ -4597,11 +4621,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-executable": {
+   "credited_by": [
+    "G1|lock|bin|denied-executable|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=none": {
    "credited_by": [
@@ -4615,18 +4643,26 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|lock|bin|revoked-after-deploy|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|lock|bin|unapproved-exec|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=canvas|GATE=allowed": {
    "family": "T1",
@@ -5999,11 +6035,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=allowed": {
+   "credited_by": [
+    "G1|uninstall|bin|allowed|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
@@ -6017,11 +6057,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=denied-executable": {
+   "credited_by": [
+    "G1|uninstall|bin|denied-executable|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=none": {
    "credited_by": [
@@ -6332,11 +6376,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=bin|GATE=allowed": {
+   "credited_by": [
+    "G1|update|bin|allowed|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=update|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
@@ -6351,11 +6399,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=update|PRIM=bin|GATE=denied-executable": {
+   "credited_by": [
+    "G1|update|bin|denied-executable|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=update|PRIM=bin|GATE=none": {
    "credited_by": [
@@ -6369,18 +6421,26 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=update|PRIM=bin|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|update|bin|revoked-after-deploy|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=update|PRIM=bin|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|update|bin|unapproved-exec|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=update|PRIM=canvas|GATE=allowed": {
    "family": "T1",
@@ -6765,11 +6825,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T3|OP=approve-deny|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|approve-deny|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=approve-deny|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -7105,11 +7169,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|approve-deny|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=hook": {
    "credited_by": [
@@ -7218,11 +7286,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|audit|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=audit|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -7576,11 +7648,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|audit|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=audit|SRC=native-plugin|PRIM=hook": {
    "credited_by": [
@@ -7754,11 +7830,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
   },
   "T3|OP=compile|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|compile|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=compile|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -7975,11 +8055,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|compile|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=other-file": {
    "family": "T3",
@@ -8037,12 +8121,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|install|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_plugin_bin_deploys_under_home_once_trusted"
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=install|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -8346,11 +8433,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|install|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=hook": {
    "credited_by": [
@@ -8459,11 +8550,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|lock|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=lock|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -8817,11 +8912,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|lock|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=hook": {
    "credited_by": [
@@ -9120,11 +9219,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T3|OP=prune|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|prune|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=prune|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -9428,11 +9531,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|prune|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=hook": {
    "credited_by": [
@@ -9529,11 +9636,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|uninstall|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=uninstall|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -9818,11 +9929,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|uninstall|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=hook": {
    "credited_by": [
@@ -9919,11 +10034,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|update|shorthand"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=update|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -10227,11 +10346,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|update|native"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=hook": {
    "credited_by": [
@@ -14708,11 +14831,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=approve-deny|PRIM=bin": {
+   "credited_by": [
+    "SB|approve-deny|native",
+    "SB|approve-deny|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=approve-deny|PRIM=canvas": {
    "family": "pair",
@@ -15141,11 +15269,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=audit|PRIM=bin": {
+   "credited_by": [
+    "SB|audit|native",
+    "SB|audit|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=audit|PRIM=canvas": {
    "family": "pair",
@@ -16004,11 +16137,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=compile|PRIM=bin": {
+   "credited_by": [
+    "SB|compile|native",
+    "SB|compile|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=compile|PRIM=canvas": {
    "family": "pair",
@@ -16535,11 +16673,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=install|PRIM=bin": {
+   "credited_by": [
+    "SB|install|native",
+    "SB|install|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=install|PRIM=canvas": {
    "family": "pair",
@@ -17080,11 +17223,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=lock|PRIM=bin": {
+   "credited_by": [
+    "SB|lock|native",
+    "SB|lock|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=lock|PRIM=canvas": {
    "family": "pair",
@@ -18531,11 +18679,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=prune|PRIM=bin": {
+   "credited_by": [
+    "SB|prune|native",
+    "SB|prune|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=prune|PRIM=canvas": {
    "family": "pair",
@@ -19001,11 +19154,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "pair|OP=uninstall|PRIM=bin": {
+   "credited_by": [
+    "SB|uninstall|native",
+    "SB|uninstall|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=uninstall|PRIM=canvas": {
    "family": "pair",
@@ -19475,11 +19633,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=update|PRIM=bin": {
+   "credited_by": [
+    "SB|update|native",
+    "SB|update|shorthand"
+   ],
    "family": "pair",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|OP=update|PRIM=canvas": {
    "family": "pair",
@@ -19789,8 +19952,13 @@
   },
   "pair|PRIM=bin|GATE=allowed": {
    "credited_by": [
+    "G1|compile|bin|allowed|user",
     "G1|deny|bin|allowed|user",
-    "G1|mcp-install|bin|allowed|user"
+    "G1|install|bin|allowed|user",
+    "G1|lock|bin|allowed|user",
+    "G1|mcp-install|bin|allowed|user",
+    "G1|uninstall|bin|allowed|user",
+    "G1|update|bin|allowed|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -19818,8 +19986,13 @@
   },
   "pair|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
+    "G1|compile|bin|denied-executable|user",
+    "G1|deny|bin|denied-executable|user",
     "G1|install|bin|denied-executable|user",
-    "G1|mcp-install|bin|denied-executable|user"
+    "G1|lock|bin|denied-executable|user",
+    "G1|mcp-install|bin|denied-executable|user",
+    "G1|uninstall|bin|denied-executable|user",
+    "G1|update|bin|denied-executable|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -19847,9 +20020,13 @@
   },
   "pair|PRIM=bin|GATE=revoked-after-deploy": {
    "credited_by": [
+    "G1|approve|bin|revoked-after-deploy|user",
+    "G1|compile|bin|revoked-after-deploy|user",
     "G1|install|bin|revoked-after-deploy|user",
+    "G1|lock|bin|revoked-after-deploy|user",
     "G1|mcp-install|bin|revoked-after-deploy|user",
-    "G1|uninstall|bin|revoked-after-deploy|user"
+    "G1|uninstall|bin|revoked-after-deploy|user",
+    "G1|update|bin|revoked-after-deploy|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -19861,9 +20038,12 @@
   "pair|PRIM=bin|GATE=unapproved-exec": {
    "credited_by": [
     "G1|approve|bin|unapproved-exec|user",
+    "G1|compile|bin|unapproved-exec|user",
     "G1|install|bin|unapproved-exec|user",
+    "G1|lock|bin|unapproved-exec|user",
     "G1|mcp-install|bin|unapproved-exec|user",
-    "G1|uninstall|bin|unapproved-exec|user"
+    "G1|uninstall|bin|unapproved-exec|user",
+    "G1|update|bin|unapproved-exec|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -19876,15 +20056,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|LOCK=newer-generator": {
    "family": "pair",
@@ -19906,8 +20088,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|NET=online": {
    "family": "pair",
@@ -19920,8 +20103,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|SCOPE=project": {
    "credited_by": [
@@ -21690,8 +21874,13 @@
   },
   "pair|SCOPE=user|GATE=allowed": {
    "credited_by": [
+    "G1|compile|bin|allowed|user",
     "G1|deny|bin|allowed|user",
-    "G1|mcp-install|bin|allowed|user"
+    "G1|install|bin|allowed|user",
+    "G1|lock|bin|allowed|user",
+    "G1|mcp-install|bin|allowed|user",
+    "G1|uninstall|bin|allowed|user",
+    "G1|update|bin|allowed|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -21716,8 +21905,13 @@
   },
   "pair|SCOPE=user|GATE=denied-executable": {
    "credited_by": [
+    "G1|compile|bin|denied-executable|user",
+    "G1|deny|bin|denied-executable|user",
     "G1|install|bin|denied-executable|user",
-    "G1|mcp-install|bin|denied-executable|user"
+    "G1|lock|bin|denied-executable|user",
+    "G1|mcp-install|bin|denied-executable|user",
+    "G1|uninstall|bin|denied-executable|user",
+    "G1|update|bin|denied-executable|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -21745,9 +21939,13 @@
   },
   "pair|SCOPE=user|GATE=revoked-after-deploy": {
    "credited_by": [
+    "G1|approve|bin|revoked-after-deploy|user",
+    "G1|compile|bin|revoked-after-deploy|user",
     "G1|install|bin|revoked-after-deploy|user",
+    "G1|lock|bin|revoked-after-deploy|user",
     "G1|mcp-install|bin|revoked-after-deploy|user",
-    "G1|uninstall|bin|revoked-after-deploy|user"
+    "G1|uninstall|bin|revoked-after-deploy|user",
+    "G1|update|bin|revoked-after-deploy|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -21759,9 +21957,12 @@
   "pair|SCOPE=user|GATE=unapproved-exec": {
    "credited_by": [
     "G1|approve|bin|unapproved-exec|user",
+    "G1|compile|bin|unapproved-exec|user",
     "G1|install|bin|unapproved-exec|user",
+    "G1|lock|bin|unapproved-exec|user",
     "G1|mcp-install|bin|unapproved-exec|user",
-    "G1|uninstall|bin|unapproved-exec|user"
+    "G1|uninstall|bin|unapproved-exec|user",
+    "G1|update|bin|unapproved-exec|user"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -21884,7 +22085,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_modifiers_at_user_scope[no-policy]"
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|SCOPE=user|SELECT=on": {
    "credited_by": [
@@ -22192,12 +22393,22 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|SRC=git|PRIM=bin": {
+   "credited_by": [
+    "SB|approve-deny|shorthand",
+    "SB|audit|shorthand",
+    "SB|compile|shorthand",
+    "SB|install|shorthand",
+    "SB|lock|shorthand",
+    "SB|prune|shorthand",
+    "SB|uninstall|shorthand",
+    "SB|update|shorthand"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_plugin_bin_deploys_under_home_once_trusted"
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|SRC=git|PRIM=canvas": {
    "credited_by": [
@@ -24961,11 +25172,22 @@
    "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_from_each_source_and_says_so[native-plugin]"
   },
   "pair|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "SB|approve-deny|native",
+    "SB|audit|native",
+    "SB|compile|native",
+    "SB|install|native",
+    "SB|lock|native",
+    "SB|prune|native",
+    "SB|uninstall|native",
+    "SB|update|native"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "pair|SRC=native-plugin|PRIM=hook": {
    "credited_by": [

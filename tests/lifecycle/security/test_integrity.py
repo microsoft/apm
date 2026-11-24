@@ -752,8 +752,12 @@ PATH_CONTAINMENT = ArtifactSlice(
         "upstream-or-proxy": Tamper(_commit_escaping_link),
     },
     cells={
+        # Either containment guard may refuse first; both refuse before any write.
         ("install", "disk-or-cache"): Expect(
-            1, (r"outside the project tree",), unchanged=(LOCK, MANIFEST), check=_outside_intact
+            1,
+            (r"outside the project tree|through a symlinked path component",),
+            unchanged=(LOCK, MANIFEST),
+            check=_outside_intact,
         ),
         ("update", "disk-or-cache"): Expect(0, unchanged=(LOCK, MANIFEST), check=_outside_intact),
         # A deployed skill member replaced by a symlink: uninstall refuses

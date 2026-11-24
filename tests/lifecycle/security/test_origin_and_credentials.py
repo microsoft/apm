@@ -466,11 +466,29 @@ def _origin_row(world: World) -> dict:
 
 
 def _origin_rebind(world: World) -> None:
-    """The local name now points at another catalog that offers p-skill from p-exec."""
+    """The local name now points at another catalog that offers p-skill from p-exec.
+
+    Since #4970 a non-interactive rebind of a registered name to another
+    catalog is refused unless ``--yes`` confirms it; the row's user does.
+    """
     _origin_publish(
         world, _ORIGIN_OTHER_SLUG, [_origin_plugin("p-skill", "lifecycle/p-exec")], _ORIGIN_MARKET
     )
-    _origin_register(world, _ORIGIN_OTHER_SLUG, "--name", _ORIGIN_MARKET)
+    # The refusal changes neither the registration nor the catalog version pins.
+    kept = (
+        world.apm_home / "marketplaces.json",
+        world.apm_home / "cache" / "marketplace" / "version-pins.json",
+    )
+    before = {path: path.read_bytes() if path.exists() else None for path in kept}
+    assert before[kept[0]] is not None, "the alias was never registered"
+    refused = driver.run(
+        world, ["marketplace", "add", _ORIGIN_OTHER_SLUG, "--name", _ORIGIN_MARKET]
+    )
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    assert "Re-run with --yes" in refused.stdout + refused.stderr
+    after = {path: path.read_bytes() if path.exists() else None for path in kept}
+    assert after == before, "a refused rebind changed the registration or the pins"
+    _origin_register(world, _ORIGIN_OTHER_SLUG, "--name", _ORIGIN_MARKET, "--yes")
 
 
 def _origin_unreachable(world: World) -> None:
