@@ -593,6 +593,18 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+# Keyword arguments of ``frontmatter.Post(content, handler, **metadata)``.
+_RESERVED_FRONTMATTER_KEYS = ("content", "handler")
+
+
+def _reserved_keys(text: str) -> str:
+    """Name the frontmatter keys that collide with Post's arguments, or ``""``."""
+    metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+    data = _BOUNDED_FRONTMATTER_HANDLER.load(metadata)
+    present = data if isinstance(data, dict) else {}
+    return ", ".join(repr(key) for key in _RESERVED_FRONTMATTER_KEYS if key in present)
+
+
 def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
     """Return *path*'s BOM-stripped frontmatter block, through its closing fence.
 
@@ -640,6 +652,13 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
     except yaml.YAMLError:
         raise
+    except TypeError as exc:
+        # Post(content, handler, **metadata) refuses a key named content or handler
+        # (#5224); any other TypeError is not a frontmatter fault and surfaces unchanged.
+        keys = _reserved_keys(text)
+        if not keys:
+            raise
+        raise yaml.YAMLError(f"reserved frontmatter key(s): {keys}") from exc
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:
