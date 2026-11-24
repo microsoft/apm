@@ -209,10 +209,12 @@ def test_a_default_branch_retry_is_fetched_by_its_admitted_commit() -> None:
     assert downloader.calls == 2
 
 
-def test_a_default_branch_that_never_resolves_is_refused() -> None:
-    """#5199: with the tiered resolver, an unresolvable default branch is never fetched by name."""
-    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_fetch_ref
+def test_a_default_branch_that_never_resolves_is_fetched_by_name_as_before() -> None:
+    """#5199: two failed resolutions admit nothing; the branch is fetched by name, as before."""
+    from apm_cli.cache.commit_reachability import admit_fetch_ref
     from apm_cli.models.dependency.reference import DependencyReference
 
-    with pytest.raises(CommitNotReachableError, match="default branch"):
-        admit_fetch_ref(_FlakyResolver(2, "a" * 40), DependencyReference.parse("o/pkg"), None)
+    downloader = _FlakyResolver(5, "a" * 40)
+
+    assert admit_fetch_ref(downloader, DependencyReference.parse("o/pkg"), None) is None
+    assert downloader.calls == 2

@@ -546,19 +546,18 @@ def _admitted_default_branch_commit(downloader, dep_ref) -> str | None:
     tiered = getattr(downloader, "_tiered_resolver", None) is not None
     try:
         resolved = downloader.resolve_git_reference(dep_ref)
-    except Exception as first:
+    except Exception:
         if not tiered:
             admit_pinned_commit(downloader, dep_ref, None)
             return None
-        # One retry; its commit is the one admitted and fetched, never the
-        # branch by name, which may have moved since (#5199).
+        # One retry (as admission always made): when it resolves, its commit
+        # is the one admitted and fetched, not the branch by name, which may
+        # have moved (#5199). When it cannot, nothing is admitted and the
+        # branch is fetched by name, as before #5199.
         try:
             resolved = downloader.resolve_git_reference(dep_ref)
-        except Exception as exc:
-            raise CommitNotReachableError(
-                f"Could not resolve the default branch of {_sanitize_origin(dep_ref.repo_url)} "
-                f"to admit its commit: {first}"
-            ) from exc
+        except Exception:
+            return None
     admit_pinned_commit(downloader, dep_ref, None, resolved=resolved if tiered else None)
     return admitted_full_commit(resolved)
 
