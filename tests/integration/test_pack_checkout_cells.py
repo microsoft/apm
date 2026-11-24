@@ -263,19 +263,23 @@ def test_a_parent_swapped_during_the_writes_is_discarded(
     world: Path, monkeypatch: pytest.MonkeyPatch, swap: str
 ) -> None:
     """W3d R3 (C8 seal): a directory replaced after mkdir, by a new directory or by a
-    link out of the staged root, while files are written, leaves only .git."""
+    link out of the staged root, while files are written, leaves only .git; a link's
+    target outside the stage is never written (writes are anchored on the made dir)."""
     if swap == "link" and os.name == "nt":
         pytest.skip("symlink creation needs privileges on Windows")
     src, sha = _source(world)
     _bare, staged = _staged(world, src)
     real_open = os.open
     swapped: list[str] = []
+    outside = world / "outside"
+    outside.mkdir()
 
     def racing_open(path, flags, mode=0o777, **kwargs):
-        if not swapped and os.path.dirname(os.fspath(path)) == str(staged / "dir"):
+        # dir/b.md is the first file written under dir/ (by path or by dir fd).
+        if not swapped and os.path.basename(os.fspath(path)) == "b.md":
             os.rename(staged / "dir", world / "moved")
             if swap == "link":
-                os.symlink(world / "moved", staged / "dir")
+                os.symlink(outside, staged / "dir")
             else:
                 (staged / "dir" / "sub").mkdir(parents=True)
             swapped.append(os.fspath(path))
@@ -285,6 +289,7 @@ def test_a_parent_swapped_during_the_writes_is_discarded(
     _assert_left_to_git(staged, sha)
     monkeypatch.undo()
     _assert_swapped(swapped)
+    _assert_empty(outside)
 
 
 def _assert_budget_splits_the_tree(sizes: list[int]) -> None:
@@ -297,3 +302,20 @@ def _assert_materialized(manifest) -> None:
 
 def _assert_swapped(swapped: list[str]) -> None:
     assert len(swapped) == 1
+
+
+def test_a_conditional_include_matching_only_the_checkout_is_honored(world: Path) -> None:
+    """Copilot #5366: an ``includeIf "gitdir:"`` that applies only inside the stage can
+    name a CRLF attributes file git's checkout would apply, so the pack refuses."""
+    src, sha = _source(world)
+    _bare, staged = _staged(world, src)
+    attributes = world / "crlf.attributes"
+    attributes.write_text("* text eol=crlf\n", encoding="utf-8")
+    included = world / "checkout.gitconfig"
+    included.write_text(f"[core]\n\tattributesFile = {attributes.as_posix()}\n", encoding="utf-8")
+    stage = Path(os.path.realpath(staged)).as_posix()
+    Path(os.environ["GIT_CONFIG_GLOBAL"]).write_text(
+        f'[includeIf "gitdir:{stage}/"]\n\tpath = {included.as_posix()}\n', encoding="utf-8"
+    )
+    reset_git_cache()
+    _assert_left_to_git(staged, sha)

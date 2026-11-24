@@ -128,14 +128,15 @@ def test_the_pack_verdict_equals_git(world: Path, monkeypatch, shape: str) -> No
 
 
 def test_every_flipped_pack_byte_gives_git_verdict_or_refuses(world: Path, monkeypatch) -> None:
-    """P1/P5: a flipped pack byte, header version included, never turns a refusal
-    into a pass."""
+    """P1/P5: a flipped pack byte, header version and object count and trailer
+    included, never turns a refusal into a pass."""
     bare, checkout, sha = _checkout(world)
     (pack,) = (bare / "objects" / "pack").glob("*.pack")
     original = pack.read_bytes()
     os.chmod(pack, 0o644)
     disagreements = []
-    for position in [*range(4, 8), *range(12, len(original) - 20, 3)]:
+    trailer = range(len(original) - 20, len(original))
+    for position in [*range(4, 12), *range(12, len(original) - 20, 3), *trailer]:
         flipped = bytearray(original)
         flipped[position] ^= 0x40
         pack.write_bytes(bytes(flipped))

@@ -72,6 +72,9 @@ class _Pack:
             len(self.data) < 32
             or header[:4] != b"PACK"
             or int.from_bytes(header[4:8], "big") not in (2, 3)
+            # git pairs a pack with its index by object count and pack checksum.
+            or int.from_bytes(bytes(self.data[8:12]), "big") != count
+            or bytes(self.data[-20:]) != idx[-40:-20]
         ):
             self.close()
             raise _Unsupported("not a pack git reads")
@@ -268,7 +271,6 @@ def materialize_tree(
         _MAX_ENTRIES,
         _MAX_PATH,
         _safe_name,
-        _write_file,
     )
     from .inprocess_fetch import _tree_entries as entries_of
 
@@ -319,6 +321,7 @@ def materialize_tree(
 
     try:
         _require_inert_checkout_attributes(env)
+        _require_inert_conditional_attributes(env, repo)
     except Exception:
         return None
     root = str(repo)
@@ -327,24 +330,99 @@ def materialize_tree(
     try:
         # C8: the staged root holds only .git, so mkdir (never exist_ok) and
         # O_EXCL|O_NOFOLLOW prove every component is one this call created.
-        for path in sorted(dirs):
-            full = os.path.join(root, *path.split("/"))
-            os.mkdir(full, 0o755)
-            info = os.lstat(full)
-            made[path] = (info.st_dev, info.st_ino)
-        for path, oid, executable in files:
-            _write_file(os.path.join(root, *path.split("/")), blobs[oid], executable)
-            manifest[path] = (oid, executable)
+        writer = _write_anchored if _ANCHORED else _write_by_path
+        writer(root, dirs, files, blobs, made)
+        manifest = {path: (oid, executable) for path, oid, executable in files}
         if not _sealed(root, made, set(manifest)):
             raise _Refuse("the staged tree changed while it was written")
         _write_index(root, files)
-        head = os.path.join(root, ".git", "HEAD")
-        with open(head, "w", encoding="ascii", newline="\n") as handle:
-            handle.write(sha + "\n")
+        from ..utils.atomic_io import atomic_write_text
+
+        # The clone's HEAD stays valid until the pin replaces it whole.
+        atomic_write_text(Path(root) / ".git" / "HEAD", sha + "\n", normalize_line_endings=False)
     except Exception:
         _discard_worktree(root)
         return None
     return manifest
+
+
+# POSIX: every write is anchored on a directory fd this call opened (no-follow), so
+# a parent swapped for a link after mkdir is never followed out of the stage.
+_ANCHORED = (
+    hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
+    and os.open in os.supports_dir_fd
+    and os.mkdir in os.supports_dir_fd
+)
+
+
+def _write_blob(fd: int, data: bytes) -> None:
+    try:
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError("write made no progress")
+            view = view[written:]
+    finally:
+        os.close(fd)
+
+
+def _write_anchored(root, dirs, files, blobs, made) -> None:
+    """Create *dirs* and *files* through directory fds, depth first (fds held = depth)."""
+    from .inprocess_fetch import _WRITE_FLAGS
+
+    opendir = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    by_dir: dict[str, list[tuple[str, str, bool]]] = {}
+    for path, oid, executable in files:
+        by_dir.setdefault(path.rpartition("/")[0], []).append((path, oid, executable))
+    stack = [("", os.open(root, opendir))]
+    try:
+        # Component order is depth-first ("a", "a/c", "a-b"); plain sorting is not.
+        for parent in ["", *sorted(dirs, key=lambda path: path.split("/"))]:
+            if parent:
+                while not parent.startswith(stack[-1][0] + "/") and stack[-1][0]:
+                    os.close(stack.pop()[1])
+                name = parent.rpartition("/")[2]
+                os.mkdir(name, 0o755, dir_fd=stack[-1][1])
+                fd = os.open(name, opendir, dir_fd=stack[-1][1])
+                info = os.fstat(fd)
+                made[parent] = (info.st_dev, info.st_ino)
+                stack.append((parent, fd))
+            for path, oid, executable in by_dir.get(parent, ()):
+                mode = 0o755 if executable else 0o644
+                name = path.rpartition("/")[2]
+                _write_blob(os.open(name, _WRITE_FLAGS, mode, dir_fd=stack[-1][1]), blobs[oid])
+    finally:
+        for _path, fd in stack:
+            os.close(fd)
+
+
+def _write_by_path(root, dirs, files, blobs, made) -> None:
+    """Platforms without directory fds (Windows): path writes, then the seal judges."""
+    from .inprocess_fetch import _write_file
+
+    for path in sorted(dirs):
+        full = os.path.join(root, *path.split("/"))
+        os.mkdir(full, 0o755)
+        info = os.lstat(full)
+        made[path] = (info.st_dev, info.st_ino)
+    for path, oid, executable in files:
+        _write_file(os.path.join(root, *path.split("/")), blobs[oid], executable)
+
+
+def _require_inert_conditional_attributes(env: dict[str, str], repo: Path) -> None:
+    """A conditional include (``includeIf``) can apply only inside the checkout, so the
+    attributes git's checkout reads are re-read from the stage itself; free otherwise."""
+    from ..utils.git_env import _read_effective_git_config, git_subprocess_env
+    from .cached_repo import cached_repo_env
+    from .inprocess_fetch import _require_inert_attributes
+
+    checkout_env = cached_repo_env(git_subprocess_env(dict(env)), Path(repo))
+    entries = _read_effective_git_config(checkout_env).entries
+    if any(entry.key.startswith("includeif.") for entry in entries):
+        staged = _read_effective_git_config(checkout_env, worktree=Path(repo)).entries
+        _require_inert_attributes(checkout_env, staged)
 
 
 def _sealed(root: str, made: dict[str, tuple[int, int]], files: set[str]) -> bool:
