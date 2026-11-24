@@ -81,4 +81,6 @@ def test_a_linked_directory_name_with_an_escape_byte_is_rendered_inert(tmp_path:
 
     message = str(refused.value)
     assert "\x1b" not in message
-    assert message.startswith("Refusing deployment through a symlinked path component: sk?[2Jills. ")
+    assert message.startswith(
+        "Refusing deployment through a symlinked path component: sk?[2Jills. "
+    )
