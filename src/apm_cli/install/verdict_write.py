@@ -193,9 +193,12 @@ def _write(
             vr._trace("no record (discovery would fetch a policy candidate)")
             return
         from apm_cli.install import verdict_inputs
+        from apm_cli.update_notice import NEW_VERSION_NOTICE
 
         notice, due = verdict_inputs.notice_schedule(
-            vr._ENTRY_TIME[0] if vr._ENTRY_TIME else 0.0, output=kind != ATTESTED
+            vr._ENTRY_TIME[0] if vr._ENTRY_TIME else 0.0,
+            output=kind != ATTESTED,
+            notified=NEW_VERSION_NOTICE in stdout_text + stderr_text,
         )
         key = vr._key(create=True)
         if key is None:
