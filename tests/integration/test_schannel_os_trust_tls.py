@@ -156,13 +156,21 @@ def _slow_crl_point(delay: float) -> Iterator[tuple[str, list[bytes], list[float
         server.server_close()
 
 
+class _Seen(list):
+    """Application bytes the peer received, plus its own failures for diagnostics."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.faults: list[str] = []
+
+
 @contextlib.contextmanager
 def _tls_peer(leaf: Path, key: Path) -> Iterator[tuple[int, list[bytes]]]:
     """``(port, application bytes received)`` of a local TLS server presenting *leaf*."""
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server_context.load_cert_chain(certfile=str(leaf), keyfile=str(key))
     listener = socket.create_server(("127.0.0.1", 0))
-    received: list[bytes] = []
+    received = _Seen()
 
     def serve() -> None:
         while True:
@@ -170,12 +178,17 @@ def _tls_peer(leaf: Path, key: Path) -> Iterator[tuple[int, list[bytes]]]:
                 conn, _ = listener.accept()
             except OSError:
                 return
-            with contextlib.suppress(OSError), conn:
-                conn.settimeout(30)
-                with server_context.wrap_socket(conn, server_side=True) as tls:
-                    if chunk := tls.recv(4096):
-                        received.append(chunk)
-                        tls.sendall(b"HTTP/1.1 204 No Content\r\n\r\n")
+            try:
+                with conn:
+                    conn.settimeout(30)
+                    with server_context.wrap_socket(conn, server_side=True) as tls:
+                        if chunk := tls.recv(4096):
+                            received.append(chunk)
+                            tls.sendall(b"HTTP/1.1 204 No Content\r\n\r\n")
+                        else:
+                            received.faults.append("eof before any request byte")
+            except OSError as exc:
+                received.faults.append(repr(exc))
 
     threading.Thread(target=serve, daemon=True).start()
     try:
@@ -193,14 +206,14 @@ def _handshake(context: ssl.SSLContext, port: int, host: str = "github.com") -> 
             tls.recv(64)
 
 
-def _assert_peer_saw(received: list[bytes], *, request: bool) -> None:
+def _assert_peer_saw(received: _Seen, *, request: bool) -> None:
     """What the peer received: nothing before a refusal, the request after an accept."""
     deadline = time.monotonic() + 5
     while request and not received and time.monotonic() < deadline:
         time.sleep(0.05)
     data = b"".join(received)
     if request:
-        assert data.startswith(b"GET / HTTP/1.1"), "the accepted handshake reached the peer"
+        assert data.startswith(b"GET / HTTP/1.1"), f"no request at the peer: {received.faults}"
     else:
         assert data == b"", "a refused handshake sends no application byte"
 
