@@ -6,7 +6,7 @@
         "budget": 1404,
         "measured": 1337,
         "reason": "tightened 1819 -> 1404: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.hash_objects": {
         "budget": 1950,
@@ -30,19 +30,19 @@
         "budget": 10428,
         "measured": 9931,
         "reason": "tightened 15059 -> 10428: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.realpath_calls": {
         "budget": 1048,
         "measured": 998,
         "reason": "tightened 1185 -> 1048: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.stat_calls": {
         "budget": 19390,
         "measured": 18466,
         "reason": "tightened 21960 -> 19390: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "git.config": {
         "budget": 10,
@@ -54,7 +54,7 @@
         "budget": 3,
         "measured": 2,
         "reason": "tightened 13 -> 3: #5325/#5333 memoized git reads; the #5338 baseline (12) predates them; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "git.var": {
         "budget": 5,
@@ -66,13 +66,13 @@
         "budget": 4,
         "measured": 3,
         "reason": "tightened 14 -> 4: #5330 in-process pinned fetch replaces the 20 git clones (#5338 baseline 13 connects); measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "http.requests": {
         "budget": 21,
         "measured": 20,
         "reason": "tightened 42 -> 21: #5330 in-process pinned fetch replaces the 20 git clones (#5338 baseline 40 requests); measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       }
     },
     "install-warm": {
@@ -80,7 +80,7 @@
         "budget": 458,
         "measured": 436,
         "reason": "tightened 856 -> 458: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.hash_objects": {
         "budget": 1917,
@@ -104,19 +104,19 @@
         "budget": 11143,
         "measured": 10612,
         "reason": "tightened 15826 -> 11143: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.realpath_calls": {
         "budget": 1064,
         "measured": 1013,
         "reason": "tightened 1201 -> 1064: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.stat_calls": {
         "budget": 19211,
         "measured": 18296,
         "reason": "tightened 21844 -> 19211: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "git.cat-file": {
         "budget": 11,
@@ -128,7 +128,7 @@
         "budget": 9,
         "measured": 8,
         "reason": "tightened 13 -> 9: #5325/#5333 memoized git config reads; the #5338 baseline (12) predates them; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "git.ls-tree": {
         "budget": 11,
@@ -190,13 +190,13 @@
         "budget": 5979,
         "measured": 5694,
         "reason": "tightened 23099 -> 5979: #5325/#5333 path-check memoization plus #5345's fixed-depth world; the #5338 baseline predates both; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.realpath_calls": {
         "budget": 1048,
         "measured": 998,
         "reason": "tightened 2762 -> 1048: #5325/#5333 path-check memoization plus #5345's fixed-depth world; the #5338 baseline predates both; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.stat_calls": {
         "budget": 6999,
@@ -388,7 +388,7 @@
         "budget": 811,
         "measured": 772,
         "reason": "tightened 1212 -> 811: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.hash_objects": {
         "budget": 1979,
@@ -412,19 +412,19 @@
         "budget": 11219,
         "measured": 10684,
         "reason": "tightened 16774 -> 11219: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.realpath_calls": {
         "budget": 1124,
         "measured": 1070,
         "reason": "tightened 1810 -> 1124: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.stat_calls": {
         "budget": 19294,
         "measured": 18375,
         "reason": "tightened 21899 -> 19294: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "git.cat-file": {
         "budget": 11,
@@ -492,7 +492,7 @@
         "budget": 467,
         "measured": 444,
         "reason": "tightened 868 -> 467: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.hash_objects": {
         "budget": 1943,
@@ -516,19 +516,19 @@
         "budget": 10592,
         "measured": 10087,
         "reason": "tightened 16147 -> 10592: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.realpath_calls": {
         "budget": 1071,
         "measured": 1020,
         "reason": "tightened 1757 -> 1071: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "fs.stat_calls": {
         "budget": 19213,
         "measured": 18298,
         "reason": "tightened 21825 -> 19213: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#PRNUM"
+        "pr": "#5389"
       },
       "git.cat-file": {
         "budget": 11,
