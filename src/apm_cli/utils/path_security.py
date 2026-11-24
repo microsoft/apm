@@ -299,12 +299,36 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     kept: list[str] = []
     for part in parts:
         if part == "..":
-            if not kept or base_dir.joinpath(*kept).is_symlink():
+            if not kept or _existing_link(base_dir.joinpath(*kept)):
                 return None
             kept.pop()
         elif part != ".":
             kept.append(part)
     return kept
+
+
+# A reparse point whose tag is a name surrogate (a symbolic link, a directory junction,
+# a WSL symlink) names another path; data-only tags (cloud files) do not.
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_IO_REPARSE_TAG_NAME_SURROGATE = 0x20000000
+
+
+def _is_link(path: Path) -> bool:
+    """Whether *path* is a link of any kind (never its target), from one ``lstat``."""
+    info = path.lstat()
+    if S_ISLNK(info.st_mode):
+        return True
+    attributes = getattr(info, "st_file_attributes", 0)
+    tag = getattr(info, "st_reparse_tag", 0)
+    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT and tag & _IO_REPARSE_TAG_NAME_SURROGATE)
+
+
+def _existing_link(path: Path) -> bool:
+    """:func:`_is_link`, with a missing path counting as no link."""
+    try:
+        return _is_link(path)
+    except FileNotFoundError:
+        return False
 
 
 def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
@@ -322,7 +346,7 @@ def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
     for part in parts:
         current /= part
         try:
-            linked = S_ISLNK(current.lstat().st_mode)
+            linked = _is_link(current)
         except FileNotFoundError:
             return None
         if linked:
@@ -331,7 +355,8 @@ def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
 
 
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
-    """Reject linked components, optionally preserving access errors for diagnostics.
+    """Reject linked components (symbolic links and Windows junctions) below *base_dir*,
+    optionally preserving access errors for diagnostics.
 
     ``..`` is collapsed first, so a missing directory followed by ``..``
     cannot hide a linked component after it.
