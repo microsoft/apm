@@ -1276,12 +1276,6 @@
     "E3"
    ]
   },
-  "T3|OP=install|SRC=local-bundle|PRIM=bin": {
-   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin",
-   "rules": [
-    "U8"
-   ]
-  },
   "T3|OP=install|SRC=local-bundle|PRIM=canvas": {
    "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=canvas",
    "rules": [
@@ -3740,13 +3734,6 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
-  "T1|OP=bundle-install|PRIM=bin|GATE=denied-dependency": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T1|OP=bundle-install|PRIM=canvas|GATE=allowed": {
    "credited_by": [
     "G1|bundle|canvas|allowed|project"
@@ -5472,11 +5459,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=pack|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|pack|bin|denied-dependency|project|plugin"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=allowed": {
    "credited_by": [
@@ -6935,13 +6926,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "T3|OP=approve-deny|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
     "SB2|approve-deny|bundle|canvas"
@@ -7424,13 +7408,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=audit|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=audit|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
     "SB2|audit|bundle|canvas"
@@ -7856,13 +7833,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=bundle-install|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
     "G1|bundle|canvas|allowed|project",
@@ -7970,13 +7940,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "T3|OP=compile|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
@@ -8746,13 +8709,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T3|OP=lock|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
@@ -16016,13 +15972,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_a_local_bundle"
   },
-  "pair|OP=bundle-install|PRIM=bin": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|OP=bundle-install|PRIM=canvas": {
    "credited_by": [
     "G1|bundle|canvas|allowed|project",
@@ -18287,6 +18236,11 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=mcp-install|PRIM=bin": {
+   "credited_by": [
+    "G1|mcp-install|bin|allowed|user",
+    "G1|mcp-install|bin|none|user",
+    "G1|mcp-install|bin|revoked-after-deploy|user"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
@@ -18294,8 +18248,9 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=mcp-install|PRIM=canvas": {
    "family": "pair",
@@ -20174,11 +20129,20 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_plugin_bin_deploys_under_home_once_trusted"
   },
   "pair|PRIM=bin|DEPLOYED=clean": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-multi|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|DEPLOYED=edited": {
    "family": "pair",
@@ -20205,25 +20169,37 @@
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin"
   },
   "pair|PRIM=bin|DRYRUN=on": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|FORCE=on": {
+   "credited_by": [
+    "G1|install-force|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|GATE=allowed": {
    "credited_by": [
@@ -20249,6 +20225,7 @@
     "G1|lock|bin|denied-dependency|project|plugin",
     "G1|marketplace|bin|denied-dependency|project",
     "G1|mcp-install|bin|denied-dependency|project|plugin",
+    "G1|pack|bin|denied-dependency|project|plugin",
     "G1|prune|bin|denied-dependency|project",
     "G1|uninstall|bin|denied-dependency|project"
    ],
@@ -20368,11 +20345,20 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states"
   },
   "pair|PRIM=bin|NET=online": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-multi|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|NOPOLICY=on": {
    "family": "pair",
@@ -20384,6 +20370,12 @@
   },
   "pair|PRIM=bin|SCOPE=project": {
    "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-multi|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project",
     "G1|install|bin|allowed|project",
     "G1|install|bin|none|project"
    ],
@@ -20403,11 +20395,15 @@
    "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|SELECT=on": {
+   "credited_by": [
+    "G1|install-select|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|TGT=multi-narrowed": {
    "family": "pair",
@@ -20418,11 +20414,15 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[multi-narrowed]"
   },
   "pair|PRIM=bin|TGT=multi-unchanged": {
+   "credited_by": [
+    "G1|install-multi|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|TGT=multi-widened": {
    "family": "pair",
@@ -20441,11 +20441,19 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-narrowed]"
   },
   "pair|PRIM=bin|TGT=single-unchanged": {
+   "credited_by": [
+    "G1|install-dry-run|bin|allowed|project",
+    "G1|install-force|bin|allowed|project",
+    "G1|install-frozen|bin|allowed|project",
+    "G1|install-select|bin|allowed|project",
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|TGT=single-widened": {
    "family": "pair",
@@ -20456,11 +20464,15 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-widened]"
   },
   "pair|PRIM=bin|UPDATE=on": {
+   "credited_by": [
+    "G1|install-update|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=canvas|DEPLOYED=absent": {
    "family": "pair",
@@ -23300,13 +23312,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_a_local_bundle"
-  },
-  "pair|SRC=local-bundle|PRIM=bin": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "pair|SRC=local-bundle|PRIM=canvas": {
    "credited_by": [
@@ -27228,11 +27233,15 @@
  },
  "pins": {
   "U-BIN": "9ac0d749836e552b423fe94cf20970c0ed1277c8a7871af859745c477d2a78bd",
+  "U-BIN-BUNDLE": "b83d2577325ef5b20d7d43c0bc0f3e1c5baa8e7cf090d1a7a0defc10f5b301f7",
   "U-USER-SCOPE-ORG-POLICY": "7839bf8d042c59baa029c1323413078d972eebb0c45edfd8e8b14106957fd513"
  },
  "removed": {
   "T1|OP=bundle-install|PRIM=bin|GATE=allowed": [
    "U-BIN-OPS"
+  ],
+  "T1|OP=bundle-install|PRIM=bin|GATE=denied-dependency": [
+   "U-BIN-BUNDLE"
   ],
   "T1|OP=bundle-install|PRIM=bin|GATE=denied-executable": [
    "U-BIN-OPS"
@@ -27297,6 +27306,9 @@
   "T3|OP=approve-deny|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=approve-deny|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "T3|OP=approve-deny|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -27335,6 +27347,9 @@
   ],
   "T3|OP=audit|SRC=inline-mcp|PRIM=skill": [
    "U8"
+  ],
+  "T3|OP=audit|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
   ],
   "T3|OP=audit|SRC=mcp-registry|PRIM=bin": [
    "U8"
@@ -27398,6 +27413,9 @@
   ],
   "T3|OP=bundle-install|SRC=inline-mcp|PRIM=skill": [
    "U8"
+  ],
+  "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
   ],
   "T3|OP=bundle-install|SRC=local-path|PRIM=bin": [
    "U8"
@@ -27564,6 +27582,9 @@
   "T3|OP=compile|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=compile|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "T3|OP=compile|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -27603,6 +27624,9 @@
   "T3|OP=install|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=install|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "T3|OP=install|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -27641,6 +27665,9 @@
   ],
   "T3|OP=lock|SRC=inline-mcp|PRIM=skill": [
    "U8"
+  ],
+  "T3|OP=lock|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
   ],
   "T3|OP=lock|SRC=mcp-registry|PRIM=bin": [
    "U8"
@@ -28329,6 +28356,9 @@
   "pair|LOCK=stale|DEPLOYED=present-provenance-unknown": [
    "U3"
   ],
+  "pair|OP=bundle-install|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "pair|OP=bundle-install|SRC=git": [
    "U8"
   ],
@@ -28434,6 +28464,9 @@
   "pair|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
+  "pair|SRC=local-bundle|PRIM=bin": [
+   "U-BIN-BUNDLE"
+  ],
   "pair|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
@@ -28504,6 +28537,15 @@
     "docs/src/content/docs/reference/cli/prune.md"
    ],
    "text": "bin/ reaches project scope only inside a trusted whole Claude plugin: loose bin/ deploys only for a marketplace plugin at user scope with a Claude target that supports skills (plugin_bin_deployable), but a plugin that ships bin/ deploys whole to .agents/plugins/<plugin>/ under its whole-plugin approval and --trust-bin (claude_plugins/admission.py), and prune retires that root, bin/ included (native_plugins/uninstall.py). So every project-scope bin cell is reachable and U-BIN removes none; the M-GATE plugin bin spine witnesses them. Self-reinstating: the generator hashes the pinned elements (generator/bin_pin.py); when the hash differs from U_BIN_PIN the project-scope bin cells become must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
+  },
+  "U-BIN-BUNDLE": {
+   "evidence": [
+    "src/apm_cli/install/services.py::integrate_local_bundle",
+    "src/apm_cli/install/local_bundle_paths.py::bundle_deploy_relative_path",
+    "src/apm_cli/install/local_bundle_paths.py::_lower_to_target",
+    "src/apm_cli/install/exec_gate.py::plugin_bin_deployable"
+   ],
+   "text": "a local bundle never deploys bin/, at any scope or gate level (#4095 lane T-1c, QL ruling): integrate_local_bundle routes every packed file through bundle_deploy_relative_path, which keeps only files under a primitive a target deploys (_lower_to_target, _is_primitive_deploy_path); no target declares a bin primitive, and the only bin/ deploy decision (exec_gate.plugin_bin_deployable) belongs to the package pipeline, which the bundle side door never calls. So every PRIM=bin cell of OP=bundle-install or SRC=local-bundle is vacuous for bin/, the org-policy level included: the bundle spine still witnesses the deny's refusal itself. Self-reinstating: bin_pin.bundle_bin_digest hashes the routing elements; when it differs from U_BIN_BUNDLE_PIN the cells become must-cover, and the tripwire test_no_target_routes_a_bundle_bin_file fails if any target ever routes a bundle bin/ path"
   },
   "U-BIN-OPS": {
    "evidence": [

@@ -162,3 +162,21 @@ def test_the_refusal_comes_before_bundle_reconciliation_changes_anything(
 
     _assert_refused_with_nothing_changed(world)
     assert extension.is_file()
+
+
+def test_pruning_a_replaced_packages_parent_on_a_fresh_clone_changes_nothing(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Cut probe (cold clone): with no apm_modules, the refusal still comes first."""
+    import shutil
+
+    world = _world(tmp_path, apm_binary_path)
+    shutil.rmtree(world.project / "apm_modules")
+    _manifest(world, [])
+    lock, tree = lock_bytes(world.project), tree_digest(world.project)
+    result = world.apm("prune", expect=None)
+    evidence = f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert result.returncode == 1, evidence
+    assert "Nothing was changed" in result.stdout + result.stderr, evidence
+    assert lock_bytes(world.project) == lock, evidence
+    assert tree_digest(world.project) == tree, evidence
