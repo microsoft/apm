@@ -23,7 +23,6 @@ Design
 from __future__ import annotations
 
 import os
-import unicodedata
 import urllib.parse as _up
 from pathlib import Path
 from stat import S_ISLNK
@@ -264,10 +263,11 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
 def _caseless(path: Path) -> str:
     """Return *path* folded for a caseless compare (NFC and NFD spellings agree).
 
-    Decomposing first and recomposing after matches Unicode canonical caseless
-    matching: folding can undo a composition the input had.
+    The shared key of :func:`apm_cli.utils.paths.caseless`.
     """
-    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", str(path)).casefold())
+    from .paths import caseless
+
+    return caseless(str(path))
 
 
 def filesystem_containment(path: Path, root: Path) -> bool | None:
@@ -307,6 +307,29 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     return kept
 
 
+def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
+    """Return the first symlinked component of *path* below *base_dir*, or ``None``.
+
+    ``..`` is collapsed first; the walk stops at the first missing component.
+    Raises ``ValueError`` when *path* is not under *base_dir* or a ``..``
+    escapes it or steps back over a link, and ``OSError`` when a component
+    cannot be inspected; :func:`has_symlink_component` turns both into a refusal.
+    """
+    parts = _collapse_relative_parts(base_dir, path.relative_to(base_dir).parts)
+    if parts is None:
+        raise ValueError(f"{path} leaves {base_dir} or steps back over a link")
+    current = base_dir
+    for part in parts:
+        current /= part
+        try:
+            linked = S_ISLNK(current.lstat().st_mode)
+        except FileNotFoundError:
+            return None
+        if linked:
+            return current
+    return None
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     """Reject linked components, optionally preserving access errors for diagnostics.
 
@@ -314,19 +337,7 @@ def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = 
     cannot hide a linked component after it.
     """
     try:
-        parts = _collapse_relative_parts(base_dir, path.relative_to(base_dir).parts)
-        if parts is None:
-            return True
-        current = base_dir
-        for part in parts:
-            current /= part
-            try:
-                linked = S_ISLNK(current.lstat().st_mode)
-            except FileNotFoundError:
-                return False
-            if linked:
-                return True
-        return False
+        return first_symlink_component(base_dir, path) is not None
     except OSError:
         if raise_on_error:
             raise
