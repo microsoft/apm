@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -139,6 +140,34 @@ def test_frontmatter_block_is_read_by_the_yaml_owner(
     path.write_bytes(content)
 
     _assert_block(read_frontmatter_block(path), block)
+
+
+def _fifo(path: Path) -> None:
+    os.mkfifo(path)
+
+
+def _link(path: Path) -> None:
+    target = path.with_name("target.md")
+    target.write_bytes(b"---\nname: x\n---\n")
+    path.symlink_to(target)
+
+
+@pytest.mark.parametrize("make", [_fifo, _link], ids=["fifo", "symlink"])
+def test_a_packed_file_that_is_not_regular_is_never_read_and_counts_as_hooks(
+    tmp_path: Path, make
+) -> None:
+    """#5268: the frontmatter reader never blocks on a FIFO and never follows a link."""
+    from apm_cli.utils.yaml_io import read_frontmatter_block
+
+    path = tmp_path / "a.md"
+    try:
+        make(path)
+    except (AttributeError, NotImplementedError, OSError):
+        pytest.skip("named pipes or symbolic links are unavailable")
+
+    with pytest.raises(OSError):
+        read_frontmatter_block(path)
+    _assert_declares(path, True, True)
 
 
 def _assert_block(actual: str, expected: str) -> None:

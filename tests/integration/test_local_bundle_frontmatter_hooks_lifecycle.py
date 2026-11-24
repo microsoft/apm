@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -581,3 +583,30 @@ def test_an_unresolvable_user_root_is_named_and_leaves_other_bundles_alone(
     text = output(result)
     assert "Skipped target copilot-cowork for the bundle Markdown hook re-check" in text, text
     assert user_file.is_file()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_a_fifo_in_the_pack_list_is_refused_by_name_without_blocking(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5268: a named pipe listed as a packed file never blocks install and is never read.
+
+    The pack integrity check names it first; the frontmatter reader's own refusal is
+    pinned at the owner in tests/unit/utils/test_regular_file_reads.py.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, _key = _bundle(world, tmp_path, None)
+    packed = bundle / _PACKED["command"]
+    packed.unlink()
+    os.mkfifo(packed)
+    consumer = _consumer(world, "fifo-consumer")
+    before = tree_bytes(consumer)
+
+    result = world.apm(consumer, "install", str(bundle), "--no-policy", expect=None)
+    text = output(result)
+
+    assert result.returncode != 0, text
+    assert _PACKED["command"] in text, text
+    assert "Traceback" not in text, text
+    assert tree_bytes(consumer) == before
+    assert stat.S_ISFIFO(packed.lstat().st_mode)
