@@ -326,9 +326,15 @@ def test_the_token_never_reaches_debug_output(apm_binary_path: Path, tmp_path: P
     assert _basic(_TOKEN).split(" ", 1)[1] not in output
 
 
-def test_the_retry_env_fetches_in_process_and_an_anonymous_env_too(tmp_path: Path) -> None:
+def test_the_retry_env_fetches_in_process_and_an_anonymous_env_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
     with serve_offline(tree, tmp_path / "world") as world:
+        # The env builders read the ambient TLS config from this process: make it the world's.
+        for variable, value in world.env.items():
+            monkeypatch.setenv(variable, value)
+        reset_git_cache()
         name = sorted(tree.packages)[0]
         url = f"https://github.com/{tree.slug(name)}"
         anonymous = AuthResolver.build_public_github_anonymous_git_env(base_env=dict(world.env))

@@ -21,6 +21,7 @@ from tests.integration.test_inprocess_fetch_world import _REVOKED, _TOKEN, _basi
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.component,
     pytest.mark.windows_compat,
     pytest.mark.promise("P-OWN-git-transport-selection", "P-OWN-host-credential-resolution"),
 ]
