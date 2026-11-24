@@ -322,6 +322,9 @@ def _report(out: str, wall: float, exit_code) -> None:
         "ops_by_apm_owner": top(_ops, 300),
         "writes_by_kind": dict(_writes.most_common()),
         "writes_by_kind_owner": top(_writes_owner, 300),
+        "gc_collections": {str(g): v[0] for g, v in sorted(_gc.items())},
+        "gc_seconds": {str(g): round(v[1], 4) for g, v in sorted(_gc.items())},
+        "gc_threshold": list(__import__("gc").get_threshold()),
         "distinct_write_paths_by_kind": {k: len(v) for k, v in sorted(_write_paths.items())},
     }
     with open(out, "w", encoding="utf-8") as handle:
@@ -395,6 +398,17 @@ def _count_ops() -> None:
 
 
 _ROOTS: list = []
+_gc: dict = {}
+_gc_start: list = [0.0]
+
+
+def _gc_callback(phase, info) -> None:
+    if phase == "start":
+        _gc_start[0] = time.perf_counter()
+        return
+    entry = _gc.setdefault(info.get("generation", -1), [0, 0.0])
+    entry[0] += 1
+    entry[1] += time.perf_counter() - _gc_start[0]
 
 
 def _norm(path) -> str:
@@ -512,6 +526,7 @@ def main() -> int:
     _count_realpath()
     _count_ops()
     _count_writes()
+    __import__("gc").callbacks.append(_gc_callback)
     args = sys.argv[1:]
     out = args[args.index("-o") + 1]
     del args[args.index("-o") : args.index("-o") + 2]
