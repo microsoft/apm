@@ -68,7 +68,7 @@ def _substituting_walk(root: Path):
 
 
 # PERF B3 PROTOTYPE: compute the walk too and fail loudly on any difference.
-_B3_DIFFERENTIAL = True
+_B3_DIFFERENTIAL = False
 
 
 @dataclass(frozen=True)
