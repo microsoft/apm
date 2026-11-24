@@ -1143,6 +1143,37 @@ class GitCache:
                         env=subprocess_env,
                         extra_git_args=_safe_git_args(),
                     )
+                # PERF LEVER C (W3d C1-C12, research): the pinned worktree from the
+                # bare's pack in process; None means nothing was written, run git.
+                inprocess_files = None
+                if not sparse_paths and not promisor_url:
+                    from .pack_objects import materialize_tree
+
+                    inprocess_files = materialize_tree(staged, sha, env or os.environ)
+            except (RuntimeError, ValueError):
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise
+            except (subprocess.SubprocessError, OSError) as exc:
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise RuntimeError(
+                    f"Failed to create checkout for {_sanitize_url(url)} @ {sha[:12]}: {exc}"
+                ) from exc
+            if inprocess_files is not None:
+                from .checkout_verify import register_inprocess_manifest
+
+                if not atomic_land(staged, final_dir, lock):
+                    from ..utils.file_ops import robust_rmtree
+
+                    robust_rmtree(staged, ignore_errors=True)
+                    raise RuntimeError(f"Race landing {_sanitize_url(url)} @ {sha[:12]}")
+                register_inprocess_manifest(final_dir, sha, inprocess_files)
+                _log.debug("In-process checkout: %s @ %s", _sanitize_url(url), sha[:12])
+                return final_dir
+            try:
                 # Checkout the specific SHA.
                 checkout = run_git_text(
                     [

@@ -105,7 +105,7 @@ def _assert_lands_like_git(fast: Path, slow: Path, sha: str, url: str) -> None:
 def test_in_process_engages_and_lands_the_bytes_and_hash_git_lands(windows_like_world, tmp_path):
     fixture, world_env = windows_like_world
     env = AuthResolver.build_public_github_anonymous_git_env(base_env=world_env)
-    forced = {**env, "APM_NO_INPROCESS_FETCH": "1"}
+    forced = {**env, "APM_NO_INPROCESS_FETCH": "1", "APM_NO_INPROCESS_CHECKOUT": "1"}
     in_process = GitCache(tmp_path / "cache-inprocess")
     via_git = GitCache(tmp_path / "cache-git")
 
