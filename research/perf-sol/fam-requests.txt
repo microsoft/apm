@@ -1,0 +1,12 @@
+windows instructions perf-bench/e1a226f3-1795548465-7d3044
+windows agents perf-bench/8c41d466-1795548489-69ebc2
+windows prompts perf-bench/fcb9716d-1795548516-1e30ce
+windows hooks perf-bench/c28d6620-1795548538-2d4b99
+windows skills perf-bench/b3582651-1795548552-26dfdd
+windows mcp perf-bench/d4dd20a9-1795548575-b6802f
+linux instructions perf-bench/e1a226f3-1795548591-0c4d4e
+linux agents perf-bench/8c41d466-1795548608-6bbfad
+linux prompts perf-bench/fcb9716d-1795548621-eb794b
+linux hooks perf-bench/c28d6620-1795548641-2a0f2a
+linux skills perf-bench/b3582651-1795548663-6ccdcd
+linux mcp perf-bench/d4dd20a9-1795548685-8173a7
