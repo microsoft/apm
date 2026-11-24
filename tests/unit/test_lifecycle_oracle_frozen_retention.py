@@ -26,6 +26,9 @@ _ORPHAN_ROW = "| [x]      | no-orphaned-packages     | 1 orphaned package(s) in 
 _DRIFT_ROW = "| [x]      | drift                    | drift detected: 1 file(s)         |\n"
 _PASS_ROW = "| [+]      | lockfile-exists          | Lockfile present                  |\n"
 _HINT = f"[i] {ORPHANED_PACKAGES.sentence()}\n"
+_PLAIN_ORPHAN = "  [x] no-orphaned-packages: 1 orphaned package(s) in lockfile\n"
+_PLAIN_DRIFT = "  [x] drift: drift detected: 1 file(s)\n"
+_PLAIN_PASS = "  [+] lockfile-exists: Lockfile present\n"
 
 
 def _i3(frozen_output: str, audit_output: str, *, frozen: int = 0, audit: int = 1):
@@ -44,8 +47,12 @@ def _json_audit(*failed: str) -> str:
 
 @pytest.mark.parametrize(
     "audit_output",
-    [_PASS_ROW + _ORPHAN_ROW + _HINT, _json_audit("no-orphaned-packages")],
-    ids=["text", "json"],
+    [
+        _PASS_ROW + _ORPHAN_ROW + _HINT,
+        _PLAIN_PASS + _PLAIN_ORPHAN + _HINT,
+        _json_audit("no-orphaned-packages"),
+    ],
+    ids=["table", "plain", "json"],
 )
 def test_a_named_frozen_keep_of_an_orphan_is_exempt_and_earns_no_receipt(
     audit_output: str,
@@ -55,8 +62,12 @@ def test_a_named_frozen_keep_of_an_orphan_is_exempt_and_earns_no_receipt(
 
 @pytest.mark.parametrize(
     "audit_output",
-    [_ORPHAN_ROW + _DRIFT_ROW + _HINT, _json_audit("no-orphaned-packages", "drift")],
-    ids=["text", "json"],
+    [
+        _ORPHAN_ROW + _DRIFT_ROW + _HINT,
+        _PLAIN_ORPHAN + _PLAIN_DRIFT + _HINT,
+        _json_audit("no-orphaned-packages", "drift"),
+    ],
+    ids=["table", "plain", "json"],
 )
 def test_another_failing_audit_check_still_fails_i3(audit_output: str) -> None:
     messages = [v.message for v in _i3(_KEPT, audit_output)]

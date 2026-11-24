@@ -583,7 +583,8 @@ _FROZEN_KEPT = re.compile(
     r"Kept packages no longer in apm\.yml because --frozen does not change apm\.lock\.yaml"
 )
 _ORPHAN_CHECK = "no-orphaned-packages"
-_FAILED_ROW = re.compile(r"^\|\s*\[x\]\s*\|\s*([a-z0-9-]+)\s*\|", re.M)
+# A failed check in the rich table ("| [x] | name |") or the plain fallback ("  [x] name: ...").
+_FAILED_ROW = re.compile(r"^(?:\|\s*\[x\]\s*\|\s*([a-z0-9-]+)\s*\||\s+\[x\] ([a-z0-9-]+): )", re.M)
 
 
 def _audit_failed_checks(text: str) -> frozenset[str]:
@@ -596,7 +597,7 @@ def _audit_failed_checks(text: str) -> frozenset[str]:
             report = None
         if isinstance(report, dict) and isinstance(report.get("checks"), list):
             return frozenset(c["name"] for c in report["checks"] if not c.get("passed"))
-    return frozenset(_FAILED_ROW.findall(text))
+    return frozenset(table or plain for table, plain in _FAILED_ROW.findall(text))
 
 
 def _i3_frozen_retention(
