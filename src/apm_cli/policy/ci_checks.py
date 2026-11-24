@@ -2068,6 +2068,7 @@ def run_baseline_checks(
                     if prepared_replay is not None
                     else project_root / APM_MODULES_DIR
                 ),
+                lock=lock,
             )
         )
     ):

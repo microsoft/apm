@@ -29,6 +29,7 @@ pytestmark = [
 ]
 
 _NAME = "always.instructions.md"
+_COPILOT_ONLY = "copilot-only.instructions.md"
 
 
 def _evidence(result: CommandResult) -> str:
@@ -47,10 +48,21 @@ def _project(tmp_path: Path, binary: Path) -> tuple[Path, dict[str, str], ApmLif
     instructions = project / ".apm" / "instructions"
     instructions.mkdir(parents=True)
     (project / "apm.yml").write_text(
-        "name: dropped\nversion: 1.0.0\ntargets:\n- claude\n- copilot\n", encoding="utf-8"
+        "name: dropped\nversion: 1.0.0\ntargets:\n- claude\n- copilot\n"
+        "dependencies:\n  apm:\n  - ./copilot-only\n",
+        encoding="utf-8",
     )
     (instructions / _NAME).write_text(
         '---\napplyTo: "**"\n---\nAlways follow the house style.\n', encoding="utf-8"
+    )
+    # A dependency whose own targets exclude Claude is never routed for Claude.
+    package = project / "copilot-only"
+    (package / ".apm" / "instructions").mkdir(parents=True)
+    (package / "apm.yml").write_text(
+        "name: copilot-only\nversion: 1.0.0\ntargets:\n- copilot\n", encoding="utf-8"
+    )
+    (package / ".apm" / "instructions" / _COPILOT_ONLY).write_text(
+        '---\napplyTo: "**"\n---\nCopilot only.\n', encoding="utf-8"
     )
     return project, env, ApmLifecycleRunner((str(binary),))
 
@@ -73,6 +85,7 @@ def test_an_instruction_routed_to_agents_md_is_named_until_compiled(
     assert audit.returncode == 1, _evidence(audit)
     assert "claude-instructions-compiled" in _text(audit), _evidence(audit)
     assert _NAME in _text(audit), _evidence(audit)
+    assert _COPILOT_ONLY not in _text(install) + _text(audit), _evidence(audit)
 
     compiled = runner.run(("compile",), cwd=project, env=env, scenario_id="compile")
     assert compiled.returncode == 0, _evidence(compiled)

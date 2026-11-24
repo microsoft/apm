@@ -79,8 +79,9 @@ def _local_package(project: Path) -> str:
     package = project / "pkg"
     (package / ".apm" / "instructions").mkdir(parents=True)
     (package / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n", encoding="utf-8")
+    # A file-type scope stays in .claude/rules/; a routed one needs compile (#5344).
     (package / ".apm" / "instructions" / "pkg.instructions.md").write_text(
-        '---\napplyTo: "**"\n---\nLocal rule.\n', encoding="utf-8"
+        '---\napplyTo: "**/*.py"\n---\nLocal rule.\n', encoding="utf-8"
     )
     return "    - ./pkg\n"
 

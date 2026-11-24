@@ -322,6 +322,8 @@ def test_warm_frozen_with_kept_skill_edit_fails_closed(
     assert lockfile.read_bytes() == lock_before
     scenario.run("install", *flags, "--frozen", "--no-policy", cwd=cwd, env=env)
     if scope == "project":
+        # audit fails while a routed Claude instruction is uncompiled (#5344).
+        scenario.run("compile", cwd=cwd, env=env)
         scenario.run("audit", "--ci", "--no-policy", cwd=cwd, env=env)
 
 

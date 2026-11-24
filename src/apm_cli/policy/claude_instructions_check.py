@@ -11,23 +11,31 @@ from .models import CheckResult
 CHECK_NAME = "claude-instructions-compiled"
 
 
-def _instruction_sources(project_root: Path, modules_root: Path) -> list[Path]:
-    """The project's own and its installed packages' compile-input instructions."""
-    found: list[Path] = []
-    own = project_root / ".apm" / "instructions"
-    for root in (own, modules_root):
-        if not root.is_dir() or root.is_symlink():
-            continue
-        found.extend(
-            path
-            for path in sorted(root.rglob("*.instructions.md"))
-            if not path.is_symlink() and (root == own or "/.apm/instructions/" in path.as_posix())
-        )
+def _instruction_sources(project_root: Path, modules_root: Path, lock: Any) -> list[Path]:
+    """The instructions install integrates for Claude: the project's own, then
+    each locked dependency whose targets keep Claude, found link-safely."""
+    from ..integration.instruction_integrator import (
+        InstructionIntegrator,
+        claude_dependency_sources,
+    )
+
+    integrator = InstructionIntegrator()
+    found = list(integrator.find_instruction_files(project_root))
+    if lock is not None:
+        for _dep, package_info, source_plan in claude_dependency_sources(
+            lock, modules_root, include_local=True
+        ):
+            found.extend(integrator.find_instruction_files(package_info.install_path, source_plan))
     return found
 
 
 def check_claude_instructions_compiled(
-    project_root: Path, targets: Sequence[Any], *, user_scope: bool, modules_root: Path
+    project_root: Path,
+    targets: Sequence[Any],
+    *,
+    user_scope: bool,
+    modules_root: Path,
+    lock: Any = None,
 ) -> CheckResult:
     """Fail while a routed Claude instruction has no compiled AGENTS.md carrying it.
 
@@ -40,7 +48,7 @@ def check_claude_instructions_compiled(
     from ..install.phases.finalize import uncompiled_instructions_warning
 
     names = uncompiled_routed_instructions(
-        project_root, _instruction_sources(Path(project_root), Path(modules_root))
+        project_root, _instruction_sources(Path(project_root), Path(modules_root), lock)
     )
     if not names:
         return CheckResult(
