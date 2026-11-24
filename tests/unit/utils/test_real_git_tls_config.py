@@ -243,3 +243,41 @@ class TestRealGitTlsConfigCaching:
 
         assert len(child.starts) == 1
         assert all(r == {"http.sslbackend": "schannel"} for r in results)
+
+
+class TestRealGitTlsConfigStamp:
+    """A kept answer is re-probed when what the probe read changes (W3d, #5351)."""
+
+    def test_a_new_home_reprobes(self, git_child, monkeypatch, tmp_path) -> None:
+        child = git_child(*_global(("http.sslbackend", "schannel")))
+        monkeypatch.setenv("HOME", str(tmp_path / "one"))
+        real_git_tls_config()
+        monkeypatch.setenv("HOME", str(tmp_path / "two"))
+        real_git_tls_config()
+
+        assert len(child.starts) == 2
+
+    def test_an_edited_global_config_reprobes(self, git_child, monkeypatch, tmp_path) -> None:
+        child = git_child(*_global(("http.sslcainfo", "/a.pem")))
+        config = tmp_path / "gitconfig"
+        config.write_text("[http]\n", encoding="utf-8")
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+        real_git_tls_config()
+        real_git_tls_config()
+        config.write_text("[http]\n\tsslCAInfo = /b.pem\n", encoding="utf-8")
+        real_git_tls_config()
+
+        assert len(child.starts) == 2
+
+    def test_user_code_mid_command_reprobes(self, git_child) -> None:
+        from apm_cli.core.invocation_memo import forget_invocation_memos, invocation_scope
+
+        child = git_child(*_global(("http.sslbackend", "openssl")))
+        with invocation_scope():
+            real_git_tls_config()
+            forget_invocation_memos()  # a lifecycle script ran and may have edited ~/.gitconfig
+            real_git_tls_config()
+
+        # Inside a command the config memo also asks git which files it reads; count probes.
+        probes = [cmd for cmd, _env in child.starts if cmd[-2:] == ["--show-scope", "--list"]]
+        assert len(probes) == 2

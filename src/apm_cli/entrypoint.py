@@ -5,6 +5,11 @@ import sys
 
 def main() -> None:
     """Report a standalone version without importing Git-dependent commands."""
+    import gc
+
+    # PROCESS-WIDE: a short-lived CLI that allocates many small acyclic objects
+    # pays hundreds of young-generation collections; raise the gen-0 threshold.
+    gc.set_threshold(100_000, 50, 50)
     if sys.argv[1:] == ["--version"]:
         import click
 

@@ -2915,8 +2915,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-local-bundle-hook-trust",
         rule_id="install-deployment-local-bundle-hook-trust",
         path="src/apm_cli/install/local_bundle_hook_trust.py",
-        old="        if None in keys:\n",
-        new="        if not keys:\n",
+        old="        elif None in keys:\n",
+        new="        elif not keys:\n",
         intent="A local-bundle hook with no recorded approval key is admitted instead of retired.",
     ),
     MutationCase(
@@ -4644,6 +4644,26 @@ CASE_IDS: tuple[str, ...] = tuple(case.guard_id for case in MUTATIONS)
 # Multiple routing edges extend existing owners; they do not allocate competing
 # registry guards. Execute these through the same source-override mutation seam.
 USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/local_bundle_hook_cwd.py",
+        old="        ensure_path_within(spelled, root)\n",
+        new="        Path(os.path.realpath(spelled)).relative_to(root)\n",
+        intent="The hook cwd in-use check computes link containment itself, not through path_security (#5310).",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/local_bundle_hook_trust.py",
+        old="            ) or runs_through_cwd(document, project_root, scripts):\n",
+        new=(
+            "            ) or runs_through_cwd(document, project_root, scripts) or not Path(\n"
+            "                os.path.realpath(path)\n"
+            "            ).is_relative_to(project_root):\n"
+        ),
+        intent="The bundle in-use check adds an inline realpath containment beside the cwd owner (#5310).",
+    ),
     MutationCase(
         guard_id="install-deployment-claude-agents-md-routing",
         rule_id="install-deployment-claude-agents-md-routing",
@@ -8198,8 +8218,8 @@ def test_every_stale_deleter_consumes_the_skip_set(
         pytest.param(
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/policy/ci_checks.py",
-            "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
-            "[]",
+            "        canvas = unadmitted_bundle_canvas(\n",
+            "        canvas = (lambda *a, **k: [])(\n",
             id="audit-skips-bundle-canvas",
         ),
         pytest.param(
