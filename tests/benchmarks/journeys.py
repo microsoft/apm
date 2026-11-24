@@ -483,7 +483,9 @@ class Context:
     def _env(self) -> dict[str, str]:
         """The world env; the authenticated journey adds a token and auth-first (research)."""
         env = dict(self.world.env)
-        token = os.environ.get("APM_BENCH_GITHUB_TOKEN")
+        # Research: force the git CLI path (B1 off) on every journey; no token.
+        env["APM_NO_INPROCESS_FETCH"] = "1"
+        token = None and os.environ.get("APM_BENCH_GITHUB_TOKEN")
         if token:
             env["GITHUB_APM_PAT"] = token
             env["APM_GITHUB_AUTH_FIRST"] = "1"
