@@ -1015,15 +1015,19 @@ def reparent_blocker(
 def _anchor_reason(lockfile, walk, key, repo_url, nearest, identity_counts) -> str | None:
     """Why a survivor cannot be re-parented by prune, or None when it can.
 
-    Re-parenting records the nearest surviving parent; it must be the first
-    parent the walk saw (its path and identity are then one edge), keep a
-    lock row (an unlocked parent leaves the survivor unresolvable) and spell
-    the survivor by its own identity (an alias would re-key it).
+    Re-parenting records the nearest surviving parent, ties to the lowest key;
+    its own edge must be the one install records (its path and identity are
+    then one edge, :func:`recorded_declaring_edge`), it must keep a lock row
+    (an unlocked parent leaves the survivor unresolvable) and spell the
+    survivor by its own identity (an alias would re-key it).
     """
     if not nearest:
         return f"{repo_url} still resolves through it, and apm.yml now declares {repo_url}"
+    from apm_cli.deps.local_identity import recorded_declaring_edge
+
     parent = min(nearest)
-    if parent != nearest[0]:
+    edges = walk.declaring_edges.get(key, {})
+    if recorded_declaring_edge(nearest[0], parent, lambda p: edges[p][1]) != parent:
         # The repair would pair one parent's path with another's identity (#5126).
         return (
             f"{repo_url} still resolves through it, and several packages at the same "
