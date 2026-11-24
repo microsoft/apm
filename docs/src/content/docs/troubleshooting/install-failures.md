@@ -19,29 +19,18 @@ before treating that message as an authentication problem.
 If the network row says `git not found; cannot test network`, the check
 could not run: it does not establish a network failure.
 
-To recover, choose another working directory using the rules below and
+To recover, choose another working directory outside the exclusion root and
 rerun `apm doctor`. Once its `git` row passes, retry your original install
 command. Network access, authentication, or later installation steps may
 still need attention.
 
-### How APM chooses Git
-
-Before searching `PATH`, APM chooses a directory to exclude, called the
-**exclusion root**. It searches the resolved current working directory and
-its parents in this order:
-
-1. The nearest directory containing `.git`.
-2. If no `.git` is found anywhere in that search, the nearest directory
-   containing an `apm.yml` file.
-3. If neither is found, the current working directory itself.
-
-APM skips `PATH` directories and resolved executables located at this root
-or in any of its subdirectories, including symlinks resolving back into it.
-The same selection rules apply to `gh`.
-
-`--global` changes the installation scope, not these rules; keep it when
-retrying a global install. Moving to a subdirectory will not help if an
-ancestor `.git` or `apm.yml` keeps Git inside the excluded directory.
+APM skips any `git` found at or below an **exclusion root**: the nearest
+directory containing `.git`, else the nearest containing `apm.yml`, else the
+working directory itself. The full rules are in
+[Git and gh executable discovery](../../enterprise/security/#git-and-gh-executable-discovery).
+`--global` does not change them, so keep it when retrying a global install.
+Moving to a subdirectory will not help if an ancestor `.git` or `apm.yml` keeps
+Git inside the excluded directory.
 
 ### Example: Git installed under your home directory
 
