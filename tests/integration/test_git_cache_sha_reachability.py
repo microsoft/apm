@@ -881,3 +881,95 @@ class TestRefCacheLinks:
         with pytest.raises(CommitNotReachableError):
             require_reachable_commit(root, origin.url, shard, self._non_tip(origin))
         assert list(target.iterdir()) == []
+
+
+class _CloneFailsDownloader(_RefDownloader):
+    """A downloader whose resolver cannot clone the origin (a dumb-HTTP host)."""
+
+    def resolve_git_reference(self, _dep_ref):
+        raise RuntimeError("Failed to clone repository acme/repo: no shallow capabilities")
+
+
+def _ref(name: str):
+    return type("Dep", (_RefDep,), {"reference": name})()
+
+
+@pytest.mark.parametrize(
+    ("ref", "tip"),
+    [("main", "m2"), ("refs/heads/main", "m2"), ("v1", "m1")],
+    ids=["branch", "full-branch-name", "annotated-tag-peeled"],
+)
+def test_a_name_the_resolver_cannot_clone_is_admitted_at_its_listed_tip(
+    tmp_path: Path, origin: _Origin, ref: str, tip: str
+) -> None:
+    """#5138: an exact ``ls-remote`` match names the commit; the fetch is by that commit."""
+    from apm_cli.cache.commit_reachability import admit_fetch_ref
+
+    origin.git("tag", "-a", "-m", "v1", "v1", origin.m1)
+    _REAL_RUN(
+        ["git", "fetch", "-q", origin.work.as_uri(), "+refs/tags/*:refs/tags/*"],
+        cwd=origin.path,
+        check=True,
+    )
+    downloader = _CloneFailsDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+
+    assert admit_fetch_ref(downloader, _ref(ref), ref) == getattr(origin, tip)
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
+    assert marker.name == getattr(origin, tip)
+
+
+def test_a_name_both_a_branch_and_a_tag_hold_is_refused_when_the_resolver_cannot_clone(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """#5138: the listing breaks no tie between a branch and a tag, as the resolver does not."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_fetch_ref
+
+    origin.git("tag", "main", origin.m1)
+    _REAL_RUN(
+        ["git", "fetch", "-q", origin.work.as_uri(), "+refs/tags/*:refs/tags/*"],
+        cwd=origin.path,
+        check=True,
+    )
+    downloader = _CloneFailsDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+
+    with pytest.raises(CommitNotReachableError, match="ambiguous"):
+        admit_fetch_ref(downloader, _ref("main"), "main")
+
+    assert not (tmp_path / "cache" / "reachability").exists()
+
+
+@pytest.mark.parametrize("ref", ["missing", "abc1234"], ids=["no-such-name", "hex-like-name"])
+def test_a_resolver_failure_is_kept_when_the_listing_cannot_name_the_ref(
+    tmp_path: Path, origin: _Origin, ref: str
+) -> None:
+    """#5138: only an exact branch or tag replaces the resolver's failure."""
+    from apm_cli.cache.commit_reachability import admit_fetch_ref
+
+    downloader = _CloneFailsDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+
+    with pytest.raises(RuntimeError, match="no shallow capabilities"):
+        admit_fetch_ref(downloader, _ref(ref), ref)
+
+    assert not (tmp_path / "cache" / "reachability").exists()
+
+
+def test_the_ref_listing_goes_where_a_remote_activated_mirror_sends_the_clone(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: config the remote URL activates (a mirror rewrite) applies to ``ls-remote``."""
+    from apm_cli.cache.commit_reachability import admit_fetch_ref
+
+    remote = "https://origin.invalid/acme/repo.git"
+    mirror = tmp_path / "mirror.gitconfig"
+    mirror.write_text(f'[url "{origin.url}"]\n\tinsteadOf = {remote}\n', encoding="ascii")
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{remote}"]\n\tpath = {mirror.as_posix()}\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    downloader = _CloneFailsDownloader(tmp_path / "cache", [remote], predicted=remote)
+
+    assert admit_fetch_ref(downloader, _ref("main"), "main") == origin.m2
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
+    assert marker.name == origin.m2

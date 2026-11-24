@@ -8,11 +8,15 @@ Real CLI against a local origin behind a GitLab-shaped URL (git
 
 from __future__ import annotations
 
+import functools
 import importlib
 import os
 import shutil
+import ssl
 import subprocess
 import sys
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -694,3 +698,63 @@ if "ls-remote" in args:
 
     assert listed.read_text(encoding="utf-8").split() == [origin.path.as_uri()]
     assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m2"
+
+
+@pytest.fixture()
+def dumb_http(origin: _Origin, tmp_path: Path):
+    """Serve the origin over Git's dumb HTTPS protocol, which has no shallow fetch.
+
+    Yields the repository URL; the loopback certificate is self-signed.
+    """
+    from tests.integration.test_marketplace_generic_https_credential_lifecycle import (
+        _write_tls_certificate,
+    )
+
+    (tmp_path / "tls").mkdir()
+    leaf, key = _write_tls_certificate(tmp_path / "tls")
+    _git("--git-dir", str(origin.path), "update-server-info", cwd=origin.path.parent)
+    served = tmp_path / "served"
+    (served / "acme").mkdir(parents=True)
+    (served / "acme" / "pkg.git").symlink_to(origin.path)
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(served))
+    handler.log_message = lambda *_args: None
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile=leaf, keyfile=key)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"https://127.0.0.1:{server.server_port}/acme/pkg.git"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=10)
+
+
+@pytest.mark.parametrize("no_cache", [False, True], ids=["cached", "no-cache"])
+def test_a_subdir_named_ref_installs_from_a_dumb_http_host(
+    tmp_path: Path,
+    origin: _Origin,
+    dumb_http: str,
+    monkeypatch: pytest.MonkeyPatch,
+    no_cache,
+) -> None:
+    """#5138: a host with no shallow fetch still admits and installs a named ref's commit."""
+    url = dumb_http
+    project = _project(tmp_path, "main", "skills/tool")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"][0]["git"] = url
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    config = tmp_path / "global.gitconfig"
+    base = url.rsplit("/acme/", 1)[0] + "/"
+    config.write_text(f'[http "{base}"]\n\tsslVerify = false\n', encoding="ascii")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache")}
+
+    result = _install(project, origin, monkeypatch, **env)
+
+    assert result.exit_code == 0, result.output
+    assert origin.m2 in (project / "apm.lock.yaml").read_text(encoding="utf-8")
+    [deployed] = (project / "apm_modules").rglob("tool.instructions.md")
+    assert deployed.read_text(encoding="utf-8") == "m2"

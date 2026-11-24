@@ -438,13 +438,35 @@ def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
     if not by_commit:
         admit_pinned_commit(downloader, dep_ref, ref)
         return ref
-    resolved = downloader.resolve_git_reference(dep_ref)
+    try:
+        resolved = downloader.resolve_git_reference(dep_ref)
+    except Exception as exc:
+        commit = _listed_tip_instead(downloader, dep_ref, ref, exc)
+        _note_admitted(ref, commit)
+        return commit
     commit = resolved.resolved_commit
     if not commit or len(commit) not in (40, 64) or not _COMMIT_RE.match(commit):
         raise CommitNotReachableError(f"Could not resolve {ref!r} to an origin commit.")
     admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
     _note_admitted(ref, commit)
     return commit.lower()
+
+
+def _listed_tip_instead(downloader, dep_ref, ref: str, failure: Exception) -> str:
+    """The exact origin tip of branch or tag *ref* when resolving it by a clone failed.
+
+    Some hosts cannot serve the resolver's shallow clone (a dumb-HTTP server);
+    ``git ls-remote`` over the dependency's transport still names the commit,
+    matched like the resolver's listing. A name both a branch and a tag holds
+    is refused as ambiguous. A hex-like name, any other failure, an origin
+    that cannot be listed, or a name no branch or tag holds raises *failure*.
+    """
+    if _COMMIT_RE.match(ref) or not _is_git_failure(failure):
+        raise failure
+    try:
+        return _listed_tip(downloader, dep_ref, ref)[0].lower()
+    except (_Unverified, _NoSuchRef):
+        raise failure from None
 
 
 # The named refs the running download admitted, as ``(ref, commit)`` (#5138).
@@ -686,15 +708,21 @@ def _sanitize_origin(url: str) -> str:
 
 def _branch_and_tag_records(url: str, env) -> list[tuple[str, str]]:
     """The origin's ``(commit, name)`` branch and tag records, from ``git ls-remote``."""
-    from ..utils.git_env import git_remote_refs
+    import tempfile
+
+    from ..utils.git_env import git_clone_env, git_remote_refs
     from .git_cache import _safe_git_args
 
     where = _sanitize_origin(url)
     try:
+        # The env a clone of *url* gets, so config its remote URL activates
+        # (a mirror rewrite) sends the listing where the fetch would go.
+        with tempfile.TemporaryDirectory(prefix="apm-ls-remote-") as probe:
+            env = git_clone_env(url, env, Path(probe) / "origin")
         listing = git_remote_refs(
             url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
         )
-    except (subprocess.SubprocessError, OSError) as exc:
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
         raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
     if listing.returncode != 0:
         raise _Unverified(f"git ls-remote failed for {where}", _git_failure(listing, url))
