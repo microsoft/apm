@@ -763,7 +763,7 @@ def _read_spawn_log(path: Path | None) -> tuple[dict, int, dict]:
         return {}, 0, {}
     spawns: dict[str, int] = {}
     modules = 0
-    counters: dict = {"self_cpu_s": 0.0, "children_cpu_s": 0.0, "git_sub": {}, "ops": {}}
+    counters: dict = {"self_cpu_s": 0.0, "children_cpu_s": 0.0, "git_sub": {}, "git_callers": {}, "ops": {}}
     for line in path.read_text(encoding="utf-8").splitlines():
         record = json.loads(line)
         modules = max(modules, record["modules"])
@@ -771,11 +771,11 @@ def _read_spawn_log(path: Path | None) -> tuple[dict, int, dict]:
             spawns[name] = spawns.get(name, 0) + count
         for key in ("self_cpu_s", "children_cpu_s"):
             counters[key] = round(counters[key] + record.get(key, 0.0), 4)
-        for table in ("git_sub", "ops"):
+        for table in ("git_sub", "git_callers", "ops"):
             for name, count in (record.get(table) or {}).items():
                 counters[table][name] = counters[table].get(name, 0) + count
     path.unlink()
-    for table in ("git_sub", "ops"):
+    for table in ("git_sub", "git_callers", "ops"):
         counters[table] = dict(sorted(counters[table].items()))
     return dict(sorted(spawns.items())), modules, counters
 
