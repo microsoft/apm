@@ -126,8 +126,10 @@ def _discovery_unproven(root: Path, identity: Any) -> bool:
     Discovery tries the candidates in order and fetches each one with no fresh
     cached entry for this project (it caches no absence), so only a fresh entry
     for the first candidate proves it returns without a fetch. GitLab ancestry
-    and Azure DevOps have no such proof: no record. *identity* is the remote's
-    org, host and port (None without one).
+    and Azure DevOps record only when this run's discovery fetched nothing: every
+    candidate it consulted came from a fresh cached entry, all of them keyed and
+    bounding the record's expiry (#5075). *identity* is the remote's org, host
+    and port (None without one).
     """
     if identity is None:
         return False
@@ -138,7 +140,10 @@ def _discovery_unproven(root: Path, identity: Any) -> bool:
 
     org, host, _port = identity
     if is_azure_devops_hostname(host) or is_gitlab_hostname(host):
-        return True
+        from apm_cli.core.policy_fetch_ledger import fetch_attempts
+        from apm_cli.install.verdict_record import _ENTRY_TIME
+
+        return len(_ENTRY_TIME) < 2 or fetch_attempts() != _ENTRY_TIME[1]
     refs = candidate_refs(org, host, discovery._policy_repo_candidates(host))
     pin = read_project_policy_hash_pin(root)
     expected = pin.normalized if pin is not None else None

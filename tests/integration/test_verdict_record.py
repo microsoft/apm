@@ -1002,3 +1002,49 @@ def test_a_linked_worktree_is_never_recorded(project: Path) -> None:
     _record()
 
     assert not (_home(project) / "verdicts").exists()
+
+
+_HOSTED_REMOTES = {
+    "gitlab": "https://gitlab.com/acme/app.git",
+    "ado": "https://dev.azure.com/acme/proj/_git/app",
+}
+
+
+def _hosted_project(project: Path, host: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    subprocess.run(
+        ["git", "-C", str(project), "remote", "add", "origin", _HOSTED_REMOTES[host]], check=True
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize("host", sorted(_HOSTED_REMOTES))
+def test_a_gitlab_or_ado_run_whose_policy_came_from_the_cache_records_and_hits(
+    project: Path, capsys, host: str
+) -> None:
+    """#5075: discovery fetched nothing, so its result rests only on keyed cache state."""
+    _hosted_project(project, host)
+    _record()
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is True
+    assert "up to date in " in capsys.readouterr().out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize("host", sorted(_HOSTED_REMOTES))
+def test_a_gitlab_or_ado_run_that_attempted_a_policy_fetch_never_records(
+    project: Path, host: str
+) -> None:
+    """A fetch (or its credential lookup) this run means the next run fetches too."""
+    from apm_cli.core.policy_fetch_ledger import note_fetch_attempt
+
+    _hosted_project(project, host)
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        note_fetch_attempt(host)
+        verdict_record.note_verified_noop()
+
+    assert not (_home(project) / "verdicts").exists()

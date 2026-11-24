@@ -149,3 +149,13 @@ def _key_modules(digest: Any, root: Path) -> None:
         if MARKER_FILENAME in names:
             continue  # a package copy: its bytes are proven against the lock
         stack += [(f"{rel}/{e.name}", e.path) for e in entries if e.is_dir(follow_symlinks=False)]
+
+
+def entry_stamp() -> list[float]:
+    """The recorded run's start: its wall time, and the org-policy fetch attempts
+    this process had made, so the writer knows whether the run's discovery fetched."""
+    import time
+
+    from apm_cli.core.policy_fetch_ledger import fetch_attempts
+
+    return [time.time(), float(fetch_attempts())]
