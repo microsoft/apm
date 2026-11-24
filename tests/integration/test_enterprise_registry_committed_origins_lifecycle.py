@@ -21,11 +21,13 @@ producer Git host) before its exit code, then by the lock and the deployed bytes
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -73,6 +75,19 @@ CATALOG_NAME = "corp-catalog"
 # A second company catalog host the committed name is later re-pointed at.
 OTHER_CATALOG_HOST = "catalog2.corp.example"
 OTHER_CATALOG_URL = f"https://{OTHER_CATALOG_HOST}/apm/marketplace.json"
+_PRINTED_URL = re.compile(r"https?://[^\s'\"()<>,;]+")
+
+
+def _url_parts(url: str) -> tuple[str, str | None, int | None, str]:
+    parsed = urlparse(url.rstrip("."))
+    return parsed.scheme, parsed.hostname, parsed.port, parsed.path
+
+
+def _printed_urls(output: str) -> set[tuple[str, str | None, int | None, str]]:
+    """Every URL the command printed, as (scheme, host, port, path)."""
+    return {_url_parts(found) for found in _PRINTED_URL.findall(output)}
+
+
 DECLARATION = {"name": "widget", "marketplace": CATALOG_NAME}
 FROZEN = (*INSTALL, "--frozen")
 UPDATE = ("update", "--yes", "--target", "copilot")
@@ -222,8 +237,11 @@ def test_committed_catalog_origin_installs_replays_frozen_and_refuses_a_rebound_
             expect_failure=True,
         )
         output = _output(refused)
-        for named in (CATALOG_NAME, CATALOG_URL, OTHER_CATALOG_URL, "Nothing was changed"):
+        for named in (CATALOG_NAME, "Nothing was changed"):
             assert named in output, _evidence(refused, proxy)
+        assert {_url_parts(CATALOG_URL), _url_parts(OTHER_CATALOG_URL)} <= _printed_urls(output), (
+            _evidence(refused, proxy)
+        )
         assert "Drop --frozen, then run 'apm install'" in output, _evidence(refused, proxy)
         assert (rebound / "apm.lock.yaml").read_bytes() == locked_bytes
         _assert_nothing_deployed(rebound)
