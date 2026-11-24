@@ -54,6 +54,26 @@ class InstallFailureAlreadyRendered(RuntimeError):
     """Signal a failed install whose user-facing diagnostics are complete."""
 
 
+class DependencyResolutionError(RuntimeError):
+    """Dependency resolution failed; *unprinted* lists the errors not yet shown (#5272).
+
+    The resolve phase prints each error with its remedy as it raises, so the
+    install summary repeats only the ones it did not print.
+    """
+
+    def __init__(self, errors: list[str], *, unprinted: list[str]) -> None:
+        super().__init__(f"Dependency resolution failed: {'; '.join(errors)}")
+        self.unprinted = tuple(unprinted)
+        self.printed = len(errors) - len(self.unprinted)
+
+    def summary(self) -> str:
+        """Name the failure without repeating an error already printed above."""
+        if self.unprinted:
+            return f"Dependency resolution failed: {'; '.join(self.unprinted)}"
+        noun = "error" if self.printed == 1 else "errors"
+        return f"Dependency resolution failed (see the {noun} above)."
+
+
 class MCPNativeConflictError(InstallFailureAlreadyRendered):
     """Native connections were preserved; actual nonconflicting writes may remain."""
 
@@ -204,7 +224,8 @@ def render_apm_dependency_failure(
         message = str(error)
         logger.refusal(message)
     else:
-        message = f"Failed to install APM dependencies: {error}"
+        cause = error.summary() if isinstance(error, DependencyResolutionError) else error
+        message = f"Failed to install APM dependencies: {cause}"
         logger.error(message)
     if not verbose:
         logger.progress("Run with --verbose for detailed diagnostics")

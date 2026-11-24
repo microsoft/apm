@@ -2,8 +2,9 @@ name: Lifecycle Journeys Nightly
 
 # All 25 docs journeys (#4110) through the real CLI in the hermetic lifecycle
 # world, on Linux, Windows and macOS, plus the full tests/lifecycle suite on
-# Linux. PR and main-push CI run only the lifecycle smoke subset, so this is
-# the only scheduled run of every lifecycle witness. A scheduled failure opens
+# Linux. PR and main-push CI run the lifecycle smoke subset (and
+# lifecycle-security.yml the Linux security cells); this is the only scheduled
+# run of every lifecycle witness. A scheduled failure opens
 # (or updates) one tracking issue; the next green scheduled run closes it.
 # Dispatch with `ref` set to a release-candidate commit on main or a release/*
 # branch to validate it before tagging; resolve-ref refuses any other commit.

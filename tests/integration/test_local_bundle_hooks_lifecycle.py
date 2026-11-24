@@ -1639,6 +1639,56 @@ def test_uninstall_bundle_keeps_kiro_scripts_beside_an_unreadable_hook_file(
     assert all((consumer / c).is_file() and c in claims for c in kiro_scripts), claims
 
 
+def test_uninstall_bundle_refuses_a_sidecar_record_with_malformed_hook_files(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144: ``hook_files: {}`` is a corrupted record, never "no hook files"; refuse."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "malformed-hook-files-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = {}
+    write(sidecar, json.dumps(data))
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+    assert ".github/apm-hooks.json (unreadable)" in refused, refused
+    assert "Traceback" not in refused, refused
+    assert tree_bytes(consumer) == before
+
+
+def test_install_retires_nothing_from_a_corrupt_sidecar_and_names_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144 review: reconciliation reads the sidecar first; nothing is unlinked."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, hook = _copilot_bundle_consumer(world, tmp_path, "corrupt-revoked-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = {}
+    write(sidecar, json.dumps(data))
+    _allow(consumer, "sha256:" + "0" * 64)  # the gate stays on; the bundle is revoked
+    deployed = {
+        path: (consumer / path).read_bytes()
+        for path in [hook, *(c for c in _claims(world, consumer) if c.endswith("/x.sh"))]
+    }
+    sidecar_bytes = sidecar.read_bytes()
+    dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
+
+    # Installing anything reconciles bundle hooks the trust no longer admits.
+    result = world.apm(consumer, "install", str(dep), "--no-policy", expect=None)
+
+    text = output(result)
+    assert result.returncode != 0, text
+    assert ".github/apm-hooks.json (unreadable)" in text, text
+    assert "Traceback" not in text, text
+    assert {path: (consumer / path).read_bytes() for path in deployed} == deployed
+    assert sidecar.read_bytes() == sidecar_bytes
+    assert all(path in _claims(world, consumer) for path in deployed)
+
+
 def test_uninstall_bundle_refuses_a_malformed_per_file_sidecar_before_writing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

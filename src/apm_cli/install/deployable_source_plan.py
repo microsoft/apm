@@ -23,7 +23,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within_resolved,
     has_symlink_component,
 )
-from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.paths import portable_relpath, relative_to
 
 if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -36,7 +36,7 @@ def _is_safe_source_path(
 ) -> bool:
     """Check containment; notify on_symlink only for symlink-component rejection."""
     try:
-        path.relative_to(source_root)
+        relative_to(path, source_root)
     except ValueError:
         return False
     if has_symlink_component(source_root, path):

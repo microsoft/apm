@@ -47,12 +47,14 @@ ENVS = ("normal", "worktree", "headless")
 # Diagnostic variants: a second headless session in the same project, and the
 # project marketplace path rewritten to an absolute path.
 # Claude-only diagnostics at project scope: a second session in the same HOME, the
-# marketplace path made absolute, no folder trust, and the native oracle (Claude's
-# own `plugin marketplace add` + `plugin install --scope project`, then the user
-# plugin state wiped to simulate a fresh clone). Worktree diagnostics: apm installs
-# only on the worktree's branch (main checkout has no .agents/plugins), or a
-# session runs in the main checkout before the first session in a worktree.
+# marketplace path made absolute, no folder trust (headless and TUI), and the
+# native oracle (Claude's own `plugin marketplace add` + `plugin install --scope
+# project`, then the user plugin state wiped to simulate a fresh clone).
+# Worktree diagnostics: apm installs only on the worktree's branch (main checkout
+# has no .agents/plugins), or a session runs in the main checkout before the
+# first session in a worktree.
 DIAG_ENVS = (
+    "tui-untrusted",
     "headless-rerun",
     "headless-abspath",
     "headless-untrusted",
@@ -463,7 +465,8 @@ class Cell:
             self.evidence["blocked"] = "no COPILOT_GITHUB_TOKEN for a Copilot session"
         tmux = ["tmux", "-L", self.id]
         start = [*tmux, "new-session", "-d", "-x", "200", "-y", "50", self.harness]
-        self.run("tmux-start", start, cwd, extra_env=self.session_env(), timeout=30)
+        launched = self.run("tmux-start", start, cwd, extra_env=self.session_env(), timeout=30)
+        self.evidence["tui_launched"] = launched.returncode == 0
 
         def pane() -> str:
             return self.run("tmux-capture", [*tmux, "capture-pane", "-p"], cwd, timeout=30).stdout
@@ -474,7 +477,11 @@ class Cell:
             return hook and "tools/list" in self.mcp_methods()
 
         self.evidence["startup_ready"] = self.wait_for(started, SESSION_SECONDS)
-        if self.harness == "claude":
+        if self.harness == "claude" and self.env.endswith("untrusted"):
+            # Keystrokes could answer the folder-trust dialog; observe it untouched,
+            # and record that it is actually on screen.
+            self.evidence["trust_prompt_shown"] = "trust this folder" in pane().lower()
+        elif self.harness == "claude":
             self.run("tmux-slash", [*tmux, "send-keys", "-l", f"/{SKILL}"], cwd, timeout=30)
             self.wait_for(lambda: pane().count(SKILL) > 1, 10)
             self.evidence["slash_menu"] = _tail(pane(), 2000)
@@ -607,6 +614,7 @@ class Cell:
             "mcp_tools_listed": "tools/list" in mcp,
             "mcp_tool_called": "tools/call" in mcp,
             "plugin_listed": PLUGIN in lists.get("plugin_list", ""),
+            "list_mcp_spawned": "spawned" in self.evidence.get("list_mcp_marker", "").split(),
         }
         if self.harness == "claude":
             sig["details_listed"] = SKILL in lists.get("plugin_details", "")
@@ -633,6 +641,13 @@ class Cell:
     def verdict(self, sig: dict) -> tuple[str, str]:
         if self.evidence.get("apm_error"):
             return "ERROR", "apm install: " + self.evidence["apm_error"].splitlines()[0][:160]
+        if self.env == "tui-untrusted" and not (
+            self.evidence.get("tui_launched") and self.evidence.get("trust_prompt_shown")
+        ):
+            # A crashed or absent TUI must not pass as proof of the trust gate.
+            return "ERROR", "the TUI did not launch or did not show the folder-trust prompt"
+        if self.env == "headless-untrusted" and "init" not in self.evidence:
+            return "ERROR", "claude -p emitted no init event, so the session never started"
         runtime = [sig["mcp_initialized"], sig["mcp_tools_listed"]]
         if not self.agent_plugin:
             runtime.append(sig["hook_fired"])
@@ -644,6 +659,9 @@ class Cell:
             runtime.append(bool(sig.get("init_path_in_cwd")))
         if self.harness == "copilot":
             runtime.append(sig["skill_listed"])
+        if self.env.endswith("untrusted") and sig["list_mcp_spawned"] and not all(runtime):
+            # No harness command may run plugin code in a folder it does not trust.
+            return "PARTIAL", "plugin MCP server spawned by a list command without folder trust"
         if all(runtime):
             return "LOADS", ", ".join(k for k, v in sig.items() if v)
         output = self.evidence.get("headless_tail", "") + self.evidence.get("screen_tail", "")
@@ -685,6 +703,10 @@ class Cell:
                 self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             cwd = self.run_dir()
             self.list_probes(cwd)
+            # `claude mcp list` health-checks (spawns) MCP servers; session evidence
+            # must come from the session alone.
+            self.evidence["list_mcp_marker"] = _read(self.mcp_marker)
+            self.reset_markers()
             if self.env.startswith("headless"):
                 self.headless(cwd)
             else:
