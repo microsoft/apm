@@ -944,6 +944,7 @@ def _write_git_dir(
     objects: dict[str, tuple[str, bytes]],
     reached: set[str],
     pins: tuple[tuple[str, str], ...],
+    raw_pack: bytes = b"",
 ) -> None:
     for value in (url, *(part for pin in pins for part in pin)):
         if any(c in _CONFIG_UNSAFE for c in value):
@@ -953,6 +954,18 @@ def _write_git_dir(
     for sub in ("refs/heads", "refs/tags", "objects/info", "objects/pack"):
         os.makedirs(os.path.join(git_dir, *sub.split("/")), exist_ok=True)
     made: set[str] = set()
+    if raw_pack and not os.environ.get("APM_PERF_LOOSE_OBJECTS"):
+        # PERF CEILING HACK (row 1): the received pack as ONE file plus an idx-sized
+        # second file, instead of one loose zlib object per reached object. Git cannot
+        # read this idx; the safe version computes a real v2 idx (sorted oids, crc32,
+        # offsets) in memory: 2 writes either way.
+        name = hashlib.sha1(raw_pack).hexdigest()
+        pack_dir = os.path.join(objects_dir, "pack")
+        _write_file(os.path.join(pack_dir, f"pack-{name}.pack"), raw_pack, False)
+        _write_file(
+            os.path.join(pack_dir, f"pack-{name}.idx"), bytes(1072 + 28 * len(reached)), False
+        )
+        reached = set()
     for oid in reached:
         kind, data = objects[oid]
         fan = os.path.join(objects_dir, oid[:2])
@@ -992,7 +1005,8 @@ def fetch_worktree(
     try:
         upload_url, proxy, trust = _gate(url, env if env is not None else os.environ)
         body = _admitted_post(upload_url, proxy, trust, _request_body(sha))
-        objects = parse_pack(_pack_from_response(body))
+        raw_pack = _pack_from_response(body)
+        objects = parse_pack(raw_pack)
         files, reached = _plan(objects, sha)
         root = str(staged)
         made = {root}
@@ -1007,7 +1021,7 @@ def fetch_worktree(
                     made.add(directory)
             _write_file(os.path.join(directory, parts[-1]), objects[oid][1], executable)
             manifest[rel] = (oid, executable)
-        _write_git_dir(staged, url, sha, objects, reached, pins)
+        _write_git_dir(staged, url, sha, objects, reached, pins, raw_pack)
         if os.name != "nt":
             info = os.lstat(root)
             if not stat.S_ISDIR(info.st_mode):

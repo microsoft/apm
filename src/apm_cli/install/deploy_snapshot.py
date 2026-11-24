@@ -156,8 +156,16 @@ class DeployJournal:
     def _append_line(self, line: dict[str, Any]) -> None:
         if self.store is None:
             raise RuntimeError("no store to write the journal manifest to")
-        with open(self.store / _MANIFEST, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, sort_keys=True) + "\n")
+        # PERF N1 HACK (W3d S5): one handle per store, flushed per line: the same
+        # record order and the same durability as open/append/close (no fsync either way).
+        handle = getattr(self, "_handle", None)
+        if handle is None or getattr(self, "_handle_store", None) != self.store:
+            if handle is not None:
+                handle.close()
+            handle = open(self.store / _MANIFEST, "a", encoding="utf-8")  # noqa: SIM115
+            self._handle, self._handle_store = handle, self.store
+        handle.write(json.dumps(line, sort_keys=True) + "\n")
+        handle.flush()
 
     def _relative(self, path: Path) -> tuple[str, str]:
         """``(base, path)``: *path* as POSIX under APM home or the deploy root.
@@ -348,6 +356,10 @@ class DeployJournal:
 
     def discard(self) -> None:
         """Delete the stored copies and the empty store parent."""
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            handle.close()
+            self._handle = None
         store, self.store = self.store, None
         if store is None:
             return
