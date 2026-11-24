@@ -4,7 +4,7 @@
 pack index only for a plain SHA-1 repository and a non-delta entry in a pack
 that passes git's index checks; every other shape returns ``None`` (V1-V4).
 ``git_sparse`` memoizes a tracked-link plan per commit id within one command,
-never across replace refs, grafts or a non-regular HEAD (L1-L3).
+never across replace refs, grafts or a non-regular HEAD (L1-L3), and never\nfor a plan that reads link blobs (L5).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import hashlib
 import shutil
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -182,23 +183,61 @@ def _git_runner(repo: Path):
     return run
 
 
-@pytest.mark.skipif(_GIT is None, reason="needs git")
-def test_a_link_plan_is_memoized_per_commit_and_copied(tmp_path: Path) -> None:
-    """L1/L4: one plan per commit id in a command; every caller gets its own copy."""
+def _committed_repo(tmp_path: Path, *, link: bool) -> Path:
+    """A detached checkout of one commit, with a tracked symlink when ``link``."""
     repo = tmp_path / "repo"
     run = _git_runner(repo)
     run("init", "-q", str(repo))
     (repo / "a.txt").write_text("a\n", encoding="ascii")
-    run("-C", str(repo), "add", "a.txt")
+    if link:
+        (repo / "b.txt").symlink_to("a.txt")
+    run("-C", str(repo), "add", ".")
     run("-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "c")
     sha = run("-C", str(repo), "rev-parse", "HEAD").strip()
     run("-C", str(repo), "checkout", "-q", "--detach", sha)
+    return repo
+
+
+def _plan_twice(repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list, int]:
+    """Two plans of one commit in one command, and the ``ls-tree`` spawns they cost."""
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    real_run = subprocess.run
+    calls: list[list[str]] = []
+
+    def run(args, *pargs, **kwargs):
+        calls.append(list(args))
+        return real_run(args, *pargs, **kwargs)
+
     kwargs = {"env": None, "timeout": 30, "extra_git_args": None}
-    with invocation_scope():
-        first = git_sparse._plan_tracked_symlinks(str(_GIT), repo, None, **kwargs)
-        first[0]["mutated"] = []
-        second = git_sparse._plan_tracked_symlinks(str(_GIT), repo, None, **kwargs)
-    _assert_plan(second, ({}, {}))
+    plans = []
+    with invocation_scope(), monkeypatch.context() as patch:
+        patch.setattr(git_sparse.subprocess, "run", run)
+        for _ in range(2):
+            plans.append(git_sparse._plan_tracked_symlinks(str(_GIT), repo, None, **kwargs))
+        plans[0][0]["mutated"] = []
+    return plans, sum("ls-tree" in call for call in calls)
+
+
+@pytest.mark.skipif(_GIT is None, reason="needs git")
+def test_a_link_plan_is_memoized_per_commit_and_copied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L1/L4: a link-free plan costs one ls-tree per commit in a command; each
+    caller gets its own copy."""
+    plans, ls_trees = _plan_twice(_committed_repo(tmp_path, link=False), monkeypatch)
+    _assert_plan(plans[1], ({}, {}))
+    _assert_ls_trees(ls_trees, 1)
+
+
+@pytest.mark.skipif(_GIT is None or sys.platform == "win32", reason="needs git symlinks")
+def test_a_plan_with_links_is_recomputed_per_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L5: a plan that reads link blobs is never reused, so a partial clone fetches
+    its own blobs and one repository's blob failure never answers for another."""
+    plans, ls_trees = _plan_twice(_committed_repo(tmp_path, link=True), monkeypatch)
+    _assert_plan(set(plans[1][0]), {"b.txt"})
+    _assert_ls_trees(ls_trees, 4)
 
 
 @pytest.mark.parametrize("shape", ["symlink-head", "replace-ref", "grafts", "symbolic-head"])
@@ -242,6 +281,10 @@ def _assert_git_answer_used(result) -> None:
 
 def _assert_plan(plan, expected) -> None:
     assert plan == expected
+
+
+def _assert_ls_trees(observed: int, expected: int) -> None:
+    assert observed == expected
 
 
 def _assert_no_memo(repo: Path) -> None:

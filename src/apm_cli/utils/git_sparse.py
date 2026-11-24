@@ -338,9 +338,10 @@ def _plan_tracked_symlinks(
 ) -> tuple[dict[str, list[_LinkWrite]], dict[str, Exception]]:
     """Plan link materialization; the common no-link case costs one ``ls-tree``.
 
-    The plan is a pure function of the commit's tree, so within one command it is
-    computed once per commit id and paths (``invocation_memo``); each caller gets
-    its own copy, and link writes and containment still run per repository.
+    Within one command a link-free plan is computed once per commit id and paths
+    (``invocation_memo``). A plan with links is recomputed per repository: it reads
+    link blobs that a partial clone fetches on demand, and a blob read can fail
+    in one repository and succeed in another.
     """
     from apm_cli.core.invocation_memo import invocation_memo
 
@@ -355,7 +356,7 @@ def _plan_tracked_symlinks(
                 raise AssertionError("memoized link plan differs from ls-tree")
         return _copy_plan(memo[key])
     result = _plan_tracked_symlinks_uncached(*args, **kwargs)
-    if key is not None:
+    if key is not None and result == ({}, {}):
         memo[key] = _copy_plan(result)
     return result
 
