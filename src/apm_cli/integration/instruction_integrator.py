@@ -587,11 +587,15 @@ class InstructionIntegrator(BaseIntegrator):
                 )
 
             rel_path = portable_relpath(target_path, project_root)
-            if target.compile_family == "claude" and self._claude_rule_taken(
+            claude_rule = target.compile_family == "claude"
+            if claude_rule and self._claude_rule_taken(
                 target_path, rel_path, source_file, new_content, package_info, diagnostics
             ):
                 files_skipped += 1
                 continue
+
+            def note_writer(path=target_path, content=new_content) -> None:
+                self._claude_rule_writers.setdefault(path, (_package_label(package_info), content))
 
             # Compare against the rendered output, not the source: rule-dir
             # formats transform content, so a source-based adopt never matches
@@ -607,11 +611,11 @@ class InstructionIntegrator(BaseIntegrator):
                 diagnostics,
                 target_paths,
                 expected_content=new_content,
+                # The bytes already on disk are this package's: it holds the path.
+                on_identical=note_writer if claude_rule else None,
             )
-            if target.compile_family == "claude" and (adopted or not skip):
-                self._claude_rule_writers.setdefault(
-                    target_path, (_package_label(package_info), new_content)
-                )
+            if claude_rule and not skip:
+                note_writer()
             if skip:
                 if adopted:
                     files_adopted += 1
