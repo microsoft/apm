@@ -649,3 +649,57 @@ def test_withdrawal_retires_hooked_markdown_under_a_relocated_claude_root(
     rows = load_yaml(lock_path).get("local_deployed_files") or []
     assert hooked.as_posix() not in rows, rows
     assert plain.as_posix() in rows, rows
+
+
+@pytest.mark.parametrize("withdrawal", ["revoked", "denied"])
+def test_an_explicit_bundle_reinstall_retires_hooked_markdown_a_withdrawn_key_admitted(
+    tmp_path: Path, apm_binary_path: Path, withdrawal: str
+) -> None:
+    """#5308 review: ``apm install <bundle>`` retires as a plain install does."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    consumer = _consumer(world, "explicit-retire-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    hooked, plain = consumer / _DEPLOYED["command"], consumer / _DEPLOYED["skill"]
+    assert hooked.is_file() and plain.is_file()
+
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {} if withdrawal == "revoked" else {"deny": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    text = output(world.apm(consumer, "install", str(bundle), "--no-policy"))
+
+    assert "Retired 1 Markdown file(s) with frontmatter hooks from local bundle 'fmpkg'" in text
+    assert not hooked.exists()
+    assert plain.is_file()
+    lock = world.lock(consumer)
+    assert _DEPLOYED["command"] not in lock["local_deployed_files"]
+    assert _DEPLOYED["skill"] in lock["local_deployed_files"]
+
+
+def test_the_markdown_hook_record_is_managed_under_an_unmanaged_files_deny_policy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5308 review: APM's own approval record is never an unmanaged file."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    consumer = _consumer(world, "managed-record-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    assert (consumer / ".claude" / "apm-bundle-markdown-hooks.json").is_file()
+    policy = tmp_path / "apm-policy.yml"
+    write(
+        policy,
+        "name: acme\nversion: 1.0.0\nenforcement: block\n"
+        "unmanaged_files:\n  action: deny\n  directories: ['.claude']\n",
+    )
+
+    audited = world.apm(consumer, "audit", "--ci", "--policy", str(policy), expect=None)
+
+    text = output(audited)
+    assert "apm-bundle-markdown-hooks.json" not in text, text
+    assert audited.returncode == 0, text
