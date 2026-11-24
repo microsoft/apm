@@ -36,7 +36,7 @@ import shlex
 import shutil
 import sys
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -138,6 +138,7 @@ class EnterpriseRegistryWorld:
         self.producer_git: list[ScriptedRequest] = []
         self.catalog_outage = False
         self.partner_catalog: dict[str, object] = {"name": "partner-catalog", "plugins": []}
+        self.extra_hosts: dict[str, Callable[[ScriptedRequest], ScriptedResponse]] = {}
         self.catalog = {
             "name": "corp-catalog",
             "owner": {"name": "Corp Platform"},
@@ -169,6 +170,7 @@ class EnterpriseRegistryWorld:
             CATALOG_HOST: self._catalog,
             PARTNER_HOST: self._partner,
         }
+        handlers.update(self.extra_hosts)
         handlers.update(dict.fromkeys(PRODUCER_GIT_HOSTS, self._producer_git))
         with local_scripted_https_proxy(self.tls, handlers) as proxy:
             yield proxy
@@ -632,10 +634,6 @@ def _same_url(actual: str, expected: str) -> bool:
     )
 
 
-class _KnownRestoreRefusal(AssertionError):
-    """The printed restore command was refused (#5264)."""
-
-
 class _RebindWorld:
     """An employee locked on the company ``widget``, then a consented rebind to a partner."""
 
@@ -756,19 +754,163 @@ def test_consented_catalog_rebind_restores_the_locked_catalog(
         assert _state(rw.project) == rw.before
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=_KnownRestoreRefusal,
-    reason="#5264: the printed origin-restore command is refused as printed",
-)
-def test_origin_restore_hint_runs_as_printed(tmp_path: Path, apm_binary_path: Path) -> None:
-    """The printed 'keep the locked marketplace' command works exactly as printed."""
+@pytest.mark.parametrize("selector", ["catalog-selector", "manifest-selector"])
+def test_catalog_declaration_installs_under_a_default_registry(
+    tmp_path: Path, apm_binary_path: Path, selector: str
+) -> None:
+    """A {name, marketplace} entry resolves through its catalog when
+    ``registries.default`` is set; the default never claims it (#5256)."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    widget = world.catalog["plugins"][0]
+    widget.update(registry=REGISTRY_NAME, version=VERSION)
+    declaration: dict[str, str] = {"name": "widget", "marketplace": "corp-catalog"}
+    if selector == "manifest-selector":
+        declaration["version"] = f"^{VERSION}"
+    with world.serve() as proxy:
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer")
+        consumer["targets"] = ["copilot"]
+        consumer["dependencies"] = {"apm": [declaration]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+        world.egress_step(
+            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
+        )
+        installed = world.egress_step(
+            proxy,
+            env,
+            project,
+            *INSTALL,
+            step="install",
+            allowed=frozenset({CATALOG_HOST, REGISTRY_HOST}),
+        )
+        assert proxy.hosts_receiving(TOKEN) == {REGISTRY_HOST}, _evidence(installed, proxy)
+    assert "_marketplace/" not in installed.stdout + installed.stderr, _evidence(installed)
+    assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == [declaration]
+    _assert_registry_state(project, artifacts, world.registry)
+
+
+def test_a_shorthand_routes_to_the_default_registry_beside_a_catalog(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A plain shorthand naming a catalog plugin's package still routes to the
+    default registry; the catalog never claims it (#5256)."""
     world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
     with world.serve() as proxy:
-        rw = _RebindWorld(world, proxy)
-        _refusal, keep = rw.rebind_and_refuse("rebind")
-        result = world.run(rw.env, rw.project, *keep, step="keep-hint-verbatim", expect=None)
-        if result.returncode != 0:
-            raise _KnownRestoreRefusal(_evidence(result))
-        rw.step(*UPDATE, name="update-kept")
-        _assert_selected(rw.project, rw.widget, world.registry)
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer", (f"acme/widget#{VERSION}",))
+        consumer["targets"] = ["copilot"]
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+        world.egress_step(
+            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
+        )
+        world.egress_step(proxy, env, project, *INSTALL, step="install")
+    _assert_registry_state(project, artifacts, world.registry)
+    widget = _locked(project)["acme/widget"]
+    assert "discovered_via" not in widget and "marketplace_plugin_name" not in widget, widget
+
+
+def test_a_failed_catalog_declaration_names_the_plugin_and_its_catalog(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Unregistered catalog and missing plugin both name widget and corp-catalog,
+    never the internal id, and the printed hints run (#5256)."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    widget = world.catalog["plugins"][0]
+    widget.update(registry=REGISTRY_NAME, version=VERSION)
+    with world.serve() as proxy:
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer")
+        consumer["targets"] = ["copilot"]
+        consumer["dependencies"] = {"apm": [{"name": "widget", "marketplace": "corp-catalog"}]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+
+        def failed_install(step: str, hint: str) -> None:
+            result = world.run(env, project, *INSTALL, step=step, expect=1)
+            text = " ".join((result.stdout + result.stderr).split())
+            assert "'widget' from marketplace 'corp-catalog'" in text, _evidence(result)
+            assert "_marketplace/" not in text, _evidence(result)
+            assert f"Run '{hint}" in text, _evidence(result)
+            assert not (project / "apm.lock.yaml").exists()
+
+        failed_install("unregistered", "apm marketplace add https://")
+        world.egress_step(
+            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
+        )
+        world.egress_step(
+            proxy,
+            env,
+            project,
+            *INSTALL,
+            step="install-after-add",
+            allowed=frozenset({CATALOG_HOST, REGISTRY_HOST}),
+        )
+        _assert_registry_state(project, artifacts, world.registry)
+
+        world.run(env, project, "uninstall", "widget@corp-catalog", step="uninstall", expect=None)
+        widget["name"] = "gadget"
+        world.run(env, project, "marketplace", "update", "corp-catalog", step="refresh")
+        dump_yaml(consumer, project / "apm.yml")
+        (project / "apm.lock.yaml").unlink(missing_ok=True)
+        failed_install("missing", "apm marketplace browse corp-catalog")
+        browse = world.run(env, project, "marketplace", "browse", "corp-catalog", step="browse")
+    assert "gadget" in browse.stdout, _evidence(browse)
+
+
+def test_origin_restore_hint_runs_as_printed(tmp_path: Path, apm_binary_path: Path) -> None:
+    """After a consented alias rebind, the printed restore command runs as
+    printed and ``apm update`` then proceeds on the locked package (#5264)."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    world.catalog["plugins"][0].update(registry=REGISTRY_NAME, version=VERSION)
+    partner_host = "catalog.partner.example"
+    partner_url = f"https://{partner_host}/apm/marketplace.json"
+    world.extra_hosts[partner_host] = world._catalog
+    declaration = {"name": "widget", "marketplace": "corp-catalog"}
+    with world.serve() as proxy:
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer")
+        consumer["registries"] = {REGISTRY_NAME: {"url": REGISTRY_URL}}
+        consumer["targets"] = ["copilot"]
+        consumer["dependencies"] = {"apm": [declaration]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+        world.run(env, project, "marketplace", "add", CATALOG_URL, step="add")
+        world.run(env, project, *INSTALL, step="install")
+        locked = (project / "apm.lock.yaml").read_bytes()
+        rebind = ("marketplace", "add", partner_url, "--name", "corp-catalog", "--yes")
+        world.run(env, project, *rebind, step="rebind")
+
+        refused = world.run(env, project, "update", "--yes", step="update-refused", expect=1)
+        text = " ".join((refused.stdout + refused.stderr).split())
+        restore = re.search(r"Otherwise, (.*?) to keep the locked marketplace", text)
+        assert restore is not None, _evidence(refused)
+        commands = re.findall(r"run '(apm [^']+)'", restore.group(1))
+        assert commands and commands[-1].startswith("apm marketplace add "), commands
+        assert (project / "apm.lock.yaml").read_bytes() == locked
+
+        for number, command in enumerate(commands):
+            world.run(env, project, *shlex.split(command)[1:], step=f"restore-{number}")
+        world.run(env, project, "update", "--yes", step="update-after-restore")
+    registered = json.loads((world.employee.config_root / "marketplaces.json").read_text("utf-8"))
+    assert [(m["name"], m["url"]) for m in registered["marketplaces"]] == [
+        ("corp-catalog", CATALOG_URL)
+    ]
+    entry = _locked(project)["acme/widget"]
+    assert entry["source"] == "registry" and entry["version"] == VERSION, entry
+    assert (project / _deployed("widget")).read_bytes() == _member(
+        artifacts["widget"].data, "widget"
+    )

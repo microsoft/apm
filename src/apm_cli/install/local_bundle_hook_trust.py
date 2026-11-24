@@ -323,17 +323,36 @@ def _retire_per_file(
         sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
         if not sidecar.is_file():
             continue
-        records = per_file_bundle_hook_keys(sidecar)
-        if item.slug not in records:
-            continue
-        key, files = records[item.slug]
         try:
+            records = per_file_bundle_hook_keys(sidecar)
+            if item.slug not in records:
+                continue
+            key, files = records[item.slug]
             write_per_file_bundle_record(
                 sidecar, item.slug, key, [value for value in files if value in kept]
             )
-        except OSError:
+        except (OSError, ValueError, TypeError):
             unwritten.add(_record_value(sidecar, Path(project_root)))
     return kept, unwritten
+
+
+def _unreadable_per_file_sidecars(project_root: Path, targets: Any) -> list[str]:
+    """Per-file sidecars whose bundle records cannot be read, named for the user."""
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
+    from apm_cli.integration.hook_ownership import per_file_bundle_hook_keys
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    unreadable = []
+    for target in _per_file_targets(targets):
+        sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
+        if not sidecar.is_file():
+            continue
+        try:
+            per_file_bundle_hook_keys(sidecar)
+        except (OSError, ValueError, TypeError):
+            label = printable_ascii_text(_record_value(sidecar, Path(project_root)))
+            unreadable.append(f"{label} (unreadable)")
+    return unreadable
 
 
 def _drop_lock_rows(lock_dir: Path, paths: Collection[str]) -> None:
@@ -526,19 +545,36 @@ def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str
     return tails
 
 
-def _hook_commands(node: Any) -> Iterator[str]:
-    """Yield every hook command field anywhere in a per-file hook document."""
+def _hook_commands(document: Any) -> list[str]:
+    """Commands a per-file hook document runs, read from handler positions only (#5136).
+
+    The shared hook grammar locates the handlers, so metadata that merely names
+    a script (``env.command``) runs nothing. A shape the grammar does not
+    recognize (a Kiro action list, a malformed entry) is scanned whole, as
+    before, so it still fails closed.
+    """
+    from apm_cli.hook_contract import HookContractError, parse_hook_source
+
+    try:
+        commands = [declared.command for declared in parse_hook_source(document).commands]
+    except HookContractError:
+        commands = list(_every_command_field(document))
+    return [command.replace("\\", "/") for command in commands]
+
+
+def _every_command_field(node: Any) -> Iterator[str]:
+    """Every hook command field anywhere in a document the grammar cannot read."""
     from apm_cli.hook_contract import HOOK_COMMAND_KEYS
 
     if isinstance(node, dict):
         for key, value in node.items():
             if key in HOOK_COMMAND_KEYS and isinstance(value, str):
-                yield value.replace("\\", "/")
+                yield value
             else:
-                yield from _hook_commands(value)
+                yield from _every_command_field(value)
     elif isinstance(node, list):
         for item in node:
-            yield from _hook_commands(item)
+            yield from _every_command_field(item)
 
 
 def _per_file_configs_running(
@@ -740,6 +776,9 @@ def retire_bundle_hooks(
     if still_running:
         # Nothing is retired: the bundle keeps the ownership trust checks read.
         return BundleHookRetirement(True, tuple(sorted(still_running)))
+    if unreadable := _unreadable_per_file_sidecars(project_root, targets):
+        # Read before any retirement write: a corrupt record retires nothing (#5144).
+        return BundleHookRetirement(True, tuple(unreadable))
     failed = retire_merged_bundle_entries(project_root, targets, slug)
     if failed:
         return BundleHookRetirement(True, tuple(failed))
@@ -795,15 +834,45 @@ def bundle_hook_cleanup_targets(targets: Any, *, user_scope: bool) -> list[Any]:
     manifest's targets; retirement only touches what the bundle owns, so the
     cleanup set covers every target that can hold hooks in this scope.
     """
+    from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
     from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+    from apm_cli.utils.path_security import PathTraversalError
 
     found = {target.name: target for target in targets or ()}
     for profile in KNOWN_TARGETS.values():
-        # An unresolvable user root (relative CODEX_HOME) only drops that target.
-        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
-        if scoped is not None and scoped.name not in found and scoped.supports("hooks"):
+        if profile.name in found or not profile.supports("hooks"):
+            continue
+        # An unresolvable user root (relative CODEX_HOME, two OneDrive mounts)
+        # never received a deploy, so it only drops that target.
+        try:
+            scoped = scoped_profile_or_none(profile, user_scope=user_scope)
+        except (CoworkResolutionError, PathTraversalError, OSError, ValueError):
+            continue
+        if scoped is not None and scoped.supports("hooks"):
             found[scoped.name] = scoped
     return list(found.values())
+
+
+def bundle_hook_recheck_targets(targets: Any, *, root: Path, user_scope: bool) -> list[Any]:
+    """Return every hook target of the scope the bundle hook re-check covers.
+
+    The manifest's *targets* plus every hook-capable target (see
+    :func:`bundle_hook_cleanup_targets`). At project scope an added target
+    whose root under *root* is reached through a link is left out: the
+    manifest did not choose it, and it may name another project's config.
+    """
+    from apm_cli.utils.path_security import has_symlink_component
+
+    found = bundle_hook_cleanup_targets(targets, user_scope=user_scope)
+    if user_scope:
+        return found
+    named = {target.name for target in targets or ()}
+    base = Path(root)
+    return [
+        target
+        for target in found
+        if target.name in named or not has_symlink_component(base, base / target.root_dir)
+    ]
 
 
 class BundleHookTargetsUnresolved(RuntimeError):
@@ -844,13 +913,16 @@ def reconcile_scope_bundle_hooks(
 
     Install, update and prune call this. Returns the unadmitted hooks.
     """
-    from apm_cli.core.scope import get_apm_dir
+    from apm_cli.core.scope import get_apm_dir, is_user_scope
 
     from .local_bundle_canvas import retire_unadmitted_bundle_canvas
 
     root, targets, allow_provider = scope_bundle_hook_inputs(
         scope, apm_package, no_policy=no_policy, logger=logger
     )
+    # A bundle installed with --target may hold hooks in a target the manifest
+    # does not name: every hook target of the scope is re-checked.
+    targets = bundle_hook_recheck_targets(targets, root=root, user_scope=is_user_scope(scope))
     lock_dir = get_apm_dir(scope)
     hooks = retire_unadmitted_bundle_hooks(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run

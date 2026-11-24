@@ -28,6 +28,7 @@ from pathlib import Path
 from stat import S_ISLNK
 
 from .file_ops import robust_rmtree
+from .paths import is_within, relative_posix, relative_to
 
 
 class PathTraversalError(ValueError):
@@ -236,9 +237,7 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
         _strip_extended_prefix(resolved_base),
     )
     try:
-        if not resolved.is_relative_to(resolved_base):
-            return None
-        return resolved.relative_to(resolved_base).as_posix()
+        return relative_posix(resolved, resolved_base)
     except (TypeError, ValueError):
         return None
 
@@ -248,7 +247,7 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     resolved = _strip_extended_prefix(path.resolve())
     resolved_base = _strip_extended_prefix(resolved_base)
     try:
-        if not resolved.is_relative_to(resolved_base):
+        if not is_within(resolved, resolved_base):
             raise PathTraversalError(
                 f"Path '{path}' resolves to '{resolved}' which is outside "
                 f"the allowed base directory '{resolved_base}'"
@@ -307,6 +306,29 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     return kept
 
 
+def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
+    """Return the first symlinked component of *path* below *base_dir*, or ``None``.
+
+    ``..`` is collapsed first; the walk stops at the first missing component.
+    Raises ``ValueError`` when *path* is not under *base_dir* or a ``..``
+    escapes it or steps back over a link, and ``OSError`` when a component
+    cannot be inspected; :func:`has_symlink_component` turns both into a refusal.
+    """
+    parts = _collapse_relative_parts(base_dir, relative_to(path, base_dir).parts)
+    if parts is None:
+        raise ValueError(f"{path} leaves {base_dir} or steps back over a link")
+    current = base_dir
+    for part in parts:
+        current /= part
+        try:
+            linked = S_ISLNK(current.lstat().st_mode)
+        except FileNotFoundError:
+            return None
+        if linked:
+            return current
+    return None
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     """Reject linked components, optionally preserving access errors for diagnostics.
 
@@ -314,19 +336,7 @@ def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = 
     cannot hide a linked component after it.
     """
     try:
-        parts = _collapse_relative_parts(base_dir, path.relative_to(base_dir).parts)
-        if parts is None:
-            return True
-        current = base_dir
-        for part in parts:
-            current /= part
-            try:
-                linked = S_ISLNK(current.lstat().st_mode)
-            except FileNotFoundError:
-                return False
-            if linked:
-                return True
-        return False
+        return first_symlink_component(base_dir, path) is not None
     except OSError:
         if raise_on_error:
             raise

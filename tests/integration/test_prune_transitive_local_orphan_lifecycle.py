@@ -1,0 +1,901 @@
+"""Prune removes a transitive local dependency no survivor declares (#4989).
+
+PROMISE: P-OWN-orphan-package-selection -- ``apm prune`` treats a transitive
+local dependency that no surviving package declares any more as an orphan:
+its lock row goes, and its deployed files go only where deployment evidence
+(receipts or the locked render) proves APM wrote them. An edited or unproven
+file is kept and named; a partial graph keeps everything and reports it
+(source: #4989 scope record).
+CELL: OP=prune SRC=local PRIM=skill SCOPE=project LOCK=consistent
+GRAPH=transitive-local-orphan | path variants: symlinked or junctioned dir,
+mixed case, NFC and NFD names, and the same directory spelled two ways.
+
+Graph: dev ``d -> ../e``, ``e -> ../f`` and dev ``a -> ../f``. Removing
+``./vendor/d`` from apm.yml leaves ``e`` unreachable while ``f`` is still
+needed by ``a``.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+import unicodedata
+from pathlib import Path
+
+import pytest
+
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.deps.lockfile import LockFile
+from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from tests.integration._install_audit_replay_kit import ReplayWorld, lock_bytes, tree_digest
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-OWN-orphan-package-selection", "P-INV-I1", "P-INV-I3"),
+]
+
+_E_SKILL = ".claude/skills/e-skill"
+_F_SKILL = ".claude/skills/f-skill"
+_NO_EVIDENCE = "no local deployment receipt or render of the locked package version"
+_NFC = unicodedata.normalize("NFC", "\u00e9")
+_NFD = unicodedata.normalize("NFD", "\u00e9")
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _skill_package(root: Path, name: str, deps: tuple[str, ...] = ()) -> None:
+    manifest = f"name: {name}\nversion: 1.0.0\n"
+    if deps:
+        manifest += "dependencies:\n  apm:\n" + "".join(f"    - {dep}\n" for dep in deps)
+    _write(root / "apm.yml", manifest)
+    _write(
+        root / f".apm/skills/{name}-skill/SKILL.md",
+        f"---\nname: {name}-skill\ndescription: Skill of {name}\n---\n# {name}\n",
+    )
+
+
+def _manifest(world: ReplayWorld, dev: list[str]) -> None:
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": []},
+            "devDependencies": {"apm": dev},
+        },
+        world.project / "apm.yml",
+    )
+
+
+def _link_dir(link: Path, target: Path) -> None:
+    """A directory symlink, or an NTFS junction where symlinks need privileges."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        if sys.platform != "win32":
+            raise
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+
+
+def _fs_folds(spelling: str, other: str, tmp_path: Path) -> bool:
+    """True when this filesystem opens *other* as the directory *spelling*."""
+    probe = tmp_path / "fold-probe"
+    (probe / spelling).mkdir(parents=True)
+    return (probe / other).is_dir()
+
+
+def _world(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    *,
+    e_dir: str = "e",
+    f_dir: str = "f",
+    a_spells_f: str | None = None,
+) -> ReplayWorld:
+    """Install dev d -> e -> f and dev a -> f, then drop ./vendor/d from apm.yml."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / f_dir, "f")
+    _skill_package(vendor / e_dir, "e", (f"../{f_dir}",))
+    _skill_package(vendor / "d", "d", (f"../{e_dir}",))
+    _skill_package(vendor / "a", "a", (f"../{a_spells_f or f_dir}",))
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    assert _row_named(world, "e")[1]["declaring_parent"] == "./vendor/d"
+    _manifest(world, ["./vendor/a"])
+    return world
+
+
+def _rows(world: ReplayWorld) -> dict[str, dict]:
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    return {row["repo_url"]: row for row in lock["dependencies"]}
+
+
+def _row_named(world: ReplayWorld, name: str) -> tuple[str, dict]:
+    return next((key, row) for key, row in _rows(world).items() if row.get("name") == name)
+
+
+def _installed(world: ReplayWorld) -> set[str]:
+    return {path.name for path in (world.project / "apm_modules" / "_local").iterdir()}
+
+
+def _output(result) -> str:
+    return " ".join((result.stdout + result.stderr).split())
+
+
+def _assert_frozen_then_no_frozen_converge(world: ReplayWorld) -> None:
+    """Cell 4: frozen passes after prune and a following --no-frozen keeps the lock bytes."""
+    pruned = lock_bytes(world.project)
+    world.apm("install", "--frozen")
+    assert lock_bytes(world.project) == pruned
+    world.apm("install", "--no-frozen")
+    assert lock_bytes(world.project) == pruned
+
+
+def _assert_orphan_pruned(world: ReplayWorld) -> None:
+    rows = _rows(world)
+    assert "_local/e" not in rows, sorted(rows)
+    assert {"_local/a", "_local/f"} <= set(rows), sorted(rows)
+    assert not (world.project / _E_SKILL).exists()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    deployed = {path for row in rows.values() for path in row.get("deployed_files") or []}
+    assert not any(path.startswith(_E_SKILL) for path in deployed), deployed
+
+
+def test_prune_removes_transitive_local_orphan_and_keeps_shared_dependency(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Cells 1 and 4: e's row and proven files go; f stays; frozen and no-frozen agree."""
+    world = _world(tmp_path, apm_binary_path)
+
+    preview = _output(world.apm("prune", "--dry-run"))
+    assert "Found 2 orphaned package(s)" in preview, preview
+    installed = _installed(world)
+
+    before = tree_digest(world.project)
+    pruned = _output(world.apm("prune"))
+
+    assert "Removed _local/d" in pruned, pruned
+    assert pruned.count("Removed _local/") == 2, pruned
+    assert len(_installed(world)) == len(installed) - 2
+    _assert_orphan_pruned(world)
+    after = tree_digest(world.project)
+    changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+    assert changed == {
+        "apm.lock.yaml",
+        f"{_E_SKILL}/SKILL.md",
+        ".claude/skills/d-skill/SKILL.md",
+    }, sorted(changed)
+    assert "nothing to prune" in _output(world.apm("prune", "--dry-run")).lower()
+    _assert_frozen_then_no_frozen_converge(world)
+    world.audit_clean()
+
+
+def test_prune_keeps_an_edited_file_of_the_orphan_and_names_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Cell 2: a user-edited file of e is kept with a diagnostic; e's row still goes."""
+    world = _world(tmp_path, apm_binary_path)
+    edited = world.project / _E_SKILL / "SKILL.md"
+    edited.write_text(edited.read_text(encoding="utf-8") + "\nmine\n", encoding="utf-8")
+    edited_bytes = edited.read_bytes()
+
+    pruned = _output(world.apm("prune"))
+
+    assert (
+        f"Skipped removing {_E_SKILL}/SKILL.md: file has been edited since APM deployed it"
+    ) in pruned, pruned
+    assert edited.read_bytes() == edited_bytes
+    assert "_local/e" not in _rows(world)
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+def test_prune_keeps_an_orphan_file_without_deployment_evidence(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Cell 3: a file e's row claims but APM cannot prove it wrote is kept and named."""
+    world = _world(tmp_path, apm_binary_path)
+    forged = ".claude/skills/e-skill/notes.md"
+    user = world.project / forged
+    _write(user, "# My own notes\n")
+    lock_path = world.project / "apm.lock.yaml"
+    lock = LockFile.read(lock_path)
+    assert lock is not None
+    (row,) = [dep for dep in lock.dependencies.values() if dep.repo_url == "_local/e"]
+    row.deployed_files.append(forged)
+    row.deployed_file_hashes[forged] = compute_file_hash(user)
+    DeploymentLedgerCodec.refresh_from_legacy(lock)
+    lock.write(lock_path)
+
+    pruned = _output(world.apm("prune"))
+
+    assert f"Kept {forged}: {_NO_EVIDENCE}" in pruned, pruned
+    assert user.read_text(encoding="utf-8") == "# My own notes\n"
+    assert not (world.project / _E_SKILL / "SKILL.md").exists()
+    assert "_local/e" not in _rows(world)
+
+
+@pytest.mark.parametrize("damage", ["malformed", "directory"])
+def test_prune_with_a_partial_graph_keeps_the_orphan_and_reports(
+    tmp_path: Path, apm_binary_path: Path, damage: str
+) -> None:
+    """A survivor whose manifest cannot be read keeps every local transitive and says so."""
+    world = _world(tmp_path, apm_binary_path)
+    manifest = world.project / "vendor" / "a" / "apm.yml"
+    if damage == "malformed":
+        manifest.write_text("name: [\n", encoding="utf-8")
+    else:
+        manifest.unlink()
+        manifest.mkdir()
+
+    pruned = _output(world.apm("prune"))
+
+    assert "_local/e" in _rows(world)
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert "Retained _local/e: the dependency graph could not be read completely" in pruned, pruned
+    assert pruned.count("Retained _local/e:") == 1, pruned
+
+
+def test_prune_keeps_local_rows_when_an_anchor_cannot_resolve(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A lock row whose declaring parent is gone has an unknown subtree: local rows stay, named."""
+    world = _world(tmp_path, apm_binary_path)
+    lock_path = world.project / "apm.lock.yaml"
+    lock = LockFile.read(lock_path)
+    assert lock is not None
+    (d_key,) = [key for key, dep in lock.dependencies.items() if dep.repo_url == "_local/d"]
+    lock.dependencies.pop(d_key)
+    lock.write(lock_path)
+
+    pruned = _output(world.apm("prune"))
+
+    assert "Retained _local/e: the dependency graph could not be read completely" in pruned, pruned
+    assert pruned.count("Retained _local/e:") == 1, pruned
+    rows = _rows(world)
+    assert {"_local/a", "_local/e", "_local/f"} == set(rows), sorted(rows)
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("e_dir", "f_dir"),
+    [
+        pytest.param("E-Pkg", "F-Pkg", id="mixed-case"),
+        pytest.param(f"e{_NFC}", f"f{_NFC}", id="nfc"),
+        pytest.param(f"e{_NFD}", f"f{_NFD}", id="nfd"),
+    ],
+)
+def test_prune_matches_exact_lock_keys_for_name_variants(
+    tmp_path: Path, apm_binary_path: Path, e_dir: str, f_dir: str
+) -> None:
+    """Path cells: case and Unicode-normalization spellings keep their exact lock keys."""
+    world = _world(tmp_path, apm_binary_path, e_dir=e_dir, f_dir=f_dir)
+    e_key, f_key = _row_named(world, "e")[0], _row_named(world, "f")[0]
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert e_key not in rows, sorted(rows)
+    assert f_key in rows, sorted(rows)
+    assert not (world.project / _E_SKILL).exists()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    _assert_frozen_then_no_frozen_converge(world)
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("linked", ["e", "f"])
+def test_prune_through_a_symlinked_or_junctioned_local_dir(
+    tmp_path: Path, apm_binary_path: Path, linked: str
+) -> None:
+    """Path cell: a linked package dir resolves to the same node as its target."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ("../f",)), ("d", ("../e",)), ("a", ("../f",))):
+        _skill_package(vendor / (f"{name}-real" if name == linked else name), name, deps)
+    _link_dir(vendor / linked, vendor / f"{linked}-real")
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    _assert_orphan_pruned(world)
+    _assert_frozen_then_no_frozen_converge(world)
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("e_spells_f", "a_spells_f"),
+    [
+        pytest.param("f", "f-link", id="symlink-alias"),
+        pytest.param("F-Pkg", "f-pkg", id="case-alias"),
+        pytest.param(f"f{_NFC}", f"f{_NFD}", id="nfc-alias"),
+    ],
+)
+def test_prune_keeps_a_survivor_spelled_another_way(
+    tmp_path: Path, apm_binary_path: Path, e_spells_f: str, a_spells_f: str
+) -> None:
+    """The shared dependency reached through another spelling of its dir is not an orphan."""
+    if a_spells_f == "f-link":
+        world = _world(tmp_path, apm_binary_path, f_dir=e_spells_f, a_spells_f=None)
+        _link_dir(world.project / "vendor" / a_spells_f, world.project / "vendor" / e_spells_f)
+        _skill_package(world.project / "vendor" / "a", "a", (f"../{a_spells_f}",))
+    else:
+        if not _fs_folds(e_spells_f, a_spells_f, tmp_path):
+            pytest.skip("this filesystem keeps both spellings distinct")
+        world = _world(tmp_path, apm_binary_path, f_dir=e_spells_f, a_spells_f=a_spells_f)
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" not in rows, sorted(rows)
+    assert any(row.get("name") == "f" for row in rows.values()), sorted(rows)
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+def test_prune_reparents_a_survivor_whose_recorded_parent_goes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Equal-depth diamond: f was recorded under e; after prune it takes z, as install would."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("e", ("../f",)),
+        ("z", ("../f",)),
+        ("d", ("../e",)),
+        ("a", ("../z",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/e"
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" not in rows, sorted(rows)
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/z"
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    _assert_frozen_then_no_frozen_converge(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A source directory that cannot resolve keeps its row and is named, not a crash.
+
+    Its subtree is unknown, so the graph is partial: every other local
+    candidate is kept and named too; nothing is deleted.
+    """
+    world = _world(tmp_path, apm_binary_path)
+    source = world.project / "vendor" / "e"
+    shutil.rmtree(source)
+    os.symlink(source, source, target_is_directory=True)
+
+    pruned = _output(world.apm("prune"))
+
+    assert "Retained _local/e:" in pruned, pruned
+    assert "Traceback" not in pruned and "Failed to parse" not in pruned, pruned
+    assert "Retained _local/d: the dependency graph could not be read completely" in pruned, pruned
+    assert {"_local/d", "_local/e"} <= set(_rows(world))
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert (world.project / ".claude/skills/d-skill/SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_keeps_the_parent_of_a_survivor_reached_through_an_alias(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """f survives only through z -> ../f-link, an alias install would re-record and move.
+
+    Prune does not re-key packages, so it keeps f's recorded parent chain and
+    names it; frozen replay passes and a second prune changes no bytes. A
+    following --no-frozen install still re-records f under the alias spelling
+    once d left apm.yml, with or without prune (alias re-key tracked in #5126).
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("g", ()),
+        ("h", ()),
+        ("f", ("../g",)),
+        ("e", ("../f", "../g", "../h")),
+        ("d", ("../e",)),
+        ("z", ("../f-link",)),
+        ("a", ("../z",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _link_dir(vendor / "f-link", vendor / "f")
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a"])
+    f_row = _row_named(world, "f")
+    # An unrelated, unlocked root is still pruned alongside the kept chain.
+    stray = world.project / "apm_modules" / "acme" / "stray"
+    _write(stray / "SKILL.md", "---\nname: stray\ndescription: Stray skill\n---\n# stray\n")
+
+    pruned = _output(world.apm("prune"))
+
+    assert "Retained _local/e:" in pruned, pruned
+    assert not stray.exists()
+    # Inspection agrees with prune: the kept chain is not reported as orphaned.
+    listed = _output(world.apm("deps", "list"))
+    assert "orphaned package(s) found" not in listed, listed
+    rows = _rows(world)
+    assert "_local/e" in rows, sorted(rows)
+    # e is kept, so h, which only e declares, keeps its row and files too.
+    assert "_local/h" in rows, sorted(rows)
+    assert (world.project / ".claude/skills/h-skill/SKILL.md").is_file()
+    assert _row_named(world, "f") == f_row
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    world.apm("install", "--frozen")
+    settled = lock_bytes(world.project)
+    world.apm("prune")
+    assert lock_bytes(world.project) == settled
+
+
+def test_prune_reparents_a_legacy_local_row_with_its_path(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A lock without declaring_parent: the survivor takes its new parent's path too.
+
+    Locks from before declaring_parent still record anchored_local_path, so
+    only declaring_parent is removed; frozen replay passes after prune.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("e", ("../f",)),
+        ("sub/z", ("../../f",)),
+        ("d", ("../e",)),
+        ("a", ("../sub/z",)),
+    ):
+        _skill_package(vendor / name, name.rsplit("/", 1)[-1], deps)
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    lock_path = world.project / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    for row in lock["dependencies"]:
+        row.pop("declaring_parent", None)
+    dump_yaml(lock, lock_path)
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" not in rows, sorted(rows)
+    assert _row_named(world, "f")[1]["local_path"] == "../../f"
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    world.apm("install", "--frozen")
+
+
+_REPLACE_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
+
+
+def test_prune_keeps_a_local_child_of_a_retained_replaced_package(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """d -> test/r (replaced by local vendor/r) -> ../e: dropping d never loses r or e.
+
+    Prune refuses before any change when d is the replacement's only recorded
+    parent (#5140), so e's row and files stay, under --dry-run and for real.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    world.publish("r", lambda root, name: _skill_package(root, name))
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "r", "r", ("../e",))
+    _skill_package(vendor / "d", "d", ("test/r",))
+    manifest = {
+        "$schema": _REPLACE_SCHEMA,
+        "name": "proj",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {"apm": []},
+        "devDependencies": {"apm": ["./vendor/d"]},
+        "replace": [{"for": {"git": "https://github.com/test/r"}, "with": {"path": "./vendor/r"}}],
+    }
+    dump_yaml(manifest, world.project / "apm.yml")
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    assert "_local/e" in _rows(world)
+    manifest["devDependencies"] = {"apm": []}
+    dump_yaml(manifest, world.project / "apm.yml")
+    lock = lock_bytes(world.project)
+
+    for args in (("prune", "--dry-run"), ("prune",)):
+        refused = _output(world.apm(*args, expect=1))
+
+        assert "Cannot prune ./vendor/d" in refused, refused
+        assert "Nothing was changed" in refused, refused
+        assert lock_bytes(world.project) == lock
+        assert "_local/e" in _rows(world)
+        assert (world.project / _E_SKILL / "SKILL.md").is_file()
+
+
+def test_prune_treats_a_surviving_single_file_dependency_as_a_leaf(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A declared primitive file cannot declare children, so the walk stays complete."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    _skill_package(vendor / "a", "a", ("../f",))
+    _write(
+        world.project / "ai" / "xyz.agent.md",
+        "---\nname: xyz\ndescription: An agent\n---\n# xyz\n",
+    )
+    _manifest(world, ["./vendor/d", "./vendor/a", "./ai/xyz.agent.md"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a", "./ai/xyz.agent.md"])
+
+    pruned = _output(world.apm("prune"))
+
+    assert "could not be read" not in pruned, pruned
+    _assert_orphan_pruned(world)
+
+
+def test_prune_keeps_everything_when_a_survivor_dir_became_a_plain_file(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """vendor/a replaced by an unsupported file is unreadable, not a leaf: f stays."""
+    world = _world(tmp_path, apm_binary_path)
+    survivor = world.project / "vendor" / "a"
+    shutil.rmtree(survivor)
+    survivor.write_text("not a package\n", encoding="utf-8")
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "_local/f" in rows, sorted(rows)
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    assert "could not be read" in pruned, pruned
+
+
+def test_reachability_admits_a_shared_file_against_the_edge_that_declares_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Production a declares ../../ai/rule.instructions.md, also a dev root: the walk completes."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    _skill_package(vendor / "a", "a", ("../f", "../../ai/rule.instructions.md"))
+    _write(
+        world.project / "ai" / "rule.instructions.md",
+        "---\napplyTo: '**'\ndescription: A rule\n---\n# rule\n",
+    )
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/a"]},
+            "devDependencies": {"apm": ["./vendor/d", "./ai/rule.instructions.md"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    # Uninstall walks production roots before dev roots, so a's edge to the
+    # file is read before the file's own dev declaration.
+    world.apm("uninstall", "./vendor/d")
+
+    _assert_orphan_pruned(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_keeps_the_children_of_a_retained_unreadable_source(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """e (kept: its source is a symlink loop) also declares h, so h stays."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "h", "h")
+    _skill_package(vendor / "e", "e", ("../h",))
+    _skill_package(vendor / "d", "d", ("../e", "../h"))
+    _skill_package(vendor / "a", "a")
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    source = vendor / "e"
+    shutil.rmtree(source)
+    os.symlink(source, source, target_is_directory=True)
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" in rows and "_local/h" in rows, sorted(rows)
+    assert (world.project / ".claude/skills/h-skill/SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_with_a_looping_surviving_root_keeps_candidates_and_reports(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A surviving root whose source is a symlink loop makes the graph partial, not a crash."""
+    world = _world(tmp_path, apm_binary_path)
+    survivor = world.project / "vendor" / "a"
+    shutil.rmtree(survivor)
+    os.symlink(survivor, survivor, target_is_directory=True)
+
+    result = world.apm("prune", expect=None)
+
+    text = _output(result)
+    assert result.returncode == 0, text
+    assert "could not be read" in text, text
+    assert "_local/e" in _rows(world)
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="hard links on POSIX only here")
+def test_prune_matches_hard_linked_primitive_files_by_path(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two hard-linked agent files are distinct dependencies; the dropped one goes."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    agents = world.project / "ai"
+    _write(agents / "kept.agent.md", "---\nname: kept\ndescription: An agent\n---\n# agent\n")
+    os.link(agents / "kept.agent.md", agents / "dropped.agent.md")
+    _manifest(world, ["./ai/kept.agent.md", "./ai/dropped.agent.md"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./ai/kept.agent.md"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert not any("dropped" in key for key in rows), sorted(rows)
+    assert any("kept" in key for key in rows), sorted(rows)
+    assert (agents / "kept.agent.md").is_file()
+
+
+def test_prune_keeps_the_parent_chain_when_the_new_parent_is_unlocked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """a now declares an uninstalled z -> f: f must not be recorded under a row-less z."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ("../f",)), ("d", ("../e",)), ("a", ())):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _skill_package(vendor / "z", "z", ("../f",))
+    _skill_package(vendor / "a", "a", ("../z",))
+    _manifest(world, ["./vendor/a"])
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(rows), sorted(rows)
+    assert "_local/z" not in rows, sorted(rows)
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/e"
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    lock_bytes = (world.project / "apm.lock.yaml").read_bytes()
+    world.apm("prune")
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock_bytes
+
+
+def test_prune_keeps_children_of_an_anchor_chain_below_a_declared_parent(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two anchor chains: one under removed d, one under still-declared p. q's child k stays."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("e", ("../f",)),
+        ("d", ("../e",)),
+        ("a", ()),
+        ("h", ()),
+        ("k", ()),
+        ("r", ("../h",)),
+        ("q", ("../r", "../k")),
+        ("p", ("../q",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a", "./vendor/p"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _skill_package(vendor / "z", "z", ("../f",))
+    _skill_package(vendor / "a", "a", ("../z",))
+    _skill_package(vendor / "y", "y", ("../r",))
+    _skill_package(vendor / "p", "p", ("../y",))
+    _manifest(world, ["./vendor/a", "./vendor/p"])
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/q:" in pruned, pruned
+    assert {"_local/q", "_local/k", "_local/r"} <= set(rows), sorted(rows)
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
+    assert (world.project / ".claude/skills/k-skill/SKILL.md").is_file()
+
+
+def test_prune_keeps_the_parent_chain_of_a_survivor_now_declared_directly(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """d -> e -> f, then apm.yml declares ./vendor/f instead of d: f keeps a locked parent."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ("../f",)), ("d", ("../e",))):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/f"])
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert {"_local/e", "_local/f"} <= set(rows), sorted(rows)
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    lock_bytes = (world.project / "apm.lock.yaml").read_bytes()
+    world.apm("prune")
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock_bytes
+
+
+def test_prune_keeps_the_parent_chain_when_equally_near_parents_disagree(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """f is reached at one depth from sub/z (../../f) and m (../f): prune keeps e's chain.
+
+    A path from one parent paired with the other would point outside vendor,
+    so prune changes no lock bytes. Install itself cannot yet resolve this
+    graph once d is dropped (with or without --frozen, with or without
+    prune); the multi-path rule is tracked in #5126.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for path, name, deps in (
+        ("f", "f", ()),
+        ("e", "e", ("../f",)),
+        ("d", "d", ("../e",)),
+        ("sub/z", "z", ("../../f",)),
+        ("a", "a", ("../sub/z",)),
+        ("m", "m", ("../f",)),
+        ("b", "b", ("../m",)),
+    ):
+        _skill_package(vendor / path, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a", "./vendor/b"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a", "./vendor/b"])
+    before = lock_bytes(world.project)
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(rows), sorted(rows)
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/e"
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert lock_bytes(world.project) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+@pytest.mark.skipif(
+    sys.platform != "win32" and os.geteuid() == 0,
+    reason="root bypasses directory permissions, so the ancestor stays readable",
+)
+def test_prune_with_an_inaccessible_source_ancestor_keeps_candidates_and_reports(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """chmod 000 vendor while ./vendor/a stays declared: prune reports, nothing is deleted."""
+    world = _world(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    vendor.chmod(0)
+    try:
+        pruned = _output(world.apm("prune"))
+    finally:
+        vendor.chmod(0o755)
+
+    assert "Retained _local/e:" in pruned, pruned
+    assert "Traceback" not in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(_rows(world))
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+@pytest.mark.parametrize("hash_seed", [str(seed) for seed in range(8)])
+def test_prune_keeps_a_survivor_whose_directory_another_candidate_shares(
+    tmp_path: Path, apm_binary_path: Path, hash_seed: str
+) -> None:
+    """vendor/e becomes a link to vendor/f: a still reaches f, so f and its files stay.
+
+    Two candidate rows resolve to one directory; the answer must not depend
+    on set iteration order, so prune runs under several hash seeds.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ()), ("d", ("../f",)), ("a", ("../f",))):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/e", "./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a"])
+    shutil.rmtree(vendor / "e")
+    os.symlink("f", vendor / "e", target_is_directory=True)
+    world.env["PYTHONHASHSEED"] = hash_seed
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "local:vendor/f and ./vendor/e resolve to one directory" in pruned, pruned
+    assert "Retained _local/f:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(rows), sorted(rows)
+    assert _row_named(world, "f")[1]["resolved_by"] in rows
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_keeps_the_children_of_an_anchor_its_top_no_longer_declares(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """d and e stay as f's alias anchors, but d's manifest no longer declares e.
+
+    Walking only d would miss h, which kept e still declares; prune keeps
+    every pending row and names it instead of deleting h.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("h", ()),
+        ("e", ("../f", "../h")),
+        ("d", ("../e",)),
+        ("z", ("../f-link",)),
+        ("a", ("../z",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _link_dir(vendor / "f-link", vendor / "f")
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a"])
+    _skill_package(vendor / "d", "d")
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert "Retained _local/h:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/h"} <= set(rows), sorted(rows)
+    assert (world.project / ".claude/skills/h-skill/SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()

@@ -725,6 +725,7 @@ install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
+install-deployment-remote-read-reuse
 install-deployment-registry-url-scheme
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
@@ -1960,3 +1961,65 @@ def test_public_run_has_no_partial_selection_surface() -> None:
     executed = [result.rule_id for group in partial.group_results for result in group.rules]
     assert executed == [picked]
     assert partial.exit_code == 2
+
+
+def test_the_definition_index_matches_the_direct_scan_and_fails_closed(tmp_path: Path) -> None:
+    """Indexed definers and fail-closed violations equal the per-call scan (#5196)."""
+    from scripts.architecture_linter.checks.registry_definition_index import (
+        _defining_files,
+        _scan_defining_files,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    sources = {
+        "src/apm_cli/a.py": "def target():\n    pass\n\n\nclass Target:\n    pass\n",
+        "src/apm_cli/b.py": "class Holder:\n    def target(self):\n        pass\n",
+        "src/apm_cli/broken.py": "def (:\n",
+    }
+    provider = FactsProvider(tmp_path, tuple(sources), registry=None, source_overrides=sources)
+    for name, kinds in (
+        ("target", ("function",)),
+        ("Target", ("class",)),
+        ("absent", ("function",)),
+    ):
+        indexed = _defining_files(provider, "rule-x", name, kinds=kinds)
+        assert indexed == _scan_defining_files(provider, "rule-x", name, kinds=kinds)
+        assert [failure.path for failure in indexed[1]] == ["src/apm_cli/broken.py"]
+    definers, _ = _defining_files(provider, "rule-x", "target", kinds=("function",))
+    assert "src/apm_cli/a.py" in definers
+
+
+def test_every_binary_selection_detector_is_gated_or_always_runs() -> None:
+    """A detector added without a pre-filter gate can never be skipped silently (#5196)."""
+    from dataclasses import fields
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _BINARY_DETECTORS,
+        _BinaryNeeds,
+    )
+
+    gates = [detector.gate for detector in _BINARY_DETECTORS if detector.gate is not None]
+    assert len(gates) == len(set(gates)), gates
+    assert set(gates) == {field.name for field in fields(_BinaryNeeds)}
+
+
+def test_a_token_free_file_skips_every_binary_selection_detector(tmp_path: Path) -> None:
+    """A synthetic token-free file needs no detector; a file with the tokens needs its own."""
+    from dataclasses import asdict
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_needs,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    plain = "def helper(value):\n    if value:\n        return value\n    return None\n"
+    tokened = 'import subprocess\n\n\ndef helper():\n    subprocess.run(["apm"], check=False)\n'
+    provider = FactsProvider(
+        tmp_path,
+        ("plain.py", "tokened.py"),
+        registry=None,
+        source_overrides={"plain.py": plain, "tokened.py": tokened},
+    )
+    assert not any(asdict(_binary_needs(provider.tree_index("plain.py"))).values())
+    needs = asdict(_binary_needs(provider.tree_index("tokened.py")))
+    assert {flag for flag, on in needs.items() if on} == {"subprocess"}
