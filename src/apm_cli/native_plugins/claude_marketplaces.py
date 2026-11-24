@@ -145,6 +145,7 @@ def _merge(
             path,
             json.dumps(data, indent=2, ensure_ascii=False) + "\n",
             new_file_mode=umask_file_mode(path) if mode is None else mode,
+            file_mode=mode,
             normalize_line_endings=False,
             temp_prefix=".apm-",
             temp_suffix=".tmp",

@@ -163,6 +163,7 @@ def atomic_write_text(
     temp_suffix: str = "",
     create_only: bool = False,
     before_publish: Callable[[], bool] | None = None,
+    file_mode: int | None = None,
 ) -> bool:
     """Atomically write ``data`` (UTF-8) to ``path``; return whether it was published.
 
@@ -210,7 +211,8 @@ def atomic_write_text(
     )
     fd_wrapped = False
     try:
-        mode = existing_mode if existed else new_file_mode
+        # file_mode is the published file's mode whether or not it existed.
+        mode = file_mode if file_mode is not None else (existing_mode if existed else new_file_mode)
         if mode is not None and hasattr(os, "fchmod"):
             with contextlib.suppress(OSError):
                 os.fchmod(fd, mode)
