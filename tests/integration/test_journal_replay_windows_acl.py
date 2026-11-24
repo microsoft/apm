@@ -8,10 +8,12 @@ path whose ACEs are all inherited restores as before.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -146,3 +148,43 @@ def test_paths_whose_aces_are_all_inherited_restore_as_before(
     assert (dir_outcome.restored, dir_outcome.kept) == (1, ())
     assert (skill / "SKILL.md").read_bytes() == b"prior\n"
     assert _acl(skill) == before, f"{sys.version}\nbefore:\n{before}"
+
+
+def _denied_advapi32():
+    """``advapi32`` whose ``GetNamedSecurityInfoW`` returns ERROR_ACCESS_DENIED (5)."""
+
+    def denied(*args):
+        return 5
+
+    return SimpleNamespace(
+        GetNamedSecurityInfoW=denied,
+        GetSecurityDescriptorControl=lambda *args: 0,
+        GetAce=lambda *args: 0,
+    )
+
+
+def test_a_path_whose_dacl_cannot_be_read_is_kept_and_its_copy_retained(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ACL that cannot be checked is never assumed absent: the unit is kept."""
+    from apm_cli.install import journal_modes
+
+    project = tmp_path / "project"
+    config, ledger = _killed_config(apm_home, project)
+    real_windll = ctypes.WinDLL
+
+    def windll(name, *args, **kwargs):
+        return _denied_advapi32() if name == "advapi32" else real_windll(name, *args, **kwargs)
+
+    journal_modes._windows_security_api.cache_clear()
+    monkeypatch.setattr(ctypes, "WinDLL", windll)  # the OS security API boundary
+    try:
+        outcome = _replay(apm_home, project, ledger)
+    finally:
+        monkeypatch.undo()
+        journal_modes._windows_security_api.cache_clear()
+
+    assert (outcome.restored, outcome.kept) == (0, ((".mcp.json", _KEEP_ACL),))
+    assert config.read_bytes() == b"killed\n"
+    [retained] = outcome.retained
+    assert (retained / "0").read_bytes() == _CONFIG_BYTES
