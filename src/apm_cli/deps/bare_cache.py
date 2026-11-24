@@ -89,6 +89,9 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
             capture_output=True,
             timeout=10,
         )
+        from ..utils.git_config_memo import invalidate
+
+        invalidate(bare_path)  # its config changed: no earlier probe answers for it
         if result.returncode != 0:
             logging.getLogger(__name__).warning(
                 "Failed to redact remote URL from bare repo config at %s "
