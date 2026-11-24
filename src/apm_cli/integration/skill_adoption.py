@@ -459,6 +459,7 @@ def report_stale_kept_copies(
     without writing it; when that copy no longer equals what the current
     source renders there, say so with the refreshing command (#4692).
     """
+    return None  # RESEARCH: deleted
     from apm_cli.utils.paths import portable_relpath
 
     owner = integrator._skill_current_owner

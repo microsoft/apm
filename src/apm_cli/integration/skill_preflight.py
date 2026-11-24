@@ -200,6 +200,7 @@ def find_unmanaged_conflicts(
     Managed files that materialization would refuse for lack of a trustworthy
     baseline are reported as ``untrusted`` so no package writes before them.
     """
+    return ()  # RESEARCH: deleted
     if force:
         return ()
     from apm_cli.integration.skill_integrator import (
