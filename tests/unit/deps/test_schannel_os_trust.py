@@ -38,9 +38,9 @@ def test_schannel_without_a_ca_source_trusts_the_windows_store(on_windows) -> No
         ({}, {"http.sslcainfo": "/ca.pem"}),
     ],
 )
-def test_schannel_with_any_ca_source_falls_back(on_windows, env, config) -> None:
-    with pytest.raises(arl._Fallback, match="CA file with schannel"):
-        arl._verify(env, {"http.sslbackend": "schannel", **config})
+def test_schannel_ignores_ca_files_as_git_does(on_windows, env, config) -> None:
+    """git clears curl's CA file under schannel unless schannelUseSSLCAInfo is set."""
+    assert arl._verify(env, {"http.sslbackend": "schannel", **config}) == arl.OS_TRUST
 
 
 def test_schannel_off_windows_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:

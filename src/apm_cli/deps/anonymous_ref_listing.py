@@ -248,7 +248,7 @@ def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
     """The CA file git would trust (GIT_SSL_CAINFO > http.sslCAInfo > SSL_CERT_FILE)."""
     backend = config.get(_BACKEND_KEY, "").lower()
     if backend == "schannel":
-        return _schannel_trust(env, config)
+        return _schannel_trust()
     if backend not in ("", "openssl"):
         raise _Fallback("non-default TLS backend")
     for path in (env.get("GIT_SSL_CAINFO"), config.get(_CA_KEY), env.get("SSL_CERT_FILE")):
@@ -259,17 +259,17 @@ def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
     return _system_ca()
 
 
-def _schannel_trust(env: Mapping[str, str], config: Mapping[str, str]) -> str:
-    """:data:`OS_TRUST` when git's schannel would trust exactly the Windows store (W3d SC2).
+def _schannel_trust() -> str:
+    """:data:`OS_TRUST`: git's schannel trusts exactly the Windows store (W3d SC2).
 
-    Every other ``http.*`` key (``schannelCheckRevoke``, ``schannelUseSSLCAInfo``,
-    ``sslCAPath``, ...) already falls back in ``_classify``; a CA file or env
-    makes the trust source ambiguous, so git decides.
+    Under schannel git clears curl's CA file unless ``http.schannelUseSSLCAInfo``
+    is set (git http.c), so ``http.sslCAInfo``, ``GIT_SSL_CAINFO`` and
+    ``SSL_CERT_FILE`` never apply and are never loaded here (SC1). Every other
+    ``http.*`` key (``schannelUseSSLCAInfo``, ``schannelCheckRevoke``,
+    ``sslCAPath``, ...) already falls back in ``_classify``.
     """
     if os.name != "nt":
         raise _Fallback("schannel outside Windows")
-    if env.get("GIT_SSL_CAINFO") or config.get(_CA_KEY) or env.get("SSL_CERT_FILE"):
-        raise _Fallback("a CA file with schannel")
     return OS_TRUST
 
 
