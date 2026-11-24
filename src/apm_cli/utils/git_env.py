@@ -1254,8 +1254,7 @@ def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
     """Return the URL git contacts for *remote_url* after ``insteadOf`` rewrites.
 
     Identification only (for example keying a cached verdict to the server
-    contacted); it never authorizes a contact. Use
-    :func:`validate_git_url_rewrite_safety` before contacting a remote.
+    contacted); it never authorizes a contact (see validate_git_url_rewrite_safety).
     """
     return resolve_git_url_rewrite(remote_url, git_url_rewrites(env)) or remote_url
 
@@ -1263,8 +1262,7 @@ def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
 def git_url_rewrites(env: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
     """The ``insteadOf`` rewrites git applies under *env*; independent of the URL."""
     child = git_subprocess_env(env)
-    # Merge the parent process config exactly as git_network_env does.
-    _append_parent_git_config(child)
+    _append_parent_git_config(child)  # the parent config merge git_network_env does
     return tuple(_read_effective_git_config(child).rewrites)
 
 
