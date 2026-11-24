@@ -359,13 +359,13 @@ def _held_realpath(text: str) -> str | None:
     return resolved
 
 
-def register_held_root(package_dir: Path, modules_dir: Path) -> None:
+def register_held_root(package_dir: Path, modules_dir: Path | None) -> None:
     """Let the walk hold *package_dir* (just placed by activation) for this invocation.
 
     Only a plain path strictly inside *modules_dir* registers; the walk still
     proves every component from the held project root before holding any.
     """
-    if not ENABLED or not _holds_allowed():
+    if not ENABLED or modules_dir is None or not _holds_allowed():
         return
     text, modules = os.path.abspath(package_dir), os.path.abspath(modules_dir)
     if not plain_win32(text) or _volatile(text):
