@@ -299,7 +299,7 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     kept: list[str] = []
     for part in parts:
         if part == "..":
-            if not kept or base_dir.joinpath(*kept).is_symlink():
+            if not kept or _existing_link(base_dir.joinpath(*kept)):
                 return None
             kept.pop()
         elif part != ".":
@@ -321,6 +321,14 @@ def _is_link(path: Path) -> bool:
     attributes = getattr(info, "st_file_attributes", 0)
     tag = getattr(info, "st_reparse_tag", 0)
     return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT and tag & _IO_REPARSE_TAG_NAME_SURROGATE)
+
+
+def _existing_link(path: Path) -> bool:
+    """:func:`_is_link`, with a missing path counting as no link."""
+    try:
+        return _is_link(path)
+    except FileNotFoundError:
+        return False
 
 
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
