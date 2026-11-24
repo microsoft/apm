@@ -136,6 +136,9 @@ class CheckResult:
     # A violation downgraded to pass by ``enforcement: warn``; text output
     # still names its subjects (#3994). Not serialized: ``passed`` is the contract.
     warned: bool = False
+    # With ``warned``: an unconditional baseline warning (#5344), not a policy
+    # violation that ``enforcement: block`` would fail. Not serialized.
+    advisory: bool = False
     # Structured advice that clears this failure, first one primary; serialized
     # by ``apm audit --format json`` as ``remediation`` and ``remediations``.
     remediations: tuple[Remediation, ...] = ()

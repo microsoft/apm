@@ -1514,9 +1514,9 @@ class LockFile:
 
     def to_yaml(self, *, user_scope: bool = False) -> str:
         """Serialize to YAML string; *user_scope* emits the user-lockfile row form."""
-        from ..utils.yaml_io import yaml_to_str
+        from ..utils.yaml_io import machine_yaml_to_str
 
-        return yaml_to_str(self._document(user_scope=user_scope))
+        return machine_yaml_to_str(self._document(user_scope=user_scope))
 
     def _document(self, *, user_scope: bool = False) -> dict[str, Any]:
         """The plain document ``to_yaml`` dumps."""
@@ -1756,7 +1756,7 @@ class LockFile:
         from ..core.deployment_ledger import DeploymentLedgerCodec
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
-        from ..utils.yaml_io import load_yaml_str, yaml_to_str
+        from ..utils.yaml_io import load_yaml_str, machine_yaml_to_str
         from .lockfile_container import remember_lockfile_text
         from .lockfile_document import document_snapshot, same_document
         from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
@@ -1822,7 +1822,7 @@ class LockFile:
             # The generator gate's only signal: whoever changes it owns it (#3962).
             self.apm_version = installed_apm_version()
         document = self._document(user_scope=user_scope)
-        serialized = yaml_to_str(document)
+        serialized = machine_yaml_to_str(document)
         assert_no_staging_paths(serialized, path.name)
         if unchanged and same_document(existing_text, serialized, existing_document):
             # A proven no-op keeps the file's own bytes (comments, key style).

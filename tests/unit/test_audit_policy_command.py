@@ -345,7 +345,7 @@ class TestCiWithoutPolicy:
         data = json.loads(result.stdout)
         # Baseline checks only, including deployment ownership and the
         # recorded executables decisions (#4053); no policy checks.
-        assert data["summary"]["total"] == data["summary"]["passed"] == 14
+        assert data["summary"]["total"] == data["summary"]["passed"] == 15
         assert [check["name"] for check in data["checks"]] == [
             "lockfile-exists",
             "ref-consistency",
@@ -360,6 +360,7 @@ class TestCiWithoutPolicy:
             "local-bundle-hooks",
             "hook-approval-pins",
             "exec-status-current",
+            "claude-instructions-compiled",
             "includes-consent",
         ]
 

@@ -31,6 +31,7 @@ A sample counts only when the 1-min load average is under ``--max-load``
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import json
 import math
@@ -553,8 +554,9 @@ class Context:
             )
             out.seek(0)
             err.seek(0)
-            tail = out.read()[-3000:].decode(errors="replace") + "\n"
-            tail += err.read()[-3000:].decode(errors="replace")
+            # Redact before slicing: a token cut at the boundary leaves no fragment.
+            tail = _redact(out.read().decode(errors="replace"))[-3000:] + "\n"
+            tail += _redact(err.read().decode(errors="replace"))[-3000:]
         return returncode, tail, cpu
 
     def checked(self, argv: list[str], cwd: Path) -> None:
@@ -562,7 +564,7 @@ class Context:
         if result.returncode != 0:
             raise RuntimeError(
                 f"setup `apm {' '.join(argv)}` failed ({result.returncode}) in {cwd}:\n"
-                f"{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
+                f"{_redact(result.stdout)[-3000:]}\n{_redact(result.stderr)[-3000:]}"
             )
 
     # state helpers (untimed)
@@ -723,6 +725,9 @@ def _noop(_ctx: Context) -> None:
 
 
 _AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
+# The CI job's read-only token for real-network authenticated cells. Taken out of
+# the environment at import, so no world (and no anonymous cell) inherits it.
+_BENCH_REAL_TOKEN = os.environ.pop("APM_BENCH_REAL_TOKEN", "")
 
 
 JOURNEYS: dict[str, Journey] = {
@@ -862,7 +867,8 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             check=False,
         )
         if result.returncode != 0 or not target.is_file():
-            print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
+            stderr = _redact(result.stderr.decode(errors="replace"))[-500:]
+            print(f"[!] cProfile run failed for {journey.name}: {stderr}")
             return None
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
@@ -898,14 +904,36 @@ def _for_world(ctx: Context, journey: Journey) -> Journey:
     """*journey* as run against this world.
 
     The placeholder token only works against the offline mirror. On real
-    github.com the caller's own token (copied by ``_RealWorld``) is used, and
-    without one the journey fails instead of measuring a rejected token.
+    github.com the authenticated journeys use ``APM_BENCH_REAL_TOKEN`` (the CI
+    job's read-only ``GITHUB_TOKEN``) or the caller's own ``GITHUB_APM_PAT``
+    (copied by ``_RealWorld``); without one the journey fails instead of
+    measuring a rejected token. The anonymous journeys never get the bench token.
     """
     if not ctx.fixture.real or all(key != "GITHUB_APM_PAT" for key, _ in journey.env):
         return journey
-    env = tuple(pair for pair in journey.env if pair[0] != "GITHUB_APM_PAT")
-    setup = journey.setup if ctx.world.env.get("GITHUB_APM_PAT") else _refuse_real_auth
-    return replace(journey, env=env, setup=setup)
+    token = _real_token(ctx)
+    if not token:
+        return replace(journey, setup=_refuse_real_auth)
+    env = tuple((key, token if key == "GITHUB_APM_PAT" else value) for key, value in journey.env)
+    return replace(journey, env=env)
+
+
+def _real_token(ctx: Context) -> str:
+    return _BENCH_REAL_TOKEN or ctx.world.env.get("GITHUB_APM_PAT", "")
+
+
+def _redact(text: str) -> str:
+    """*text* without the bench token (error tails land in uploaded artifacts).
+
+    Covers the raw token and the Basic credential git sends for it
+    (``x-access-token:<token>``, plain and base64).
+    """
+    if not _BENCH_REAL_TOKEN or not text:
+        return text
+    basic = f"x-access-token:{_BENCH_REAL_TOKEN}"
+    for secret in (base64.b64encode(basic.encode()).decode(), basic, _BENCH_REAL_TOKEN):
+        text = text.replace(secret, "***")
+    return text
 
 
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
@@ -921,7 +949,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         try:
             journey.setup(ctx)
         except RuntimeError as exc:
-            error = str(exc)
+            error = _redact(str(exc))
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
@@ -931,7 +959,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         sample.load_ok = load < args.max_load
         samples.append(sample)
         if sample.returncode != 0:
-            error = output
+            error = _redact(output)
             break
     valid = [s for s in samples if s.load_ok and s.returncode == 0]
     if not valid and not error:

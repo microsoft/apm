@@ -59,6 +59,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "codex-admission-stale": _CODEX,
     "codex-native-loose-files": _CODEX,
     "root-context-compile": _HINT,
+    "claude-instructions-uncompiled": "executed end to end by "
+    "tests/integration/test_dropped_routed_instructions_lifecycle.py (#5344)",
     "user-root-context-compile": _HINT,
     "executables-parked": "printed only by the interactive executables approval prompt",
     "local-package-unreadable": _ROOT,
