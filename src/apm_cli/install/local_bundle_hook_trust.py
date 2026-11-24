@@ -716,6 +716,37 @@ def _remove_unedited(
     return failed
 
 
+def _bundle_hook_inputs(project_root: Path, targets: Any, slug: str, lock_paths):
+    """``(state, hook files, script rows)`` one bundle's hook retirement acts on."""
+    state = deployed_bundle_hook_keys(project_root, targets, lock_paths).get(slug)
+    hook_files = {
+        _relative_value(value, project_root) for value in (state.hook_files if state else ())
+    }
+    return state, hook_files, _bundle_script_rows(lock_paths, targets, slug, project_root)
+
+
+def _still_running(project_root: Path, targets: Any, slug: str, hook_files, scripts) -> set[str]:
+    """Hook configs the bundle does not own that still run its scripts."""
+    return _configs_still_running(project_root, targets, slug, scripts) | (
+        _per_file_configs_running(project_root, targets, hook_files, scripts)
+    )
+
+
+def bundle_hooks_in_use(
+    project_root: Path, targets: Any, slug: str, *, lock_dir: Path | None
+) -> tuple[str, ...]:
+    """Hook configs that still run *slug*'s scripts, read before anything is written (#5291).
+
+    The same check :func:`retire_bundle_hooks` refuses on; a caller runs it
+    first so a refused uninstall writes nothing, not even its resume note.
+    """
+    project_root = Path(project_root)
+    _state, hook_files, scripts = _bundle_hook_inputs(
+        project_root, targets, slug, local_bundle_paths(lock_dir)
+    )
+    return tuple(sorted(_still_running(project_root, targets, slug, hook_files, scripts)))
+
+
 def retire_bundle_hooks(
     project_root: Path,
     targets: Any,
@@ -743,17 +774,11 @@ def retire_bundle_hooks(
     project_root = Path(project_root)
     lockfile = LockFile.read(get_lockfile_path(lock_dir)) if lock_dir is not None else None
     lock_paths = local_bundle_paths(lock_dir)
-    state = deployed_bundle_hook_keys(project_root, targets, lock_paths).get(slug)
-    hook_files = {
-        _relative_value(value, project_root) for value in (state.hook_files if state else ())
-    }
-    scripts = _bundle_script_rows(lock_paths, targets, slug, project_root)
+    state, hook_files, scripts = _bundle_hook_inputs(project_root, targets, slug, lock_paths)
     rows = scripts | {
         value for value in lock_paths if _relative_value(value, project_root) in hook_files
     }
-    still_running = _configs_still_running(
-        project_root, targets, slug, scripts
-    ) | _per_file_configs_running(project_root, targets, hook_files, scripts)
+    still_running = _still_running(project_root, targets, slug, hook_files, scripts)
     if still_running:
         # Nothing is retired: the bundle keeps the ownership trust checks read.
         return BundleHookRetirement(True, tuple(sorted(still_running)))

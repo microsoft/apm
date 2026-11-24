@@ -276,11 +276,22 @@ def _finish_records(slugs: list[str], lock_dir: Path, *, scope: Any, logger: Any
     return failed
 
 
+def _report_kept_hooks(logger: Any, slug: str, files: str) -> None:
+    logger.error(
+        f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
+        "they stay recorded. Remove or repair those files, then retry."
+    )
+
+
 def uninstall_local_bundles(
     slugs: list[str], bundle_scope: _BundleScope, *, scope: Any, logger: Any, dry_run: bool
 ) -> None:
     """Retire each selected bundle's hooks through the hook trust owner; exit 1 on failure."""
-    from ...install.local_bundle_hook_trust import installed_local_bundles, retire_bundle_hooks
+    from ...install.local_bundle_hook_trust import (
+        bundle_hooks_in_use,
+        installed_local_bundles,
+        retire_bundle_hooks,
+    )
     from ...install.local_bundle_pending import mark_bundle_retiring, retiring_bundle_slugs
 
     root, targets, lock_dir = bundle_scope.root, bundle_scope.targets, bundle_scope.lock_dir
@@ -306,6 +317,18 @@ def uninstall_local_bundles(
             logger.dry_run_notice(f"Would remove hooks from local bundle '{slug}'")
         return
 
+    # A hook still running a bundle's script refuses before the resume note is
+    # written, so a refused uninstall leaves every file as it was (#5291).
+    in_use = {
+        slug: paths
+        for slug in slugs
+        if slug in deployed
+        and (paths := bundle_hooks_in_use(root, targets, slug, lock_dir=lock_dir))
+    }
+    for slug, paths in in_use.items():
+        _report_kept_hooks(logger, slug, ", ".join(paths))
+    if in_use:
+        sys.exit(1)
     try:
         for slug in slugs:
             mark_bundle_retiring(lock_dir, slug, "hooks")
@@ -332,11 +355,7 @@ def uninstall_local_bundles(
     # Every failure is reported, each with its own recovery step, before exiting.
     failed = [slug for slug in slugs if slug in left]
     for slug in failed:
-        files = ", ".join(left[slug]) or "merged hook configuration"
-        logger.error(
-            f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
-            "they stay recorded. Remove or repair those files, then retry."
-        )
+        _report_kept_hooks(logger, slug, ", ".join(left[slug]) or "merged hook configuration")
     if failed or record_failed:
         sys.exit(1)
     for slug in slugs:
