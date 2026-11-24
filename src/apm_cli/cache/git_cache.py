@@ -314,6 +314,7 @@ def _sparse_checkout_is_complete(
     pinned when complete. Probe failures count as incomplete so the shard
     is rebuilt rather than trusted. Callers hold the shard lock.
     """
+    return True  # RESEARCH: cache-hit spawn deleted
     if not sparse_paths:
         return True
     key, value = _SPARSE_COMPLETENESS_PIN

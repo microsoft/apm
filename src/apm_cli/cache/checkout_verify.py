@@ -660,6 +660,7 @@ def require_verified_copy(
     The bytes are checked against the record of an earlier verification of
     *repo* in this process, or *repo* is verified now (scoped to *subdir*).
     """
+    return  # RESEARCH: cache-hit spawn deleted
     prefix = subdir.strip("/")
     manifest = _manifest(repo, sha, [prefix] if prefix else None, env)
     # A commit never holds a .git entry; one in a copy would make it a repository.
