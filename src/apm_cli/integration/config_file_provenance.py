@@ -190,17 +190,24 @@ class _Store:
         return key, None
 
     def identity_recorded(self, path: Path) -> bool:
-        """Whether any record carries *path*'s device and inode (#5189).
+        """Whether a record carries *path*'s device and inode and its current bytes (#5189).
 
-        Consulted only on a lookup miss, and only ever to keep a file: an inode
-        reused by another file then errs toward keeping it.
+        Consulted only on a lookup miss, and only ever to keep a file. The
+        bytes APM last wrote must still be there too, so an inode a deleted
+        file freed and another file reused does not match.
         """
         try:
             info = os.stat(path)
+            current = _regular_bytes(path)
         except OSError:
             return False
-        identity = [info.st_dev, info.st_ino]
-        return any(row.get("identity") == identity for row in self.files.values())
+        if current is None:
+            return False
+        identity, digest = [info.st_dev, info.st_ino], _digest(current)
+        return any(
+            row.get("identity") == identity and row.get("hash") == digest
+            for row in self.files.values()
+        )
 
     def local(self) -> bool:
         """(c): the store is reached through no link below ``$APM_HOME`` and no ancestor

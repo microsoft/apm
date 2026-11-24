@@ -756,7 +756,7 @@ def test_a_users_skeleton_reached_through_a_second_path_is_kept(tmp_path, apm_ho
     config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
     _apm_writes(config, _WITH_ENTRY, manifest_root=first)
     assert config_file_origin(config) is Origin.PREEXISTING
-    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry is gone again
+    _apm_writes(config, _SKELETON, manifest_root=first)  # APM's cleanup removes its entry
     try:
         os.link(config, second / ".mcp.json")
     except (OSError, NotImplementedError):
