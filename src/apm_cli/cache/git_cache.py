@@ -384,7 +384,7 @@ def _packed_commit(git_dir: Path, sha: str) -> bool | None:
 
 # PERF PROTOTYPE (lever 4): write the checkout's .git in process instead of
 # ``git clone --local --shared --no-checkout``; differential vs a real clone.
-_GITDIR_DIFFERENTIAL = True
+_GITDIR_DIFFERENTIAL = False
 _INIT_CONFIG: dict[tuple[str, int], str] = {}
 _GITDIR_WRITE_FLAGS = (
     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
