@@ -28,6 +28,7 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from tests.lifecycle.known import KnownFailure
 
 pytestmark = [
     pytest.mark.integration,
@@ -172,11 +173,32 @@ _GRAPH_FIELDS = (
 )
 
 
-def _graph_rows(project: Path) -> dict[str, tuple]:
-    """Each lock row's graph metadata, the part prune repairs (#5126)."""
+def _graph_rows(project: Path) -> dict[str, dict]:
+    """Each package's lock graph metadata by name, the part prune repairs (#5126)."""
     return {
-        row["repo_url"]: tuple(row.get(name) for name in _GRAPH_FIELDS) for row in _rows(project)
+        row.get("name"): {"repo_url": row["repo_url"], **{f: row.get(f) for f in _GRAPH_FIELDS}}
+        for row in _rows(project)
     }
+
+
+def _descendants(graph: _Graph, name: str) -> set[str]:
+    seen: set[str] = set()
+    queue = [name]
+    while queue:
+        for child, _ in graph.edges[queue.pop()]:
+            if child not in seen:
+                seen.add(child)
+                queue.append(child)
+    return seen
+
+
+def _drift(before: dict, after: dict, names) -> list[str]:
+    """Each named package whose graph metadata a fresh resolve changed."""
+    return [
+        f"{name}: {before.get(name)} -> {after.get(name)}"
+        for name in sorted(names)
+        if before.get(name) != after.get(name)
+    ]
 
 
 def _kept_declared(seed, project: Path, rows, needed, exit_code: int, output: str) -> str | None:
@@ -192,29 +214,68 @@ def _kept_declared(seed, project: Path, rows, needed, exit_code: int, output: st
     return f"seed {seed}: {unnamed[0]} kept without a name; {output}" if unnamed else None
 
 
-def _converges(seed: int, project: Path) -> str:
+@dataclass(frozen=True)
+class _Exempt:
+    """Rows the convergence oracle skips, each for a stated reason."""
+
+    rows: frozenset[str]  # named fail-closed keeps; a hand-dropped root (#3668)
+    rekeyed: frozenset[str]  # promoted or alias-spelled survivors: install re-keys (#5238)
+    # Rows beneath either: install moves their parent, depth and dev status
+    # (or drops them) when it drops or re-keys the row above.
+    beneath: frozenset[str]
+    unchanged: bool = False  # prune left the lockfile bytes as they were
+
+
+def _recorded_under(rows: dict, exempt: _Exempt) -> set[str]:
+    """Rows the pruned lock records beneath an exempt row, through resolved_by.
+
+    While prune keeps a row fail-closed it repairs no parent, so a row still
+    recorded under it moves when install drops that row.
+    """
+    by_url = {row["repo_url"]: name for name, row in rows.items()}
+    under = set(exempt.rows | exempt.rekeyed)
+    grew = True
+    while grew:
+        grew = False
+        for name, row in rows.items():
+            if name not in under and by_url.get(row.get("resolved_by")) in under:
+                under.add(name)
+                grew = True
+    return under
+
+
+def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool) -> str:
     """A fresh resolve of the pruned project records the same graph (#5126).
 
-    The edited manifest's new content hash is install's to record, not prune's.
+    Every row but the exempt ones is compared; the edited manifest's new
+    content hash is install's to record, not prune's. With *rekeyed* only the
+    #5238 rows are compared, each failure naming the re-key.
     """
     settled = _graph_rows(project)
+    if exempt.unchanged:
+        # Prune removed nothing and wrote no lock: the rows are the last
+        # install's, not prune's to repair (#5126 repairs after a removal).
+        return "unchanged"
     clear_apm_yml_cache()
     resolved = _run(project, "install", "--no-frozen")
-    if resolved.exit_code != 0 or _graph_rows(project) != settled:
-        changed = sorted(map(repr, set(_graph_rows(project).items()) ^ set(settled.items())))
-        return f"seed {seed}: install --no-frozen after prune changed {changed}"
-    return "converged"
+    after = _graph_rows(project)
+    if resolved.exit_code != 0:
+        return f"seed {seed}: install --no-frozen after prune failed: {resolved.output[:500]}"
+    if rekeyed:
+        drift = _drift(settled, after, exempt.rekeyed)
+        return f"seed {seed}: install re-keyed {drift}" if drift else "converged"
+    skipped = exempt.rows | exempt.rekeyed | exempt.beneath | _recorded_under(settled, exempt)
+    drift = _drift(settled, after, (set(settled) | set(after)) - skipped)
+    return f"seed {seed}: install --no-frozen after prune changed {drift}" if drift else "converged"
 
 
 def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | None, bool | None]:
     """``(verdict, dropped root removed)``.
 
     The verdict is "converged" when prune kept every declared package and a
-    fresh resolve keeps its lock bytes, None when it kept every declared
-    package behind a named fail-closed keep or a root another package still
-    declares, "rekeyed" for a graph only install re-keys (#5238; with
-    *rekeyed* its convergence is checked too), "skipped" when install refused
-    the graph, else the failure with its seed first.
+    fresh resolve records the same graph for every row the oracle does not
+    exempt (with *rekeyed*: for the #5238 rows only), "skipped" when install
+    refused the graph, else the failure with its seed first.
     The second value is None when a fail-closed rule is meant to keep the
     dropped root (the planted chain, a promoted survivor, or a root another
     survivor declares), else whether prune removed it.
@@ -246,12 +307,13 @@ def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | 
         _write_package(vendor, graph, parent)
     # Sometimes apm.yml now declares a transitive survivor directly.
     promotable = sorted(_needed(graph) - set(graph.roots))
-    promoted = bool(promotable) and rng.random() < 0.3
+    promoted = rng.choice(promotable) if promotable and rng.random() < 0.3 else None
     if promoted:
-        graph.roots.append(rng.choice(promotable))
+        graph.roots.append(promoted)
         _write_project(project, graph)
     clear_apm_yml_cache()
 
+    lock_before = (project / "apm.lock.yaml").read_bytes()
     pruned = _run(project, "prune")
 
     output = " ".join(pruned.output.split())
@@ -266,16 +328,20 @@ def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | 
     verdict = _kept_declared(seed, project, rows, needed, pruned.exit_code, output)
     if verdict is not None:
         return verdict, removed
-    if named or dropped in needed:
-        # A fail-closed keep is named; a hand-dropped root another package
-        # still declares stays direct until install records it (#3668).
-        return None, removed
-    if (promoted or graph.aliased & needed) and not rekeyed:
-        # A survivor now declared directly, or one reached through an alias
-        # spelling, is re-keyed only by install (#5238); the strict companion
-        # cell below fails once prune converges on these too.
-        return "rekeyed", removed
-    return _converges(seed, project), removed
+    # A fail-closed keep is named; a hand-dropped root another package still
+    # declares stays direct until install records it (#3668); a promoted or
+    # alias-spelled survivor is re-keyed only by install (#5238, checked by the
+    # companion cell below). Every other row is compared on every field.
+    rows = frozenset(named | ({dropped} if dropped in needed else set()))
+    rekeyed_rows = frozenset(({promoted} if promoted else set()) | (graph.aliased & needed))
+    beneath = set().union(*(_descendants(graph, name) for name in rows | rekeyed_rows))
+    exempt = _Exempt(
+        rows=rows,
+        rekeyed=rekeyed_rows,
+        beneath=frozenset(beneath - rows - rekeyed_rows),
+        unchanged=lock_before == (project / "apm.lock.yaml").read_bytes(),
+    )
+    return _converges(seed, project, exempt, rekeyed=rekeyed), removed
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
@@ -306,7 +372,7 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
             removed += dropped_removed
         if verdict == "converged":
             converged += 1
-        elif verdict is not None and verdict != "rekeyed":
+        elif verdict not in (None, "unchanged"):
             failures.append(verdict[:1500])
     monkeypatch.chdir(tmp_path)
     print(
@@ -322,28 +388,37 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
     # least half of those graphs, and those graphs are not a token few.
     assert eligible >= len(seeds) // 5, eligible
     assert removed * 2 >= eligible, (removed, eligible)
-    # The convergence oracle must run on some graphs in every chunk, not none.
-    assert converged >= len(seeds) // 10, converged
+    # The convergence oracle must hold on most graphs, not a token few.
+    assert converged * 2 >= len(seeds), converged
+
+
+_REKEYED = KnownFailure(
+    "#5238",
+    "prune keeps a promoted or alias-spelled survivor's row that install re-keys",
+    r"install re-keyed",
+)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#5238: prune keeps a promoted or alias-spelled survivor's row; install re-keys it",
-)
+@_REKEYED.mark()
 def test_prune_converges_on_graphs_install_rekeys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The graphs the main cell exempts as #5238's: a fresh resolve keeps prune's lock."""
+    """The rows the main cell exempts as #5238's: a fresh resolve keeps prune's record.
+
+    Any other failure is reported without the signature, so it fails the cell.
+    """
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
-    failures = []
+    rekeyed, other = [], []
     for seed in _FIXED_SEEDS[:_CHUNK]:
         root = tmp_path / f"s{seed}"
         root.mkdir()
         verdict, _ = _check_seed(seed, root, rekeyed=True)
-        if verdict not in (None, "converged", "skipped"):
-            failures.append(verdict[:500])
+        if verdict in (None, "converged", "skipped", "unchanged"):
+            continue
+        (rekeyed if "install re-keyed" in verdict else other).append(verdict[:500])
     monkeypatch.chdir(tmp_path)
 
-    assert not failures, "\n".join(failures)
+    assert not other, "\n".join(other)
+    assert not rekeyed, "\n".join(rekeyed)
