@@ -42,3 +42,18 @@ def test_owner_containment_checks_take_the_string_route(
     # The checks only read: the tree they inspected is left exactly as it was.
     assert [entry.name for entry in (root / "pkg").iterdir()] == ["x.md"]
     assert inner.read_text(encoding="utf-8") == "x\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_dotdot_cannot_hide_a_link_on_the_string_route(
+    tmp_path, no_pathlib_containment: None
+) -> None:
+    """The ``..`` collapse in has_symlink_component also runs on the string route."""
+    root = tmp_path.resolve()
+    (root / "elsewhere").mkdir()
+    (root / "link").symlink_to(root / "elsewhere", target_is_directory=True)
+    hidden = root / "missing" / ".." / "link" / "x.md"
+
+    assert path_security.has_symlink_component(root, hidden) is True
+    assert path_security.has_symlink_component(root, root / "elsewhere" / "x.md") is False
+    assert (root / "link").is_symlink()
