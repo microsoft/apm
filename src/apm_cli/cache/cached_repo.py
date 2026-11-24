@@ -321,7 +321,7 @@ def validate_cached_links(repo: Path, paths: list[str] | None, env: dict[str, st
     from .checkout_verify import inprocess_verified
 
     if not paths and inprocess_verified(repo):
-        return  # PERF PROTOTYPE: written in-process, which refuses every link.
+        return  # Written in-process, which refuses every link.
     from ..utils.git_sparse import validate_materialized_symlinks
 
     validate_materialized_symlinks(

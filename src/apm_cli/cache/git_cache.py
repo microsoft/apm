@@ -384,7 +384,7 @@ class GitCache:
             )
             sha = checkout.parent.name
             if not sparse_paths and inprocess_verified(checkout, sha):
-                # PERF PROTOTYPE: every byte was hashed to its id while written this run.
+                # This process hashed every byte to its object id while writing this very directory.
                 return checkout
             verify_env = git_subprocess_env(env)
             cone = bool(sparse_paths)
@@ -494,7 +494,7 @@ class GitCache:
     def _inprocess_checkout(
         self, url: str, shard_key: str, sha: str, *, env: dict[str, str] | None
     ) -> Path | None:
-        """PERF PROTOTYPE: land a full checkout fetched without git, or ``None`` to run git."""
+        """Land a full checkout fetched in-process, or ``None`` to run git."""
         from ..utils.file_ops import robust_rmtree
         from .checkout_verify import register_inprocess_manifest
         from .inprocess_fetch import fetch_worktree

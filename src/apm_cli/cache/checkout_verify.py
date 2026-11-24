@@ -661,7 +661,7 @@ _INPROCESS: dict[tuple[str, str], tuple[int, int]] = {}
 
 
 def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str, bool]]) -> None:
-    """PERF PROTOTYPE: record the verdict an in-process fetch reached while writing *repo*.
+    """Record the verdict an in-process fetch reached while writing *repo*.
 
     Bound to the landed directory's (dev, ino): a swapped directory misses and is verified.
     """
@@ -673,7 +673,7 @@ def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str
 
 
 def inprocess_verified(repo: Path, sha: str | None = None) -> bool:
-    """PERF PROTOTYPE: whether this process wrote and verified this very *repo* in-process."""
+    """Whether this process wrote and verified this very *repo* in-process."""
     key = _key(repo, sha or Path(repo).parent.name)
     with _MANIFEST_LOCK:
         identity = _INPROCESS.get(key)

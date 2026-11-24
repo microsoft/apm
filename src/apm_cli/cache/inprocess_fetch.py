@@ -394,7 +394,7 @@ def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, str]:
     return f"https://github.com{path}/git-upload-pack", proxy, ca
 
 
-_attr_cache: dict[tuple, bool] = {}
+_ATTR_MEMO = "inprocess-fetch-attribute-sources"
 _attr_lock = threading.Lock()
 
 
@@ -438,16 +438,23 @@ def _attribute_sources(child_env: Mapping[str, str]) -> bool:
 
 
 def _require_no_attribute_sources(child_env: Mapping[str, str]) -> None:
+    from ..core.invocation_memo import invocation_memo
+
+    # Kept for one command only (dropped after lifecycle scripts); no memo outside one.
+    memo = invocation_memo(_ATTR_MEMO)
     fingerprint = tuple(sorted(child_env.items()))
-    with _attr_lock:
-        cached = _attr_cache.get(fingerprint)
+    cached = None
+    if memo is not None:
+        with _attr_lock:
+            cached = memo.get(fingerprint)
     if cached is None:
         try:
             cached = _attribute_sources(child_env)
         except Exception:
             cached = True
-        with _attr_lock:
-            _attr_cache[fingerprint] = cached
+        if memo is not None:
+            with _attr_lock:
+                memo[fingerprint] = cached
     if cached:
         raise _Refuse("an attributes source outside the commit may change checkout bytes")
 
