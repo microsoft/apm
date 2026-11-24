@@ -118,6 +118,10 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         ('cmd /c "sh .claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
         ("cd .claude && sh -c 'sh hooks/otherpkg/../hookpkg/hooks/scripts/x.sh'", True),
         ("sh hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ("sh .claude/hooks/hookpkg/hooks/scripts/./'x'.sh", True),
+        ('sh .claude/hooks/hookpkg/hooks/scripts/"x"".sh"', True),
+        ("sh .claude/hooks/hookpkg/hooks/scripts/x\\.sh", True),
+        ("sh .claude/hooks/hookpkg/hooks/scripts/$'\\x78'.sh", True),
     ],
     ids=[
         "project-dir-anchor",
@@ -147,6 +151,10 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         "cmd-slash-c",
         "nested-inherits-cd-with-space",
         "target-root-relative",
+        "quoted-fragment",
+        "adjacent-quoted-fragments",
+        "escaped-dot",
+        "ansi-c-quoting",
     ],
 )
 def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:

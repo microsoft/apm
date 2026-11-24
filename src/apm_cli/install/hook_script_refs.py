@@ -27,6 +27,7 @@ _DRIVE = re.compile(r"^[A-Za-z]:/")
 _NOT_PLAIN = re.compile(r"[$`*?\[\]{}~=;&|()<>'\"\\\n]")
 # Words that change the working directory relative paths resolve from.
 _DIRECTORY_CHANGES = frozenset({"cd", "pushd", "popd"})
+_QUOTING = re.compile(r"[\"'\\]")
 _HANDS_TO_SHELL = re.compile(r"^(?:-.*|/[A-Za-z]|eval|exec|source|\.|<+)$")
 
 
@@ -69,6 +70,21 @@ def _name_pattern(names: Collection[str]) -> re.Pattern[str]:
     return re.compile(rf"(?<![\w.-])(?:{alternatives})(?![\w.-])")
 
 
+def _mentions(command: str, pattern: re.Pattern[str]) -> bool:
+    """Whether *command* names a script, as written or as the shell decodes its quoting.
+
+    ``./'x'.sh`` and ``x\\.sh`` run ``x.sh``; ANSI-C quoting (``$'...'``) can
+    spell any name, so it counts as naming one (fail closed).
+    """
+    folded = caseless(command)
+    return bool(
+        "$'" in command
+        or pattern.search(folded)
+        or pattern.search(_QUOTING.sub("", folded))
+        or any(pattern.search(caseless(word)) for word in _words(command) or ())
+    )
+
+
 def runs_script(
     command: str, refs: tuple[frozenset, frozenset], bases: Collection[Path], project_root: Path
 ) -> bool:
@@ -83,7 +99,7 @@ def runs_script(
     """
     names, paths = refs
     pattern = _name_pattern(names)
-    if not pattern.search(caseless(command)):
+    if not _mentions(command, pattern):
         return False
     text = command
     if not _ASSIGNED_ANCHOR.search(command):
