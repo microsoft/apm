@@ -593,6 +593,27 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+def _non_string_keys(text: str) -> str:
+    """Name the non-string keys of *text*'s frontmatter, or ``""`` when it has none."""
+    metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+    data = _BOUNDED_FRONTMATTER_HANDLER.load(metadata)
+    keys = [
+        _key_label(k) for k in (data if isinstance(data, dict) else {}) if not isinstance(k, str)
+    ]
+    return ", ".join(keys)
+
+
+def _key_label(key: Any) -> str:
+    """Name one repository-controlled key safely: printable ASCII, never a failing render."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    try:
+        text = repr(key)
+    except ValueError:  # an int past Python's digit limit
+        return f"<{type(key).__name__}>"
+    return printable_ascii_text(text) if len(text) <= 40 else f"<{type(key).__name__}>"
+
+
 def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
     """Return *path*'s BOM-stripped frontmatter block, through its closing fence.
 
@@ -640,6 +661,13 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
     except yaml.YAMLError:
         raise
+    except TypeError as exc:
+        # Post(**metadata) refuses a non-string key such as ``1:`` (#4922, #5028);
+        # any other TypeError is not a frontmatter fault and surfaces unchanged.
+        keys = _non_string_keys(text)
+        if not keys:
+            raise
+        raise yaml.YAMLError(f"non-string frontmatter key(s): {keys}") from exc
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:
