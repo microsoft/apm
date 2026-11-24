@@ -244,38 +244,50 @@ def _recorded_under(rows: dict, exempt: _Exempt) -> set[str]:
     return under
 
 
-def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool) -> str:
+def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tally: dict) -> str:
     """A fresh resolve of the pruned project records the same graph (#5126).
 
     Every row but the exempt ones is compared; the edited manifest's new
     content hash is install's to record, not prune's. With *rekeyed* only the
-    #5238 rows are compared, each failure naming the re-key.
+    #5238 rows are compared, each failure naming the re-key. *tally* counts
+    the rows seen and the rows compared; a graph that compared none is
+    "vacuous", never "converged".
     """
     settled = _graph_rows(project)
     if exempt.unchanged:
         # Prune removed nothing and wrote no lock: the rows are the last
         # install's, not prune's to repair (#5126 repairs after a removal).
         return "unchanged"
+    tally["rows"] = tally.get("rows", 0) + len(settled)
     clear_apm_yml_cache()
     resolved = _run(project, "install", "--no-frozen")
     after = _graph_rows(project)
     if resolved.exit_code != 0:
         return f"seed {seed}: install --no-frozen after prune failed: {resolved.output[:500]}"
     if rekeyed:
-        drift = _drift(settled, after, exempt.rekeyed)
-        return f"seed {seed}: install re-keyed {drift}" if drift else "converged"
-    skipped = exempt.rows | exempt.rekeyed | exempt.beneath | _recorded_under(settled, exempt)
-    drift = _drift(settled, after, (set(settled) | set(after)) - skipped)
-    return f"seed {seed}: install --no-frozen after prune changed {drift}" if drift else "converged"
+        names = set(exempt.rekeyed)
+    else:
+        skipped = exempt.rows | exempt.rekeyed | exempt.beneath | _recorded_under(settled, exempt)
+        names = (set(settled) | set(after)) - skipped
+    tally["compared"] = tally.get("compared", 0) + len(names)
+    drift = _drift(settled, after, names)
+    if drift:
+        what = "install re-keyed" if rekeyed else "install --no-frozen after prune changed"
+        return f"seed {seed}: {what} {drift}"
+    return "converged" if names else "vacuous"
 
 
-def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | None, bool | None]:
+def _check_seed(
+    seed: int, root: Path, *, rekeyed: bool = False, tally: dict | None = None
+) -> tuple[str | None, bool | None]:
     """``(verdict, dropped root removed)``.
 
     The verdict is "converged" when prune kept every declared package and a
     fresh resolve records the same graph for every row the oracle does not
-    exempt (with *rekeyed*: for the #5238 rows only), "skipped" when install
-    refused the graph, else the failure with its seed first.
+    exempt (with *rekeyed*: for the #5238 rows only) and compared at least one,
+    "vacuous" when it compared none, "unchanged" when prune left the lock
+    as it was, "skipped" when install refused the graph, else the failure
+    with its seed first. *tally* accumulates the rows seen and compared.
     The second value is None when a fail-closed rule is meant to keep the
     dropped root (the planted chain, a promoted survivor, or a root another
     survivor declares), else whether prune removed it.
@@ -341,7 +353,8 @@ def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | 
         beneath=frozenset(beneath - rows - rekeyed_rows),
         unchanged=lock_before == (project / "apm.lock.yaml").read_bytes(),
     )
-    return _converges(seed, project, exempt, rekeyed=rekeyed), removed
+    tally = {} if tally is None else tally
+    return _converges(seed, project, exempt, rekeyed=rekeyed, tally=tally), removed
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
@@ -360,10 +373,11 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
         seeds.append(run_seed)
     failures = []
     skipped = removed = eligible = converged = 0
+    tally: dict = {}
     for seed in seeds:
         root = tmp_path / f"s{seed}"
         root.mkdir()
-        verdict, dropped_removed = _check_seed(seed, root)
+        verdict, dropped_removed = _check_seed(seed, root, tally=tally)
         if verdict == "skipped":
             skipped += 1
             continue
@@ -372,12 +386,13 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
             removed += dropped_removed
         if verdict == "converged":
             converged += 1
-        elif verdict not in (None, "unchanged"):
+        elif verdict not in (None, "unchanged", "vacuous"):
             failures.append(verdict[:1500])
     monkeypatch.chdir(tmp_path)
     print(
         f"seeds: {len(seeds)}, install refused: {skipped}, "
-        f"root removed: {removed}/{eligible}, converged: {converged}"
+        f"root removed: {removed}/{eligible}, converged: {converged}, "
+        f"rows compared: {tally.get('compared', 0)}/{tally.get('rows', 0)}"
     )
 
     assert not failures, f"{len(failures)} failing seed(s):\n" + "\n".join(failures)
@@ -388,8 +403,10 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
     # least half of those graphs, and those graphs are not a token few.
     assert eligible >= len(seeds) // 5, eligible
     assert removed * 2 >= eligible, (removed, eligible)
-    # The convergence oracle must hold on most graphs, not a token few.
+    # The convergence oracle must hold on most graphs, each comparing at least
+    # one row, and must compare a real share of all rows, not a token few.
     assert converged * 2 >= len(seeds), converged
+    assert tally.get("compared", 0) * 5 >= tally.get("rows", 0) * 2, tally
 
 
 _REKEYED = KnownFailure(
@@ -415,7 +432,7 @@ def test_prune_converges_on_graphs_install_rekeys(
         root = tmp_path / f"s{seed}"
         root.mkdir()
         verdict, _ = _check_seed(seed, root, rekeyed=True)
-        if verdict in (None, "converged", "skipped", "unchanged"):
+        if verdict in (None, "converged", "skipped", "unchanged", "vacuous"):
             continue
         (rekeyed if "install re-keyed" in verdict else other).append(verdict[:500])
     monkeypatch.chdir(tmp_path)
