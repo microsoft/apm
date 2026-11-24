@@ -134,14 +134,21 @@
     },
     {
       "id": "install-entry-routing",
-      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage; the one exception is the locked fast path (install/fast_entry.py then install/diff_apply.py), which serves only a bare 'apm install' or 'apm install --frozen', writes only files the verified lockfile, caches and package-bound records prove, never deletes, and runs the full pipeline on any doubt",
+      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage; the one exception is the locked fast path (install/fast_entry.py then install/diff_apply.py), which serves only a bare 'apm install' or 'apm install --frozen', writes only files the verified lockfile, caches and package-bound records prove, never deletes, and runs the full pipeline on any doubt; a bare install may instead replay the verified-state record (install/verdict_record.py), which writes nothing and replays only when an HMAC under a per-user key matches every live verdict input",
       "owner": "install/pipeline_entry.py (pipeline_preview, PipelinePreview, record_preview_resolution): run_install_pipeline is entered only through install/service.py InstallService, from a closed list of _install_apm_dependencies callers (commands/install.py, update.py, lock.py, deps/cli.py); dry_run=True stops before the first write and the preview projects its plan; install --mcp and apm mcp install hand their server to install/service_integration.py run_service_integrations, whose run_mcp_integration installs and records only that entry (install/mcp/entry_integration.py), so the command keeps no integrator or lockfile writes",
       "selectors": [
         "src/apm_cli/install/diff_apply.py",
         "src/apm_cli/install/fast_entry.py",
         "src/apm_cli/install/fast_output.py",
         "src/apm_cli/install/noop_diff.py",
-        "src/apm_cli/install/pipeline_entry.py"
+        "src/apm_cli/install/pipeline_entry.py",
+        "src/apm_cli/install/verdict_git.py",
+        "src/apm_cli/install/verdict_inputs.py",
+        "src/apm_cli/install/verdict_key.py",
+        "src/apm_cli/install/verdict_key_windows.py",
+        "src/apm_cli/install/verdict_policy.py",
+        "src/apm_cli/install/verdict_record.py",
+        "src/apm_cli/integration/mcp_install_summary.py"
       ],
       "guards": ["install-deployment-install-entry-routing"]
     },
@@ -395,7 +402,7 @@
       "decision": "Reading and parsing the project git remote for org-policy discovery",
       "owner": "policy/_remote.py (_git_remote_origin_url, _remote_url_parts, _parse_remote_url, _extract_org_host_port_from_git_remote)",
       "selectors": ["src/apm_cli/policy/_remote.py"],
-      "guards": ["install-deployment-policy-remote-origin-owner"]
+      "guards": ["install-deployment-policy-remote-origin-owner", "install-deployment-remote-read-reuse"]
     },
     {
       "id": "policy-mcp-transport-projection",
@@ -490,6 +497,7 @@
       "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; install/local_bundle_canvas.py gate_bundle_canvas gates a bundle's canvas extensions and retires them with this owner's helpers; 'apm uninstall <bundle>' selects a bundle in commands/uninstall/local_bundle.py and retires its deployed hooks through retire_bundle_hooks (#3700); consumers: commands/install.py, commands/update.py, commands/prune.py, commands/uninstall/local_bundle.py, policy/ci_checks.py",
       "selectors": [
         "src/apm_cli/install/local_bundle_hook_trust.py",
+        "src/apm_cli/install/hook_script_refs.py",
         "src/apm_cli/install/local_bundle_canvas.py",
         "src/apm_cli/commands/uninstall/local_bundle.py"
       ],
