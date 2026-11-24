@@ -84,17 +84,10 @@ def test_an_insteadof_rewrite_of_the_url_is_reported_for_the_url_check() -> None
     assert prefixes == ("https://github.com/",)
 
 
-def test_schannel_trusts_the_os_store_only_on_windows(tmp_path: Path) -> None:
-    ca = tmp_path / "ca.pem"
-    ca.write_text("x", encoding="utf-8")
-
-    if os.name == "nt":
-        assert fetch._trust({}, {"http.sslbackend": "schannel"}) == ("os", "")
-        with pytest.raises(fetch._Refuse):
-            fetch._trust({"GIT_SSL_CAINFO": str(ca)}, {"http.sslbackend": "schannel"})
-    else:
-        with pytest.raises(fetch._Refuse, match="sslBackend"):
-            fetch._trust({}, {"http.sslbackend": "schannel"})
+def test_schannel_falls_back_to_git_on_every_host() -> None:
+    """git's schannel checks certificate revocation; only git matches it (W3d)."""
+    with pytest.raises(fetch._Refuse, match="sslBackend"):
+        fetch._trust({}, {"http.sslbackend": "schannel"})
     with pytest.raises(fetch._Refuse, match="sslBackend"):
         fetch._trust({}, {"http.sslbackend": "gnutls"})
 
@@ -168,11 +161,14 @@ def test_a_401_challenge_falls_back_without_sending_credentials(monkeypatch) -> 
         sent.update(kwargs)
         yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
 
+    import certifi
+
     monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
-    monkeypatch.setattr(fetch, "_session", lambda trust: object())
 
     with pytest.raises(fetch._Refuse, match="auth challenge"):
-        fetch._post("https://github.com/o/r/git-upload-pack", None, ("os", ""), b"0000")
+        fetch._post(
+            "https://github.com/o/r/git-upload-pack", None, ("file", certifi.where()), b"0000"
+        )
 
     assert "Authorization" not in sent["headers"]
     assert sent["ambient_credentials"] is False
@@ -210,8 +206,13 @@ def frozen_world(tmp_path: Path, monkeypatch):
     config.write_text("[user]\n\tname = a\n", encoding="utf-8")
     built, fake = _frozen_from(config)
     monkeypatch.setattr("apm_cli.utils.git_env.git_network_env", fake)
-    monkeypatch.setattr(fetch, "_config_paths", lambda env: (str(config),))
-    monkeypatch.setattr(fetch, "_binary_identity", lambda git: (git, 1, 2, 3, 4))
+    import sys
+
+    # Collaborators only: the config files git reports, and a stable "git" binary to stat.
+    monkeypatch.setattr(
+        "apm_cli.utils.git_config_memo.git_config_paths", lambda env: (str(config),)
+    )
+    monkeypatch.setattr("apm_cli.utils.git_env.get_git_executable", lambda: sys.executable)
     return config, built
 
 
@@ -250,3 +251,48 @@ def test_an_extra_header_added_mid_command_falls_back(frozen_world):
         config.write_text("[http]\n\textraHeader = Authorization: x\n", encoding="utf-8")
         with pytest.raises(fetch._Refuse, match="extraHeader"):
             fetch._effective(env)
+
+
+def test_a_carriage_return_in_an_attributes_record_refuses(tmp_path: Path) -> None:
+    """git splits records on LF and reads CR as whitespace: ``eol=crlf`` would apply."""
+    attributes = tmp_path / "attributes"
+    attributes.write_bytes(b"* diff\reol=crlf\n")
+    crlf = tmp_path / "crlf"
+    crlf.write_bytes(b"*.pdf diff=astextplain\r\n*.c diff=cpp\r\n")
+
+    assert not fetch._inert_attributes(str(attributes))
+    assert fetch._inert_attributes(str(crlf)), "a CRLF line ending is only whitespace to git"
+
+
+@pytest.mark.parametrize("configured", ["~/.gitattributes", "%(prefix)/etc/attrs", "rel/attrs"])
+def test_an_attributes_file_git_must_resolve_falls_back(configured: str) -> None:
+    with pytest.raises(fetch._Refuse, match="path resolution"):
+        fetch._attribute_files(
+            {"GIT_ATTR_NOSYSTEM": "1"}, [Entry("core.attributesfile", configured)]
+        )
+
+
+def test_attributes_are_checked_under_the_checkout_env_not_the_parents(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The parent's attributesFile is inert, but the isolated checkout reads XDG's crlf."""
+    inert = tmp_path / "inert"
+    inert.write_text("*.pdf diff\n", encoding="utf-8")
+    xdg = tmp_path / "xdg"
+    (xdg / "git").mkdir(parents=True)
+    (xdg / "git" / "attributes").write_text("* eol=crlf\n", encoding="utf-8")
+    seen: list[dict] = []
+
+    def checkout_config(env):
+        seen.append(dict(env))
+        # The isolated checkout config names no attributesFile: git uses the XDG default.
+        return namedtuple("Snapshot", "entries")([])
+
+    monkeypatch.setattr("apm_cli.utils.git_env._read_effective_git_config", checkout_config)
+    env = {"XDG_CONFIG_HOME": str(xdg), "GIT_ATTR_NOSYSTEM": "1", "PATH": os.environ["PATH"]}
+
+    with pytest.raises(fetch._Refuse, match="checkout-affecting"):
+        fetch._require_inert_checkout_attributes(env)
+    assert seen and seen[0]["GIT_TERMINAL_PROMPT"] == "0"  # the cached_repo_env fence
+    # Killed control: the parent's view (its inert attributesFile) would have admitted it.
+    fetch._require_inert_attributes(env, [Entry("core.attributesfile", str(inert))])

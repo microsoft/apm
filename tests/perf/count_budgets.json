@@ -3,22 +3,22 @@
   "journeys": {
     "install-cold": {
       "fs.files_written": {
-        "budget": 1436,
-        "measured": 1367,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1819,
+        "measured": 1732,
+        "reason": "#5330 in-process pinned fetch: the checkout's files are now written by the apm process (inprocess_fetch.py os.open), which the counter sees, instead of by an uncounted git clone/checkout child; tree-10, offline mirror, rtt 0; max of CI runs 45401098857 (1520) and 45403013362 (1732)",
+        "pr": "#5340"
       },
       "fs.hash_objects": {
-        "budget": 1608,
-        "measured": 1531,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1950,
+        "measured": 1857,
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.hashed_bytes": {
-        "budget": 2852339,
-        "measured": 2716513,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 3381038,
+        "measured": 3220036,
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.lockfile_reads": {
         "budget": 11,
@@ -44,39 +44,9 @@
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
       },
-      "git.cat-file": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
-      "git.checkout": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
-      "git.clone": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
       "git.config": {
         "budget": 55,
         "measured": 52,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
-      "git.init": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
-      "git.ls-tree": {
-        "budget": 21,
-        "measured": 20,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
       },
@@ -87,10 +57,10 @@
         "pr": "#5338"
       },
       "git.var": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 5,
+        "measured": 4,
+        "reason": "#5330 in-process pinned fetch: its attribute-source probe `git var GIT_ATTR_SYSTEM` (memoized per child env) runs before the in-process checkout; tree-10, offline mirror, rtt 0; CI runs 45401098857 and 45403013362 (both 4)",
+        "pr": "#5340"
       },
       "http.connects": {
         "budget": 14,
@@ -113,16 +83,16 @@
         "pr": "#5338"
       },
       "fs.hash_objects": {
-        "budget": 1529,
-        "measured": 1456,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1917,
+        "measured": 1825,
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.hashed_bytes": {
-        "budget": 2955248,
-        "measured": 2814521,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 3492216,
+        "measured": 3325920,
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.lockfile_reads": {
         "budget": 11,

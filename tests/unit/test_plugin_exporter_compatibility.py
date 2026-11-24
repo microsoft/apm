@@ -472,7 +472,7 @@ class TestExportPluginBundle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as warn:
             with patch(
                 "apm_cli.bundle.plugin_exporter._merge_file_map",
                 side_effect=lambda fm, comps, name, force, colls: colls.append(
@@ -480,8 +480,9 @@ class TestExportPluginBundle:
                 ),
             ):
                 export_plugin_bundle(project, output_dir)
-        # _rich_warning is only called for collisions, not necessarily from here
-        # Just ensure it runs without error
+        warned = [c.args[0] for c in warn.call_args_list]
+        assert warned
+        assert all(msg.startswith("collision: ") for msg in warned)
 
     def test_collision_warning_emitted_with_logger(self, tmp_path):
         from apm_cli.bundle.plugin_exporter import export_plugin_bundle
