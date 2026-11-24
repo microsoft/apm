@@ -295,3 +295,27 @@ def test_withdrawn_approval_retires_deployed_markdown_with_frontmatter_hooks(
     again = output(world.apm(consumer, "install", "--no-policy"))
     assert "Retired" not in again, again
     assert tree_bytes(consumer / ".claude") == after
+
+
+def test_withdrawn_approval_keeps_hooked_markdown_edited_outside_apm(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    consumer = _consumer(world, "edited-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    hooked = consumer / _DEPLOYED["command"]
+    edited = hooked.read_bytes() + b"Edited by hand.\n"
+    hooked.write_bytes(edited)
+
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    text = output(world.apm(consumer, "install", "--no-policy"))
+
+    assert f"Kept edited file(s): {_DEPLOYED['command']}" in text, text
+    assert hooked.read_bytes() == edited
+    assert _DEPLOYED["command"] in world.lock(consumer)["local_deployed_files"]

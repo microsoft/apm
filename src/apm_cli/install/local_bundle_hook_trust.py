@@ -858,6 +858,11 @@ def reconcile_scope_bundle_hooks(
     retire_unadmitted_bundle_canvas(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
     )
+    from .local_bundle_markdown_hooks import retire_unadmitted_bundle_markdown
+
+    retire_unadmitted_bundle_markdown(
+        root, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
+    )
     return hooks
 
 

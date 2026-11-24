@@ -498,9 +498,9 @@ policy and retires those `hooks.json` entries and `hooks/` scripts when it no
 longer holds; `apm audit --ci` reports them first. A bundle Markdown file, such
 as a command `.md` or a `SKILL.md`, whose frontmatter declares `hooks` (or cannot
 be read) waits for the same approval: it is skipped and named until the key is
-approved. Revoking the approval later does not yet retire such a file once it
-is deployed, and audit does not report it; remove it by hand
-([#5254](https://github.com/microsoft/apm/issues/5254)). Canvas extensions a
+approved. When that approval is later revoked or denied, the next `apm install`,
+`apm update` or `apm prune` retires such files the bundle deployed (a file you
+edited is kept and named); `apm audit --ci` does not report them yet. Canvas extensions a
 bundle deploys (with the `canvas` experimental flag) follow the same approval, re-check and retirement; a reinstall retires
 the extensions the new bundle content no longer ships. Retiring one bundle's
 extensions never removes another bundle's or anything outside the target's
