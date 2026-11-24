@@ -1452,6 +1452,21 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             'def _marker(slug):\n    return "local-bundle::" + slug\n\n\ndef _retire_bundle_hooks(',
         ),
         (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_markdown_hooks.py",
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+            'def _hand_record(files):\n    return {"local-bundle-markdown-hooks": files}\n\n\n'
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_markdown_hooks.py",
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+            "def _hand_write(root):\n"
+            '    (root / "apm-bundle-markdown-hooks.json").write_text("{}")\n\n\n'
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+        ),
+        (
             "install-deployment-bundle-user-scope-root",
             "src/apm_cli/commands/install.py",
             "                    user_scope=global_,\n",

@@ -869,11 +869,26 @@ def reconcile_scope_bundle_hooks(
         scope, apm_package, no_policy=no_policy, logger=logger
     )
     lock_dir = get_apm_dir(scope)
+    from .local_bundle_markdown_hooks import preflight_bundle_markdown_records
+
+    # Every Markdown hook record is read before the first retirement (#5254).
+    preflight_bundle_markdown_records(root, targets, scope=scope, logger=logger)
     hooks = retire_unadmitted_bundle_hooks(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
     )
     retire_unadmitted_bundle_canvas(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
+    )
+    from .local_bundle_markdown_hooks import retire_unadmitted_bundle_markdown
+
+    retire_unadmitted_bundle_markdown(
+        root,
+        targets,
+        allow_provider,
+        lock_dir=lock_dir,
+        scope=scope,
+        logger=logger,
+        dry_run=dry_run,
     )
     return hooks
 
