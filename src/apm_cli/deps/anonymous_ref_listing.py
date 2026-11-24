@@ -560,17 +560,16 @@ def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, st
 
 # ``-c`` keys whose values cannot change an https ref advertisement request
 # (hooks, fsmonitor, submodules, checkout line endings and links).
-_INERT_GIT_ARG_KEYS = frozenset(
-    {
-        "core.hookspath",
-        "core.fsmonitor",
-        "submodule.recurse",
-        "core.autocrlf",
-        "core.eol",
-        "core.symlinks",
-        "core.longpaths",
-    }
-)
+_INERT_BASE_KEYS = ("core.hookspath", "core.fsmonitor", "submodule.recurse", "core.longpaths")
+
+
+def _inert_git_arg_keys() -> frozenset[str]:
+    from apm_cli.utils.git_env import git_line_ending_pin_entries, git_symlink_pin_entry
+
+    pins = (key for key, _value in (*git_line_ending_pin_entries(), git_symlink_pin_entry()))
+    return frozenset((*_INERT_BASE_KEYS, *(key.lower() for key in pins)))
+
+
 _BRANCH_AND_TAG_PATTERNS = ("refs/heads/*", "refs/tags/*")
 _listing_lock = threading.Lock()
 
@@ -579,8 +578,9 @@ def _inert(git_args) -> bool:
     args = list(git_args)
     if len(args) % 2:
         return False
+    inert = _inert_git_arg_keys()
     for flag, value in zip(args[::2], args[1::2], strict=True):
-        if flag != "-c" or value.partition("=")[0].lower() not in _INERT_GIT_ARG_KEYS:
+        if flag != "-c" or value.partition("=")[0].lower() not in inert:
             return False
     return True
 

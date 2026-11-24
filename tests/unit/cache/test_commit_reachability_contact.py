@@ -22,7 +22,6 @@ def test_url_rewrites_are_probed_once_for_many_origins(
         return (("https://mirror.example/", "https://github.com/rewritten/"),)
 
     monkeypatch.setattr("apm_cli.utils.git_env.git_url_rewrites", _rewrites)
-    monkeypatch.setattr("apm_cli.cache.commit_reachability._REWRITES", {})
     env = {"GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig")}
 
     plain = [effective_contact(f"https://github.com/o/pkg-{i}", env) for i in range(5)]
