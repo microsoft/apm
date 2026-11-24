@@ -225,7 +225,7 @@ class TestGitHubPackageDownloader:
         )
 
         with patch.object(self.downloader, "resolve_git_reference", return_value=mock_resolved_ref):
-            result = self.downloader.download_package("user/repo#main", target_path)
+            result = self.downloader.download_package("user/repo", target_path)
 
             assert result.package.name == "test-package"
             assert result.package.version == "1.0.0"
@@ -261,7 +261,7 @@ class TestGitHubPackageDownloader:
 
         with patch.object(self.downloader, "resolve_git_reference", return_value=mock_resolved_ref):
             with pytest.raises(RuntimeError, match="Invalid APM package"):
-                self.downloader.download_package("user/repo#main", target_path)
+                self.downloader.download_package("user/repo", target_path)
 
     @patch("apm_cli.deps.github_downloader.Repo")
     def test_download_package_git_failure(self, mock_repo_class):
@@ -524,7 +524,7 @@ class TestErrorHandling:
             ) as build_context,
             pytest.raises(RuntimeError) as exc_info,
         ):
-            downloader.download_package("owner/private-repo#main", tmp_path / "pkg")
+            downloader.download_package("owner/private-repo", tmp_path / "pkg")
 
         assert str(exc_info.value) == (
             "Failed to clone repository owner/private-repo. "
@@ -683,7 +683,7 @@ class TestErrorHandling:
             ) as build_context,
             pytest.raises(RuntimeError) as exc_info,
         ):
-            downloader.download_package("acme/missing-repo#v1.0.0", tmp_path / "missing")
+            downloader.download_package("acme/missing-repo", tmp_path / "missing")
 
         message = str(exc_info.value)
         assert message == "Failed to clone repository acme/missing-repo. <access hint>"
@@ -1233,13 +1233,13 @@ class TestSubdirectoryPackageCommitSHA:
             assert checkout_call.args[1] == sha
             assert checkout_call.kwargs["env"] is downloader.git_env
 
-    @pytest.mark.parametrize("ref", ["refs/heads/main", "refs/tags/v1"])
+    @pytest.mark.parametrize("ref", ["main", "v1", "refs/heads/main", "refs/tags/v1"])
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("apm_cli.deps.github_downloader.validate_apm_package")
-    def test_a_fully_qualified_ref_is_fetched_by_its_exact_commit(
+    def test_a_named_ref_is_fetched_by_its_admitted_commit(
         self, mock_validate, mock_repo_class, ref
     ):
-        """``clone --branch`` takes only a short name, so a full ref is fetched by its commit."""
+        """A named ref is fetched by the commit it was admitted at, never by name (#5138)."""
         sha = "c" * 40
         dep_ref = self._make_dep_ref(ref=ref)
         mock_validation = ValidationResult()
@@ -1269,47 +1269,6 @@ class TestSubdirectoryPackageCommitSHA:
         assert checkout.call_args.args[1] == sha
         assert info.resolved_reference.ref_name == ref
         assert (self.temp_dir / "my-skill" / "apm.yml").is_file()
-
-    @patch("apm_cli.deps.github_downloader.Repo")
-    @patch("apm_cli.deps.github_downloader.validate_apm_package")
-    def test_branch_ref_uses_shallow_clone(self, mock_validate, mock_repo_class):
-        """Branch/tag refs must use shallow clone with depth=1 and branch kwarg."""
-        dep_ref = self._make_dep_ref(ref="main")
-
-        mock_repo = Mock()
-        mock_repo_class.return_value = mock_repo
-
-        mock_validation = ValidationResult()
-        mock_validation.is_valid = True
-        mock_validation.package = APMPackage(name="my-skill", version="1.0.0")
-        mock_validate.return_value = mock_validation
-
-        with patch.dict(os.environ, {}, clear=True):
-            downloader = GitHubPackageDownloader()
-
-        with patch.object(downloader, "_clone_with_fallback") as mock_clone:
-            mock_clone.return_value = mock_repo
-
-            target = self.temp_dir / "my-skill"
-
-            def setup_subdir(*args, **kwargs):
-                clone_path = args[1]
-                subdir = clone_path / "packages" / "my-skill"
-                subdir.mkdir(parents=True)
-                (subdir / "apm.yml").write_text("name: my-skill\nversion: 1.0.0\n")
-                return mock_repo
-
-            mock_clone.side_effect = setup_subdir
-
-            downloader.download_subdirectory_package(dep_ref, target)
-
-            call_kwargs = mock_clone.call_args
-            assert call_kwargs.kwargs.get("depth") == 1, "Branch ref should use depth=1"
-            assert call_kwargs.kwargs.get("branch") == "main", "Branch ref should pass branch"
-            assert "no_checkout" not in call_kwargs.kwargs, "Branch ref should not set no_checkout"
-
-            # No explicit checkout for branch refs
-            mock_repo.git.checkout.assert_not_called()
 
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("apm_cli.deps.github_downloader.validate_apm_package")
