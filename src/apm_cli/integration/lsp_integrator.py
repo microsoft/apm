@@ -13,6 +13,7 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
@@ -221,12 +222,14 @@ class _CleanupPlan:
 
 
 def _written_by_apm(entry: object, expected: dict) -> bool:
-    """Whether an on-disk entry is still what APM rendered from its locked config."""
-    if entry == expected:
-        return True
-    from apm_cli.deps.plugin_root_render import contains_plugin_root, matches_at_some_root
+    """Whether an on-disk entry is exactly what APM rendered from its locked config.
 
-    return contains_plugin_root(expected) and matches_at_some_root(expected, entry)
+    A render that still holds ``${CLAUDE_PLUGIN_ROOT}`` had no proven package
+    root, so it proves nothing: the entry is kept and reported (#5263).
+    """
+    from apm_cli.deps.plugin_root_render import contains_plugin_root
+
+    return entry == expected and not contains_plugin_root(expected)
 
 
 def _cleanup_failed(
@@ -1176,6 +1179,7 @@ class LSPIntegrator:
         user_scope: bool,
         fail_on_write_error: bool,
         locked_configs: dict[str, dict] | None,
+        plugin_roots: Mapping[str, str] | None = None,
     ) -> _CleanupPlan | None:
         """Read one target config and decide which stale names to remove, without writing.
 
@@ -1205,11 +1209,17 @@ class LSPIntegrator:
             return None
 
         present = sorted(name for name in stale_names if name in servers)
+        # Each locked config renders at its own package's root, never any root (#5263).
+        roots = [
+            SimpleNamespace(name=name, plugin_root=root)
+            for name, root in (plugin_roots or {}).items()
+            if name in present
+        ]
         expected = (
             LSPIntegrator._locked_entries(
                 locked_configs,
                 set(present),
-                [],
+                roots,
                 spec,
                 project_root=project_root,
                 user_scope=user_scope,
@@ -1321,13 +1331,15 @@ class LSPIntegrator:
         logger=None,
         fail_on_write_error: bool = False,
         locked_configs: dict[str, dict] | None = None,
+        plugin_roots: Mapping[str, str] | None = None,
     ) -> None:
         """Remove stale LSP entries per target after reading every config first.
 
         Every config the cleanup touches is read and planned before the first
         change, so one unreadable config changes none of them (#5263).
         *locked_configs* are the server configs APM recorded; an entry that no
-        longer matches its recorded render is kept and reported.
+        longer matches its recorded render, at the declaring package's root
+        from *plugin_roots*, is kept and reported.
         """
         if logger is None:
             logger = NullCommandLogger()
@@ -1345,6 +1357,7 @@ class LSPIntegrator:
                     user_scope=user_scope,
                     fail_on_write_error=fail_on_write_error,
                     locked_configs=locked_configs,
+                    plugin_roots=plugin_roots,
                 )
             except Exception as exc:
                 _cleanup_failed(runtime, spec, user_scope, exc, fail_on_write_error)

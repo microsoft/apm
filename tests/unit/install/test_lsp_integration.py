@@ -859,6 +859,7 @@ class TestSkipInstall:
             logger=mock_integrator.install.call_args.kwargs["logger"],
             fail_on_write_error=False,
             locked_configs={"pyright": {}},
+            plugin_roots={"pyright": str(tmp_path.resolve())},
         )
         assert mock_integrator.update_lockfile.call_args.kwargs["lsp_target_servers"] == {
             "claude": set(),

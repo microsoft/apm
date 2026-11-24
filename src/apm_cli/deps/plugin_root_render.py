@@ -190,18 +190,6 @@ def _is_normalized_root(root: str) -> bool:
     return all(segment not in ("", ".", "..") for segment in segments)
 
 
-def matches_at_some_root(authored: Any, stored: Any) -> bool:
-    """Whether *stored* is *authored* with the placeholder expanded at one root.
-
-    Used when the declaring package is gone and its root is unknown (#5263).
-    """
-    pairs: list[tuple[str, str]] = []
-    if not _placeholder_pairs(authored, stored, pairs):
-        return False
-    roots = {_expanded_root(current, other) for current, other in pairs}
-    return None not in roots and len(roots) <= 1
-
-
 def legacy_absolute_root(
     current: Any,
     stored: Any,
