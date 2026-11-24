@@ -1415,6 +1415,7 @@ def fetch_sparse_worktree(
         return None
     if _rate_limited():
         return None
+    credential: str | None = None
     try:
         credential, env = _split_managed_auth(env if env is not None else os.environ)
         upload_url, proxy, trust = _gate(url, env)
@@ -1434,7 +1435,6 @@ def fetch_sparse_worktree(
             if set(blobs) != set(wanted) or any(kind != "blob" for kind, _ in blobs.values()):
                 raise _Refuse("blob response differs from the wanted set")
             objects.update(blobs)
-        del credential
         if not _cone_attributes_ok(objects, sha, files):
             raise _Refuse("an in-cone .gitattributes may change checkout bytes")
         root = str(staged)
@@ -1470,3 +1470,5 @@ def fetch_sparse_worktree(
     except Exception as exc:
         _note(url, f"sparse fallback: {type(exc).__name__}: {exc}")
         return None
+    finally:
+        del credential  # every path, exceptions included (W3d)
