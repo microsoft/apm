@@ -11,7 +11,6 @@ permission bits for every staged entry; otherwise the unit is kept and reported.
 from __future__ import annotations
 
 import errno
-import functools
 import os
 import stat
 from pathlib import Path
@@ -103,120 +102,23 @@ _NO_XATTRS = frozenset(
 )
 
 
-# Windows: an ACE a file did not inherit, or a DACL protected from inheritance (#5178).
-_INHERITED_ACE = 0x10
-_SE_DACL_PROTECTED = 0x1000
-_WIN_NOT_THERE = frozenset({2, 3})  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
-
-
-@functools.cache
-def _windows_security_api() -> tuple[Any, Any]:
-    """``advapi32`` and ``kernel32`` with the signatures :func:`_windows_acl` calls."""
-    import ctypes
-    from ctypes import wintypes
-
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    pointer = ctypes.POINTER(ctypes.c_void_p)
-    advapi32.GetNamedSecurityInfoW.argtypes = [
-        wintypes.LPCWSTR,
-        ctypes.c_int,
-        wintypes.DWORD,
-        *([pointer] * 5),
-    ]
-    advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
-    advapi32.GetSecurityDescriptorControl.argtypes = [
-        ctypes.c_void_p,
-        ctypes.POINTER(wintypes.WORD),
-        ctypes.POINTER(wintypes.DWORD),
-    ]
-    advapi32.GetSecurityDescriptorControl.restype = wintypes.BOOL
-    advapi32.GetAce.argtypes = [ctypes.c_void_p, wintypes.DWORD, pointer]
-    advapi32.GetAce.restype = wintypes.BOOL
-    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-    kernel32.LocalFree.restype = ctypes.c_void_p
-    return advapi32, kernel32
-
-
-def _windows_acl(path: Path) -> bool:
-    """Whether *path*'s DACL holds an ACE it did not inherit, or is protected (#5178).
-
-    A file APM writes takes every ACE from its parent; an explicit grant or deny
-    would be lost by a restore. ``OSError`` when the DACL cannot be read.
-    """
-    import ctypes
-    from ctypes import wintypes
-
-    advapi32, kernel32 = _windows_security_api()
-    dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
-    # SE_FILE_OBJECT (1), DACL_SECURITY_INFORMATION (4).
-    status = advapi32.GetNamedSecurityInfoW(
-        str(path), 1, 4, None, None, ctypes.byref(dacl), None, ctypes.byref(descriptor)
-    )
-    if status in _WIN_NOT_THERE:
-        return False
-    if status:
-        raise OSError(status, "cannot read the DACL", str(path))
-    try:
-        control, revision = wintypes.WORD(), wintypes.DWORD()
-        if not advapi32.GetSecurityDescriptorControl(
-            descriptor, ctypes.byref(control), ctypes.byref(revision)
-        ):
-            raise ctypes.WinError(ctypes.get_last_error())
-        if control.value & _SE_DACL_PROTECTED:
-            return True
-        if not dacl.value:
-            return False  # a NULL DACL holds no entry
-        count = ctypes.cast(dacl, ctypes.POINTER(ctypes.c_ushort))[2]  # ACL.AceCount
-        for index in range(count):
-            ace = ctypes.c_void_p()
-            if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            if not ctypes.cast(ace, ctypes.POINTER(ctypes.c_ubyte))[1] & _INHERITED_ACE:
-                return True  # ACE_HEADER.AceFlags without INHERITED_ACE
-        return False
-    finally:
-        kernel32.LocalFree(descriptor)
-
-
-def _is_junction(path: Path) -> bool:
-    isjunction = getattr(os.path, "isjunction", None)  # Python 3.12+
-    return bool(isjunction and isjunction(path))
-
-
-def _posix_acl(path: Path) -> bool:
-    try:
-        names = os.listxattr(path, follow_symlinks=False)
-    except OSError as exc:
-        if exc.errno in _NO_XATTRS:
-            return False  # unsupported, none, or nothing there: no ACL
-        raise
-    return bool(_ACL_XATTRS.intersection(names))
-
-
 def carries_acl(*paths: Path) -> bool:
-    """Whether any of *paths* (or an entry below one) carries an ACL.
+    """Whether any of *paths* (or an entry below one) carries a POSIX ACL.
 
-    A POSIX ACL on Linux; on Windows, a DACL with an ACE it did not inherit or
-    protected from inheritance (#5178). Restored bytes are staged with
-    permission bits only, so an ACL would be lost. A path whose ACL cannot be
-    checked is never assumed to have none.
+    Restored bytes are staged with permission bits only, so an ACL would be lost.
     """
-    if os.name == "nt":
-        has_acl = _windows_acl
-    elif hasattr(os, "listxattr"):
-        has_acl = _posix_acl
-    else:
+    if not hasattr(os, "listxattr"):
         return False
     for root in paths:
         for path in [root, *(_entries(root) if root.is_dir() and not root.is_symlink() else ())]:
-            if os.name == "nt" and (path.is_symlink() or _is_junction(path)):
-                continue  # a link has no ACL of its own to keep, as on Linux
             try:
-                if has_acl(path):
-                    return True
-            except OSError:
+                names = os.listxattr(path, follow_symlinks=False)
+            except OSError as exc:
+                if exc.errno in _NO_XATTRS:
+                    continue  # unsupported, none, or nothing there: no ACL
                 return True  # cannot be checked: never assumed absent
+            if _ACL_XATTRS.intersection(names):
+                return True
     return False
 
 
@@ -234,22 +136,17 @@ def stage_private(copy: Path, staged: Path, kind: str, read: Any) -> None:
         _stage_tree(copy, staged, read)
     if carries_acl(staged):
         # Inherited from the destination's default ACL: never published (#5134).
-        raise OSError(f"{staged} would carry an inherited ACL")
-
-
-# On Windows a 0o700 mkdir gives the directory an explicit, protected DACL (Python
-# 3.12.4+): an ACL carries_acl reports. Windows modes carry nothing else.
-_STAGE_DIR_MODE = 0o777 if os.name == "nt" else 0o700
+        raise OSError(f"{staged} would carry an inherited POSIX ACL")
 
 
 def _stage_tree(copy: Path, staged: Path, read: Any) -> None:
-    staged.mkdir(mode=_STAGE_DIR_MODE)
+    staged.mkdir(mode=0o700)
     for entry in sorted(copy.rglob("*")):
         target = staged / entry.relative_to(copy)
         if entry.is_symlink():
             os.symlink(os.readlink(entry), target)
         elif entry.is_dir():
-            target.mkdir(mode=_STAGE_DIR_MODE)
+            target.mkdir(mode=0o700)
         else:
             _write_private(target, read(entry))
 
