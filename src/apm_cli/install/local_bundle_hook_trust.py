@@ -23,7 +23,13 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
-from apm_cli.install.hook_script_refs import hook_commands, runs_script, script_refs
+from apm_cli.install.hook_script_refs import (
+    hook_commands,
+    runs_script,
+    script_refs,
+    script_tails,
+)
+from apm_cli.install.local_bundle_hook_cwd import runs_through_cwd
 from apm_cli.install.local_bundle_hook_states import (
     _merged_hook_documents,
     _merged_hook_states,
@@ -555,16 +561,6 @@ def _relative_value(value: str, project_root: Path) -> str:
     return _record_value(path, project_root) if path.is_absolute() else value
 
 
-def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
-    """Return each script row under *target_root*, spelled relative to it."""
-    tails = []
-    for value in scripts:
-        spelled = Path(value) if Path(value).is_absolute() else project_root / value
-        if spelled.is_relative_to(target_root):
-            tails.append(spelled.relative_to(target_root).as_posix())
-    return tails
-
-
 def _per_file_configs_running(
     project_root: Path, targets: Any, owned: Collection[str], scripts: Collection[str]
 ) -> set[str]:
@@ -581,7 +577,7 @@ def _per_file_configs_running(
     refs = script_refs(project_root, scripts)
     for target in _per_file_targets(targets):
         target_root = project_root / target.root_dir
-        tails = _script_tails(project_root, target_root, scripts)
+        tails = script_tails(project_root, target_root, scripts)
         hooks_dir = target_root / "hooks"
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not hooks_dir.is_dir():
@@ -596,8 +592,13 @@ def _per_file_configs_running(
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
             texts = list(hook_commands(document))
-            if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
-                runs_script(text, refs, (project_root, target_root), project_root) for text in texts
+            if (
+                any(tail in text.replace("\\", "/") for text in texts for tail in tails)
+                or any(
+                    runs_script(text, refs, (project_root, target_root), project_root)
+                    for text in texts
+                )
+                or runs_through_cwd(document, project_root, scripts)
             ):
                 found.add(value)
     return found
@@ -643,7 +644,7 @@ def _configs_still_running(
         if config is None:
             continue
         target_root = project_root / target.root_dir
-        tails = _script_tails(project_root, target_root, scripts)
+        tails = script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not json_path.is_file():

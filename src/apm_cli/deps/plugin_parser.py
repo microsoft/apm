@@ -1052,8 +1052,10 @@ def _read_mcp_json(
 
 def resolve_plugin_root_placeholders(value: Any, plugin_path: Path) -> Any:
     """Resolve plugin-root placeholders in an in-memory manifest value."""
+    from apm_cli.utils.realpath import resolve_path
+
     if isinstance(value, str):
-        return value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_path.resolve()))
+        return value.replace("${CLAUDE_PLUGIN_ROOT}", str(resolve_path(plugin_path)))
     if isinstance(value, dict):
         return {
             key: resolve_plugin_root_placeholders(item, plugin_path) for key, item in value.items()
