@@ -226,6 +226,12 @@ class _Exempt:
     unchanged: bool = False  # prune left the lockfile bytes as they were
 
 
+def _identity(rows: dict, name: str) -> tuple:
+    """A package's lock identity: its repo_url and whether it is recorded direct."""
+    row = rows.get(name) or {}
+    return row.get("repo_url"), row.get("resolved_by") is None
+
+
 def _recorded_under(rows: dict, exempt: _Exempt) -> set[str]:
     """Rows the pruned lock records beneath an exempt row, through resolved_by.
 
@@ -242,6 +248,30 @@ def _recorded_under(rows: dict, exempt: _Exempt) -> set[str]:
                 under.add(name)
                 grew = True
     return under
+
+
+def _rekey_verdict(seed: int, settled: dict, after: dict, names: set[str]) -> str:
+    """The companion's verdict on the #5238 rows *names*.
+
+    Only a changed lock identity is the #5238 re-key: a new repo_url, a move
+    between a direct and a transitive record (a promotion), or a row recorded
+    under such a row. Any other change on these rows is reported unsigned.
+    """
+    rekeyed_all = {
+        name
+        for name in set(settled) | set(after)
+        if _identity(settled, name) != _identity(after, name)
+    }
+    rekeyed_urls = {settled[name]["repo_url"] for name in rekeyed_all if name in settled}
+    moved = [
+        name
+        for name in sorted(names)
+        if name in rekeyed_all or (settled.get(name) or {}).get("resolved_by") in rekeyed_urls
+    ]
+    drift = _drift(settled, after, names - set(moved))
+    if drift:
+        return f"seed {seed}: install --no-frozen after prune changed {drift}"
+    return f"seed {seed}: install re-keyed {moved}" if moved else "converged"
 
 
 def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tally: dict) -> str:
@@ -265,15 +295,14 @@ def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tall
     if resolved.exit_code != 0:
         return f"seed {seed}: install --no-frozen after prune failed: {resolved.output[:500]}"
     if rekeyed:
-        names = set(exempt.rekeyed)
-    else:
-        skipped = exempt.rows | exempt.rekeyed | exempt.beneath | _recorded_under(settled, exempt)
-        names = (set(settled) | set(after)) - skipped
+        tally["compared"] = tally.get("compared", 0) + len(exempt.rekeyed)
+        return _rekey_verdict(seed, settled, after, set(exempt.rekeyed))
+    skipped = exempt.rows | exempt.rekeyed | exempt.beneath | _recorded_under(settled, exempt)
+    names = (set(settled) | set(after)) - skipped
     tally["compared"] = tally.get("compared", 0) + len(names)
     drift = _drift(settled, after, names)
     if drift:
-        what = "install re-keyed" if rekeyed else "install --no-frozen after prune changed"
-        return f"seed {seed}: {what} {drift}"
+        return f"seed {seed}: install --no-frozen after prune changed {drift}"
     return "converged" if names else "vacuous"
 
 
