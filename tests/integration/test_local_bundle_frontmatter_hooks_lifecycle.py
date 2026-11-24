@@ -610,3 +610,42 @@ def test_a_fifo_in_the_pack_list_is_refused_by_name_without_blocking(
     assert "Traceback" not in text, text
     assert tree_bytes(consumer) == before
     assert stat.S_ISFIFO(packed.lstat().st_mode)
+
+
+def test_withdrawal_retires_hooked_markdown_under_a_relocated_claude_root(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5289: user scope with CLAUDE_CONFIG_DIR outside HOME records absolute rows;
+    the re-check keeps a granted file and retires a revoked one, dropping its row."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    claude_root = tmp_path / "relocated-claude"
+    claude_root.mkdir()
+    world.env["CLAUDE_CONFIG_DIR"] = str(claude_root)
+    home = world.isolated.home
+    user_manifest_path = home / ".apm" / "apm.yml"
+    write(user_manifest_path, "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    user_manifest = load_yaml(user_manifest_path)
+    user_manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(user_manifest, user_manifest_path)
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle), "--no-policy")
+    hooked = claude_root / "commands" / "run.md"
+    plain = claude_root / "skills" / "hs" / "SKILL.md"
+    assert hooked.is_file() and plain.is_file()
+    lock_path = home / ".apm" / "apm.lock.yaml"
+    assert hooked.as_posix() in (load_yaml(lock_path).get("local_deployed_files") or [])
+
+    granted = output(world.apm(world.isolated.work_root, "install", "-g", "--no-policy"))
+    assert "Retired" not in granted, granted
+    assert hooked.is_file()
+
+    user_manifest["executables"] = {}
+    dump_yaml(user_manifest, user_manifest_path)
+    text = output(world.apm(world.isolated.work_root, "install", "-g", "--no-policy"))
+
+    assert "Retired 1 Markdown file(s) with frontmatter hooks" in text, text
+    assert not hooked.exists()
+    assert plain.is_file()
+    rows = load_yaml(lock_path).get("local_deployed_files") or []
+    assert hooked.as_posix() not in rows, rows
+    assert plain.as_posix() in rows, rows
