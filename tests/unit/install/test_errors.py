@@ -18,7 +18,6 @@ from apm_cli.install.errors import (
     render_apm_dependency_failure,
 )
 from apm_cli.install.phases.resolve import _fail_on_resolution_errors
-from tests.lifecycle.known import KnownFailure
 
 pytestmark = pytest.mark.unit
 
@@ -104,14 +103,6 @@ def test_lockfile_generator_refusal_message_stays_canonical():
     assert install_failure_message(error) == str(error)
 
 
-_RESOLUTION_ERROR_ONCE = KnownFailure(
-    "#5272",
-    "a failed dependency resolution prints its error twice",
-    r"printed 2 times",
-)
-
-
-@_RESOLUTION_ERROR_ONCE.mark()
 def test_a_resolution_error_is_printed_once_with_its_remedy():
     """I9: the resolve phase and the install renderer must not both print the error."""
     cause = (
