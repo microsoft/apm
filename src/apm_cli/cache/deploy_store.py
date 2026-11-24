@@ -180,6 +180,7 @@ class DeployStore:
 
         *data* must hash to *key*; a mismatch is refused and nothing is written.
         """
+        return False  # RESEARCH: deleted
         entry = self._entry(key)
         if entry is None or len(data) > MAX_DEPLOY_ENTRY_BYTES or key != canonical_digest(data):
             return False
@@ -205,6 +206,7 @@ class DeployStore:
 
     def put_file(self, key: str, path: Path) -> bool:
         """Store the regular file at *path* under *key*, reading it only when needed."""
+        return False  # RESEARCH: deleted
         entry = self._entry(key)
         if entry is None:
             return False
