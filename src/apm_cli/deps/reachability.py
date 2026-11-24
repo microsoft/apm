@@ -37,7 +37,7 @@ its ``--dry-run`` preview.
 
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -984,18 +984,35 @@ def _retain_alias_anchors(
     )
 
 
-def reparent_blocker(lockfile: LockFile, walk: ReachabilityResult, key: str) -> str | None:
-    """Why prune cannot re-derive *key*'s parent from *walk*, or None when it can (#5126)."""
+def parent_identity_counts(lockfile: LockFile) -> Counter:
+    """How many lock rows record each parent identity; built once per decision (#5126)."""
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    return Counter(
+        lockfile_parent_identity(row, lockfile.replacements)
+        for row in lockfile.dependencies.values()
+    )
+
+
+def reparent_blocker(
+    lockfile: LockFile, walk: ReachabilityResult, key: str, identity_counts: Counter
+) -> str | None:
+    """Why prune cannot re-derive *key*'s parent from *walk*, or None when it can (#5126).
+
+    *identity_counts* comes from :func:`parent_identity_counts` for *lockfile*.
+    """
     depth = walk.depths.get(key)
     nearest = [
         parent
         for parent in walk.declaring_edges.get(key, {})
         if depth is not None and walk.depths.get(parent) == depth - 1
     ]
-    return _anchor_reason(lockfile, walk, key, lockfile.dependencies[key].repo_url, nearest)
+    return _anchor_reason(
+        lockfile, walk, key, lockfile.dependencies[key].repo_url, nearest, identity_counts
+    )
 
 
-def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
+def _anchor_reason(lockfile, walk, key, repo_url, nearest, identity_counts) -> str | None:
     """Why a survivor cannot be re-parented by prune, or None when it can.
 
     Re-parenting records the nearest surviving parent; it must be the first
@@ -1020,10 +1037,7 @@ def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
     from apm_cli.deps.lockfile import lockfile_parent_identity
 
     identity = lockfile_parent_identity(lockfile.dependencies[parent], lockfile.replacements)
-    if any(
-        other != parent and lockfile_parent_identity(row, lockfile.replacements) == identity
-        for other, row in lockfile.dependencies.items()
-    ):
+    if identity_counts[identity] > 1:
         # Recording a parent identity two rows share leaves the survivor ambiguous.
         return (
             f"{repo_url} still resolves through it, and the package that now declares "
@@ -1056,6 +1070,7 @@ def _alias_anchors(lockfile, removed_keys, walk) -> dict[str, str]:
         if key in lockfile.dependencies
     }
     anchors: dict[str, str] = {}
+    identity_counts = parent_identity_counts(lockfile)
     for key in sorted(lockfile.dependencies):
         # Every survivor, retained or declared, whose recorded parent goes.
         row = lockfile.dependencies.get(key)
@@ -1069,7 +1084,7 @@ def _alias_anchors(lockfile, removed_keys, walk) -> dict[str, str]:
             for parent in walk.declaring_edges.get(key, {})
             if walk.depths.get(parent) == depth - 1
         ]
-        reason = _anchor_reason(lockfile, walk, key, row.repo_url, nearest)
+        reason = _anchor_reason(lockfile, walk, key, row.repo_url, nearest, identity_counts)
         if reason is None:
             continue
         parent = gone.get(row.resolved_by)

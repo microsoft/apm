@@ -576,6 +576,9 @@ def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
         for key in removed_keys
         if key in lockfile.dependencies
     }
+    from ..deps.reachability import parent_identity_counts
+
+    identity_counts = parent_identity_counts(lockfile)
     return sorted(
         key
         for key in retained
@@ -583,12 +586,12 @@ def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
         and key in walk.reachable_via
         and (
             lockfile.dependencies[key].resolved_by in gone
-            or _stale_local_parent(lockfile, walk, key)
+            or _stale_local_parent(lockfile, walk, key, identity_counts)
         )
     )
 
 
-def _stale_local_parent(lockfile, walk, key) -> bool:
+def _stale_local_parent(lockfile, walk, key, identity_counts) -> bool:
     """A local survivor whose recorded parent no longer declares it (#5126).
 
     Its surviving parent dropped the edge, or its declaring parent was pruned
@@ -610,7 +613,7 @@ def _stale_local_parent(lockfile, walk, key) -> bool:
     stale = row.resolved_by not in parents or (
         row.declaring_parent is not None and row.declaring_parent not in declared
     )
-    return stale and reparent_blocker(lockfile, walk, key) is None
+    return stale and reparent_blocker(lockfile, walk, key, identity_counts) is None
 
 
 def _repaired_survivors(lockfile, retained, walk, reparented) -> list[str]:
