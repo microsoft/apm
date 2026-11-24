@@ -2067,3 +2067,36 @@ def git_long_paths_args() -> list[str]:
     if os.name == "nt":
         return ["-c", "core.longpaths=true"]
     return []
+
+
+# RESEARCH ONLY (no PR): per-command memo of the effective-config probe, keyed on
+# the exact probe inputs (full child env, git_dir, worktree). Ceiling measurement.
+import threading as _rs_threading  # noqa: E402
+
+from apm_cli import _research_spans as _rs  # noqa: E402
+
+_rs_cfg_memo: dict = {}
+_rs_cfg_lock = _rs_threading.Lock()
+_rs_read_uncached = _read_effective_git_config
+
+
+def _read_effective_git_config(  # noqa: F811
+    env: dict[str, str],
+    *,
+    git_dir: Path | None = None,
+    worktree: Path | None = None,
+) -> _GitConfigSnapshot:
+    key = (
+        tuple(sorted((str(k), str(v)) for k, v in env.items())),
+        os.path.abspath(git_dir) if git_dir is not None else None,
+        os.path.abspath(worktree) if worktree is not None else None,
+    )
+    hit = _rs_cfg_memo.get(key)
+    if hit is not None:
+        _rs._add("cfgmemo.hit", 0.0, 0.0, 0.0)
+        return hit
+    snapshot = _rs_read_uncached(env, git_dir=git_dir, worktree=worktree)
+    with _rs_cfg_lock:
+        _rs_cfg_memo[key] = snapshot
+    _rs._add("cfgmemo.miss", 0.0, 0.0, 0.0)
+    return snapshot
