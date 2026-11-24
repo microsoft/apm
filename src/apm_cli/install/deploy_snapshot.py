@@ -321,6 +321,7 @@ class DeployJournal:
             "Pre-install copies kept after a failed restore.\n", encoding="ascii"
         )
         retained = self.store.with_name(_RETAINED_PREFIX + self.store.name[len(_STORE_PREFIX) :])
+        release_held(self.store)
         try:
             self.store.rename(retained)
         except OSError:
@@ -353,6 +354,7 @@ class DeployJournal:
         store, self.store = self.store, None
         if store is None:
             return
+        release_held(store.parent)
         shutil.rmtree(store, ignore_errors=True)
         with contextlib.suppress(OSError):
             store.parent.rmdir()
@@ -727,6 +729,7 @@ def _apply(unit: _Replay) -> None:
         _modes.apply_own_mode(staged, mode)
         if os.path.lexists(path):
             _remove(path)
+        release_held(staged)
         os.replace(staged, path)
     finally:
         if os.path.lexists(staged):
@@ -741,6 +744,7 @@ def _keep(store: Path) -> Path:
             encoding="ascii",
         )
     retained = store.with_name(_RETAINED_PREFIX + store.name[len(_STORE_PREFIX) :])
+    release_held(store)
     try:
         store.rename(retained)
     except OSError:
@@ -857,6 +861,7 @@ def _replay_store(
     committed: Callable[[], str | None],
 ) -> ReplayOutcome:
     """Replay one abandoned store, or raise ``JournalReplayError`` after keeping it."""
+    release_held(store)
     try:
         header, body = _read_manifest(store)
         lines, seals, commit = _parse(body)
@@ -982,6 +987,7 @@ def replay_abandoned_journals(
     with contextlib.suppress(OSError):
         stores = sorted(store_parent.glob(f"{_STORE_PREFIX}*"))
     restored, kept, retained = 0, [], []
+    release_held(store_parent)
     for store in stores:
         if not store.is_dir() or store.is_symlink() or os.path.lexists(store / _RETAINED_MARKER):
             continue

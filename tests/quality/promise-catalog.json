@@ -190,7 +190,7 @@
     "P-OWN-user-facing-output-diagnostics": "architecture owner (core-runtime.json): User-facing output / diagnostics",
     "P-OWN-user-invocable-resolution": "architecture owner (core-runtime.json): Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
     "P-OWN-user-root-scoped-instruction-eligibility": "architecture owner (hooks-integrations.json): User-root target capabilities: scoped instruction eligibility and user-scope hook home reference",
-    "P-OWN-windows-held-directory-release": "architecture owner (transport-auth-platform.json): Held directory release before APM directory mutations on Windows: only package activation registers a held root, and APM releases the holds under a path before it renames or deletes a directory there",
+    "P-OWN-windows-held-directory-release": "architecture owner (transport-auth-platform.json): Held directory release before APM directory mutations on Windows: only package activation registers a held root and only the integrate phase holds deploy destinations, and APM releases the holds under a path before it renames or deletes a directory there",
     "P-OWN-windows-stable-executable-path": "architecture owner (transport-auth-platform.json): Windows stable executable path",
     "P-PERF-count-budgets": "perf promise engine layer 1: each budgeted journey stays within its count budgets; a budget changes only in a PR row with a reason",
     "P-SEC-gitpython-advisory-floor": "installing apm-cli upgrades GitPython below 3.1.41 (published Windows advisories CVE-2023-40590, CVE-2024-22190)",

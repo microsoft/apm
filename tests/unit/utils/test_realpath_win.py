@@ -22,12 +22,16 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.invocation_memo import invocation_scope
+from apm_cli.install.deploy_snapshot import DeployJournal
 from apm_cli.install.resolution_staging import ResolutionStagingSession
+from apm_cli.integration import write_seam
+from apm_cli.native_plugins.layout import prune_empty
 from apm_cli.utils import realpath_win
 from apm_cli.utils.file_ops import robust_replace, robust_rmtree
 from apm_cli.utils.realpath import resolve_path
 from apm_cli.utils.realpath_win import (
     _volatile,
+    deploy_holds,
     held_count,
     plain_win32,
     register_held_root,
@@ -285,3 +289,91 @@ def test_portable_relpaths_takes_the_fast_form(
         "apm_modules/o/r/missing.md",
     ]
     assert calls == []  # every resolve took a fast form, none fell back to ntpath.realpath
+
+
+# --------------------------------------------------------------------------
+# W3d DR8: deploy destination holds (DR1 lifetime, DR2 APM's own mutations)
+# --------------------------------------------------------------------------
+
+
+def _hold(path: Path, directory: Path) -> None:
+    """Resolve *path* so the walk holds *directory*, and prove it is held."""
+    resolve_path(path)
+    assert str(directory).lower() in _held_keys(), f"{directory} must be held"
+
+
+@_WINDOWS
+def test_dr1_deploy_holds_end_with_the_integrate_block(project: Path) -> None:
+    skills = project / ".github" / "skills"
+    (skills / "x").mkdir(parents=True)
+    (skills / "x" / "SKILL.md").write_text("s", encoding="ascii")
+    deploy_keys = {str(skills).lower(), str(skills / "x").lower()}
+    with _held_scope(project) as package:
+        resolve_path(package / "sub" / "b.txt")
+        with deploy_holds(project, [skills]):
+            resolve_path(skills / "x" / "SKILL.md")
+            assert deploy_keys <= _held_keys()
+        held = _held_keys()
+        assert not deploy_keys & held
+        assert {str(project).lower(), str(package).lower(), str(package / "sub").lower()} <= held
+        # Unregistered: resolving there again holds nothing below the project root.
+        assert resolve_path(skills / "x" / "SKILL.md") == (skills / "x" / "SKILL.md").resolve()
+        assert not deploy_keys & _held_keys()
+    assert held_count() == 0
+
+
+@_WINDOWS
+def test_dr2_write_seam_renames_and_deletes_held_deploy_dirs(project: Path) -> None:
+    skills = project / ".github" / "skills"
+    gone, moved, renamed, tree = (skills / n for n in ("gone", "moved", "renamed", "tree"))
+    for directory in (gone, moved, tree):
+        directory.mkdir(parents=True)
+    (moved / "SKILL.md").write_text("m", encoding="ascii")
+    (tree / "SKILL.md").write_text("t", encoding="ascii")
+    with _held_scope(project):
+        with deploy_holds(project, [skills]):
+            _hold(gone / "missing.md", gone)
+            write_seam.rmdir(gone)
+        with deploy_holds(project, [skills]):
+            _hold(moved / "SKILL.md", moved)
+            write_seam.rename(moved, renamed)
+        with deploy_holds(project, [skills]):
+            _hold(tree / "SKILL.md", tree)
+            write_seam.rmtree(tree)
+    assert not gone.exists()
+    assert not moved.exists()
+    assert (renamed / "SKILL.md").read_text(encoding="ascii") == "m"
+    assert not tree.exists()
+    assert sorted(child.name for child in skills.iterdir()) == ["renamed"]
+
+
+@_WINDOWS
+def test_dr2_journal_restore_puts_user_bytes_back_under_a_held_deploy_dir(
+    project: Path,
+) -> None:
+    skills = project / ".github" / "skills"
+    user = skills / "mine" / "SKILL.md"
+    user.parent.mkdir(parents=True)
+    original = b"user bytes\r\nkept exactly\n"
+    user.write_bytes(original)
+    journal = DeployJournal(project / "home" / "install-snapshots")
+    with _held_scope(project), deploy_holds(project, [skills]):
+        _hold(user, user.parent)
+        journal.record(user.parent)
+        user.write_bytes(b"apm overwrote this\n")
+        assert journal.restore() == []
+    assert user.read_bytes() == original
+    assert sorted(child.name for child in user.parent.iterdir()) == ["SKILL.md"]
+
+
+@_WINDOWS
+def test_native_plugin_prune_empty_removes_held_dirs(project: Path) -> None:
+    plugins = project / ".claude" / "plugins"
+    catalog = plugins / ".claude-plugin"
+    catalog.mkdir(parents=True)
+    with _held_scope(project), deploy_holds(project, [plugins]):
+        _hold(catalog / "marketplace.json", catalog)
+        assert str(plugins).lower() in _held_keys()
+        prune_empty(plugins)
+    assert not plugins.exists()
+    assert (project / ".claude").is_dir()

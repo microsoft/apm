@@ -79,6 +79,99 @@ def _expect_clean(report) -> None:
             '\n\n_REGISTER = getattr(object, "register_held_root", None)\n',
             id="registration-by-name",
         ),
+        pytest.param(
+            REGISTRATION,
+            "src/apm_cli/install/pipeline.py",
+            None,
+            "\n\ndef _hold_elsewhere(ctx):\n"
+            "    from apm_cli.utils.realpath_win import deploy_holds\n\n"
+            "    return deploy_holds(ctx.project_root, [])\n",
+            id="deploy-holds-outside-integrate-phase",
+        ),
+        pytest.param(
+            REGISTRATION,
+            "src/apm_cli/integration/write_seam.py",
+            None,
+            "\n\ndef deploy_holds(project_root, directories):\n    return None\n",
+            id="deploy-holds-second-definition",
+        ),
+        pytest.param(
+            REGISTRATION,
+            "src/apm_cli/commands/uninstall/engine.py",
+            None,
+            "\n\nfrom ...utils.realpath_win import _register  # noqa: E402\n",
+            id="private-register-imported",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/integration/write_seam.py",
+            "    release_held(source)\n    release_held(destination)\n    os.rename(",
+            "    os.rename(",
+            id="seam-rename",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/integration/write_seam.py",
+            "    release_held(path)\n    shutil.rmtree(",
+            "    shutil.rmtree(",
+            id="seam-rmtree",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/install/deploy_snapshot.py",
+            "                release_held(directory)\n",
+            "",
+            id="journal-empty-directories",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/install/deploy_snapshot.py",
+            "        release_held(store.parent)\n",
+            "",
+            id="journal-store-discard",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/install/root_redirect.py",
+            "        release_held()  # discarding created roots deletes them: nothing may stay held\n",
+            "",
+            id="created-root-discard",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/install/skill_path_migration.py",
+            "                release_held(parent)\n",
+            "",
+            id="skill-migration-parents",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/native_plugins/layout.py",
+            "            release_held(empty)\n",
+            "",
+            id="native-plugin-prune",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/native_plugins/layout.py",
+            "    release_held(replaced)\n",
+            "",
+            id="native-plugin-restore",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/install/diff_apply.py",
+            None,
+            "\n\ndef _drop(path):\n    os.rmdir(path)\n",
+            id="diff-apply-raw-rmdir",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/install/transaction.py",
+            None,
+            "\n\ndef _drop(path):\n    path.rmdir()\n",
+            id="transaction-raw-rmdir",
+        ),
     ],
 )
 def test_held_directory_guards_reject_unreleased_mutations(
@@ -98,6 +191,12 @@ def test_held_directory_guards_reject_unreleased_mutations(
 def test_held_directory_release_ignores_non_directory_replace(extra: str) -> None:
     """``str.replace`` and keyword ``replace`` calls are not directory mutations."""
     _expect_clean(_report(RELEASE, "src/apm_cli/commands/update.py", None, extra))
+
+
+def test_held_root_registration_ignores_unrelated_register_helpers() -> None:
+    """A module's own ``_register`` helper is not realpath_win's private registrar."""
+    extra = "\n\ndef _register(item):\n    return item\n\n\n_register(None)\n"
+    _expect_clean(_report(REGISTRATION, "src/apm_cli/integration/write_seam.py", None, extra))
 
 
 def test_held_directory_guards_accept_current_sources() -> None:

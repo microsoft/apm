@@ -4445,6 +4445,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A re-anchor move renames a package directory path resolution may still hold.",
     ),
     MutationCase(
+        guard_id="transport-platform-held-directory-release-integrator",
+        rule_id="transport-platform-held-directory-release",
+        path="src/apm_cli/integration/write_seam.py",
+        old="    release_held(path)\n    path.rmdir()\n",
+        new="    path.rmdir()\n",
+        intent="An integrator rmdir removes a deploy directory the integrate phase may hold.",
+    ),
+    MutationCase(
         guard_id="transport-platform-held-root-registration",
         rule_id="transport-platform-held-root-registration",
         path="src/apm_cli/commands/uninstall/engine.py",
