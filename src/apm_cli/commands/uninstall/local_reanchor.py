@@ -671,6 +671,17 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
 # -- uninstall command steps (#4889) ----------------------------------------
 
 
+def _manifest_declares_replacements(apm_yml_path) -> bool:
+    """Whether apm.yml declares a ``replace`` block; unreadable counts as declared."""
+    from ...utils.yaml_io import load_yaml
+
+    try:
+        data = load_yaml(Path(apm_yml_path))
+    except Exception:
+        return True
+    return bool(data.get("replace")) if isinstance(data, dict) else False
+
+
 def _refuse_unverifiable_local_survivors(
     lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False, quiet: bool = False
 ) -> list:
@@ -707,9 +718,11 @@ def _refuse_unverifiable_local_survivors(
 
     # Replacement rules can turn a remote survivor into a local source; the
     # offline check does not evaluate them, so it cannot prove anything unused.
+    # apm.yml's rules count too: the lock may not record them yet (#5031).
     if (
         not unresolved
         and not lockfile.replacements
+        and not _manifest_declares_replacements(apm_yml_path)
         and not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local))
     ):
         return []
