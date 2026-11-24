@@ -760,6 +760,21 @@ class GitCache:
                 if partial:
                     fetch += ["--filter=blob:none"]
                 steps.append([*fetch, "origin", sha])
+                # A ref for the pin: a shallow source is cloned through the pack
+                # transport (git ignores --local), which only sees refs.
+                steps.append(
+                    [git_exe, "--git-dir", str(staged), "update-ref", "refs/heads/apm-pin", sha]
+                )
+                steps.append(
+                    [
+                        git_exe,
+                        "--git-dir",
+                        str(staged),
+                        "symbolic-ref",
+                        "HEAD",
+                        "refs/heads/apm-pin",
+                    ]
+                )
                 for argv in steps:
                     run_git_text(
                         argv,
