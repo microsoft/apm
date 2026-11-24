@@ -1351,15 +1351,18 @@ class LSPIntegrator:
                 continue
             if plan is not None:
                 plans.append((runtime, spec, plan))
+        from apm_cli.core.remediation import kept_note
         from apm_cli.utils.diagnostics import printable_ascii_text
 
         for runtime, spec, plan in plans:
             label = spec.label(user_scope=user_scope)
             for name in plan.edited:
                 logger.warning(
-                    f"Kept LSP server {printable_ascii_text(name)} in "
-                    f"{printable_ascii_text(label)}: it was edited after install. "
-                    "Remove it by hand if it is no longer needed."
+                    kept_note(
+                        f"LSP server {printable_ascii_text(name)} in {printable_ascii_text(label)}",
+                        "it was edited after install",
+                        "Remove it by hand if it is no longer needed.",
+                    )
                 )
             try:
                 LSPIntegrator._apply_target_cleanup(
