@@ -860,10 +860,11 @@ class CollisionCell(Cell):
         """Each named plugin contributes a distinguishable `analyze` skill."""
         if self.harness == "claude":
             return all(f"{name}:{COLLIDING}" in seen["skills"] for name in names)
+        # Copilot qualifies a skill name only while it is ambiguous, so each
+        # package's skill is identified by the body marker in its description.
+        markers = {"rh-a": "RH_A_BODY", "rh-b": "RH_B_BODY"}
         joined = "\n".join(seen["skills"])
-        return all(name in seen["plugins"] for name in names) and (
-            len(seen["skills"]) >= len(names) and all(name in joined for name in names)
-        )
+        return all(name in seen["plugins"] and markers[name] in joined for name in names)
 
     def execute(self) -> dict:
         name_a, name_b = self.plugin_names()
