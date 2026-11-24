@@ -453,14 +453,14 @@ def test_prune_keeps_the_parent_of_a_survivor_reached_through_an_alias(
     assert lock_bytes(world.project) == settled
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#5238 a legacy row's new local_path changes its lock key (owner re-key)",
-)
 def test_prune_reparents_a_legacy_local_row_with_its_path(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A lock without declaring_parent: the survivor takes its new parent's path too."""
+    """A lock without declaring_parent: the survivor takes its new parent's path too.
+
+    Locks from before declaring_parent still record anchored_local_path, so
+    only declaring_parent is removed; frozen replay passes after prune.
+    """
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"
     for name, deps in (
@@ -478,7 +478,6 @@ def test_prune_reparents_a_legacy_local_row_with_its_path(
     lock = load_yaml(lock_path)
     for row in lock["dependencies"]:
         row.pop("declaring_parent", None)
-        row.pop("anchored_local_path", None)
     dump_yaml(lock, lock_path)
     _manifest(world, ["./vendor/a"])
 
