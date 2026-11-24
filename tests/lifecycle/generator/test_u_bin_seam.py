@@ -79,3 +79,17 @@ def test_no_target_routes_a_bundle_bin_file() -> None:
         canvas_approved=True,
     )
     assert skill is not None
+
+
+def test_the_model_expects_bin_only_for_a_claude_target() -> None:
+    """bin/ has a Claude surface only: with claude and copilot declared, the model
+    expects the plugin's bin/ once, for claude (exec_gate.plugin_bin_deployable)."""
+    from tests.lifecycle.model.expected import expected_deployed
+    from tests.lifecycle.model.state import ModelState
+
+    model = ModelState(
+        declared=frozenset({"p"}), targets=frozenset({"claude", "copilot"}), exec_gate=False
+    )
+    deployed = expected_deployed(model, {"p": frozenset({"bin", "skill"})})
+    assert {target for _pkg, kind, target in deployed if kind == "bin"} == {"claude"}
+    assert {target for _pkg, kind, target in deployed if kind == "skill"} == {"claude", "copilot"}
