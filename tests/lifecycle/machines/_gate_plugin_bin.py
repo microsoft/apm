@@ -28,14 +28,17 @@ I1-I9. ``plugin_bin_cells`` labels the same script statically.
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
+from tests.lifecycle import driver
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.world.scopes import use_policy
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 
 PLUGIN = "p-native-claude-bin"
 KINDS = {PLUGIN: frozenset({"bin"})}
@@ -172,6 +175,42 @@ class GatePluginBin(StepRunner):
         assert named[0].lstrip().startswith("[!]"), named[0]
         assert "'apm install' to record provenance" not in output, output
 
+    def tripwire_bundle(self) -> None:
+        """A consumer of the project's bundle gets nothing of the omitted plugin (#5253).
+
+        The bundle's embedded lock may still name the plugin's ``native_plugin`` row;
+        installing the bundle must deploy nothing under ``.agents/plugins`` and record
+        no such row, so the row stays inert.
+        """
+        if self.dry:
+            return
+        world, project = self.bench.world, self.bench.deploy_root
+        before = {p.relative_to(project).as_posix() for p in project.rglob("*")}
+        out = world.root / "tripwire-bundle"
+        packed = self.bench.run(("pack", "--output", str(out)))
+        assert packed.returncode == 0, packed.stdout + packed.stderr
+        # Pack synthesizes the project's plugin manifest; nothing else in it changes.
+        added = {p.relative_to(project).as_posix() for p in project.rglob("*")} - before
+        assert added <= {".claude-plugin", ".claude-plugin/plugin.json"}, sorted(added)
+        if ".claude-plugin" in added:
+            shutil.rmtree(project / ".claude-plugin")
+        (bundle,) = [path for path in out.iterdir() if path.is_dir()]
+        consumer = world.root / "tripwire-consumer"
+        consumer.mkdir()
+        manifest = "name: consumer\nversion: 1.0.0\ntargets: [claude]\ndependencies:\n  apm: []\n"
+        (consumer / "apm.yml").write_text(manifest, encoding="utf-8")
+        runner = ApmLifecycleRunner(driver.driver_command(), timeout_seconds=driver.TIMEOUT_SECONDS)
+        result = runner.run(
+            ("install", str(bundle)), cwd=consumer, env=world.env, scenario_id="tripwire-bundle"
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (consumer / ".agents").exists(), sorted(map(str, consumer.rglob("*")))
+        lock = consumer / "apm.lock.yaml"
+        text = lock.read_text(encoding="utf-8") if lock.exists() else ""
+        assert "native_plugin" not in text, text
+        shutil.rmtree(out)
+        shutil.rmtree(consumer)
+
     def _credit(self, op: str, cell: str, step: Step, retires: bool) -> None:
         present: dict[str, list[str]] = {}
         absent: dict[str, list[str]] = {}
@@ -284,6 +323,7 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("approve", "approve", PLUGIN)
     machine.run("install", *install)
     machine.run("pack", "pack", "--dry-run")
+    machine.tripwire_bundle()
     machine.deny_by_policy()
     machine.run("marketplace", "marketplace", "add", machine.marketplace_url())
     machine.run("prune", "prune", retires=True)
