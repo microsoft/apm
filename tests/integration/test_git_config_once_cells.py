@@ -180,3 +180,53 @@ def test_config_once_env_equals_the_probe_repository_env(user_config: Path, tmp_
 
     assert once is not None
     assert once == probed
+
+
+def test_case_variant_path_keys_are_left_to_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W3d D4: /Acme and /acme fold to one key but Git compares paths case-sensitively."""
+    headers = _headers(
+        "http.https://github.com/Acme.extraheader", "http.https://github.com/acme.extraheader"
+    )
+    url = "https://github.com/acme/repo"
+    asked: list[str] = []
+    monkeypatch.setattr(
+        git_env, "_spawned_header_group", lambda remote, group, env: asked.append(remote) or ()
+    )
+
+    assert git_env._inprocess_header_group(url, headers) is None
+    git_env._urlmatched_header_group(url, headers, {})
+    assert asked == [url]
+
+
+@pytest.mark.parametrize("scope", ["local", "worktree"])
+def test_a_local_or_worktree_entry_keeps_the_probe_repository(
+    user_config: Path, monkeypatch: pytest.MonkeyPatch, scope: str
+) -> None:
+    """W3d D1: a repository-scoped entry means the repo-less read is not what Git will see."""
+    real = git_env._read_effective_git_config
+
+    def with_local_entry(env, **kwargs):
+        snapshot = real(env, **kwargs)
+        extra = GitConfigEntry(scope, "http.https://github.com/.extraheader", "X-Local: 1")
+        return git_env._GitConfigSnapshot(
+            (*snapshot.entries, extra), snapshot.rewrites, snapshot.http_headers
+        )
+
+    monkeypatch.setattr(git_env, "_read_effective_git_config", with_local_entry)
+
+    with invocation_scope():
+        assert git_env._config_once_clone_env(URL, None) is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory permissions")
+def test_an_unwritable_target_fails_and_leaves_nothing(user_config: Path, tmp_path: Path) -> None:
+    """W3d D3: the probe path cannot create its throwaway repository; nothing is left behind."""
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    parent.chmod(0o500)
+    try:
+        with invocation_scope(), pytest.raises(Exception):  # noqa: B017 - any refusal is fine
+            git_env._probed_clone_env(URL, None, parent / "clone", bare=True)
+        assert list(parent.iterdir()) == []
+    finally:
+        parent.chmod(0o700)
