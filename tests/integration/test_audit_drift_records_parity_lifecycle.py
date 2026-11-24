@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from tests.integration._install_audit_replay_kit import (
     hooks_package,
     write,
 )
+from tests.lifecycle.known import KnownFailure
 from tests.utils.apm_lifecycle_runner import CommandResult
 
 pytestmark = [
@@ -177,6 +179,17 @@ def test_an_adopted_prompt_a_text_read_changes_gives_the_live_verdict(
 _STYLE = Path(".github/instructions/style.instructions.md")
 
 
+def _plain_world(tmp_path: Path, binary: Path, package=_verbatim_package) -> ReplayWorld:
+    world = ReplayWorld.create(tmp_path, binary)
+    dep = world.publish("plain", package)
+    write(
+        world.project / "apm.yml",
+        f"name: proj\nversion: 1.0.0\ntargets: [copilot]\ndependencies:\n  apm:\n    - {dep}\n",
+    )
+    world.apm("install")
+    return world
+
+
 def _same_bytes_elsewhere(project: Path, target: Path) -> None:
     copy = project.parent / "elsewhere.md"
     copy.write_bytes(target.read_bytes())
@@ -187,11 +200,6 @@ def _same_bytes_elsewhere(project: Path, target: Path) -> None:
 def _dangling(project: Path, target: Path) -> None:
     target.unlink()
     target.symlink_to(project.parent / "missing.md")
-
-
-def _fifo(project: Path, target: Path) -> None:
-    target.unlink()
-    os.mkfifo(target)
 
 
 def _directory(project: Path, target: Path) -> None:
@@ -210,28 +218,21 @@ def _linked_parent(project: Path, target: Path) -> None:
 _ADVERSARIAL = {
     "link-to-same-bytes": (_same_bytes_elsewhere, None),
     "dangling-link": (_dangling, True),
-    "fifo": (_fifo, True),
     "directory": (_directory, True),
     "linked-parent-dir": (_linked_parent, None),
 }
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX links and FIFOs")
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX links")
 @pytest.mark.parametrize("kind", sorted(_ADVERSARIAL))
 def test_an_adversarial_deployed_destination_gives_the_live_verdict(
     tmp_path: Path, apm_binary_path: Path, kind: str
 ) -> None:
-    """Whatever stands at a served file's deployed path (a link, a dangling link, a FIFO,
+    """Whatever stands at a served file's deployed path (a link, a dangling link,
     a directory, a linked parent), the record-served audit gives the live verdict,
     finishes, and prints ASCII only; a destination that cannot hold the deployed bytes
     fails the audit (#5151)."""
-    world = ReplayWorld.create(tmp_path, apm_binary_path)
-    dep = world.publish("plain", _verbatim_package)
-    write(
-        world.project / "apm.yml",
-        f"name: proj\nversion: 1.0.0\ntargets: [copilot]\ndependencies:\n  apm:\n    - {dep}\n",
-    )
-    world.apm("install")
+    world = _plain_world(tmp_path, apm_binary_path)
     tamper, must_fail = _ADVERSARIAL[kind]
     tamper(world.project, world.project / _STYLE)
 
@@ -243,34 +244,82 @@ def test_an_adversarial_deployed_destination_gives_the_live_verdict(
         assert "style.instructions.md" in output, output
 
 
-def test_a_non_ascii_and_a_newline_file_name_give_the_live_verdict_on_one_line(
-    tmp_path: Path, apm_binary_path: Path
+_NEWLINE_SPLITS_THE_ENTRY = KnownFailure(
+    "#5279",
+    "the drift list prints a file name's newline verbatim",
+    r"(?m)^\[\+\] all checks passed\.md",
+)
+
+
+@pytest.mark.parametrize(
+    "file_name",
+    [
+        pytest.param("r\u00e9f\u00e9rence.md", id="non-ascii"),
+        pytest.param(
+            "line\n[+] all checks passed.md",
+            id="newline",
+            marks=[
+                pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names"),
+                _NEWLINE_SPLITS_THE_ENTRY.mark(),
+            ],
+        ),
+    ],
+)
+def test_an_edited_file_with_an_unusual_name_is_reported_on_one_ascii_line(
+    tmp_path: Path, apm_binary_path: Path, file_name: str
 ) -> None:
-    """A served skill file named with non-ASCII text or a newline, then hand-edited, is
-    reported with the live verdict, in ASCII, and cannot inject a verdict line (#5151)."""
-    names = ("r\u00e9f\u00e9rence.md", "line\n[+] all checks passed.md")
+    """A served skill file named with non-ASCII text or a newline, then hand-edited, gets
+    the live verdict, in ASCII, and its name cannot start a verdict line (#5151)."""
 
     def package(root: Path, name: str) -> None:
         _verbatim_package(root, name)
-        for index, file_name in enumerate(names):
-            write(root / ".apm/skills/plain-helper/references" / file_name, f"Ref {index}.\n")
+        write(root / ".apm/skills/plain-helper/references" / file_name, "Ref.\n")
 
-    world = ReplayWorld.create(tmp_path, apm_binary_path)
-    dep = world.publish("plain", package)
-    write(
-        world.project / "apm.yml",
-        f"name: proj\nversion: 1.0.0\ntargets: [copilot]\ndependencies:\n  apm:\n    - {dep}\n",
-    )
-    world.apm("install")
-    references = world.project / ".github/skills/plain-helper/references"
-    if not references.is_dir():
-        references = next(world.project.rglob("plain-helper/references"))
-    for file_name in names:
-        deployed = references / file_name
-        deployed.write_text(deployed.read_text(encoding="utf-8") + "Edit.\n", encoding="utf-8")
+    world = _plain_world(tmp_path, apm_binary_path, package)
+    (deployed,) = [
+        path
+        for path in world.project.rglob("plain-helper/references/*")
+        if path.name == file_name and "apm_modules" not in path.parts
+    ]
+    deployed.write_text(deployed.read_text(encoding="utf-8") + "Edit.\n", encoding="utf-8")
 
     served, _live = _same_verdict(world, "--ci", "--no-fail-fast")
     output = served.stdout + served.stderr
     assert served.returncode != 0, output
     assert output.isascii(), output
     assert not any(line.startswith("[+] all checks passed") for line in output.splitlines()), output
+
+
+_FIFO_BLOCKS_THE_AUDIT = KnownFailure(
+    "#5280",
+    "audit --ci blocks reading a FIFO at a deployed path",
+    r"timed out after",
+    raises=subprocess.TimeoutExpired,
+)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFOs")
+@_FIFO_BLOCKS_THE_AUDIT.mark()
+def test_a_fifo_at_a_deployed_path_fails_the_audit_without_blocking(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A FIFO standing at a served file's path is drift: the audit finishes, fails and
+    names the path, instead of blocking on the read (#5151)."""
+    world = _plain_world(tmp_path, apm_binary_path)
+    target = world.project / _STYLE
+    target.unlink()
+    os.mkfifo(target)
+
+    result = subprocess.run(
+        (str(apm_binary_path), "audit", "--ci", "--no-fail-fast"),
+        cwd=world.project,
+        env=world.env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "style.instructions.md" in output, output
+    assert output.isascii(), output
