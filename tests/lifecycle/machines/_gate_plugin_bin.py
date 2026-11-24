@@ -28,14 +28,16 @@ I1-I9. ``plugin_bin_cells`` labels the same script statically.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
-from tests.lifecycle.machines._kit import Bench, Step, StepRunner
+from tests.lifecycle.machines._kit import Bench, KnownCell, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.world.scopes import use_policy
+from tests.lifecycle.world.services import REGISTRY_SERVER
 
 PLUGIN = "p-native-claude-bin"
 KINDS = {PLUGIN: frozenset({"bin"})}
@@ -46,6 +48,38 @@ DENY_POLICY = "deny-native"
 # Harness settings files whose enabledPlugins declare a project-scope plugin.
 SETTINGS = (".claude/settings.json", ".github/copilot/settings.json")
 _RETIRED = r"1 native plugin\(s\) removed"
+# Exit codes pinned from main's behaviour (#4095 lane T-1b).
+AUDIT_GATED = (1,)
+# audit --ci names the decision the gate no longer makes and the command that records it.
+_STALE_DECISION = r"exec-status-current details:"
+AUDIT_DENIED = (1,)
+# audit --ci names the org denylist entry that denies the plugin.
+_DENYLISTED = r"dependency-denylist details:"
+COMPILE_DENIED = (1,)
+_COMPILE_BLOCKED = r"Compile blocked by org policy"
+LOCK_DENIED = (1,)
+_RESOLVE_BLOCKED = r"Blocked by org policy at .*\(dependency-denylist\)\. Nothing was changed"
+# Strict known cells: the step must still fail its oracle on main; a pass is an error.
+# approve under an org dependency deny says "approved" and points at apm install,
+# which refuses: the approval names no org block (#5236).
+_ORG_BLOCK_NAMED = r"(?i)org policy"
+KNOWN_PLUGIN: dict[str, str] = {"G1|approve|bin|denied-dependency|project": "#5236"}
+# The same cells for the known-cell issue snapshot (tests/quality/known_cell_issues.py).
+KNOWN_CELLS = (
+    KnownCell(
+        "G1|approve|bin|denied-dependency|project",
+        "I7",
+        "#5236",
+        _ORG_BLOCK_NAMED,
+        lambda *_args: False,
+    ),
+)
+# The project gate matrix already labels its p-exec steps under the org deny with these
+# ops (its bin/ never deploys, so it credits no bin cell, #4981); this spine's steps carry
+# a ``plugin`` suffix there so each machine id keeps one witness.
+_MATRIX_DENIED_OPS = frozenset(
+    {"audit-ci", "compile", "install", "install-frozen", "lock", "mcp-install", "update"}
+)
 
 
 class PluginBinBench(Bench):
@@ -61,7 +95,9 @@ class PluginBinState:
 
     declared: bool = False
     gate_on: bool = False
-    approved: bool = False
+    decision: str | None = None
+    revoked: bool = False
+    deployed: bool = False
     denied_by_policy: bool = False
 
     def gate(self) -> str:
@@ -69,12 +105,20 @@ class PluginBinState:
             return "denied-dependency"
         if not self.gate_on:
             return "none"
-        return "allowed" if self.approved else "unapproved-exec"
+        if self.revoked:
+            return "revoked-after-deploy"
+        if self.decision == "allowed":
+            return "allowed"
+        return "denied-executable" if self.decision == "denied" else "unapproved-exec"
+
+    def allows(self) -> bool:
+        return self.gate() in ("none", "allowed")
 
     def model(self) -> ModelState:
         model = ModelState(
             declared=frozenset({PLUGIN}) if self.declared else frozenset(),
-            decisions={(PLUGIN, "bin"): "allowed"} if self.approved else {},
+            decisions={(PLUGIN, "bin"): self.decision} if self.decision else {},
+            revoked=frozenset({(PLUGIN, "bin")}) if self.revoked else frozenset(),
             targets=TARGETS,
             exec_gate=self.gate_on,
         )
@@ -92,30 +136,66 @@ class GatePluginBin(StepRunner):
         # Every file of the deployed plugin root, bin/ included (set by a deploy).
         self.root_files: frozenset[str] = frozenset()
 
-    def run(self, op: str, *words: str, retires: bool = False) -> None:
+    def run(
+        self, op: str, *words: str, retires: bool = False, exits=(0,), says: tuple[str, ...] = ()
+    ) -> None:
         """Run one command, check I1-I9 and its outcome, credit its id, then advance."""
-        cell = f"G1|{op}|bin|{self.state.gate()}|project"
+        gate = self.state.gate()
+        cell = f"G1|{op}|bin|{gate}|project"
+        if gate == "denied-dependency" and op in _MATRIX_DENIED_OPS:
+            cell += "|plugin"
         self.credited.add(cell)
-        requested = self._requested(op)
-        if not self.dry:
-            fields: dict[str, object] = {"mutating": op not in ("marketplace", "audit-ci")}
+        requested = self._requested(op, retires)
+        if not self.dry and cell in KNOWN_PLUGIN:
+            self._known(cell, words, requested)
+        elif not self.dry:
+            # A decision is recorded, not applied: the next resolving command retires
+            # what it no longer allows (the deny prints that hint), as in the user spine.
+            # install --mcp touches MCP configuration only and keeps bin/ byte-identical
+            # at every gate level (U7), so it is not the command that retires it.
+            decision = op in ("approve", "deny", "mcp-install")
+            fields: dict[str, object] = {
+                "mutating": op not in ("marketplace", "audit-ci") and not decision
+            }
             if op == "audit-ci":
                 fields["read_only"] = True
             if op == "marketplace":
                 fields.update(forbidden={"project": ("*",), "outside": ("*",)}, allowed={})
             step = self.step(
-                words, exits=frozenset({0}), cells=(cell,), model=requested.model(), **fields
+                words, exits=frozenset(exits), cells=(cell,), model=requested.model(), **fields
             )
             self._check_outcome(op, requested, step, retires)
-            self._credit(op, cell, step, retires)
+            self._credit(op, cell, step, retires, frozenset(exits), says)
         self.state = requested
 
-    def _requested(self, op: str) -> PluginBinState:
+    def _known(self, cell: str, words: tuple[str, ...], requested: PluginBinState) -> None:
+        """Run a strict known cell: I1-I9 hold, but its own oracle must fail (else remove it)."""
+        step = self.step(
+            words, exits=frozenset({0, 1}), cells=(cell,), model=requested.model(), mutating=False
+        )
+        output = step.result.stdout + step.result.stderr
+        assert not re.search(_ORG_BLOCK_NAMED, output), (
+            f"{cell} now names the org block: remove it from KNOWN_PLUGIN "
+            f"({KNOWN_PLUGIN[cell]})\n{output}"
+        )
+        assert set(step.after.deployed) == set(step.before.deployed), cell
+        self.expected_seen.add(cell)
+
+    def _requested(self, op: str, retires: bool = False) -> PluginBinState:
         state = replace(self.state)
         if op == "install":
             state.declared = True
-        if op == "approve":
-            state.gate_on = state.approved = True
+            state.deployed = state.allows()
+        if op == "uninstall":
+            state.declared = state.revoked = state.deployed = False
+        if op == "approve" and not state.denied_by_policy:
+            # An org deny refuses the approval and records nothing (_gate_kit).
+            state.gate_on, state.decision, state.revoked = True, "allowed", False
+        if op == "deny":
+            state.gate_on, state.decision, state.revoked = True, "denied", state.deployed
+        if retires:
+            # A retired plugin is gone: what stays is the decision, not a revocation.
+            state.deployed = state.revoked = False
         return state
 
     def _check_outcome(self, op: str, requested: PluginBinState, step: Step, retires: bool) -> None:
@@ -158,14 +238,22 @@ class GatePluginBin(StepRunner):
         records = [k for k in rows if lock.dependencies[k].native_plugin]
         assert not records, f"prune kept the native plugin record: {records}"
 
-    def _credit(self, op: str, cell: str, step: Step, retires: bool) -> None:
+    def _credit(
+        self,
+        op: str,
+        cell: str,
+        step: Step,
+        retires: bool,
+        exits: frozenset[int],
+        says: tuple[str, ...],
+    ) -> None:
         present: dict[str, list[str]] = {}
         absent: dict[str, list[str]] = {}
         unchanged: dict[str, tuple[str, ...]] = {"outside": ("*",)}
-        matches: tuple[str, ...] = ()
+        matches: tuple[str, ...] = says
         if retires:
             absent["project"] = sorted(self.root_files)
-            matches = (_RETIRED,)
+            matches = (*says, _RETIRED)
         elif op != "install":
             # A catalog command leaves every project byte alone; approve leaves the root.
             unchanged["project"] = ("*",) if op == "marketplace" else (ROOT, *SETTINGS)
@@ -176,7 +264,7 @@ class GatePluginBin(StepRunner):
             present=present,
             unchanged=unchanged,
             output_matches=matches,
-            exit=frozenset({0}),
+            exit=exits,
         )
         check_obligation(
             cell,
@@ -263,13 +351,33 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     # unapproved-exec: the gate turns on over a plugin deployed with it off.
     machine.run("install", *install, machine.spec())
     machine.gate_on()
+    machine.run("audit-ci", "audit", "--ci", exits=AUDIT_GATED, says=(_STALE_DECISION,))
     machine.run("prune", "prune", retires=True)
-    # denied-dependency: org policy denies the approved, deployed plugin.
+    # allowed: audit replays the approved root and prune keeps it.
     machine.run("approve", "approve", PLUGIN)
     machine.run("install", *install)
+    machine.run("audit-ci", "audit", "--ci")
+    machine.run("prune", "prune")
+    # revoked-after-deploy: a deny over the deployed root; prune retires it.
+    machine.run("deny", "deny", PLUGIN)
+    machine.run("audit-ci", "audit", "--ci", exits=AUDIT_GATED, says=(_STALE_DECISION,))
+    machine.run("prune", "prune", retires=True)
+    # denied-executable: install deploys nothing; audit and prune have nothing to act on.
+    machine.run("install", *install)
+    machine.run("audit-ci", "audit", "--ci")
+    machine.run("prune", "prune")
+    machine.run("approve", "approve", PLUGIN)
+    machine.run("install", *install)
+    # denied-dependency: org policy denies the approved, deployed plugin.
     machine.deny_by_policy()
     machine.run("marketplace", "marketplace", "add", machine.marketplace_url())
+    machine.run("audit-ci", "audit", "--ci", exits=AUDIT_DENIED, says=(_DENYLISTED,))
+    machine.run("approve", "approve", PLUGIN)
+    machine.run("compile", "compile", exits=COMPILE_DENIED, says=(_COMPILE_BLOCKED,))
+    machine.run("lock", "lock", exits=LOCK_DENIED, says=(_RESOLVE_BLOCKED,))
+    machine.run("mcp-install", "install", "--mcp", REGISTRY_SERVER)
     machine.run("prune", "prune", retires=True)
+    machine.run("uninstall", "uninstall", machine.spec())
 
 
 def plugin_bin_cells() -> frozenset[str]:
@@ -281,5 +389,5 @@ def plugin_bin_cells() -> frozenset[str]:
 
 def deploys_bin(cell: str) -> bool:
     """Whether the step behind *cell* deploys the plugin's bin/ at project scope."""
-    _, op, _, gate, _ = cell.split("|")
-    return op == "install" and gate in ("none", "allowed")
+    parts = cell.split("|")
+    return parts[1] == "install" and parts[3] in ("none", "allowed")

@@ -51,6 +51,7 @@ from tests.lifecycle.generator.space import Entry, build_space, raw_cells
 from tests.lifecycle.generator.witnesses import (
     BIN_WITNESSES,
     FORM_SOURCES,
+    GATE_PLUGIN_BIN_SPINE,
     SOURCE_SPINE,
     SOURCE_SPINE_UNOBSERVED,
     credits,
@@ -827,9 +828,11 @@ def test_no_ungoverned_user_scope_step_credits_an_org_deny() -> None:
     ):
         assert rows[key]["status"] == "required", (key, rows[key])
         assert rows[key]["witness"].endswith("[project]"), (key, rows[key])
-    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell (#4981).
+    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell
+    # (#4981); the whole-plugin bin spine, whose bin/ deploys at project scope, does.
     bin_cell = "T1|OP=compile|PRIM=bin|GATE=denied-dependency"
-    assert rows[bin_cell]["status"] == "baseline", (bin_cell, rows[bin_cell])
+    assert rows[bin_cell]["witness"] == GATE_PLUGIN_BIN_SPINE, (bin_cell, rows[bin_cell])
+    assert rows[bin_cell]["credited_by"] == ["G1|compile|bin|denied-dependency|project|plugin"]
     for key, row in rows.items():
         user_only = row.get("credited_by") and all(
             cell.endswith("|denied-dependency|user") for cell in row["credited_by"]
