@@ -149,3 +149,37 @@ def _key_modules(digest: Any, root: Path) -> None:
         if MARKER_FILENAME in names:
             continue  # a package copy: its bytes are proven against the lock
         stack += [(f"{rel}/{e.name}", e.path) for e in entries if e.is_dir(follow_symlinks=False)]
+
+
+def entry_stamp() -> list[Any]:
+    """The recorded run's start: its wall time, the org-policy fetch attempts this
+    process had made, and the policy cache's shape, so the writer knows whether the
+    run's discovery fetched and whether the cache it read is still the one keyed."""
+    import time
+
+    from apm_cli.core.policy_fetch_ledger import fetch_attempts
+
+    return [time.time(), fetch_attempts(), policy_cache_shape()]
+
+
+def policy_cache_shape() -> str | None:
+    """Every policy cache file's path, mtime and content digest (the cache discovery
+    reads), read no-follow; None when any of it cannot be read (no record)."""
+    import hashlib
+
+    from apm_cli.install.verdict_record import _cache_root, _read_nofollow
+
+    try:
+        cache = _cache_root()
+        if cache is None:
+            return ""
+        rows = []
+        for rel, files, _dirs in _tree(str(cache / "policy_v1")):
+            for entry in files:
+                data = _read_nofollow(entry.path)
+                digest = "absent" if data is None else hashlib.sha256(data).hexdigest()
+                mtime = entry.stat(follow_symlinks=False).st_mtime_ns
+                rows.append(f"{rel}/{entry.name}:{mtime}:{digest}")
+        return "\n".join(rows)
+    except (OSError, ValueError):
+        return None
