@@ -71,14 +71,16 @@ def _file_id(path: str) -> _FileId | None:
     return (path, True, len(data), hashlib.sha256(data).hexdigest())
 
 
-def fingerprint(paths: Iterable[str]) -> tuple[_FileId, ...] | None:
+def fingerprint(
+    paths: Iterable[str], file_id: Callable[[str], _FileId | None] = _file_id
+) -> tuple[_FileId, ...] | None:
     """Return the content identity of *paths*, or ``None`` if one cannot be read."""
     ids = []
     for path in paths:
-        file_id = _file_id(path)
-        if file_id is None:
+        identity = file_id(path)
+        if identity is None:
             return None
-        ids.append(file_id)
+        ids.append(identity)
     return tuple(ids)
 
 
@@ -195,6 +197,7 @@ def read(
     git_dir: Path | None,
     worktree: Path | None,
     config_paths: Callable[[Mapping[str, str]], tuple[str, ...] | None],
+    file_id: Callable[[str], _FileId | None] = _file_id,
 ) -> _T:
     """Return ``probe()``, reusing this invocation's snapshot while its files are unchanged."""
     memo = invocation_memo(_MEMO)
@@ -203,7 +206,7 @@ def read(
     key = ("snapshot", git, tuple(sorted(env.items())), _real(git_dir), _real(worktree))
     with _lock:
         kept = memo.get(key)
-    if isinstance(kept, _Kept) and fingerprint(kept.candidates) == kept.fingerprint:
+    if isinstance(kept, _Kept) and fingerprint(kept.candidates, file_id) == kept.fingerprint:
         return kept.snapshot
     paths_key = ("paths", git, tuple((name, env.get(name)) for name in _PATH_ENV))
     with _lock:
@@ -220,15 +223,16 @@ def read(
     with _lock:
         hint = memo.get(("includes", key), ())
     candidates = tuple(sorted({*scope_files, *repository, *hint}))
-    before = fingerprint(candidates)
+    before = fingerprint(candidates, file_id)
     snapshot = probe()
-    includes = _include_files(snapshot.entries, (*scope_files, *repository), env)  # type: ignore[attr-defined]
+    entries = snapshot.entries  # type: ignore[attr-defined]
+    includes = _include_files(entries, (*scope_files, *repository), env)
     if before is None or includes is None:
         return snapshot
     after_set = tuple(sorted({*scope_files, *repository, *includes}))
     # Keep only when the files Git read were the same bytes before and after the
     # probe; an include first seen now is fingerprinted and kept on the next miss.
-    if after_set == candidates and fingerprint(after_set) == before:
+    if after_set == candidates and fingerprint(after_set, file_id) == before:
         with _lock:
             memo[key] = _Kept(candidates, before, snapshot)
     else:
