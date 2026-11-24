@@ -1400,15 +1400,22 @@ def test_recording_many_writes_resolves_each_root_once(
         extra.write_text(f"rendered {name}\n", encoding="utf-8")
         paths.append(extra)
     session = _session(root, lock)
+    # Every resolution reaches one of these: pathlib's realpath, or the Linux
+    # kernel form's open(O_PATH).
     resolved: list[str] = []
-    realpath = os.path.realpath
+    realpath, open_ = os.path.realpath, os.open
 
     def counted(value, *args, **kwargs):
         resolved.append(os.fspath(value))
         return realpath(value, *args, **kwargs)
 
+    def counted_open(value, *args, **kwargs):
+        resolved.append(os.fspath(value))
+        return open_(value, *args, **kwargs)
+
     with monkeypatch.context() as patch:
         patch.setattr(os.path, "realpath", counted)
+        patch.setattr(os, "open", counted_open)
         session.record({p: compute_file_hash(p) for p in paths}, [TARGET], "pkg")
     session.flush()
     assert resolved.count(os.fspath(TARGET.skills_deploy_path(root))) == 1
