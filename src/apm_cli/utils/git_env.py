@@ -895,7 +895,7 @@ def _has_applicable_http_authorization(
 
 
 # PERF RANK-5 PROTOTYPE: compute the spawn too and fail loudly on any difference.
-_CONFIG_ONCE_DIFFERENTIAL = True
+_CONFIG_ONCE_DIFFERENTIAL = False
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _UNSUPPORTED_URL_CHARS = frozenset("%*?#@" + chr(92))
 
