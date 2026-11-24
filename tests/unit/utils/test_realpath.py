@@ -220,3 +220,43 @@ def test_a_link_free_path_resolves_without_the_proc_name(
     monkeypatch.setattr(os, "readlink", counted)
     assert [resolve_path(plain), resolve_path(missing), resolve_path(linked)] == expected
     assert len(readlinks) == 1  # only the path through a link needs the /proc name
+
+
+@pytest.mark.skipif(not realpath._openat2_state["usable"], reason="openat2 is Linux 5.6+")
+def test_openat2_shapes_match_pathlib(tree: Path) -> None:
+    (tree / "dir" / "final_link").symlink_to(tree / "dir" / "file.md")
+    os.mkdir(tree / "locked")
+    os.chmod(tree / "locked", 0)
+    raw = os.fsdecode(b"/tmp/\xff-not-utf8")
+    candidates = [
+        tree / "link_dir" / "sub",
+        tree / "dir" / "final_link",
+        tree / "dangling",
+        Path("/proc/self/cwd"),
+        tree / "dir" / "missing" / "deeper",
+        tree / "dir" / "file.md" / "under-file",
+        tree / "locked" / "x",
+        Path(raw),
+    ]
+    try:
+        for candidate in candidates:
+            assert resolve_path(candidate) == candidate.resolve(), candidate
+        assert realpath._link_free("//" + str(tree)) is None
+        assert realpath._link_free(str(tree) + "\0x") is None
+    finally:
+        os.chmod(tree / "locked", 0o700)
+
+
+@pytest.mark.skipif(not realpath._openat2_state["usable"], reason="openat2 is Linux 5.6+")
+def test_an_unsupported_openat2_turns_itself_off(tree: Path) -> None:
+    import errno
+
+    saved = list(realpath._openat2_call)
+    realpath._openat2_call[:] = [lambda _raw: (-1, errno.ENOSYS)]
+    try:
+        candidate = tree / "dir" / "file.md"
+        assert resolve_path(candidate) == candidate.resolve()
+        assert realpath._openat2_state["usable"] is False
+    finally:
+        realpath._openat2_call[:] = saved
+        realpath._openat2_state["usable"] = True

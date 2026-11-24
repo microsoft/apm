@@ -154,7 +154,13 @@ def _link_free(text: str) -> bool | None:
 
     ``None`` when unproven: a link somewhere, openat2 unavailable, or an error.
     """
-    if not _openat2_state["usable"] or "/./" in text or "/.." in text or text.endswith("/."):
+    if (
+        not _openat2_state["usable"]
+        or not text.startswith("/")
+        or text.startswith("//")
+        or "\0" in text
+        or any(part in ("", ".", "..") for part in text[1:].split("/"))
+    ):
         return None
     if not _openat2_call:
         try:
@@ -167,8 +173,10 @@ def _link_free(text: str) -> bool | None:
     except (OSError, ValueError, TypeError):
         return None
     if fd >= 0:
-        os.close(fd)
-        return True
+        try:
+            return True
+        finally:
+            os.close(fd)
     if err in (errno.ENOSYS, errno.EPERM, errno.EINVAL, errno.E2BIG):
         _openat2_state["usable"] = False  # not offered here (old kernel, seccomp)
     return True if err in _MISSING else None
