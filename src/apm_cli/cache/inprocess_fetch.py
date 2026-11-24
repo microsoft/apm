@@ -1124,29 +1124,86 @@ def sparse_checkout_file(cones: tuple[str, ...]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _cone_attributes_inert(data: bytes) -> bool:
-    """S6' (pending W3d): an in-cone .gitattributes is inert under APM's eol=lf pins."""
+_KNOWN_ATTRIBUTES = frozenset(
+    {"text", "eol", "crlf", "filter", "ident", "working-tree-encoding", *_INERT_ATTRIBUTES}
+)
+
+
+class _PlannedObjects:
+    """``checkout_verify``'s object source over objects whose ids were computed in process."""
+
+    def __init__(self, objects: dict[str, tuple[str, bytes]]) -> None:
+        self._objects = objects
+
+    def read(self, oid: str, kind: str) -> bytes:
+        from .checkout_verify import CheckoutVerificationError
+
+        found = self._objects.get(oid)
+        if found is None or found[0] != kind:
+            raise CheckoutVerificationError(f"object {oid[:12]} is not a planned {kind}")
+        return found[1]
+
+
+def _cone_attributes_ok(
+    objects: dict[str, tuple[str, bytes]], sha: str, files: list[tuple[str, str, bool]]
+) -> bool:
+    """T1'/U1-U5: no written file's attribute state can change its checkout bytes."""
+    import re
+
+    from .checkout_verify import _Attributes, _Tree
+
+    sources = [
+        objects[oid][1] for rel, oid, _ in files if rel.rpartition("/")[2] == ".gitattributes"
+    ]
+    if not sources:
+        return True
     if os.environ.get("APM_PERF_S_STRICT_ATTR"):
         return False
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith(("[attr]", '"')):
+    for data in sources:  # U2: wholesale refusals before any matching
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
             return False
-        for token in line.split()[1:]:
-            name = token.lstrip("-!").split("=", 1)[0].lower()
-            if (
-                token.lower() in _EOL_INERT
-                or name in _INERT_ATTRIBUTES
-                or name.startswith("linguist-")
-            ):
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
                 continue
-            return False
+            if line.startswith(("[attr]", '"')):
+                return False
+            for token in line.split()[1:]:
+                name = token.lstrip("-!").split("=", 1)[0].lower()
+                if name not in _KNOWN_ATTRIBUTES and not name.startswith("linguist-"):
+                    return False
+    root = objects[sha][1].split(b"\n", 1)[0][5:].decode("ascii")
+    source = _PlannedObjects(objects)
+
+    class _Folded(_Attributes):
+        """U3: core.ignorecase matching, casefolded path against casefolded patterns."""
+
+        def _load(self, directory: str) -> None:
+            fresh = directory not in self._rules
+            super()._load(directory)
+            rules = self._rules.get(directory)
+            if fresh and rules is not None:
+                self._rules[directory] = [
+                    (anchored, re.compile(regex.pattern, re.IGNORECASE), attrs)
+                    for anchored, regex, attrs in rules
+                ]
+
+    engines = (
+        _Attributes(_Tree(source, root, 20), source),
+        _Folded(_Tree(source, root, 20), source),
+    )
+    transforms = ("filter", "ident", "working-tree-encoding")
+    for rel, _, _ in files:
+        for engine in engines:
+            state = engine.state(rel)
+            if state is None:
+                return False
+            if state.get("eol") not in (None, "lf") or "crlf" in state:
+                return False
+            if any(state.get(name) not in (None, False) for name in transforms):
+                return False
     return True
 
 
@@ -1249,11 +1306,8 @@ def fetch_sparse_worktree(
             if set(blobs) != set(wanted) or any(kind != "blob" for kind, _ in blobs.values()):
                 raise _Refuse("blob response differs from the wanted set")
             objects.update(blobs)
-        for rel, oid, _ in files:
-            if rel.rpartition("/")[2] == ".gitattributes" and not _cone_attributes_inert(
-                objects[oid][1]
-            ):
-                raise _Refuse("an in-cone .gitattributes may change checkout bytes")
+        if not _cone_attributes_ok(objects, sha, files):
+            raise _Refuse("an in-cone .gitattributes may change checkout bytes")
         root = str(staged)
         made = {root}
         manifest: dict[str, tuple[str, bool]] = {}

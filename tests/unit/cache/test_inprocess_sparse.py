@@ -56,12 +56,16 @@ def _repo(tmp_path: Path, extra: dict[str, bytes] | None = None) -> tuple[Path, 
     src = tmp_path / "src"
     src.mkdir()
     _git(src, "init", "-q")
-    for rel, data in {**_TREE, **(extra or {})}.items():
-        path = src / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-    _git(src, "add", "-A")
-    _git(src, "commit", "-q", "-m", "c")
+    for batch in (_TREE, extra or {}):
+        if not batch:
+            continue
+        for rel, data in batch.items():
+            path = src / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        # The attributes land after the files, so no attribute rewrites them on add.
+        _git(src, "add", "-A")
+        _git(src, "commit", "-q", "-m", "c")
     return src, _git(src, "rev-parse", "HEAD").decode().strip()
 
 
@@ -102,12 +106,8 @@ def _plan_with(tmp_path: Path, extra: dict[str, bytes], cone: str = "packages/gu
     return src, sha, objects, files
 
 
-def _attributes_inert(objects, files) -> bool:
-    return all(
-        fetch._cone_attributes_inert(objects[oid][1])
-        for rel, oid, _ in files
-        if rel.rpartition("/")[2] == ".gitattributes"
-    )
+def _attributes_inert(objects, files, sha) -> bool:
+    return fetch._cone_attributes_ok(objects, sha, files)
 
 
 def test_a_crlf_blob_under_text_auto_eol_lf_is_written_as_git_writes_it(tmp_path: Path) -> None:
@@ -115,8 +115,8 @@ def test_a_crlf_blob_under_text_auto_eol_lf_is_written_as_git_writes_it(tmp_path
         ".gitattributes": b"* text=auto eol=lf\n*.md text eol=lf\n*.bin -text\n",
         "packages/guide/crlf.md": b"line one\r\nline two\r\n",
     }
-    src, _sha, objects, files = _plan_with(tmp_path, extra)
-    assert _attributes_inert(objects, files)
+    src, sha, objects, files = _plan_with(tmp_path, extra)
+    assert _attributes_inert(objects, files, sha)
     ours = {rel: objects[oid][1] for rel, oid, _ in files}
     theirs, _ = _git_sparse(src, tmp_path, "packages/guide")
     assert ours == theirs
@@ -128,17 +128,17 @@ def test_a_crlf_blob_under_text_auto_eol_lf_is_written_as_git_writes_it(tmp_path
         b"* text eol=crlf\n",
         b"*.md eol=crlf\n",
         b"* crlf\n",
-        b"*.bin filter=lfs diff=lfs merge=lfs -text\n",
+        b"*.md filter=lfs diff=lfs merge=lfs -text\n",
         b"*.md ident\n",
         b"*.md working-tree-encoding=UTF-16\n",
         b"[attr]mine text eol=crlf\n",
         b'"*.md" text\n',
-        b"*.md unknown-token\n",
+        b"*.bin unknown-token\n",
     ],
 )
 def test_a_byte_changing_attribute_sends_the_dep_to_git(tmp_path: Path, attributes: bytes) -> None:
-    _src, _sha, objects, files = _plan_with(tmp_path, {".gitattributes": attributes})
-    assert not _attributes_inert(objects, files)
+    _src, sha, objects, files = _plan_with(tmp_path, {".gitattributes": attributes})
+    assert not _attributes_inert(objects, files, sha)
 
 
 def test_a_nested_in_cone_eol_crlf_sends_the_dep_to_git(tmp_path: Path) -> None:
@@ -146,14 +146,14 @@ def test_a_nested_in_cone_eol_crlf_sends_the_dep_to_git(tmp_path: Path) -> None:
         ".gitattributes": b"* text=auto eol=lf\n",
         "packages/guide/.gitattributes": b"*.md eol=crlf\n",
     }
-    _src, _sha, objects, files = _plan_with(tmp_path, extra)
-    assert not _attributes_inert(objects, files)
+    _src, sha, objects, files = _plan_with(tmp_path, extra)
+    assert not _attributes_inert(objects, files, sha)
 
 
 def test_an_out_of_cone_attributes_file_does_not_apply(tmp_path: Path) -> None:
-    _src, _sha, objects, files = _plan_with(tmp_path, {"docs/.gitattributes": b"* eol=crlf\n"})
+    _src, sha, objects, files = _plan_with(tmp_path, {"docs/.gitattributes": b"* eol=crlf\n"})
     assert "docs/.gitattributes" not in {rel for rel, _, _ in files}
-    assert _attributes_inert(objects, files)
+    assert _attributes_inert(objects, files, sha)
 
 
 @pytest.mark.parametrize(
@@ -194,3 +194,41 @@ def test_a_link_in_the_cone_refuses_and_one_outside_is_ignored(tmp_path: Path) -
     sha = _git(src, "rev-parse", "HEAD").decode().strip()
     with pytest.raises(fetch._Refuse):
         fetch._sparse_plan(_objects(src, sha), sha, ("packages/guide",))
+
+
+def test_eol_crlf_for_a_pattern_no_written_file_matches_engages(tmp_path: Path) -> None:
+    extra = {".gitattributes": b"* text=auto eol=lf\n*.bat text eol=crlf\n*.png binary\n"}
+    src, sha, objects, files = _plan_with(tmp_path, extra)
+    assert _attributes_inert(objects, files, sha)
+    ours = {rel: objects[oid][1] for rel, oid, _ in files}
+    theirs, _ = _git_sparse(src, tmp_path, "packages/guide")
+    assert ours == theirs
+
+
+def test_a_written_file_the_crlf_pattern_matches_sends_the_dep_to_git(tmp_path: Path) -> None:
+    extra = {
+        ".gitattributes": b"*.bat text eol=crlf\n",
+        "packages/guide/run.bat": b"@echo off\n",
+    }
+    _src, sha, objects, files = _plan_with(tmp_path, extra)
+    assert not _attributes_inert(objects, files, sha)
+
+
+def test_a_case_variant_matches_as_core_ignorecase_would(tmp_path: Path) -> None:
+    """U3: ``*.bat`` matches RUN.BAT on a case-insensitive checkout."""
+    extra = {
+        ".gitattributes": b"*.bat text eol=crlf\n",
+        "packages/guide/RUN.BAT": b"@echo off\n",
+    }
+    _src, sha, objects, files = _plan_with(tmp_path, extra)
+    assert not _attributes_inert(objects, files, sha)
+
+
+def test_a_deeper_override_is_evaluated_by_state(tmp_path: Path) -> None:
+    extra = {
+        ".gitattributes": b"*.bat text eol=crlf\n",
+        "packages/guide/.gitattributes": b"*.bat -text eol=lf\n",
+        "packages/guide/run.bat": b"@echo off\n",
+    }
+    _src, sha, objects, files = _plan_with(tmp_path, extra)
+    assert _attributes_inert(objects, files, sha)
