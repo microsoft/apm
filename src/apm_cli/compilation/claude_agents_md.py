@@ -604,37 +604,3 @@ def refresh_compiled_digest(base_dir: Path, agents_md: Path) -> None:
 def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> bool:
     """One-off :meth:`CompiledCoverage.has` (install reuses one instance per root)."""
     return CompiledCoverage(project_root).has(apply_to, body)
-
-
-def uncompiled_routed_instructions(project_root: Path, sources) -> list[str]:
-    """Names of routed instructions no compiled ``AGENTS.md`` Claude loads carries (#5344).
-
-    The same decision install makes: an always-on or single-directory
-    instruction routes to ``AGENTS.md`` (no ``.claude/rules/`` file), so until
-    a compiled file Claude loads holds its exact scope and body, Claude Code
-    has no copy of it. A blocking hand-authored root file keeps every
-    instruction in ``.claude/rules/``, so nothing is uncompiled then. An
-    unreadable source is skipped; install reports it.
-    """
-    import yaml
-
-    from ..utils.yaml_io import loads_frontmatter
-
-    root = Path(project_root)
-    cache: dict = {}
-    if claude_agents_md_blocker(root, cache=cache) is not None:
-        return []
-    coverage = CompiledCoverage(root)
-    names: set[str] = set()
-    for source in sources:
-        try:
-            post = loads_frontmatter(Path(source).read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, ValueError, yaml.YAMLError):
-            continue
-        metadata = post.metadata if isinstance(post.metadata, dict) else {}
-        apply_to = metadata.get("applyTo")
-        if routes_to_agents_md(apply_to, root, cache=cache) and not coverage.has(
-            apply_to, post.content
-        ):
-            names.add(Path(source).name)
-    return sorted(names)

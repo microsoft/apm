@@ -1104,56 +1104,6 @@ def routed_claude_rule_renders(
     attested dependency fails too unless the lock proves it gives Claude
     nothing (:func:`_lock_proves_claude_excluded`).
     """
-    rules: dict[str, dict[str, str]] = {}
-
-    def _missing(dep, dep_ref, install_path: Path) -> None:
-        attested = bool(getattr(dep, "content_hash", None))
-        if verified and attested and not _lock_proves_claude_excluded(dep, dep_ref):
-            _refuse_missing_source(dep, install_path, project_root)
-
-    def _before_manifest(dep, install_path: Path) -> None:
-        if verified and getattr(dep, "content_hash", None):
-            _require_locked_source(lockfile, dep, install_path, project_root)
-
-    for dep, package_info, source_plan in claude_dependency_sources(
-        lockfile,
-        modules_root,
-        include_local=include_local,
-        dependency_keys=dependency_keys,
-        on_missing=_missing,
-        before_manifest=_before_manifest,
-    ):
-        rendered = InstructionIntegrator().render_agents_md_routed_rules(
-            package_info, project_root, source_plan
-        )
-        if verified:
-            deployed = set(dep.deployed_files)
-            rendered = {path: text for path, text in rendered.items() if path not in deployed}
-            if rendered and not getattr(dep, "content_hash", None):
-                _require_locked_source(lockfile, dep, package_info.install_path, project_root)
-        if rendered:
-            rules[dep.get_unique_key()] = rendered
-    return rules
-
-
-def claude_dependency_sources(
-    lockfile,
-    modules_root: Path,
-    *,
-    include_local: bool,
-    dependency_keys: Collection[str] | None = None,
-    on_missing=None,
-    before_manifest=None,
-):
-    """Yield ``(dep, package_info, source_plan)`` for each locked dependency Claude gets.
-
-    The selection install applies: locked dependencies only (the "." self
-    entry is the project's own content, never a dependency, #5336), installed
-    under *modules_root*, whose edge and own ``targets:`` both keep Claude,
-    with the deployable source plan that authorizes their files. Pack renders
-    routed rules from it; audit asks which routed instructions are uncompiled
-    (#5344).
-    """
     from apm_cli.core.scope import manifest_file
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.install.package_resolution import effective_dependency_selection
@@ -1161,6 +1111,9 @@ def claude_dependency_sources(
     from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.models.apm_package import APMPackage, PackageInfo
 
+    rules: dict[str, dict[str, str]] = {}
+    # The "." self entry is the project's own content, never a dependency under
+    # apm_modules: it has no install path to render from (#5336).
     for dep in lockfile.get_package_dependencies():
         if dep.source == "local" and not include_local:
             continue
@@ -1168,12 +1121,13 @@ def claude_dependency_sources(
             continue
         dep_ref = dep.to_dependency_ref()
         install_path = dep_ref.get_install_path(modules_root)
+        attested = bool(getattr(dep, "content_hash", None))
         if not install_path.is_dir():
-            if on_missing is not None:
-                on_missing(dep, dep_ref, install_path)
+            if verified and attested and not _lock_proves_claude_excluded(dep, dep_ref):
+                _refuse_missing_source(dep, install_path, project_root)
             continue
-        if before_manifest is not None:
-            before_manifest(dep, install_path)
+        if verified and attested:
+            _require_locked_source(lockfile, dep, install_path, project_root)
         manifest = manifest_file(install_path)
         package = (
             APMPackage.from_apm_yml(manifest)
@@ -1201,7 +1155,17 @@ def claude_dependency_sources(
             canvas_approved=False,
             skip_bin=True,
         )
-        yield dep, package_info, source_plan
+        rendered = InstructionIntegrator().render_agents_md_routed_rules(
+            package_info, project_root, source_plan
+        )
+        if verified:
+            deployed = set(dep.deployed_files)
+            rendered = {path: text for path, text in rendered.items() if path not in deployed}
+            if rendered and not attested:
+                _require_locked_source(lockfile, dep, install_path, project_root)
+        if rendered:
+            rules[dep.get_unique_key()] = rendered
+    return rules
 
 
 def _lock_proves_claude_excluded(dep, dep_ref) -> bool:

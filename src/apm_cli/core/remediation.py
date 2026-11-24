@@ -1577,11 +1577,6 @@ CODEX_NATIVE_LOOSE_FILES = _entry(
     before="preserve or relocate your edits and resolve the cleanup conflicts",
 )
 ROOT_CONTEXT_COMPILE = _entry("root-context-compile", "apm compile", "update {outputs}")
-CLAUDE_INSTRUCTIONS_UNCOMPILED = _entry(
-    "claude-instructions-uncompiled",
-    "apm compile",
-    "write the AGENTS.md Claude Code loads them from",
-)
 USER_ROOT_CONTEXT_COMPILE = _entry(
     "user-root-context-compile", "apm compile -g", "update root context files for {targets}"
 )
