@@ -17,6 +17,7 @@ import pytest
 
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from tests.lifecycle.known import KnownFailure
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
@@ -211,6 +212,30 @@ def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_is_skipped(
     text = _output(world.apm(world.root, *install))
 
     assert "Skipped unsafe bundle entry 'agents/rev.agent.md'" in text, text
+    assert not any(outside.iterdir())
+
+
+_OUT_OF_SCOPE_EXITS_ZERO = KnownFailure(
+    "#5300",
+    "install exits 0 when a codex agent destination is a symlink out of scope",
+    r"-> 0 \(expected 1\)",
+)
+
+
+@_OUT_OF_SCOPE_EXITS_ZERO.mark()
+@pytest.mark.skipif(os.name == "nt", reason="needs an unprivileged symlink")
+def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_fails_the_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The out-of-scope link refuses like a loop does: exit 1, the standard text (#5300)."""
+    world, install, outside = _symlinked_user_agents(tmp_path, apm_binary_path, "outside")
+
+    text = _output(world.apm(world.root, *install, expect=1))
+
+    assert (
+        "Refusing deployment through a symlinked path component: .codex/agents. "
+        "Replace the symlink with a regular directory or remove it, then retry."
+    ) in text, text
     assert not any(outside.iterdir())
 
 
