@@ -734,7 +734,7 @@ def _inert_attributes(path: str) -> bool:
         if line.startswith(("[attr]", '"')):
             return False
         for token in line.split()[1:]:
-            name = token.lstrip("-!").split("=", 1)[0].lower()
+            name = (token[1:] if token[:1] in ("-", "!") else token).split("=", 1)[0].lower()
             if name not in _INERT_ATTRIBUTES and not name.startswith("linguist-"):
                 return False
     return True
@@ -882,14 +882,11 @@ def _session(trust: tuple[str, str]):
         return _session_for_refs(trust[1])
     with _os_session_lock:
         if _os_session is None:
-            import http.cookiejar
             import ssl
 
             import truststore
-            from requests.adapters import HTTPAdapter
 
-            from ..utils.http_credentials import CredentialScopedSession
-            from ..version import get_version
+            from ..deps.anonymous_ref_listing import _session_with_context
 
             class _OsTrustContext(truststore.SSLContext):
                 """The OS store only (schannel's trust): requests' CA bundle is not added."""
@@ -897,31 +894,7 @@ def _session(trust: tuple[str, str]):
                 def load_verify_locations(self, *args, **kwargs) -> None:
                     return None
 
-            context = _OsTrustContext(ssl.PROTOCOL_TLS_CLIENT)
-
-            class _OsTrustAdapter(HTTPAdapter):
-                def init_poolmanager(self, *args, **kwargs):
-                    kwargs["ssl_context"] = context
-                    return super().init_poolmanager(*args, **kwargs)
-
-                def proxy_manager_for(self, proxy, **proxy_kwargs):
-                    proxy_kwargs["ssl_context"] = context
-                    return super().proxy_manager_for(proxy, **proxy_kwargs)
-
-            session = CredentialScopedSession(ambient_credentials=False)
-            session.trust_env = False
-            session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
-            session.headers.clear()
-            session.headers.update(
-                {
-                    "User-Agent": f"apm/{get_version()}",
-                    "Accept": "*/*",
-                    "Accept-Encoding": "identity",
-                    "Pragma": "no-cache",
-                }
-            )
-            session.mount("https://", _OsTrustAdapter(pool_connections=4, pool_maxsize=16))
-            _os_session = session
+            _os_session = _session_with_context(_OsTrustContext(ssl.PROTOCOL_TLS_CLIENT))
         return _os_session
 
 
