@@ -1960,3 +1960,39 @@ def test_public_run_has_no_partial_selection_surface() -> None:
     executed = [result.rule_id for group in partial.group_results for result in group.rules]
     assert executed == [picked]
     assert partial.exit_code == 2
+
+
+def test_every_binary_selection_detector_is_gated_or_always_runs() -> None:
+    """A detector added without a pre-filter gate can never be skipped silently (#5196)."""
+    from dataclasses import fields
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _BINARY_DETECTORS,
+        _BinaryNeeds,
+    )
+
+    gates = [detector.gate for detector in _BINARY_DETECTORS if detector.gate is not None]
+    assert len(gates) == len(set(gates)), gates
+    assert set(gates) == {field.name for field in fields(_BinaryNeeds)}
+
+
+def test_a_token_free_file_skips_every_binary_selection_detector(tmp_path: Path) -> None:
+    """A synthetic token-free file needs no detector; a file with the tokens needs its own."""
+    from dataclasses import asdict
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_needs,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    plain = "def helper(value):\n    if value:\n        return value\n    return None\n"
+    tokened = 'import subprocess\n\n\ndef helper():\n    subprocess.run(["apm"], check=False)\n'
+    provider = FactsProvider(
+        tmp_path,
+        ("plain.py", "tokened.py"),
+        registry=None,
+        source_overrides={"plain.py": plain, "tokened.py": tokened},
+    )
+    assert not any(asdict(_binary_needs(provider.tree_index("plain.py"))).values())
+    needs = asdict(_binary_needs(provider.tree_index("tokened.py")))
+    assert {flag for flag, on in needs.items() if on} == {"subprocess"}
