@@ -98,12 +98,56 @@ def _strip_prefix(final: str) -> str | None:
     return stripped if plain_win32(stripped) else None
 
 
-def _form_b(text: str) -> str | None:
-    """``ntpath.realpath(text)`` with one ``_getfinalpathname``, or ``None``."""
+_DEVICE: list[tuple[str, str]] = []  # (NT device name, drive) of the held root's volume
+
+
+def _final_path(text: str) -> str:
+    """``nt._getfinalpathname(text)``, naming the volume by its NT device when known.
+
+    Same open as CPython (no access, no sharing, backup semantics). The DOS
+    volume name costs a mount-manager query per call; the NT device name
+    does not. On the held root's device the DOS name is the root's drive
+    (learned once from the root's own DOS final path); any other device
+    takes CPython's call.
+    """
     import nt  # type: ignore[import-not-found]
 
+    if not _DEVICE:
+        return nt._getfinalpathname(text)
+    device, drive = _DEVICE[0]
+    ctypes, k32, _find, _info, invalid = _kernel32()
+    handle = k32.CreateFileW(text, 0, 0, None, _OPEN_EXISTING, 0x02000000, None)
+    if not handle or handle == invalid:
+        raise ctypes.WinError(ctypes.get_last_error())
+    buffer = ctypes.create_unicode_buffer(1024)
     try:
-        final = nt._getfinalpathname(text)
+        size = k32.GetFinalPathNameByHandleW(handle, buffer, 1024, 0x2)  # VOLUME_NAME_NT
+    finally:
+        k32.CloseHandle(handle)
+    value = buffer.value
+    if 0 < size < 1024 and value.startswith(device + "\\"):
+        return f"{_PREFIX}{drive}{value[len(device) :]}"
+    return nt._getfinalpathname(text)
+
+
+def _learn_device(handle: int, final: str) -> None:
+    """Record the held root's NT device name and drive (``final`` is its DOS path)."""
+    ctypes, k32 = _kernel32()[:2]
+    buffer = ctypes.create_unicode_buffer(1024)
+    size = k32.GetFinalPathNameByHandleW(handle, buffer, 1024, 0x2)  # VOLUME_NAME_NT
+    rest = final[2:]
+    value = buffer.value
+    if 0 < size < 1024 and len(rest) > 1 and value.endswith(rest):
+        device = value[: -len(rest)]
+        if device.startswith("\\Device\\") and "\\" not in device[len("\\Device\\") :]:
+            _DEVICE[:] = [(device, final[:2])]
+
+
+def _form_b(text: str) -> str | None:
+    """``ntpath.realpath(text)`` with one ``_getfinalpathname``, or ``None``."""
+
+    try:
+        final = _final_path(text)
     except OSError as exc:
         if getattr(exc, "winerror", None) in _ERROR_NOT_FOUND:
             return _form_b_missing(text)
@@ -122,7 +166,6 @@ def _form_b_missing(text: str) -> str | None:
     follows a name that exists but cannot be opened (a dangling link): each
     split-off name must be absent under ``lstat`` here, else ``None``.
     """
-    import nt  # type: ignore[import-not-found]
 
     tail: list[str] = []
     current = text
@@ -141,7 +184,7 @@ def _form_b_missing(text: str) -> str | None:
             parent += "\\"  # "C:" -> the drive root
         tail.append(name)
         try:
-            final = nt._getfinalpathname(parent)
+            final = _final_path(parent)
         except OSError as exc:
             if getattr(exc, "winerror", None) not in _ERROR_NOT_FOUND or len(parent) == 3:
                 return None
@@ -334,6 +377,7 @@ def _root_text() -> str | None:
             return None
         _held[cwd] = held
         _root.append(cwd)
+        _learn_device(held[1], held[0])
         return cwd
 
 
@@ -440,6 +484,7 @@ def release_held(under: object = None) -> None:
             _held.clear()
             _registered.clear()
             _root.clear()
+            _DEVICE.clear()
         else:
             try:
                 base = os.path.abspath(os.fspath(under)).lower().rstrip("\\")  # type: ignore[arg-type]
