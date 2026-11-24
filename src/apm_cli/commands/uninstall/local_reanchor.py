@@ -33,6 +33,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ...utils.paths import spelling_key
 from .engine import _dependency_public_label, _removed_lock_key
 
 
@@ -869,11 +870,17 @@ _MARKDOWN_DESTINATION = re.compile(r"\]\(\s*(?:<([^<>\n]+)>|((?:[^\s()<>]|\([^\s
 
 
 def _moving_dirs(moves) -> tuple[str, ...]:
-    """Each moving copy as written and as resolved (a symlinked apm_modules root)."""
+    """Each moving copy as written and as resolved (a symlinked apm_modules root).
+
+    Compared by the case-folded, NFC spelling key (#5158): a case or Unicode
+    variant of a link refuses like the exact spelling. On a case-sensitive
+    volume that may refuse a link to a distinct look-alike directory; a
+    refusal changes nothing, so it fails closed.
+    """
     dirs = set()
     for current, _target in moves:
-        dirs.add(os.path.normcase(os.path.normpath(os.fspath(current))))
-        dirs.add(os.path.normcase(os.path.realpath(current)))
+        dirs.add(spelling_key(os.path.normpath(os.fspath(current))))
+        dirs.add(spelling_key(os.path.realpath(current)))
     return tuple(sorted(dirs))
 
 
@@ -888,8 +895,8 @@ def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bo
     """
 
     def under(candidate: str) -> bool:
-        candidate = os.path.normcase(candidate)
-        return any(candidate == d or candidate.startswith(d + os.sep) for d in dirs)
+        candidate = spelling_key(candidate)
+        return any(candidate == d or candidate.startswith(d + "/") for d in dirs)
 
     text = data.decode("utf-8", "replace")
     destinations = [bracketed or bare for bracketed, bare in _MARKDOWN_DESTINATION.findall(text)]
