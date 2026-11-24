@@ -11,6 +11,8 @@ import unicodedata
 from collections.abc import Callable, Container, Iterable, Iterator
 from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, WindowsPath
 
+from .realpath import resolve_path
+
 # Marks an input the string comparison does not decide; pathlib decides it.
 _UNDECIDED = object()
 # Only pathlib's own classes: a subclass may override relative_to/is_relative_to.
@@ -107,13 +109,13 @@ def portable_relpath(path: Path, base: Path) -> str:
     a resolved absolute POSIX path.
     """
     try:
-        relative = relative_posix(path.resolve(), base.resolve())
+        relative = relative_posix(resolve_path(path), resolve_path(base))
     except (ValueError, OSError, RuntimeError):
         relative = None
     if relative is not None:
         return relative
     try:
-        return path.resolve().as_posix()
+        return resolve_path(path).as_posix()
     except (OSError, RuntimeError):
         return path.as_posix()
 
