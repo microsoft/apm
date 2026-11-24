@@ -482,7 +482,7 @@ class Context:
 
     def _env(self) -> dict[str, str]:
         """The world env; the authenticated journey adds a token and auth-first (research)."""
-        env = self._env()
+        env = dict(self.world.env)
         token = os.environ.get("APM_BENCH_GITHUB_TOKEN")
         if token:
             env["GITHUB_APM_PAT"] = token
@@ -507,7 +507,7 @@ class Context:
         (``wait4``; on Windows, every process of its Job Object), so
         server-side ``git http-backend`` work is excluded.
         """
-        env = dict(self.world.env)
+        env = self._env()
         if self.spawn_log is not None:
             env["APM_PERF_SPAWN_LOG"] = str(self.spawn_log)
             env["PYTHONPATH"] = str(_SPAWN_COUNTER_DIR)
