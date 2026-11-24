@@ -479,10 +479,21 @@ def _top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
     known after construction), and ``[]`` when the document is not a mapping
     or lacks *key*.
     """
-    try:
-        node = yaml.compose(text, Loader=_BoundedSafeLoader)
-    except (yaml.YAMLError, ValueError, RecursionError):
-        return None
+    node = None
+    if "\t" not in text and machine_yaml_admits(text):
+        # libyaml scans and parses, the Python composer builds the same node
+        # graph (#4939): the bounded compose runs about 10x faster. Text with a
+        # tab (libyaml accepts some the pure scanner refuses) and any text the C
+        # parser cannot compose are judged by the pure parser below.
+        try:
+            node = yaml.compose(text, Loader=_BoundedCSafeLoader)
+        except (yaml.YAMLError, ValueError, RecursionError):
+            node = None
+    if node is None:
+        try:
+            node = yaml.compose(text, Loader=_BoundedSafeLoader)
+        except (yaml.YAMLError, ValueError, RecursionError):
+            return None
     if not isinstance(node, yaml.MappingNode):
         return []
     values: list[str | None] = []
