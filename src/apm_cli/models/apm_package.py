@@ -1145,6 +1145,8 @@ class PackageInfo:
     deployment_package_root: Path | None = None
     # (replay output root, live deploy root): audit replay renders links live (#3901)
     deployment_frame: tuple[Path, Path] | None = None
+    # The lockfile's deployed files for a replayed dependency (#5343).
+    replay_recorded_files: frozenset[str] = frozenset()
     local_bundle_id: str | None = None  # Set only for a local bundle's hook view (#3700)
     local_bundle_approval: str | None = None  # The key that admitted those hooks (#4027)
     # Verbatim licence copies APM added after materialization (#3556); see
