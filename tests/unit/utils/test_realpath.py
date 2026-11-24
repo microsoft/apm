@@ -1,0 +1,122 @@
+"""``resolve_path`` returns exactly what ``Path.resolve()`` returns.
+
+Each cell builds a real tree (plain, missing, links, a loop, a file used as a
+directory) and compares the kernel-backed result with pathlib's own. On Linux
+the fast form is taken; elsewhere the helper is ``Path.resolve()`` itself.
+"""
+
+from __future__ import annotations
+
+import os
+import random
+import sys
+from pathlib import Path
+
+import pytest
+
+from apm_cli.utils import realpath
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.realpath import resolve_path
+
+pytestmark = pytest.mark.component
+
+_LINKS = pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+
+
+@pytest.fixture
+def tree(tmp_path: Path) -> Path:
+    root = tmp_path / "root"
+    (root / "dir" / "sub").mkdir(parents=True)
+    (root / "dir" / "file.md").write_text("x", encoding="utf-8")
+    (root / "outside").mkdir()
+    if sys.platform != "win32":
+        (root / "link_dir").symlink_to(root / "dir", target_is_directory=True)
+        (root / "dir" / "link_file").symlink_to(root / "dir" / "file.md")
+        (root / "dangling").symlink_to(root / "nowhere" / "target")
+        (root / "loop_a").symlink_to(root / "loop_b")
+        (root / "loop_b").symlink_to(root / "loop_a")
+        (root / "dir" / "escape").symlink_to(root / "outside", target_is_directory=True)
+    return root
+
+
+_PLAIN = ["dir", "dir/file.md", "dir/sub", "dir/missing.md", "dir/missing/deeper/x.md", "dir/file.md/under-file"]
+_LINKED = [
+    "link_dir",
+    "link_dir/file.md",
+    "link_dir/sub/../file.md",
+    "dir/link_file",
+    "dangling",
+    "dangling/child",
+    "dir/escape/new.md",
+    "link_dir/missing/x.md",
+]
+
+
+@pytest.mark.parametrize("relative", _PLAIN)
+def test_resolve_path_matches_pathlib(tree: Path, relative: str) -> None:
+    candidate = tree / relative
+    assert resolve_path(candidate) == candidate.resolve()
+
+
+@_LINKS
+@pytest.mark.parametrize("relative", _LINKED)
+def test_resolve_path_matches_pathlib_through_links(tree: Path, relative: str) -> None:
+    candidate = tree / relative
+    assert resolve_path(candidate) == candidate.resolve()
+
+
+@_LINKS
+def test_a_symlink_loop_still_raises_like_pathlib(tree: Path) -> None:
+    with pytest.raises(RuntimeError):
+        (tree / "loop_a").resolve()
+    with pytest.raises(RuntimeError):
+        resolve_path(tree / "loop_a")
+
+
+def test_a_relative_path_matches_pathlib(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tree)
+    assert resolve_path(Path("dir/file.md")) == Path("dir/file.md").resolve()
+
+
+@_LINKS
+def test_a_link_out_of_the_base_is_still_refused(tree: Path) -> None:
+    with pytest.raises(PathTraversalError):
+        ensure_path_within(tree / "dir" / "escape" / "new.md", tree / "dir")
+
+
+@pytest.mark.skipif(not realpath._FAST, reason="kernel form is Linux-only")
+def test_linux_resolves_in_the_kernel(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    linked, missing = tree / "link_dir" / "file.md", tree / "link_dir" / "new" / "x.md"
+    expected = (linked.resolve(), missing.resolve())
+
+    def no_python_walk(*_args, **_kwargs):
+        raise AssertionError("posixpath.realpath must not run")
+
+    monkeypatch.setattr(os.path, "realpath", no_python_walk)
+    assert (resolve_path(linked), resolve_path(missing)) == expected
+
+
+_FUZZ_PARTS = ["dir", "sub", "file.md", "missing", "..", ".", "link_dir", "link_file", "dangling", "escape", "x"]
+
+
+@_LINKS
+def test_seeded_paths_match_posix_realpath(tree: Path) -> None:
+    rng = random.Random(4939)
+    for _ in range(400):
+        parts = [rng.choice(_FUZZ_PARTS) for _ in range(rng.randint(1, 6))]
+        text = str(tree) + "/" + "/".join(parts)
+        assert str(resolve_path(Path(text))) == os.path.realpath(text), text
+
+
+@_LINKS
+def test_without_proc_the_answer_is_pathlib(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(realpath, "_PROC_FD", str(tree / "no-proc") + "/")
+    candidate = tree / "link_dir" / "file.md"
+    assert resolve_path(candidate) == candidate.resolve()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")
+def test_a_fifo_leaf_resolves_without_blocking(tree: Path) -> None:
+    fifo = tree / "dir" / "pipe"
+    os.mkfifo(fifo)
+    assert resolve_path(fifo) == fifo.resolve()
