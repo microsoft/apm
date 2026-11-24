@@ -1392,8 +1392,8 @@ class GitHubPackageDownloader:
                 # calling get_checkout so the cache skips its internal
                 # ls-remote. Same pattern as the non-subdir path at
                 # line ~1604 which passes locked_sha=resolved.
-                try:  # A declared ref is already its admitted commit; never resolve it again.
-                    _resolved = None if dep_ref.reference else self.resolve_git_reference(dep_ref)
+                try:  # An admitted ref is already its commit; never resolve it again.
+                    _resolved = None if ref else self.resolve_git_reference(dep_ref)
                     _resolved_sha_for_cache = _resolved.resolved_commit if _resolved else ref
                 except Exception:
                     _resolved_sha_for_cache = None
@@ -1868,7 +1868,7 @@ class GitHubPackageDownloader:
             )
 
         # Regular package download: a declared commit is admitted before resolution can fetch it.
-        from ..cache.commit_reachability import admit_and_resolve
+        from ..cache.commit_reachability import admit_and_resolve, admitted_full_commit
 
         resolved_ref = admit_and_resolve(self, dep_ref)
 
@@ -1970,8 +1970,9 @@ class GitHubPackageDownloader:
                     verbose_callback=verbose_callback,
                 )
                 checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
-            elif dep_ref.reference:
-                # A named ref: its admitted commit, fetched shallowly by commit (#5138)
+            elif dep_ref.reference or admitted_full_commit(resolved_ref):
+                # A named ref (#5138) or the default branch (#5199): its admitted
+                # commit, fetched shallowly by commit
                 fetch_commit_worktree(
                     self._execute_transport_plan,
                     dep_ref.repo_url,
