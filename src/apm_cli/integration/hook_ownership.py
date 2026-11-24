@@ -151,15 +151,63 @@ def _slot_sorted(items: list, owned: Callable[[Any], bool], key: Callable[[Any],
     return [next(ranked) if owned(item) else item for item in items]
 
 
-def canonical_hook_order(hooks: dict) -> None:
+def owned_hook_slots(hooks: dict, markers: frozenset[str]) -> tuple[list, dict]:
+    """Snapshot event key order and which entries *markers* own, before a source rewrites them."""
+    events = {
+        name: [
+            (entry, isinstance(entry, dict) and entry.get("_apm_source") in markers)
+            for entry in entries
+        ]
+        for name, entries in hooks.items()
+        if isinstance(entries, list)
+    }
+    return list(hooks), events
+
+
+def _refill_owned_slots(hooks: dict, prior: tuple[list, dict], source: str) -> None:
+    """Put *source*'s fresh entries back in the slots its old entries held, in every event.
+
+    Entries the rewrite removed stay gone; extra fresh entries follow, and events
+    the rewrite emptied and recreated return to their key position.
+    """
+    keys, events = prior
+    for name, slots in events.items():
+        current = hooks.get(name)
+        if not isinstance(current, list):
+            continue
+        fresh = [e for e in current if isinstance(e, dict) and e.get("_apm_source") == source]
+        kept = {id(e) for e in current if not any(e is f for f in fresh)}
+        refill = iter(fresh)
+        placed: list = []
+        for entry, owned in slots:
+            if owned:
+                placed.extend(e for e in (next(refill, None),) if e is not None)
+            elif id(entry) in kept:
+                placed.append(entry)
+        done = {id(e) for e in placed}
+        hooks[name] = placed + [e for e in current if id(e) not in done]
+    order = [k for k in keys if k in hooks] + [k for k in hooks if k not in set(keys)]
+    if order != list(hooks):
+        reordered = {name: hooks[name] for name in order}
+        hooks.clear()
+        hooks.update(reordered)
+
+
+def canonical_hook_order(
+    hooks: dict, prior: tuple[list, dict] | None = None, source: str | None = None
+) -> None:
     """Give APM's merged hook entries one order, whatever order packages were added (#5285).
 
-    In every event, APM-owned entries are stably sorted by ``_apm_source``
-    inside the slots they already hold, and events holding only APM entries
-    are sorted by name inside their key slots. User entries and events never
-    move, so a single, incremental, full or update install writes the same
-    bytes for the same set of packages.
+    With *prior* (:func:`owned_hook_slots`, taken before *source* rewrote its
+    entries) the fresh entries first refill the slots the old ones held, so a
+    reinstall moves no user entry. Then, in every event, APM-owned entries are
+    stably sorted by ``_apm_source`` inside the slots they hold, and events
+    holding only APM entries are sorted by name inside their key slots. User
+    entries and events never move, so a single, incremental, full or update
+    install writes the same bytes for the same set of packages.
     """
+    if prior is not None and source is not None:
+        _refill_owned_slots(hooks, prior, source)
     for event_name, entries in hooks.items():
         if isinstance(entries, list):
             hooks[event_name] = _slot_sorted(entries, _owned_entry, lambda e: e["_apm_source"])

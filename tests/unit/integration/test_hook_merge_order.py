@@ -47,7 +47,7 @@ def _package(project: Path, name: str, extra_event: str) -> PackageInfo:
     return PackageInfo(package=APMPackage(name=name, version="1.0.0"), install_path=root)
 
 
-def _install_in_order(project: Path, target: str, order: tuple[str, ...]) -> dict[str, bytes]:
+def _install_in_order(project: Path, target: str, order: tuple[str, ...]) -> Path:
     config = _MERGE_HOOK_TARGETS[target]
     root = project / KNOWN_TARGETS[target].root_dir
     root.mkdir(parents=True)
@@ -57,10 +57,7 @@ def _install_in_order(project: Path, target: str, order: tuple[str, ...]) -> dic
     packages = {name: _package(project, name, events[name]) for name in events}
     for name in order:
         HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS[target], packages[name], project)
-    return {
-        path.relative_to(project).as_posix(): path.read_bytes()
-        for path in sorted(root.glob("*.json"))
-    }
+    return root
 
 
 @pytest.mark.parametrize("target", _TARGETS)
@@ -68,23 +65,25 @@ def test_merged_hook_config_bytes_do_not_depend_on_addition_order(
     tmp_path: Path, target: str
 ) -> None:
     """#5285: every addition order writes the same config and sidecar bytes."""
-    written = {
+    roots = {
         order: _install_in_order(tmp_path / "-".join(order), target, order)
         for order in permutations(("alpha", "beta", "gamma"))
     }
 
-    canonical = written[("alpha", "beta", "gamma")]
-    assert len(canonical) >= 1
-    for order, files in written.items():
-        assert files == canonical, order
+    canonical = roots[("alpha", "beta", "gamma")]
+    names = sorted(path.name for path in canonical.glob("*.json"))
+    assert names
+    for order, root in roots.items():
+        for name in names:
+            assert (root / name).read_bytes() == (canonical / name).read_bytes(), (order, name)
 
 
 @pytest.mark.parametrize("target", _TARGETS)
 def test_canonical_order_keeps_user_hooks_in_place(tmp_path: Path, target: str) -> None:
     """#5285: APM's entries are ordered among themselves; the user's entry stays first."""
     config = _MERGE_HOOK_TARGETS[target]
-    files = _install_in_order(tmp_path, target, ("gamma", "alpha", "beta"))
-    document = json.loads(files[f"{KNOWN_TARGETS[target].root_dir}/{config.config_filename}"])
+    root = _install_in_order(tmp_path, target, ("gamma", "alpha", "beta"))
+    document = json.loads((root / config.config_filename).read_text(encoding="utf-8"))
 
     container = config.event_container_key
     assert {k: v for k, v in document.items() if k != container} == {
@@ -98,3 +97,29 @@ def test_canonical_order_keeps_user_hooks_in_place(tmp_path: Path, target: str) 
         "beta",
         "gamma",
     ]
+
+
+@pytest.mark.parametrize("target", _TARGETS)
+def test_reinstall_keeps_a_user_hook_between_owned_entries(tmp_path: Path, target: str) -> None:
+    """#5285: reinstalling a package refills its own slots, so a user hook between
+    two packages' entries keeps its place and the config bytes do not change."""
+    config = _MERGE_HOOK_TARGETS[target]
+    root = tmp_path / KNOWN_TARGETS[target].root_dir
+    root.mkdir(parents=True)
+    path = root / config.config_filename
+    container = config.event_container_key
+    event = _HOOK_EVENT_MAP.get(target, {}).get("PreToolUse", "PreToolUse")
+    packages = {name: _package(tmp_path, name, "Stop") for name in ("alpha", "beta")}
+    for name in ("alpha", "beta"):
+        HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS[target], packages[name], tmp_path)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    user = _CURSOR_USER_HOOK if target == "cursor" else _USER_HOOK
+    document[container][event].insert(1, user)
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in sorted(root.glob("*.json"))}
+
+    HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS[target], packages["alpha"], tmp_path)
+
+    assert {p.name: p.read_bytes() for p in sorted(root.glob("*.json"))} == before
+    entries = json.loads(path.read_text(encoding="utf-8"))[container][event]
+    assert "echo mine" in json.dumps(entries[1]), entries

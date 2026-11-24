@@ -74,6 +74,7 @@ from apm_cli.integration.hook_ownership import (
     drop_source_entries,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
+    owned_hook_slots,
     read_hook_object,
     read_merged_hook_config,
     remove_emptied_hook_file,
@@ -1294,6 +1295,7 @@ class HookIntegrator(BaseIntegrator):
 
         # Safe legacy leaf aliases retire with the canonical marker (#3665).
         owned_markers = frozenset({source_marker, *legacy_source_markers})
+        prior_slots = owned_hook_slots(json_config[container], owned_markers)
         if config.target_key == "cursor":
             drop_source_entries(json_config[container], owned_markers)
 
@@ -1501,7 +1503,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_adopted += copy_result.files_adopted
 
         drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)
-        canonical_hook_order(json_config[container])
+        canonical_hook_order(json_config[container], prior_slots, source_marker)
         # Shared configs are cleaned by ownership, never file-level deletion.
         write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)
 
