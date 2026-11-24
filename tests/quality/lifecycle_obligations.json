@@ -4243,6 +4243,7 @@
     "G1|install-dry-run|bin|allowed|project",
     "G1|install-force|bin|allowed|project",
     "G1|install-frozen|bin|allowed|project",
+    "G1|install-multi|bin|allowed|project",
     "G1|install-select|bin|allowed|project",
     "G1|install-update|bin|allowed|project",
     "G1|install|bin|allowed|project"
@@ -19696,6 +19697,7 @@
     "G1|install-dry-run|bin|allowed|project",
     "G1|install-force|bin|allowed|project",
     "G1|install-frozen|bin|allowed|project",
+    "G1|install-multi|bin|allowed|project",
     "G1|install-select|bin|allowed|project",
     "G1|install-update|bin|allowed|project"
    ],
@@ -19890,6 +19892,7 @@
     "G1|install-dry-run|bin|allowed|project",
     "G1|install-force|bin|allowed|project",
     "G1|install-frozen|bin|allowed|project",
+    "G1|install-multi|bin|allowed|project",
     "G1|install-select|bin|allowed|project",
     "G1|install-update|bin|allowed|project"
    ],
@@ -19912,6 +19915,7 @@
     "G1|install-dry-run|bin|allowed|project",
     "G1|install-force|bin|allowed|project",
     "G1|install-frozen|bin|allowed|project",
+    "G1|install-multi|bin|allowed|project",
     "G1|install-select|bin|allowed|project",
     "G1|install-update|bin|allowed|project",
     "G1|install|bin|allowed|project",
@@ -19952,11 +19956,15 @@
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[multi-narrowed]"
   },
   "pair|PRIM=bin|TGT=multi-unchanged": {
+   "credited_by": [
+    "G1|install-multi|bin|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|PRIM=bin|TGT=multi-widened": {
    "family": "pair",

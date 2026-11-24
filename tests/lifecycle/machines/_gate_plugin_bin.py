@@ -102,6 +102,7 @@ class PluginBinState:
     revoked: bool = False
     deployed: bool = False
     denied_by_policy: bool = False
+    targets: frozenset[str] = TARGETS
 
     def gate(self) -> str:
         if self.denied_by_policy:
@@ -122,7 +123,7 @@ class PluginBinState:
             declared=frozenset({PLUGIN}) if self.declared else frozenset(),
             decisions={(PLUGIN, "bin"): self.decision} if self.decision else {},
             revoked=frozenset({(PLUGIN, "bin")}) if self.revoked else frozenset(),
-            targets=TARGETS,
+            targets=self.targets,
             exec_gate=self.gate_on,
         )
         return model.with_policy(DENY_POLICY, [PLUGIN]) if self.denied_by_policy else model
@@ -189,7 +190,7 @@ class GatePluginBin(StepRunner):
         if op == "install":
             state.declared = True
             state.deployed = state.allows()
-        elif op in CONTEXT_INSTALLS:
+        elif op in CONTEXT_INSTALLS or op == MULTI_INSTALL:
             # A re-install of the converged plugin keeps exactly what it had.
             assert state.declared and state.deployed == state.allows(), (op, state)
         if op == "uninstall":
@@ -328,6 +329,17 @@ class GatePluginBin(StepRunner):
         self._edit_manifest("undeclare-" + PLUGIN, lambda data: data["dependencies"].update(apm=[]))
         self.state.declared = False
 
+    def set_targets(self, *targets: str) -> None:
+        """Declare *targets* in apm.yml (an input edit); the model and the observer follow."""
+
+        def change(data: dict) -> None:
+            data["targets"] = sorted(targets)
+
+        self._edit_manifest("targets-" + "-".join(sorted(targets)), change)
+        self.state.targets = frozenset(targets)
+        if not self.dry:
+            self.model = replace(self.model, targets=frozenset(targets))
+
     def gate_on(self) -> None:
         """An empty executables block turns the gate on over the deployed plugin."""
         self._edit_manifest("gate-on", lambda data: data.update(executables={}))
@@ -367,6 +379,12 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("prune", "prune")
     for op, (flags, _factors) in CONTEXT_INSTALLS.items():
         machine.run(op, *install, *flags)
+    # Widen to claude and copilot (a target change), re-install unchanged, narrow back.
+    machine.set_targets("claude", "copilot")
+    machine.run("install", *install)
+    machine.run(MULTI_INSTALL, *install)
+    machine.set_targets(*sorted(TARGETS))
+    machine.run("install", *install)
     # revoked-after-deploy: a deny over the deployed root; prune retires it.
     machine.run("deny", "deny", PLUGIN)
     machine.run("audit-ci", "audit", "--ci", exits=AUDIT_GATED, says=(_STALE_DECISION,))
@@ -399,6 +417,8 @@ CONTEXT_INSTALLS: Mapping[str, tuple[tuple[str, ...], Mapping[str, str]]] = {
     "install-dry-run": (("--dry-run",), {"DRYRUN": "on"}),
     "install-select": (("--target", "claude"), {"SELECT": "on"}),
 }
+# A converged re-install with claude and copilot both declared keeps bin/.
+MULTI_INSTALL = "install-multi"
 _CONTEXT = {"DEPLOYED": "clean", "NET": "online", "TGT": "single-unchanged"}
 
 
@@ -415,6 +435,8 @@ def bin_context(cell: str) -> Mapping[str, str] | None:
         return {}
     if op in CONTEXT_INSTALLS and gate == "allowed":
         return {**_CONTEXT, **CONTEXT_INSTALLS[op][1]}
+    if op == MULTI_INSTALL and gate == "allowed":
+        return {**_CONTEXT, "TGT": "multi-unchanged"}
     return None
 
 

@@ -199,6 +199,7 @@ GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "install-force": ("install", ("FORCE",)),
     "install-dry-run": ("install", ("DRYRUN",)),
     "install-select": ("install", ("SELECT",)),
+    "install-multi": ("install", ()),
     "update": ("update", ()),
     "lock": ("lock", ()),
     "audit": ("audit", ()),
