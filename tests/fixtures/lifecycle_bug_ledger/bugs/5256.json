@@ -1,0 +1,17 @@
+{
+  "issue": 5256,
+  "fixed_in": "Unreleased",
+  "summary": "With registries.default set, an object-form marketplace declaration ({name, marketplace}) was claimed by the default registry as an unscoped shorthand, so apm.yml failed to load before the catalog was read, with an error that named the internal _marketplace/ identifier.",
+  "failure_modes": [
+    "routing",
+    "outcome"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_enterprise_registry_lifecycle.py::test_catalog_declaration_installs_under_a_default_registry",
+    "tests/unit/test_apm_yml_registries.py::TestDefaultRouting::test_marketplace_declaration_not_routed"
+  ]
+}
