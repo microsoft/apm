@@ -535,8 +535,8 @@ def _decide_installed_paths(
     removed_keys = set(stale_keys)
     for keys in path_keys.values():
         removed_keys.update(keys)
-    reparented = _reparented_survivors(lockfile, removed_keys, retained, walk)
     settled = bool(removed_keys) and not unverified and not anchors
+    reparented = _reparented_survivors(lockfile, removed_keys, retained, walk, settled=settled)
     repaired = _repaired_survivors(lockfile, retained, walk, reparented) if settled else []
     direct = _direct_rows(lockfile, walk, repaired) if settled else []
     return OrphanRemovalDecision(
@@ -563,11 +563,13 @@ def _decide_installed_paths(
     )
 
 
-def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
+def _reparented_survivors(lockfile, removed_keys, retained, walk, *, settled: bool) -> list[str]:
     """Retained rows recorded under a parent this prune removes (#4989).
 
     They take the parent a fresh install records, from the complete walk;
-    without one they keep their rows unchanged.
+    without one they keep their rows unchanged. A row whose recorded parent
+    survives but no longer declares it is re-derived only when *settled*
+    (nothing kept fail-closed), since its dev status is repaired with it.
     """
     if walk is None or lockfile is None or not removed_keys:
         return []
@@ -586,7 +588,7 @@ def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
         and key in walk.reachable_via
         and (
             lockfile.dependencies[key].resolved_by in gone
-            or _stale_local_parent(lockfile, walk, key, identity_counts)
+            or (settled and _stale_local_parent(lockfile, walk, key, identity_counts))
         )
     )
 
@@ -609,9 +611,9 @@ def _stale_local_parent(lockfile, walk, key, identity_counts) -> bool:
         for parent in edges
         if parent in lockfile.dependencies
     }
-    declared = {identity for identity, _ in edges.values()}
+    # resolved_by names a parent identity; declaring_parent names its exact key.
     stale = row.resolved_by not in parents or (
-        row.declaring_parent is not None and row.declaring_parent not in declared
+        row.declaring_parent is not None and row.declaring_parent not in edges
     )
     return stale and reparent_blocker(lockfile, walk, key, identity_counts) is None
 
