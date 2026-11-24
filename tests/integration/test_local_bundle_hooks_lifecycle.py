@@ -540,10 +540,11 @@ def _named_bundle(world: MarketplacePackWorld, tmp_path: Path, name: str) -> tup
 def _recorded(world: MarketplacePackWorld, path: Path) -> dict | None:
     """This machine's config file record of *path* (what crash recovery verifies)."""
     records = Path(world.env["APM_HOME"]) / "deployment-receipts" / "config-files"
-    store = records / "records.json"
-    if not store.is_file():
-        return None
-    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    rows = [
+        row
+        for store in (sorted(records.glob("*.json")) if records.is_dir() else ())
+        for row in json.loads(store.read_text(encoding="utf-8")).get("files", [])
+    ]
     return next((row for row in rows if row["path"] == path.resolve().as_posix()), None)
 
 
@@ -1725,6 +1726,88 @@ def test_uninstall_bundle_path_refuses_a_keyed_and_a_keyless_copy(
     assert "hookpkg, team-hooks" in refused, refused
     assert "Run 'apm uninstall <installed-name>'" in refused, refused
     assert tree_bytes(consumer) == before
+
+
+_BUNDLE_SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+
+
+def _user_hook(consumer: Path, where: str, command: str) -> str:
+    """Register a user hook that runs *command*; return the config it lives in."""
+    if where == "copilot":
+        write(
+            consumer / ".github" / "hooks" / "mine.json",
+            json.dumps(
+                {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": command}]}}
+            ),
+        )
+        return ".github/hooks/mine.json"
+    settings = consumer / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    entry = {"matcher": "Mine", "hooks": [{"type": "command", "command": command}]}
+    data["hooks"]["PreToolUse"].append(entry)
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return ".claude/settings.json"
+
+
+@pytest.mark.parametrize(
+    ("where", "command"),
+    [
+        ("copilot", f"bash {_BUNDLE_SCRIPT}"),
+        ("claude", "./x.sh"),
+        ("claude", "cd .claude/hooks/hookpkg/hooks/scripts && ./x.sh"),
+        ("claude", "sh .claude/hooks/hookpkg/hooks/scripts/./x.sh"),
+        ("claude", "sh hooks/hookpkg/hooks/scripts/./x.sh"),
+        ("claude", "sh -c 'sh .claude/hooks/hookpkg/hooks/scripts/./x.sh'"),
+        ("claude", "S=x; sh .claude/hooks/hookpkg/hooks/scripts/$S.sh"),
+        ("copilot", "sh .claude/hooks/hookpkg/hooks/scripts/x.\\\nsh"),
+    ],
+    ids=[
+        "other-target",
+        "dot-slash",
+        "cd-prefix",
+        "dot-segment",
+        "target-root",
+        "nested",
+        "variable",
+        "backslash-newline",
+    ],
+)
+def test_uninstall_bundle_keeps_a_script_a_user_hook_runs_under_any_spelling(
+    tmp_path: Path, apm_binary_path: Path, where: str, command: str
+) -> None:
+    """#5106: a user hook still running a bundle script, however spelled, refuses uninstall."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, f"spelling-{where}-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    config = _user_hook(consumer, where, command)
+    assert _BUNDLE_SCRIPT in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+
+    assert config in text, text
+    assert "Removed hooks from local bundle 'hookpkg'" not in text, text
+    assert "Traceback" not in text, text
+    assert (consumer / _BUNDLE_SCRIPT).is_file()
+    assert _BUNDLE_SCRIPT in _claims(world, consumer)
+
+
+def test_uninstall_bundle_ignores_a_user_hook_running_another_script(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5106 control: a user hook that runs an unrelated script never blocks uninstall."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "unrelated-hook-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    _user_hook(consumer, "claude", "./tools/lint.sh")
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / _BUNDLE_SCRIPT).exists()
+    assert _BUNDLE_SCRIPT not in _claims(world, consumer)
+    assert _hook_entries(consumer) == {"PreToolUse": ["Mine"]}
 
 
 def _user_hook_naming_the_script(consumer: Path, document_for) -> str:

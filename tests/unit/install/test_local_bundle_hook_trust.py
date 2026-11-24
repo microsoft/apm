@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.install.local_bundle_hook_trust import (
     REASON_NOT_GRANTED,
     REASON_UNRECORDED,
@@ -77,3 +79,240 @@ def test_no_deployed_bundle_hooks_never_resolves_trust(tmp_path: Path) -> None:
     targets = [SimpleNamespace(name="claude", root_dir=".claude")]
     assert unadmitted_bundle_hooks(tmp_path, targets, lambda: calls.append(1)) == []
     assert calls == []
+
+
+_SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+
+
+@pytest.mark.parametrize(
+    ("command", "runs"),
+    [
+        ('"${CLAUDE_PROJECT_DIR}/.claude/hooks/hookpkg/hooks/scripts/x.sh"', True),
+        ('sh "$(pwd)/.claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        ("cd -- .claude/hooks/hookpkg/hooks && sh scripts/./x.sh", True),
+        ("bash -c 'cd .claude/hooks/hookpkg/hooks/scripts && ./x.sh'", True),
+        ("sh 'unterminated x.sh", True),
+        ("sh $(pwd)/.claude/hooks/hookpkg/hooks/scripts/./x.sh; true", True),
+        ("sh `pwd`/.claude/hooks/hookpkg/hooks/scripts/./x.sh; true", True),
+        ("(cd / && true); sh .claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ("cd .claude/hooks/hookpkg/hooks && sh -c 'sh scripts/./x.sh'", True),
+        (
+            'CLAUDE_PROJECT_DIR="$PWD/.claude/hooks/hookpkg/hooks"; '
+            'sh "$CLAUDE_PROJECT_DIR/scripts/./x.sh"',
+            True,
+        ),
+        ('HOME="$PWD/.claude/hooks/hookpkg/hooks"; sh "$HOME/scripts/./x.sh"', True),
+        ("cd - && sh scripts/./x.sh", True),
+        ("sh -c '.claude/hooks/hookpkg/hooks/scripts/./x.sh;true'", True),
+        ("sh .claude/hooks/hookpkg/hooks/script*/./x.sh", True),
+        ("sh ././x.sh", True),
+        ('script=.claude/hooks/hookpkg/hooks/scripts/./x.sh; sh "$script"', True),
+        ('"${CLAUDE_PROJECT_DIR}/.claude/hooks/otherpkg/hooks/scripts/x.sh"', False),
+        ("bash .github/hooks/otherpkg/scripts/x.sh", False),
+        ('cd "$HOME" && sh /opt/tools/x.sh', False),
+        ('sh "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', False),
+        ("cd . && " * 20 + "true", False),
+        ("./tools/lint.sh", False),
+        ("./tools/max.sh", False),
+        ("sh -c 'sh .claude/hooks/hookpkg/hooks/scripts/./x.sh'", True),
+        ('cmd /c "sh .claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        ("cd .claude && sh -c 'sh hooks/otherpkg/../hookpkg/hooks/scripts/x.sh'", True),
+        ("sh hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ("sh .claude/hooks/hookpkg/hooks/scripts/./'x'.sh", True),
+        ('sh .claude/hooks/hookpkg/hooks/scripts/"x"".sh"', True),
+        ("sh .claude/hooks/hookpkg/hooks/scripts/x\\.sh", True),
+        ("sh .claude/hooks/hookpkg/hooks/scripts/$'\\x78'.sh", True),
+    ],
+    ids=[
+        "project-dir-anchor",
+        "command-substitution",
+        "cd-terminator",
+        "nested-shell",
+        "unparsable",
+        "substitution-then-separator",
+        "backtick-then-separator",
+        "subshell-cd",
+        "nested-inherits-cd",
+        "reassigned-project-dir",
+        "reassigned-home",
+        "cd-dash",
+        "nested-without-space",
+        "glob-directory",
+        "repeated-dot",
+        "assigned-script",
+        "sibling-package",
+        "sibling-relative",
+        "same-name-absolute",
+        "quoted-absolute-with-space",
+        "many-cd",
+        "unrelated",
+        "longer-name",
+        "nested-with-space",
+        "cmd-slash-c",
+        "nested-inherits-cd-with-space",
+        "target-root-relative",
+        "quoted-fragment",
+        "adjacent-quoted-fragments",
+        "escaped-dot",
+        "ansi-c-quoting",
+    ],
+)
+def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:
+    """#5106: a hook command runs a bundle script unless it certainly names another file."""
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    root = Path("/project")
+    refs = script_refs(root, [_SCRIPT])
+
+    assert runs_script(command, refs, (root, root / ".claude"), root) is runs
+
+
+def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> None:
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    spaced = Path("/tmp/my project")
+    assert runs_script(
+        f'sh "{spaced.as_posix()}/{_SCRIPT}"', script_refs(spaced, [_SCRIPT]), (spaced,), spaced
+    )
+    # An option hands quoted words to a rescan, which must not split a spaced root.
+    assert runs_script(
+        f'sh -e "{spaced.as_posix()}/{_SCRIPT.replace("/scripts/", "/scripts/./")}"',
+        script_refs(spaced, [_SCRIPT]),
+        (spaced,),
+        spaced,
+    )
+    refs = (frozenset({"x.sh"}), frozenset({f"c:/project/{_SCRIPT}"}))
+    assert runs_script(
+        "C:/project/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (Path("/"),), Path("/")
+    )
+    assert runs_script(
+        "sh C:/project/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, (Path("/"),), Path("/")
+    )
+
+
+@pytest.mark.parametrize(
+    ("script", "command"),
+    [
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/run.sh",
+            "sh .claude/hooks/hookpkg/hooks/scripts/Run.sh",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/run.sh",
+            "sh .claude/hooks/HookPkg/hooks/scripts/Run.sh",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/run.sh",
+            "sh /project/.CLAUDE/hooks/hookpkg/hooks/scripts/RUN.SH",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/caf\u00e9.sh",
+            "sh .claude/hooks/hookpkg/hooks/scripts/cafe\u0301.sh",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/caf\u00e9.sh",
+            "sh .claude/hooks/hookpkg/hooks/scripts/CAFE\u0301.SH",
+        ),
+        (
+            ".claude/hooks/r\u00e9sum\u00e9/hooks/scripts/run.sh",
+            "sh .claude/hooks/re\u0301sume\u0301/hooks/scripts/run.sh",
+        ),
+    ],
+    ids=[
+        "case-name",
+        "case-directory-and-name",
+        "case-absolute",
+        "nfd-name",
+        "nfd-and-case-name",
+        "nfd-directory",
+    ],
+)
+def test_script_references_compare_by_the_shared_caseless_key(script: str, command: str) -> None:
+    """#5106: a case-insensitive volume runs any case or NFD spelling of the script.
+
+    Comparing by the one caseless key on every OS over-refuses on a
+    case-sensitive volume, which fails closed.
+    """
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    root = Path("/project")
+
+    assert runs_script(command, script_refs(root, [script]), (root, root / ".claude"), root)
+
+
+_DIR = ".claude/hooks/hookpkg/hooks/scripts"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"S=x; sh {_DIR}/${{S}}.sh",
+        f"S=x; sh {_DIR}/$S.sh",
+        f'sh "$(printf {_DIR}/%s.sh x)"',
+        f"sh `printf {_DIR}/%s.sh x`",
+        f"sh {_DIR}/x.{{sh,}}",
+        f"sh {_DIR}/x.s?",
+        f"sh {_DIR}/*.sh",
+        f"sh {_DIR}/[x].sh",
+        f"sh {_DIR}/x.\\\nsh",
+        f'a=x; b=.sh; eval "sh {_DIR}/$a$b"',
+        f"set RUN=x&& sh {_DIR}/%RUN%.sh",
+        f"set RUN=x&& sh {_DIR}/!RUN!.sh",
+        f"sh /opt/tools/x.sh; S=x; sh {_DIR}/$S.sh",
+    ],
+    ids=[
+        "braced-variable",
+        "variable",
+        "command-substitution",
+        "backticks",
+        "brace-list",
+        "glob-question",
+        "glob-star",
+        "glob-class",
+        "backslash-newline",
+        "eval-variables",
+        "cmd-percent-variable",
+        "cmd-delayed-variable",
+        "hidden-beside-unrelated-same-name",
+    ],
+)
+def test_a_spelling_that_hides_the_script_name_fails_closed(command: str) -> None:
+    """#5106: an expansion left after the anchors may spell the script, so it runs it."""
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    root = Path("/project")
+
+    assert runs_script(command, script_refs(root, [_SCRIPT]), (root, root / ".claude"), root)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"${CLAUDE_PROJECT_DIR}/.claude/hooks/otherpkg/hooks/scripts/lint.sh"',
+        '"$CLAUDE_PROJECT_DIR/.claude/hooks/otherpkg/hooks/scripts/lint.sh"',
+        'pwsh -File "$env:CLAUDE_PROJECT_DIR/.claude/hooks/otherpkg/run.ps1"',
+        'sh "$HOME/tools/lint.sh"',
+        'sh "${HOME}/tools/lint.sh"',
+        'pwsh -File "$env:HOME/tools/run.ps1"',
+        "date +%Y && sh tools/lint.sh",
+        "date +%Y-%m-%d && sh tools/lint.sh",
+    ],
+    ids=[
+        "braced-project-dir",
+        "project-dir",
+        "env-project-dir",
+        "home",
+        "braced-home",
+        "env-home",
+        "date-format",
+        "date-format-fields",
+    ],
+)
+def test_a_lone_documented_anchor_never_refuses(command: str) -> None:
+    """#5106: anchors are substituted first and a date format names no variable, so a hook
+    running another script never refuses."""
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    root = Path("/project")
+
+    assert not runs_script(command, script_refs(root, [_SCRIPT]), (root, root / ".claude"), root)
