@@ -316,6 +316,72 @@ def _variant_key(sparse_paths: list[str] | None) -> str:
     return f"sparse-{digest}"
 
 
+# PERF PROTOTYPE: compute git's answer too and fail loudly on any difference.
+_GITPATH_DIFFERENTIAL = True
+
+
+def _packed_commit(git_dir: Path, sha: str) -> bool | None:
+    """PERF PROTOTYPE (lever 2b): whether a pack in *git_dir* holds *sha* as a commit.
+
+    Reads only pack ``.idx`` v2 fanout + a bisect and the entry's type bits,
+    the bytes ``git cat-file -t`` reads. ``True``/``False`` only for a plain
+    SHA-1 repository whose object is a non-delta pack entry; anything else
+    (loose object, alternates, delta entry, other index version, not found)
+    returns ``None`` and the caller spawns git as before.
+    """
+    import bisect
+    import struct
+
+    if len(sha) != 40:
+        return None
+    objects = git_dir / "objects"
+    try:
+        want = bytes.fromhex(sha)
+    except ValueError:
+        return None
+    if (objects / "info" / "alternates").exists() or (objects / sha[:2] / sha[2:]).exists():
+        return None
+    try:
+        idx_files = sorted((objects / "pack").glob("pack-*.idx"))
+    except OSError:
+        return None
+    for idx_path in idx_files:
+        try:
+            data = idx_path.read_bytes()
+        except OSError:
+            return None
+        if data[:8] != b"\xfftOc\x00\x00\x00\x02":
+            return None
+        fanout = struct.unpack(">256I", data[8 : 8 + 1024])
+        total = fanout[255]
+        lo = fanout[want[0] - 1] if want[0] else 0
+        hi = fanout[want[0]]
+        names = 8 + 1024
+        keys = [data[names + 20 * i : names + 20 * i + 20] for i in range(lo, hi)]
+        at = bisect.bisect_left(keys, want)
+        if at == len(keys) or keys[at] != want:
+            continue
+        index = lo + at
+        offsets = names + 20 * total + 4 * total
+        (offset,) = struct.unpack(">I", data[offsets + 4 * index : offsets + 4 * index + 4])
+        if offset & 0x80000000:
+            return None
+        pack_path = idx_path.with_suffix(".pack")
+        try:
+            with open(pack_path, "rb") as handle:
+                handle.seek(offset)
+                first = handle.read(1)
+        except OSError:
+            return None
+        if not first:
+            return None
+        kind = (first[0] >> 4) & 7
+        if kind in (6, 7):
+            return None
+        return kind == 1
+    return None
+
+
 class GitCache:
     """Content-addressable git cache with integrity verification.
 
@@ -812,6 +878,9 @@ class GitCache:
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
+        packed = _packed_commit(staged, sha)
+        if packed and not _GITPATH_DIFFERENTIAL:
+            return  # PERF PROTOTYPE (lever 2b): the pack already holds the commit
         try:
             probe = run_git_text(
                 [
@@ -824,7 +893,10 @@ class GitCache:
                 env=cached_repo_env(git_subprocess_env(env)),
                 stdin=subprocess.DEVNULL,
             )
-            if probe.returncode != 0 or "commit" not in probe.stdout:
+            spawned = probe.returncode == 0 and "commit" in probe.stdout
+            if packed is not None and packed != spawned:
+                raise RuntimeError("PERF lever 2b differential: pack idx != git cat-file -t")
+            if not spawned:
                 self._fetch_sha_into(staged, url, sha, env=env, partial=partial)
         except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
             _log.debug("Tag-only commit fetch skipped for %s: %s", _sanitize_url(url), exc)
@@ -1123,6 +1195,9 @@ class GitCache:
 
         if not self._bare_trusted(bare_dir, url=url, env=env):
             return False
+        known = _packed_commit(bare_dir, sha)
+        if known is not None and not _GITPATH_DIFFERENTIAL:
+            return known  # PERF PROTOTYPE (lever 2b)
         git_exe = get_git_executable()
         subprocess_env = git_subprocess_env(env)
         subprocess_env = cached_repo_env(subprocess_env)
@@ -1134,7 +1209,10 @@ class GitCache:
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
             )
-            return result.returncode == 0 and "commit" in result.stdout.strip()
+            spawned = result.returncode == 0 and "commit" in result.stdout.strip()
+            if known is not None and known != spawned:
+                raise RuntimeError("PERF lever 2b differential: pack idx != git cat-file -t")
+            return spawned
         except (subprocess.TimeoutExpired, OSError):
             return False
 

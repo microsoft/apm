@@ -299,6 +299,22 @@ class _LinkResolver:
             ) from None
 
 
+# PERF PROTOTYPE: recompute and fail loudly on any difference.
+_GITPATH_DIFFERENTIAL = True
+_LINK_PLANS: dict[tuple[str, tuple[str, ...] | None], tuple[dict, dict]] = {}
+
+
+def _detached_head(repo_dir: Path) -> str | None:
+    """The commit id a detached ``HEAD`` names (the file ``git ls-tree HEAD`` reads), or ``None``."""
+    try:
+        text = (Path(repo_dir) / ".git" / "HEAD").read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if len(text) in (40, 64) and all(c in "0123456789abcdef" for c in text):
+        return text
+    return None
+
+
 def _plan_tracked_symlinks(
     git_exe: str,
     repo_dir: Path,
@@ -308,7 +324,44 @@ def _plan_tracked_symlinks(
     timeout: int,
     extra_git_args: list[str] | None,
 ) -> tuple[dict[str, list[_LinkWrite]], dict[str, Exception]]:
-    """Plan link materialization; the common no-link case costs one ``ls-tree``."""
+    """Plan link materialization; the common no-link case costs one ``ls-tree``.
+
+    PERF PROTOTYPE (lever 3): the plan is a pure function of the commit's tree,
+    so within one command it is computed once per (commit id, paths).
+    """
+    head = _detached_head(repo_dir)
+    key = (head, tuple(paths) if paths is not None else None) if head else None
+    if key is not None and key in _LINK_PLANS:
+        cached = _LINK_PLANS[key]
+        if not _GITPATH_DIFFERENTIAL:
+            return cached
+        fresh = _plan_tracked_symlinks_uncached(
+            git_exe, repo_dir, paths, env=env, timeout=timeout, extra_git_args=extra_git_args
+        )
+        same_failures = {k: (type(v), str(v)) for k, v in fresh[1].items()} == {
+            k: (type(v), str(v)) for k, v in cached[1].items()
+        }
+        if fresh[0] != cached[0] or not same_failures:
+            raise RuntimeError("PERF lever 3 differential: memoized link plan != ls-tree")
+        return cached
+    result = _plan_tracked_symlinks_uncached(
+        git_exe, repo_dir, paths, env=env, timeout=timeout, extra_git_args=extra_git_args
+    )
+    if key is not None:
+        _LINK_PLANS[key] = result
+    return result
+
+
+def _plan_tracked_symlinks_uncached(
+    git_exe: str,
+    repo_dir: Path,
+    paths: list[str] | None,
+    *,
+    env: dict[str, str] | None,
+    timeout: int,
+    extra_git_args: list[str] | None,
+) -> tuple[dict[str, list[_LinkWrite]], dict[str, Exception]]:
+    """One ``ls-tree`` (plus link blobs when links exist) for the HEAD tree."""
     scoped = _tree_entries(
         git_exe,
         repo_dir,
