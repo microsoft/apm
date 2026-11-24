@@ -716,9 +716,9 @@ def _setup_replay(ctx: Context) -> None:
 
     The first sample starts from a clean user state: earlier journeys in this
     world leave deployment receipts for a project checkout ``fresh_project``
-    has since replaced, and the no-op would never converge against them. The
-    last untimed no-op must replay; otherwise the cell fails instead of timing
-    a full re-proof.
+    has since replaced, and the no-op would never converge against them. On a
+    CLI with the record, the last untimed no-op must replay; otherwise the cell
+    fails instead of timing a full re-proof.
     """
     if not ctx.is_installed:
         ctx.fresh_user_state()
@@ -726,8 +726,9 @@ def _setup_replay(ctx: Context) -> None:
     for root in ctx.roots():
         ctx.checked(["install"], root)
         outcome = _replay_outcome(ctx.run(["install"], root).stderr)
-        if outcome != "hit":
-            raise RuntimeError(f"setup no-op did not converge in {root}: replay {outcome or '-'}")
+        # No trace line: a CLI without the verified-state record (nothing to converge).
+        if outcome and outcome != "hit":
+            raise RuntimeError(f"setup no-op did not converge in {root}: replay {outcome}")
 
 
 def _replay_outcome(tail: str) -> str:
