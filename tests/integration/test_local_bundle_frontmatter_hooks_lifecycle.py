@@ -338,7 +338,8 @@ def test_withdrawn_approval_keeps_hooked_markdown_edited_outside_apm(
     dump_yaml(manifest, consumer / "apm.yml")
     text = output(world.apm(consumer, "install", "--no-policy"))
 
-    assert "Kept, as they are edited, unreadable or have no recorded hash" in text, text
+    assert "Kept 1 Markdown file(s) with frontmatter hooks" in text, text
+    assert "edited, unreadable or have no recorded hash" in text, text
     assert _DEPLOYED["command"] in text, text
     assert hooked.read_bytes() == edited
     assert _DEPLOYED["command"] in world.lock(consumer)["local_deployed_files"]
@@ -531,3 +532,27 @@ def test_withdrawal_reaches_deploy_roots_and_dropped_targets(
 
     assert not (consumer / deployed).exists(), text
     assert "Retired 1 Markdown file(s) with frontmatter hooks" in text, text
+
+
+def test_an_edited_hooked_file_under_a_granted_bundle_is_named_as_kept(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5254 N1: no "Retired 0" with a revocation reason while the approval holds."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    consumer = _consumer(world, "granted-edit-consumer")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    hooked = consumer / _DEPLOYED["command"]
+    edited = hooked.read_bytes() + b"Edited by hand.\n"
+    hooked.write_bytes(edited)
+
+    text = output(world.apm(consumer, "install", "--no-policy"))
+
+    assert "Retired" not in text, text
+    assert "approval no longer granted" not in text, text
+    assert "Kept 1 Markdown file(s) with frontmatter hooks" in text, text
+    assert _DEPLOYED["command"] in text, text
+    assert hooked.read_bytes() == edited
