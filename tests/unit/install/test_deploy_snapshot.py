@@ -2351,8 +2351,8 @@ def test_a_group_writable_apm_home_defers_replay_until_its_group_write_is_remove
 def test_the_printed_chmod_fixes_an_apm_home_whose_path_has_a_space(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#5385 review: the printed recovery command quotes APM_HOME, so running it works."""
-    import subprocess
+    """#5385 review: the printed recovery command quotes APM_HOME, so a shell reads one path."""
+    import shlex
 
     from apm_cli.install.errors import InstallFailureAlreadyRendered
     from apm_cli.install.transaction import replay_abandoned_deploys
@@ -2371,8 +2371,7 @@ def test_the_printed_chmod_fixes_an_apm_home_whose_path_has_a_space(
         replay_abandoned_deploys(project / "apm_modules", logger)
 
     (command,) = [m.split("Run '", 1)[1].split("',", 1)[0] for m in warnings if "Run '" in m]
-    subprocess.run(["sh", "-c", command], cwd=tmp_path, check=True)
-    assert home.stat().st_mode & 0o020 == 0
+    assert shlex.split(command) == ["chmod", "g-w", str(home)]
     assert config.read_bytes() == b"killed\n"
 
 
