@@ -877,15 +877,38 @@ def test_a_record_expires_when_the_daily_update_check_falls_due(
     assert ("up to date in " in capsys.readouterr().out) is hits
 
 
-def test_a_run_that_checked_for_updates_is_never_recorded(project: Path) -> None:
-    """That run may print a notice the next ordinary run would not."""
+def _record_after_update_check(output: str) -> None:
     from apm_cli.utils.version_checker import save_version_check_timestamp
 
     with verdict_record.recording(["install"]):
-        sys.stdout.write(_OUTPUT)
+        sys.stdout.write(output)
         save_version_check_timestamp()
         verdict_record.note_verified_noop()
+
+
+def test_a_run_whose_update_check_printed_nothing_records(project: Path, capsys) -> None:
+    """The first no-op of a day runs the update check; with nothing new it prints
+    nothing, and so does the next run while the check is fresh: it records and replays."""
+    _record_after_update_check(_OUTPUT)
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is True
+    _assert_no_notice(capsys.readouterr().out)
+
+
+def test_a_run_that_printed_the_update_notice_is_never_recorded(project: Path) -> None:
+    """The next ordinary run would not print the notice, so its output is not recorded."""
+    from apm_cli.update_notice import NEW_VERSION_NOTICE
+
+    _record_after_update_check(f"[!] {NEW_VERSION_NOTICE}9.9.9 (current: 0.1.0)\n{_OUTPUT}")
+
     assert not (_home(project) / "verdicts").exists()
+
+
+def _assert_no_notice(out: str) -> None:
+    from apm_cli.update_notice import NEW_VERSION_NOTICE
+
+    assert "up to date in " in out and NEW_VERSION_NOTICE not in out
 
 
 def test_the_common_dir_config_git_reads_is_keyed(

@@ -64,12 +64,16 @@ def key_startup(digest: Any, root: Path, notice: str, surfaces: list[str]) -> No
         digest.put("notice-mtime", b"%d" % os.stat(notice).st_mtime_ns)
 
 
-def notice_schedule(entry_time: float, *, output: bool = True) -> tuple[str, float | None]:
+def notice_schedule(
+    entry_time: float, *, output: bool = True, notified: bool = False
+) -> tuple[str, float | None]:
     """The update-check file and when its daily check falls due, if the schedule
     decides the notice; ("", None) when another gate does.
 
-    Raises OSError or ValueError (no record) when the check is due or this run ran
-    it: that run may have printed a notice the next ordinary run would not.
+    Raises OSError or ValueError (no record) when the check is due, or when this run
+    ran it and printed the notice (*notified*), which the next ordinary run would
+    not print. A run that ran the check and printed nothing records: the next run,
+    with the check fresh, prints nothing either, and the record expires when it falls due.
     """
     from apm_cli import update_notice
 
@@ -80,10 +84,9 @@ def notice_schedule(entry_time: float, *, output: bool = True) -> tuple[str, flo
     path = get_update_cache_path()
     checked = os.stat(path).st_mtime
     # File times can trail the clock (a coarse kernel clock, 2 s on FAT).
-    if output and checked >= entry_time - _CLOCK_GRAIN:
-        # A record of output only: an attested record replays none, and the
-        # notice is keyed and rendered live by the next run.
-        raise ValueError("this run checked for updates")
+    if output and notified and checked >= entry_time - _CLOCK_GRAIN:
+        # Only a record of output replays it; an attested record replays none.
+        raise ValueError("this run printed the update notice")
     return str(path), checked + _NOTICE_PERIOD
 
 
