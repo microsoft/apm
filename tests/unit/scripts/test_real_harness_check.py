@@ -65,11 +65,16 @@ def test_committed_expectations_name_only_known_cells() -> None:
     known = {
         f"{harness}-{env}-{scope}"
         for harness in probe.HARNESSES
-        for env in probe.ENVS + probe.DIAG_ENVS
+        for env in probe.ENVS + probe.DIAG_ENVS + probe.COLLISION_ENVS
         for scope in probe.SCOPES
     }
     assert set(expected) <= known
-    assert {row["verdict"] for row in expected.values()} <= {"LOADS", "PARTIAL", "DOES NOT LOAD"}
+    assert {row["verdict"] for row in expected.values()} <= {
+        "LOADS",
+        "PARTIAL",
+        "DOES NOT LOAD",
+        "REFUSED",
+    }
 
 
 TOKEN = "github_pat_" + "A1b2C3d4E5" * 8 + "xyz"
