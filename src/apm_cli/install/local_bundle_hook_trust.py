@@ -586,9 +586,61 @@ def _per_file_configs_running(
             except (OSError, ValueError, TypeError):
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
-            if any(tail in text for text in _hook_commands(document) for tail in tails):
+            if any(
+                tail in text for text in _hook_commands(document) for tail in tails
+            ) or _runs_through_cwd(document, project_root, scripts):
                 found.add(value)
     return found
+
+
+def _handler_cwds(document: Any) -> list[tuple[str, Any]]:
+    """``(command, cwd)`` for every handler that declares a working directory (#5281)."""
+    from apm_cli.hook_contract import HOOK_COMMAND_KEYS, HookContractError, hook_handlers
+
+    try:
+        handlers = [dict(handler.value) for handler in hook_handlers(document)]
+    except HookContractError:
+        handlers = list(_every_mapping(document))
+    return [
+        (handler[key], handler["cwd"])
+        for handler in handlers
+        if "cwd" in handler
+        for key in HOOK_COMMAND_KEYS
+        if isinstance(handler.get(key), str)
+    ]
+
+
+def _every_mapping(node: Any) -> Iterator[dict]:
+    """Every object anywhere in a document the hook grammar cannot read."""
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _every_mapping(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _every_mapping(item)
+
+
+def _runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str]) -> bool:
+    """Whether a handler runs a bundle script relative to its ``cwd`` field (#5281).
+
+    The cwd resolves against the project root. One that cannot be resolved
+    with certainty (not a plain path, a variable or ``~``, or outside the
+    project) may run anything, so it counts as running the scripts.
+    """
+    root = Path(os.path.abspath(project_root))
+    for command, cwd in _handler_cwds(document):
+        if not isinstance(cwd, str) or not cwd.strip() or cwd.startswith("~") or "$" in cwd:
+            return True
+        base = Path(os.path.normpath(root / cwd.replace("\\", "/")))
+        if not base.is_relative_to(root):
+            return True
+        text = command.replace("\\", "/")
+        for value in scripts:
+            script = Path(os.path.normpath(root / value))
+            if script.is_relative_to(base) and script.relative_to(base).as_posix() in text:
+                return True
+    return False
 
 
 def _configs_still_running(
