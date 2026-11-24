@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import hashlib
 import json
 import math
 import os
@@ -1063,6 +1064,9 @@ def run(args: argparse.Namespace) -> dict:
             ).stdout.strip(),
             "platform": platform.platform(),
             "cpus": os.cpu_count(),
+            # Runner CPU class sets absolute CPU seconds; report absolutes per class.
+            "cpu_model": cpu_model(),
+            "yardstick_cpu_s": yardstick_cpu_s(),
             "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "runs": args.runs,
             "rtt_ms": args.rtt,
@@ -1097,6 +1101,50 @@ def run(args: argparse.Namespace) -> dict:
     report["meta"]["uptime_end"] = _uptime()
     _write(report, out)
     return report
+
+
+def cpu_model() -> str:
+    """The runner's CPU model name ("" when unknown)."""
+    try:
+        if sys.platform.startswith("linux"):
+            for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+                if line.startswith("model name"):
+                    return line.partition(":")[2].strip()
+        elif sys.platform == "darwin":
+            return subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+        elif sys.platform == "win32":
+            import winreg
+
+            key = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as handle:
+                return str(winreg.QueryValueEx(handle, "ProcessorNameString")[0]).strip()
+    except OSError:
+        pass
+    return platform.processor()
+
+
+def yardstick_cpu_s() -> float:
+    """CPU seconds of a fixed single-thread workload: the runner's speed, not the CLI's.
+
+    Pure-Python arithmetic plus SHA-256 over fixed bytes; same work on every
+    runner, so the value tells CPU classes apart. Best of three.
+    """
+    data = b"apm-perf-yardstick" * 65536
+    best = math.inf
+    for _ in range(3):
+        start = time.process_time()
+        total = 0
+        for i in range(1_000_000):
+            total += i * i % 7
+        for _ in range(8):
+            hashlib.sha256(data).digest()
+        best = min(best, time.process_time() - start)
+    return round(best, 4)
 
 
 def _uptime() -> str:
