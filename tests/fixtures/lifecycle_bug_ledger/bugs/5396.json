@@ -1,0 +1,16 @@
+{
+  "issue": 5396,
+  "fixed_in": "Unreleased",
+  "summary": "After a project was re-cloned at the same path, every install repeated the unusable MCP write evidence warning and audit --ci failed, because evidence bound to the old installation could never bind again; install now sets that evidence aside once (renamed, never deleted), keeps the entries it listed, and repeat installs converge.",
+  "failure_modes": [
+    "idempotency",
+    "outcome"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_recloned_checkout_sets_the_old_evidence_aside_once_and_converges"
+  ]
+}
