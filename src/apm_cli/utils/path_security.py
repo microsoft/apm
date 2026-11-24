@@ -307,23 +307,20 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     return kept
 
 
-# A directory junction is a mount-point reparse point (Python < 3.12 has no isjunction).
+# A reparse point whose tag is a name surrogate (a symbolic link, a directory junction,
+# a WSL symlink) names another path; data-only tags (cloud files) do not.
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
-_IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+_IO_REPARSE_TAG_NAME_SURROGATE = 0x20000000
 
 
 def _is_link(path: Path) -> bool:
-    """Whether *path* is a symbolic link or a Windows directory junction (never its target)."""
+    """Whether *path* is a link of any kind (never its target), from one ``lstat``."""
     info = path.lstat()
     if S_ISLNK(info.st_mode):
         return True
-    isjunction = getattr(os.path, "isjunction", None)
-    if isjunction is not None:
-        return isjunction(path)
     attributes = getattr(info, "st_file_attributes", 0)
-    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT) and (
-        getattr(info, "st_reparse_tag", 0) == _IO_REPARSE_TAG_MOUNT_POINT
-    )
+    tag = getattr(info, "st_reparse_tag", 0)
+    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT and tag & _IO_REPARSE_TAG_NAME_SURROGATE)
 
 
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
