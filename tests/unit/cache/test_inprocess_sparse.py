@@ -130,7 +130,7 @@ def test_a_crlf_blob_under_text_auto_eol_lf_is_written_as_git_writes_it(tmp_path
         b"* crlf\n",
         b"*.bin filter=lfs diff=lfs merge=lfs -text\n",
         b"*.md ident\n",
-        b"*.md working-tree-encoding=UTF-16\n",
+        b"*.utf16 working-tree-encoding=UTF-16\n",
         b"[attr]mine text eol=crlf\n",
         b'"*.md" text\n',
         b"*.md unknown-token\n",
