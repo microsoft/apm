@@ -26,8 +26,11 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import re
+import secrets
+import stat
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -63,11 +66,14 @@ class LocalReanchorPlan:
     snapshot: tuple[tuple[Path, str], ...] = ()
     # (current, re-anchored) install directory of each re-keyed root (#4999).
     moves: tuple[tuple[Path, Path], ...] = ()
-    # (current install directory, its dependency reference, framed hash) of each
-    # moving copy whose hash-excluded files went stale: re-materialized (#5102).
-    fresh: tuple[tuple[Path, Any, bool], ...] = ()
+    # (current install directory, its dependency reference, framed hash, recorded
+    # content_hash) of each moving copy whose hash-excluded files went stale:
+    # re-materialized (#5102) and verified once against that hash (#5193).
+    fresh: tuple[tuple[Path, Any, bool, str | None], ...] = ()
     # Lock key -> install's breadth-first visit rank, for request order (#4999).
     visit_order: dict[str, int] = field(default_factory=dict)
+    # Re-identified key -> the child keys it wins as nearest parent (#5091).
+    children: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Deployed path -> the writer a fresh install records once re-ranked (#5048).
     writers: dict[str, str] = field(default_factory=dict)
 
@@ -106,6 +112,68 @@ def _root_identities(
     return identities
 
 
+def _won_children(walk, nodes, renames: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    """Each re-identified key's children whose winning parent it is (#5091).
+
+    The winner is the nearest parent, ties going to the lowest re-anchored
+    key, as install and ``resolved_by`` rank them; a child another parent
+    wins keeps naming that parent.
+    """
+    won: dict[str, list[str]] = {key: [] for key in nodes}
+    for child in sorted(walk.declaring_edges):
+        nearest = _nearest_parents(walk, child)
+        if nearest:
+            winner = _ranked_parent(nearest, renames)
+            if winner in won:
+                won[winner].append(child)
+    return {key: tuple(children) for key, children in won.items()}
+
+
+def _respelled_descendants(
+    lockfile, decision, walk, local_roots, label, modules_dir: Path
+) -> dict[str, tuple[str, str, Any, str]]:
+    """Local descendants whose winning edge respells their directory (#5091).
+
+    A case-only spelling on a case-insensitive filesystem, or a symlinked
+    spelling, resolves to the same package directory, but a fresh install
+    records the winning edge's spelling and names its copy after it (#5091).
+    Such a descendant is re-keyed like a root, with the same identity fields.
+    """
+    respelled: dict[str, tuple[str, str, Any, str]] = {}
+    for key in sorted(set(decision.rescued_parents) - set(local_roots)):
+        row = lockfile.get_dependency(key)
+        nearest = _nearest_parents(walk, key)
+        if row is None or row.source != "local" or not nearest:
+            continue
+        declared, alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))
+        via = walk.declaring_edges.get(key, {}).get(nearest[0])
+        real_dir = walk.local_dirs.get(key)
+        if (
+            declared == row.repo_url
+            or alias != row.alias
+            or via is None
+            or via[1] is None
+            or real_dir is None
+            or not _same_install_dir(
+                row,
+                declared,
+                modules_dir,
+                source=_edge_sources(walk, key, nearest[0], row, modules_dir),
+            )
+        ):
+            continue
+        copy = row.to_dependency_ref().get_install_path(modules_dir)
+        _require_copy(copy, key, label, modules_dir)
+        # A copy that moves like a root takes the fresh-copy path for stale excluded
+        # files; one that stays put (an alias names its path) gets no refresh, so its
+        # excluded files must match too.
+        spelled = replace(row.to_dependency_ref(), local_path=via[1], repo_url=declared)
+        stays = os.fspath(spelled.get_install_path(modules_dir)) == os.fspath(copy)
+        _require_fresh_copy(row, real_dir, copy, key, label, modules_dir, unhashed=stays)
+        respelled[key] = (via[1], nearest[0], real_dir, declared)
+    return respelled
+
+
 def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir: Path):
     """Return the winning edge's repo spelling, or refuse when it installs elsewhere.
 
@@ -119,7 +187,9 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
             f"{label(key)} stays, but the package that still needs it declares it under "
             f"another name ({alias or 'no alias'}), which installs elsewhere"
         )
-    if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
+    if declared != row.repo_url and not _same_install_dir(
+        row, declared, modules_dir, source=_edge_sources(walk, key, parent, row, modules_dir)
+    ):
         # An alias spelling (a symlink) installs as another package directory.
         raise LocalReanchorRefused(
             f"{label(key)} stays, but the package that still needs it declares it as "
@@ -128,10 +198,71 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
     return declared
 
 
-def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
-    """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem)."""
-    if declared is None or declared.casefold() != row.repo_url.casefold():
+class _SourceFacts:
+    """The filesystem facts a normalization respelling is proven on (#5222); a test seam."""
+
+    def identity(self, path: Path) -> tuple[int, int] | None:
+        """``(device, inode)`` of a real directory, never through a final link."""
+        try:
+            found = path.lstat()
+        except OSError:
+            return None
+        return (found.st_dev, found.st_ino) if stat.S_ISDIR(found.st_mode) else None
+
+    def contained(self, root: Path, path: Path) -> bool:
+        """Whether *path* is reached from *root* with no linked component and stays inside."""
+        from ...utils.path_security import (
+            has_symlink_component,
+            is_within,
+            resolve_for_containment,
+        )
+
+        try:
+            return not has_symlink_component(root, path) and is_within(
+                resolve_for_containment(path), resolve_for_containment(root)
+            )
+        except (OSError, RuntimeError, ValueError):
+            return False
+
+
+def _edge_sources(walk, key: str, parent, row, modules_dir: Path) -> tuple[Path, Path, Path] | None:
+    """The recorded and the spelled source directory of *key* under *parent*, and the root.
+
+    Both are spelled lexically in the declaring parent's directory: the edge's
+    own ``local_path`` and the row's recorded leaf name (#5222).
+    """
+    edge = walk.declaring_edges.get(key, {}).get(parent)
+    parent_dir = walk.local_dirs.get(parent)
+    if edge is None or edge[1] is None or parent_dir is None or not row.local_path:
+        return None
+    spelled = Path(os.path.normpath(Path(parent_dir) / edge[1]))
+    return spelled.parent / Path(row.local_path).name, spelled, modules_dir.parent.resolve()
+
+
+def _same_install_dir(
+    row, declared: str | None, modules_dir: Path, *, source=None, facts=None
+) -> bool:
+    """Whether *declared* names *row*'s own package directory.
+
+    A letter-case respelling is decided by the install paths on a
+    case-insensitive filesystem (#5091). A Unicode-normalization respelling
+    is proven on the SOURCE directories (*source*: the recorded and the
+    spelled directory and the project root): both inside the project, neither
+    reached through a link, and one inode (#5222).
+    """
+    if declared is None:
         return False
+    if declared.casefold() != row.repo_url.casefold():
+        from ...utils.paths import caseless
+
+        if source is None or caseless(declared) != caseless(row.repo_url):
+            return False
+        recorded, spelled, root = source
+        facts = facts or _SourceFacts()
+        if not all(facts.contained(root, path) for path in (recorded, spelled)):
+            return False
+        first = facts.identity(recorded)
+        return first is not None and first == facts.identity(spelled)
     ref = row.to_dependency_ref()
     try:
         current = ref.get_install_path(modules_dir)
@@ -181,9 +312,10 @@ def plan_local_reanchor(
             root=project_root,
             root_local_dirs={},
         )
-        for key, (local_path, parent_key, real_dir, repo_url) in _root_identities(
-            lockfile, walk, local_roots, label, modules_dir
-        ).items()
+        for key, (local_path, parent_key, real_dir, repo_url) in {
+            **_root_identities(lockfile, walk, local_roots, label, modules_dir),
+            **_respelled_descendants(lockfile, decision, walk, local_roots, label, modules_dir),
+        }.items()
     }
     renames = {key: node.get_unique_key() for key, node in nodes.items()}
     collisions = sorted(
@@ -206,25 +338,19 @@ def plan_local_reanchor(
     }
     moves = _materialization_moves(lockfile, nodes, modules_dir, label)
     fresh = _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir)
-    declaring_parents: dict[str, tuple[str, str | None]] = {}
-    resolved_by: dict[str, str | None] = {}
-    for key in decision.rescued_parents:
-        nearest = _nearest_parents(walk, key)
-        if not nearest:
-            continue
-        edges = walk.declaring_edges[key]
-        # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
-        resolved_by[key] = edges[min(nearest, key=lambda parent: renames.get(parent, parent))][0]
+    # One re-parent rule for uninstall and prune (#5161).
+    declaring_parents, resolved_by = reparent_rows(
+        lockfile, walk, decision.rescued_parents, renames, skip=frozenset(nodes)
+    )
+    for key in resolved_by:
         row = lockfile.get_dependency(key)
         if row is not None and row.source == "local" and key not in nodes:
             # A re-parented descendant must still install where its row says, from a copy.
-            _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
+            first = _nearest_parents(walk, key)[0]
+            _winning_edge_installs_here(walk, key, first, lockfile, label, modules_dir)
             copy = row.to_dependency_ref().get_install_path(modules_dir)
             _require_copy(copy, key, label, modules_dir)
             _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label, modules_dir)
-        if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
-            first = nearest[0]
-            declaring_parents[key] = (renames.get(first, first), edges[first][1])
     return LocalReanchorPlan(
         renames,
         identities,
@@ -232,8 +358,64 @@ def plan_local_reanchor(
         resolved_by,
         moves=moves,
         fresh=fresh,
+        children=_won_children(walk, nodes, renames),
         visit_order=dict(getattr(walk, "visit_order", {}) or {}),
     )
+
+
+def reparent_rows(
+    lockfile,
+    walk,
+    keys,
+    renames: dict[str, str] | None = None,
+    *,
+    skip=frozenset(),
+    locked_identity: bool = False,
+) -> tuple[dict[str, tuple[str, str | None]], dict[str, str | None]]:
+    """The parent install records for each of *keys*, from a complete walk.
+
+    Returns ``(declaring_parents, resolved_by)`` for :class:`LocalReanchorPlan`:
+    a local row takes the first shallowest declaring edge, and every row the
+    nearest parent, ties to the lowest key as install ranks them (#4833).
+    ``apm prune`` re-parents a survivor whose recorded parent it removes (#4989);
+    with *locked_identity* a parent that keeps its lock row is named by that
+    row, so a parent reached through a symlink alias names its own row.
+    """
+    from ...deps.lockfile import lockfile_parent_identity
+
+    renames = renames or {}
+    declaring_parents: dict[str, tuple[str, str | None]] = {}
+    resolved_by: dict[str, str | None] = {}
+    for key in keys:
+        nearest = _nearest_parents(walk, key)
+        if not nearest:
+            continue
+        edges = walk.declaring_edges[key]
+        parent_key = _ranked_parent(nearest, renames)
+        resolved_by[key] = edges[parent_key][0]
+        parent_row = lockfile.dependencies.get(parent_key) if locked_identity else None
+        if parent_row is not None:
+            resolved_by[key] = lockfile_parent_identity(parent_row, lockfile.replacements)
+        row = lockfile.get_dependency(key)
+        # A legacy local row (no declaring_parent) re-parented by prune takes
+        # the new parent's local_path too, or it would resolve elsewhere.
+        if (
+            row is not None
+            and row.source == "local"
+            and key not in skip
+            and (row.declaring_parent or locked_identity)
+        ):
+            # A legacy row resolves local_path against resolved_by, so it takes
+            # that parent's edge; others keep install's first shallowest edge.
+            first = nearest[0] if row.declaring_parent else parent_key
+            declaring_parents[key] = (renames.get(first, first), edges[first][1])
+    return declaring_parents, resolved_by
+
+
+def _ranked_parent(nearest, renames: dict[str, str]) -> str:
+    """The nearest parent a re-parented row records: ties go to the lowest key, as
+    install ranks the new keys (#4833). The one ranking uninstall and prune share."""
+    return min(nearest, key=lambda parent: renames.get(parent, parent))
 
 
 def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> tuple:
@@ -260,7 +442,9 @@ def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> t
         except (OSError, ValueError):
             stale = False
         if stale:
-            fresh.append((current, ref, row.content_hash_framed))
+            # A descendant's local_path is relative to its parent: stage from the source itself.
+            sourced = replace(ref, local_path=os.path.abspath(source))
+            fresh.append((current, sourced, row.content_hash_framed, row.content_hash))
     return tuple(fresh)
 
 
@@ -275,7 +459,19 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
         current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
         target = node.get_install_path(modules_dir)
         _require_copy(current, key, label, modules_dir)
-        if current == target:
+        # Compared as spelled: a case-insensitive Path equality hides a case-only rename.
+        if os.fspath(current) == os.fspath(target):
+            continue
+        if target.exists() and _same_directory(current, target):
+            # A case-only rename goes through a temporary name, which every
+            # case-insensitive filesystem honors (#5091).
+            # A short name: the package name may already be near the length limit.
+            step = current.with_name(f".apm-case-{secrets.token_hex(4)}")
+            if step.exists():
+                raise LocalReanchorRefused(
+                    f"{label(key)} stays, but {_modules_path(step, modules_dir)} is in the way"
+                )
+            moves += [(current, step), (step, target)]
             continue
         if target.exists():
             raise LocalReanchorRefused(
@@ -284,6 +480,13 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
             )
         moves.append((current, target))
     return tuple(moves)
+
+
+def _same_directory(first: Path, second: Path) -> bool:
+    try:
+        return first.samefile(second)
+    except OSError:
+        return False
 
 
 def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
@@ -297,12 +500,21 @@ def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
 
 
 def _require_fresh_copy(
-    row, source: Path | None, copy: Path, key: str, label, modules_dir: Path
+    row,
+    source: Path | None,
+    copy: Path,
+    key: str,
+    label,
+    modules_dir: Path,
+    *,
+    unhashed: bool = True,
 ) -> None:
     """Refuse a kept descendant whose local source no longer matches its copy (#4999).
 
     Install recopies a changed local source, so keeping the old copy would not
     leave apm_modules as a fresh install does. An unreadable source refuses too.
+    With *unhashed* false, only the hashed content counts: a moving copy whose
+    excluded files went stale is re-materialized instead (#5102).
     """
     from ...install.phases.local_content import local_source_matches_copy
 
@@ -310,7 +522,7 @@ def _require_fresh_copy(
         fresh = (
             source is not None
             and local_source_matches_copy(row, source, copy)
-            and _unhashed_files_match(source, copy)
+            and (not unhashed or _unhashed_files_match(source, copy))
         )
     except (OSError, ValueError, TypeError):
         fresh = False
@@ -329,32 +541,69 @@ def _unhashed_files_match(source: Path, copy: Path) -> bool:
     """Whether the files the package hash skips (.git/, __pycache__/) match the copy.
 
     Install copies them through the local copier, so a change there alone still
-    makes a fresh install rewrite apm_modules (#4999).
+    makes a fresh install rewrite apm_modules (#4999). Only those subtrees are
+    compared, read in place: nothing is staged to decide (#5193).
     """
     import filecmp
-    import tempfile
-
-    from ...config import get_apm_temp_dir
-    from ...install.phases.local_content import _copy_tree_dereferencing_validated
 
     if not source.is_dir():
         return True
+    names = _unhashed_source_files(source)
+    copied = {
+        path.relative_to(copy).as_posix()
+        for path in copy.rglob("*")
+        if path.is_file() and _UNHASHED & set(path.relative_to(copy).parts)
+    }
+    # filecmp streams each pair in bounded chunks: no tree is held in memory.
+    return set(names) == copied and all(
+        filecmp.cmp(names[name], copy / name, shallow=False) for name in sorted(names)
+    )
 
-    def unhashed(root: Path) -> set[str]:
-        return {
-            path.relative_to(root).as_posix()
-            for path in root.rglob("*")
-            if path.is_file() and {".git", "__pycache__"} & set(path.relative_to(root).parts)
-        }
 
-    with tempfile.TemporaryDirectory(prefix="apm-reanchor-", dir=get_apm_temp_dir()) as stage:
-        image = Path(stage) / "package"
-        _copy_tree_dereferencing_validated(source, image, source)
-        names = unhashed(image)
-        # filecmp streams each pair in bounded chunks: no tree is held in memory.
-        return names == unhashed(copy) and all(
-            filecmp.cmp(image / name, copy / name, shallow=False) for name in sorted(names)
-        )
+_UNHASHED = frozenset({".git", "__pycache__"})
+
+
+def _unhashed_source_files(source: Path) -> dict[str, Path]:
+    """The hash-excluded files the local copier writes from *source*, by relative path.
+
+    The walk follows the copier (``_copy_tree_dereferencing_validated``): an
+    in-package link is read through, while a link out of the package, a broken
+    link, a link cycle, an unreadable directory or a special file refuses as
+    the copy would (#5193).
+    """
+    from ...utils.path_security import PathTraversalError, ensure_path_within
+
+    found: dict[str, Path] = {}
+
+    def walk(directory: Path, relative: tuple[str, ...], visited: frozenset[Path]) -> None:
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError as exc:
+            raise PathTraversalError(f"Cannot read package directory '{directory}': {exc}") from exc
+        for entry in entries:
+            parts = (*relative, entry.name)
+            target = entry
+            if entry.is_symlink():
+                try:
+                    target = entry.resolve(strict=True)
+                except OSError as exc:
+                    raise PathTraversalError(f"Symlink '{entry}' is unresolvable: {exc}") from exc
+                ensure_path_within(target, source)
+                if target.is_dir():
+                    if target in visited:
+                        raise PathTraversalError(f"Circular symlink detected: '{entry}'")
+                    walk(target, parts, visited | {target})
+                    continue
+            elif entry.is_dir():
+                walk(entry, parts, visited)
+                continue
+            if not stat.S_ISREG(target.stat().st_mode):
+                raise OSError(f"{entry} is not a regular file")
+            if _UNHASHED & set(parts):
+                found["/".join(parts)] = target
+
+    walk(source, (), frozenset())
+    return found
 
 
 def move_materializations(
@@ -510,7 +759,14 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
     """
     if not plan:
         return False
+    from ...deps.lockfile import lockfile_parent_identity
+
     renames = {old: new for old, new in plan.renames.items() if old != new}
+    replacements = getattr(lockfile, "replacements", None)
+    old_identity = {
+        key: lockfile_parent_identity(lockfile.dependencies[key], replacements)
+        for key in plan.identities
+    }
     for key, (local_path, parent_key, anchored, repo_url) in plan.identities.items():
         row = lockfile.dependencies[key]
         row.local_path, row.declaring_parent, row.anchored_local_path = (
@@ -537,9 +793,34 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
             if row.resolved_by in renames:
                 row.resolved_by = renames[row.resolved_by]
             lockfile.dependencies[renames.get(key, key)] = row
+    _reidentify_children(lockfile, old_identity, renames, replacements, plan.children)
     for row in lockfile.dependencies.values():
         _rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
     return True
+
+
+def _reidentify_children(
+    lockfile, old_identity: dict, renames: dict, replacements, children: dict
+) -> None:
+    """Point a re-identified parent's own children at its new identity (#5091).
+
+    Without replacements a child names its parent by repository identity, not
+    by lock key, so a respelled parent (``_local/F`` -> ``_local/f``) would
+    leave its children naming a parent that no longer exists. That identity
+    is not unique (another ``F`` directory has the same one), so only the
+    children this parent wins as nearest parent are updated.
+    """
+    from ...deps.lockfile import lockfile_parent_identity
+
+    for key, before in old_identity.items():
+        row = lockfile.dependencies.get(renames.get(key, key))
+        after = lockfile_parent_identity(row, replacements) if row is not None else before
+        if after == before:
+            continue
+        for child in children.get(key, ()):
+            child_row = lockfile.dependencies.get(renames.get(child, child))
+            if child_row is not None and child_row.resolved_by == before:
+                child_row.resolved_by = after
 
 
 def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> LocalReanchorPlan:
@@ -621,6 +902,20 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
 # -- uninstall command steps (#4889) ----------------------------------------
 
 
+def _manifest_declares_replacements(apm_yml_path) -> bool:
+    """Whether apm.yml declares a ``replace`` block.
+
+    An unreadable apm.yml, or one that is not a mapping, counts as declared (#5226).
+    """
+    from ...utils.yaml_io import load_yaml
+
+    try:
+        data = load_yaml(Path(apm_yml_path))
+    except Exception:
+        return True
+    return bool(data.get("replace")) if isinstance(data, dict) else True
+
+
 def _refuse_unverifiable_local_survivors(
     lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False, quiet: bool = False
 ) -> list:
@@ -657,9 +952,11 @@ def _refuse_unverifiable_local_survivors(
 
     # Replacement rules can turn a remote survivor into a local source; the
     # offline check does not evaluate them, so it cannot prove anything unused.
+    # apm.yml's rules count too: the lock may not record them yet (#5031).
     if (
         not unresolved
         and not lockfile.replacements
+        and not _manifest_declares_replacements(apm_yml_path)
         and not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local))
     ):
         return []
@@ -794,15 +1091,16 @@ def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
     owners = {f"package:{key}" for key in plan.renames}
     if owners & set((getattr(lockfile, "lsp_config_provenance", None) or {}).values()):
         return "it supplies a language server"
-    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    for record in ledger.records.values():
         if len(record.owners) > 1 and any(owner in plan.renames for owner in record.owners):
             return f"it shares {DeploymentLedgerCodec.legacy_value(record.locator)} with another package"
-    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root)):
+    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root), ledger):
         return f"{linked} links into its apm_modules copy"
     return None
 
 
-def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
+def _links_into_moving_copy(lockfile, plan, project_root: Path, ledger=None) -> str | None:
     """A recorded deployed file that names a copy the re-anchor moves (#4999).
 
     Rendered links (a package's in-package assets, or the project's own skill
@@ -810,7 +1108,6 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     leave them dangling until the next install rewrites them. Only paths the
     deploy-path gate accepts are read; any other claim refuses too.
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...utils.paths import portable_relpath
 
     spellings = set()
@@ -825,14 +1122,169 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     )
     dirs = _moving_dirs(plan.moves)
 
-    def names(member: Path) -> bool:
-        data = member.read_bytes()
+    def names(member: Path, data: bytes | None = None) -> bool:
+        data = member.read_bytes() if data is None else data
         return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
 
-    for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
+    for deployed in sorted(_recorded_claims(lockfile, ledger)):
         if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
+    return _compiled_output_naming(project_root, names)
+
+
+def _recorded_claims(lockfile, ledger=None) -> set[str]:
+    """Every deployed path the lock records: the legacy view and canonical rows (#5097).
+
+    A canonical ``deployments`` row may have no legacy ``deployed_files`` entry;
+    its project-relative path is a deployed file all the same. *ledger* is the
+    caller's already decoded ledger, when it has one.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...core.deployment_state import LocatorKind
+
+    claims = set(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile))
+    ledger = ledger if ledger is not None else DeploymentLedgerCodec.from_lockfile(lockfile)
+    for record in ledger.records.values():
+        if record.locator.kind is LocatorKind.PROJECT_RELATIVE:
+            claims.add(record.locator.value)
+    return claims
+
+
+# Compiled outputs are not recorded claims; APM marks each one in its header.
+class _UnreadableDir(OSError):
+    """A directory the compiled-output walk cannot list: refuse, never skip it."""
+
+
+def _compiled_output_naming(project_root: Path, names) -> str | None:
+    """A compiled output (AGENTS.md and kin) that names the moving copy (#5097).
+
+    ``apm compile`` copies links verbatim into these files, so one that names
+    the copy keeps it in place like a deployed file. The walk covers compile's
+    own placement universe (``placement_prunes_dir``). Only regular files are
+    opened; a file's header is read, and its full content only when it carries
+    APM's generated marker. An unreadable directory or marked output refuses.
+    """
+    from ...compilation.context_optimizer import (
+        PLACEMENT_HIDDEN_TOOL_TREES,
+        hidden_tool_root,
+        placement_prunes_dir,
+    )
+    from ...compilation.root_context_protection import catalog_root_context_markers
+    from ...utils.paths import portable_relpath
+
+    # Compile's own catalog: each file name with the headers it accepts.
+    markers_by_name = catalog_root_context_markers()
+
+    root = Path(project_root)
+    section = _managed_section_start(root)
+
+    def refuse(error: OSError) -> None:
+        raise _UnreadableDir(error.filename or root)
+
+    try:
+        for directory, subdirs, files in os.walk(root, onerror=refuse):
+            here = Path(directory)
+            subdirs[:] = sorted(
+                name
+                for name in subdirs
+                if not placement_prunes_dir(
+                    name,
+                    outside_tool_roots=not hidden_tool_root(
+                        (here / name).relative_to(root).parts, PLACEMENT_HIDDEN_TOOL_TREES
+                    ),
+                )
+            )
+            for name in sorted(markers_by_name.keys() & set(files)):
+                path = here / name
+                try:
+                    data = _marked_regular_file(path, markers_by_name[name], section)
+                    if data is not None and names(path, data):
+                        return portable_relpath(path, root)
+                except (OSError, UnicodeDecodeError):
+                    # Unreadable or undecodable: named, never a crash or a skip.
+                    return portable_relpath(path, root)
+    except _UnreadableDir as unreadable:
+        return portable_relpath(Path(unreadable.args[0]), root)
+    return _recorded_output_naming(root, names, markers_by_name, section)
+
+
+def _recorded_output_naming(root: Path, names, markers_by_name, section: bytes) -> str | None:
+    """A recorded compile output outside the default placement that names the copy (#5235).
+
+    ``apm compile --output`` can write into a directory placement prunes or
+    under a custom name; compile records every output it writes, so each one
+    still present is read like a placed output.
+    """
+    from ...core.agents_md_compile_record import read_compiled_outputs
+
+    markers = tuple(sorted({marker for found in markers_by_name.values() for marker in found}))
+    for relative in read_compiled_outputs(root):
+        path = root / relative
+        if not os.path.lexists(path):
+            continue
+        try:
+            data = _marked_regular_file(path, markers, section)
+            if data is not None and names(path, data):
+                return relative
+        except (OSError, UnicodeDecodeError):
+            return relative
     return None
+
+
+def _managed_section_start(project_root: Path) -> bytes:
+    """The managed-section begin marker the project's compile uses (#5097).
+
+    Read through compile's own config owner, so a custom marker is honored.
+    """
+    from ...compilation.agents_compiler import CompilationConfig
+
+    marker = CompilationConfig.from_apm_yml(project_root=project_root).agents_md_start_marker
+    return marker.encode("utf-8") if isinstance(marker, str) else b""
+
+
+def _marked_regular_file(path: Path, markers, section: bytes = b"") -> bytes | None:
+    """The bytes of *path* when it is an APM-written regular file, else ``None``.
+
+    APM-written means APM's header in the first 4 KiB, or a managed-section
+    begin marker (*section*) anywhere, streamed, since authored text may
+    precede the section. Opened without following a final link and without
+    blocking, then checked on the descriptor itself, so a link, FIFO or device
+    swapped in is never read (#5097). Windows has no ``O_NOFOLLOW``, so a link
+    is refused there before opening. An undecodable header raises.
+    """
+    from ...compilation.constants import decode_utf8_prefix, has_generated_marker_header
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow and not stat.S_ISREG(path.lstat().st_mode):
+        return None
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        if error.errno in (errno.ELOOP, errno.EMLINK):
+            return None  # a final link: never followed
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        head = os.read(fd, 4096)
+        found = has_generated_marker_header(decode_utf8_prefix(head), markers) or (
+            bool(section) and section in head
+        )
+        # Only a rolling tail is kept while searching; the content is read on a match.
+        tail = head[-len(section) :] if section else b""
+        while not found and section and (chunk := os.read(fd, 1 << 16)):
+            found = section in tail + chunk
+            tail = (tail + chunk)[-len(section) :]
+        if not found:
+            return None
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks = []
+        while chunk := os.read(fd, 1 << 16):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
@@ -1035,7 +1487,7 @@ def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
     and the fresh one takes its re-anchored path. A copy that cannot be staged
     and verified keeps the plain move (the next install rebuilds it, as today).
     """
-    fresh = {current: (ref, framed) for current, ref, framed in plan.fresh}
+    fresh = {current: (ref, framed, recorded) for current, ref, framed, recorded in plan.fresh}
     moves = []
     for current, target in plan.moves:
         stage = current.with_name(f"{_FRESH}{current.name}")
@@ -1057,9 +1509,13 @@ def _fresh_copy_moves(plan, modules_dir: Path, staged: list[Path]) -> tuple:
     return tuple(moves)
 
 
-def _stage_fresh_copy(stage: Path, current: Path, ref, framed: bool, modules_dir: Path) -> bool:
-    """Write install's image of *ref* to *stage*; whether it hashes as *current* does.
+def _stage_fresh_copy(
+    stage: Path, current: Path, ref, framed: bool, recorded: str | None, modules_dir: Path
+) -> bool:
+    """Write install's image of *ref* to *stage* once; whether it hashes as the lock records.
 
+    The staged image is hashed once against the row's recorded ``content_hash``
+    (*recorded*), or the current copy when the row records none (#5193).
     Install drops a stale ``.apm-pin`` from an unmarkable (local) copy, which
     the hash does not see, so the staged image gets the same cleanup first.
     """
@@ -1076,9 +1532,8 @@ def _stage_fresh_copy(stage: Path, current: Path, ref, framed: bool, modules_dir
         _remove_marker(stage, modules_dir)
         if os.path.lexists(stage / MARKER_FILENAME):
             return False
-        return compute_local_package_hash(stage, framed=framed) == compute_local_package_hash(
-            current, framed=framed
-        )
+        expected = recorded or compute_local_package_hash(current, framed=framed)
+        return compute_local_package_hash(stage, framed=framed) == expected
     except (LocalPackageError, PathTraversalError, OSError, ValueError, TypeError):
         return False
 

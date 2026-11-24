@@ -98,6 +98,10 @@ from scripts.architecture_linter.checks.install_lifecycle_serialization import (
     GUARD_LIFECYCLE_SERIALIZATION_CLOSED,
     check_lifecycle_serialization_closed_world,
 )
+from scripts.architecture_linter.checks.install_local_reparent_rule import (
+    GUARD_LOCAL_REPARENT_RULE,
+    check_local_reparent_rule,
+)
 from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
@@ -275,10 +279,17 @@ from scripts.architecture_linter.checks.install_uninstall_preflight import (
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
-    _rule(
-        GUARD_UNINSTALL_PREFLIGHT,
-        "Uninstall validates recorded paths and survivor trust before its first write.",
-        check_uninstall_preflight,
+    Rule(
+        id=GUARD_UNINSTALL_PREFLIGHT,
+        group="install_deployment",
+        guard_ids=(
+            GUARD_UNINSTALL_PREFLIGHT,
+            f"{GUARD_UNINSTALL_PREFLIGHT}-consent-kept-link-route",
+            f"{GUARD_UNINSTALL_PREFLIGHT}-hook-sync-consent-route",
+            f"{GUARD_UNINSTALL_PREFLIGHT}-hook-sync-route",
+        ),
+        description="Uninstall validates recorded paths and survivor trust before its first write.",
+        check=check_uninstall_preflight,
     ),
     _rule(
         GUARD_INSTALL_LOCKFILE_PREFLIGHT,
@@ -328,6 +339,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_REANCHOR_WRITER_PREDICTION,
         "A re-anchor predicts a shared path's writer only through install's owners.",
         check_reanchor_writer_prediction,
+    ),
+    _rule(
+        GUARD_LOCAL_REPARENT_RULE,
+        "Uninstall and prune rank a re-parented local row's parent through reparent_rows.",
+        check_local_reparent_rule,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,

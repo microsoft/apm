@@ -1,0 +1,15 @@
+{
+  "issue": 5285,
+  "fixed_in": "Unreleased",
+  "summary": "Incremental hook installs appended each package's entries to a merged hook config (claude, cursor, codex, gemini) in addition order, unlike a full install, so audit --ci reported drift and the next plain install rewrote the config.",
+  "failure_modes": [
+    "idempotency"
+  ],
+  "properties": [
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/unit/integration/test_hook_merge_order.py::test_merged_hook_config_bytes_do_not_depend_on_addition_order",
+    "tests/integration/test_concurrent_manifest_mutation_lifecycle.py::test_incremental_hook_installs_in_any_order_pass_audit"
+  ]
+}

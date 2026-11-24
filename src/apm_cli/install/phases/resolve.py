@@ -167,6 +167,7 @@ def _activate_validated_candidate(
 ) -> Path:
     """Publish one accepted candidate, then expose its download metadata."""
     from apm_cli.utils.content_hash import compute_package_hash
+    from apm_cli.utils.realpath import resolve_path
 
     content_hash = compute_package_hash(candidate_path, framed=True)
     live_path = staging_session.publish_replacement(candidate_path)
@@ -177,7 +178,7 @@ def _activate_validated_candidate(
         dep_key, resolved_sha = pending
         callback_downloaded[dep_key] = resolved_sha
         if callback_content_hashes is not None:
-            callback_content_hashes[dep_key] = (live_path.resolve(), content_hash)
+            callback_content_hashes[dep_key] = (resolve_path(live_path), content_hash)
     if tui is not None:
         tui.task_completed(dep_key)
     return live_path
@@ -327,11 +328,16 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=(
         return
     for _display, failure in failures if ctx.logger else ():
         ctx.logger.verbose_detail(f"  {failure}")
-    for error in dependency_graph.resolution_errors:
+    from apm_cli.install.errors import DependencyResolutionError
+
+    errors = list(dependency_graph.resolution_errors)
+    unprinted = []
+    for error in errors:
         if ctx.logger and not error.startswith("Marketplace package materialization failed:"):
             ctx.logger.error(error)
-    joined_errors = "; ".join(dependency_graph.resolution_errors)
-    raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
+        else:
+            unprinted.append(error)
+    raise DependencyResolutionError(errors, unprinted=unprinted)
 
 
 def _judge_resolution(ctx: InstallContext, graph, failures, depth_policy, resolver) -> None:

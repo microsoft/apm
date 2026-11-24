@@ -15,6 +15,9 @@ record for one origin never admits the same commit from another.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import functools
 import os
 import re
 import stat
@@ -50,6 +53,9 @@ class VerdictStage:
         self._pending: dict[Path, str] = {}
         self._lock = threading.Lock()
         self._scratch: str | None = None
+        self._memo: dict[str, object] = {}
+        # One origin listing per remote for this attempt (see branch_and_tag_refs).
+        self.listings: dict = {}
 
     def add(self, marker: Path, canonical: str) -> None:
         with self._lock:
@@ -67,10 +73,20 @@ class VerdictStage:
                 self._scratch = tempfile.mkdtemp(prefix="apm-reach-")
             return Path(self._scratch)
 
+    def remember(self, key: str, compute):
+        """*compute()*'s value for digest *key*, computed once per attempt."""
+        with self._lock:
+            if key in self._memo:
+                return self._memo[key]
+        value = compute()
+        with self._lock:
+            return self._memo.setdefault(key, value)
+
     def commit(self) -> None:
         """Write the staged verdicts (best effort: a missing one is re-checked)."""
         with self._lock:
             pending, self._pending = self._pending, {}
+            self.listings = {}
         for marker, canonical in pending.items():
             try:
                 _write_marker(marker, canonical)
@@ -81,6 +97,7 @@ class VerdictStage:
     def discard(self) -> None:
         with self._lock:
             self._pending = {}
+            self.listings = {}
         self._close()
 
     def _close(self) -> None:
@@ -89,6 +106,8 @@ class VerdictStage:
 
         with self._lock:
             scratch, self._scratch = self._scratch, None
+            self._memo = {}
+            self.listings = {}
         if scratch is not None:
             shutil.rmtree(scratch, ignore_errors=True)
         with _stage_lock:
@@ -117,6 +136,25 @@ def _stage() -> VerdictStage | None:
 def _linked_dirs(path: Path, depth: int = 3) -> bool:
     """Whether any of the *depth* directories above *path* in the ref cache is a link."""
     return any(part.is_symlink() for part in list(path.parents)[:depth])
+
+
+_FRESH_LISTING = contextvars.ContextVar("apm_fresh_listing", default=False)
+
+
+@contextlib.contextmanager
+def _fresh_listing():
+    """Ask the origin again inside: a recheck after a failure needs its state now."""
+    token = _FRESH_LISTING.set(True)
+    try:
+        yield
+    finally:
+        _FRESH_LISTING.reset(token)
+
+
+def _attempt_listings() -> dict | None:
+    """The open install attempt's listing memo; None outside an attempt or when fresh."""
+    stage = _stage()
+    return None if stage is None or _FRESH_LISTING.get() else stage.listings
 
 
 def _write_marker(marker: Path, canonical: str) -> None:
@@ -253,7 +291,8 @@ def _at_origin(downloader, dep_ref, fn) -> None:
         except Exception as exc:
             if verdicts:
                 raise verdicts[-1] from None
-            raise (contact[-1] if contact else CommitNotReachableError(str(exc))) from exc
+            # No verdict was reached: admission still refuses, never "gone".
+            raise (contact[-1] if contact else _Unverified(str(exc))) from exc
     if verdicts:
         raise verdicts[-1]
 
@@ -277,7 +316,7 @@ def _require_at_origin(downloader, dep_ref, sha: str) -> None:
     )
 
 
-_CONTACTS: dict[tuple, str] = {}
+_REWRITES: dict[tuple, tuple[tuple[str, str], ...] | None] = {}
 
 
 def effective_contact(contact: str, env) -> str | None:
@@ -288,10 +327,10 @@ def effective_contact(contact: str, env) -> str | None:
     extra git process per package.
     """
     merged = {**os.environ, **(env or {})}
-    key = (contact, _rewrite_config(merged), _config_files_state(merged))
-    if key not in _CONTACTS:
-        _CONTACTS[key] = _effective_contact(contact, env)
-    return _CONTACTS[key]
+    key = (_rewrite_config(merged), _config_files_state(merged))
+    if key not in _REWRITES:
+        _REWRITES[key] = _probe_rewrites(env)
+    return _effective_contact(contact, _REWRITES[key])
 
 
 def _rewrite_config(env: dict[str, str]) -> tuple:
@@ -333,14 +372,26 @@ def _config_files_state(env: dict[str, str]) -> tuple:
     return tuple(state)
 
 
-def _effective_contact(contact: str, env) -> str | None:
-    from ..utils.git_env import effective_git_url
-    from .url_normalize import normalize_repo_url
+def _probe_rewrites(env) -> tuple[tuple[str, str], ...] | None:
+    """The rewrites git applies under *env* (one config probe), or None if unknown."""
+    from ..utils.git_env import git_url_rewrites
 
     try:
-        effective = effective_git_url(contact, env)
+        return git_url_rewrites(env)
     except Exception:
+        return None
+
+
+def _effective_contact(contact: str, rewrites) -> str | None:
+    from ..utils.git_env import resolve_git_url_rewrite
+    from .url_normalize import normalize_repo_url
+
+    if rewrites is None:
         # Unknown contact: callers neither trust nor record a verdict for it.
+        return None
+    try:
+        effective = resolve_git_url_rewrite(contact, rewrites) or contact
+    except Exception:
         return None
     try:
         return normalize_repo_url(effective)
@@ -379,10 +430,32 @@ def _record_tip(downloader, dep_ref, sha: str) -> None:
     root, origin = _origin(downloader, dep_ref)
     ssh = not dep_ref.artifactory_prefix and initial_transport_scheme(dep_ref) == "ssh"
     contact = downloader._build_repo_url(dep_ref.repo_url, use_ssh=ssh, dep_ref=dep_ref)
-    key = _verdict_key(origin, contact, getattr(downloader, "git_env", None))
-    if key is None or not _persists(downloader):
+    if not _persists(downloader):
+        return
+    # The resolver may have listed *contact* plainly or cloned it, which can
+    # activate a remote-dependent rewrite; which one is unknown here. A tip is
+    # recorded only when both name the same server, else it is verified at
+    # the fetch destination when next admitted.
+    transport = _url_only_env(getattr(downloader, "git_env", None))
+    try:
+        probed = _probed_listing_env(contact, transport)
+    except _Unverified:
+        return
+    key = _verdict_key(origin, contact, probed)
+    if key is None or key != _verdict_key(origin, contact, transport):
         return
     _record(_marker(root, cache_shard_key(origin), sha.lower()), key)
+
+
+def _url_only_env(env) -> dict[str, str]:
+    """*env* without credentials, untranslated: enough to tell which URL git contacts."""
+    from ..utils.git_env import clear_git_auth_env, clear_git_platform_token_env
+
+    scrubbed = {**os.environ, **(env or {}), "LC_ALL": "C", "LANGUAGE": "C"}
+    clear_git_platform_token_env(scrubbed, remove=True)
+    # A url rewrite carried in GIT_CONFIG_PARAMETERS still decides the server (#5246).
+    clear_git_auth_env(scrubbed, keep_url_rewrites=True)
+    return scrubbed
 
 
 def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> None:
@@ -419,30 +492,196 @@ def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> 
 
 
 def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
-    """Admit *ref*'s commit and return what to fetch: a fully qualified ref by its commit.
+    """Admit *ref*'s commit and return what to fetch: any named ref by its commit.
 
-    ``git clone --branch`` takes only a short name, which the origin's other
-    namespace could also hold, so ``refs/heads/<x>`` and ``refs/tags/<x>``
-    are fetched by the commit they resolve to exactly; so is a hex-like name
-    shorter than a full commit, which names a branch or tag first and else an
-    abbreviation, so that admission and the fetch judge the same commit.
+    A branch or tag can move after admission, and ``git clone --branch``
+    would fetch wherever it points then, so every declared ref other than a
+    full commit is fetched by the commit it was admitted at (#5138). That
+    also keeps ``refs/heads/<x>``, ``refs/tags/<x>`` and hex-like names
+    exact, so admission and the fetch judge the same commit.
 
     Raises:
         CommitNotReachableError: The commit is not admitted.
     """
-    by_commit = ref and (
-        ref.startswith(("refs/heads/", "refs/tags/"))
-        or (len(ref) not in (40, 64) and _COMMIT_RE.match(ref))
-    )
+    by_commit = bool(ref) and not (len(ref) in (40, 64) and _COMMIT_RE.match(ref))
     if not by_commit:
         admit_pinned_commit(downloader, dep_ref, ref)
         return ref
-    resolved = downloader.resolve_git_reference(dep_ref)
+    try:
+        resolved = downloader.resolve_git_reference(dep_ref)
+    except Exception as exc:
+        commit = _listed_tip_instead(downloader, dep_ref, ref, exc)
+        _note_admitted(ref, commit)
+        return commit
     commit = resolved.resolved_commit
     if not commit or len(commit) not in (40, 64) or not _COMMIT_RE.match(commit):
         raise CommitNotReachableError(f"Could not resolve {ref!r} to an origin commit.")
     admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
+    _note_admitted(ref, commit)
     return commit.lower()
+
+
+def _listed_tip_instead(downloader, dep_ref, ref: str, failure: Exception) -> str:
+    """The exact origin tip of branch or tag *ref* when resolving it by a clone failed.
+
+    Some hosts cannot serve the resolver's shallow clone (a dumb-HTTP server);
+    ``git ls-remote`` over the dependency's transport still names the commit,
+    matched like the resolver's listing. A name both a branch and a tag holds
+    is refused as ambiguous. A hex-like name, any other failure, an origin
+    that cannot be listed, or a name no branch or tag holds raises *failure*.
+    """
+    if _COMMIT_RE.match(ref) or not _is_git_failure(failure):
+        raise failure
+    try:
+        return _listed_tip(downloader, dep_ref, ref)[0].lower()
+    except (_Unverified, _NoSuchRef):
+        raise failure from None
+
+
+# The named refs the running download admitted, as ``(ref, commit)`` (#5138).
+_ADMITTED: contextvars.ContextVar[list[tuple[str, str]] | None] = contextvars.ContextVar(
+    "apm_admitted_named_refs", default=None
+)
+
+
+def _note_admitted(ref: str | None, commit: str | None) -> None:
+    admitted = _ADMITTED.get()
+    if admitted is not None and ref and commit:
+        admitted.append((ref, commit.lower()))
+
+
+class AdmittedCommitGoneError(CommitNotReachableError):
+    """A named ref's admitted commit can no longer be fetched from the origin."""
+
+
+def name_a_lost_admitted_commit(download):
+    """Make a download of a named ref whose admitted commit is gone fail by name (#5138).
+
+    A named ref is fetched by the commit it was admitted at, never by name.
+    When the download fails and that commit is no longer reachable from any
+    branch or tag of the origin (the ref was rewritten), the failure says so
+    instead of a git error. Any other failure is raised unchanged.
+    """
+
+    @functools.wraps(download)
+    def _download(downloader, repo_ref, *args, **kwargs):
+        token = _ADMITTED.set([])
+        try:
+            return download(downloader, repo_ref, *args, **kwargs)
+        except CommitNotReachableError:
+            raise
+        except Exception as exc:
+            lost = None
+            if _is_git_failure(exc):
+                lost = _lost_admitted_commit(downloader, repo_ref, _ADMITTED.get() or [])
+            if lost is None:
+                raise
+            raise _commit_gone(*lost) from exc
+        finally:
+            _ADMITTED.reset(token)
+
+    return _download
+
+
+def _commit_gone(ref: str, admitted: str, now: str) -> AdmittedCommitGoneError:
+    from ..utils.diagnostics import printable_ascii_text
+
+    ref = printable_ascii_text(repr(ref))
+    return AdmittedCommitGoneError(
+        f"{ref} was admitted at commit {admitted[:12]}, which can no longer be "
+        f"fetched from the origin ({ref} now points to {now}). Run the install "
+        "again to admit its current commit, or 'apm update' when the lockfile "
+        "pins it."
+    )
+
+
+def admitted_tip_name(url: str, ref: str, admitted: str, env) -> str | None:
+    """The full name of *ref* at the origin when it still points at *admitted*.
+
+    For a server that will not serve a commit by its id (#5138): the ref is
+    then fetched by this name. ``None`` when the origin cannot be listed.
+
+    Raises:
+        AdmittedCommitGoneError: *ref* no longer points at *admitted*.
+    """
+    try:
+        with _fresh_listing():
+            records = _branch_and_tag_records(url, env)
+    except _Unverified:
+        return None
+    from ..deps.git_remote_ops import exact_branch_or_tag_sha
+
+    try:
+        tip = exact_branch_or_tag_sha(records, ref, _sanitize_origin(url))
+    except RuntimeError:
+        tip = None
+    if tip != admitted.lower():
+        raise _commit_gone(ref, admitted, tip[:12] if tip else "no branch or tag")
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        return ref
+    names = {name for _tip, name in records}
+    return f"refs/heads/{ref}" if f"refs/heads/{ref}" in names else f"refs/tags/{ref}"
+
+
+def _is_git_failure(exc: BaseException) -> bool:
+    """Whether *exc* (or what it wraps) is a git fetch, clone or checkout failure.
+
+    Validation and filesystem errors after a successful fetch are not.
+    """
+    from ..deps.git_lazy import git_command_error
+
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, (subprocess.CalledProcessError, git_command_error())):
+            return True
+        if isinstance(seen, RuntimeError) and str(seen).startswith(
+            ("Failed to clone repository", "Failed to checkout commit")
+        ):
+            return True
+        seen = seen.__cause__
+    return False
+
+
+def _lost_admitted_commit(downloader, repo_ref, admitted) -> tuple[str, str, str] | None:
+    """``(ref, commit, now)`` when a named ref's admitted commit left the origin."""
+    if not admitted:
+        return None
+    ref, commit = admitted[-1]
+    try:
+        from ..models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse(repo_ref) if isinstance(repo_ref, str) else repo_ref
+        with _fresh_listing():
+            if _reachable_now(downloader, dep_ref, commit) is not False:
+                return None
+            found: list[str] = []
+            with contextlib.suppress(CommitNotReachableError):
+                _at_origin(
+                    downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env))
+                )
+    except Exception:
+        return None
+    return ref, commit, found[0][:12] if found else "no branch or tag"
+
+
+def _reachable_now(downloader, dep_ref, sha: str) -> bool | None:
+    """Whether an origin branch or tag reaches *sha* now, ignoring recorded verdicts."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="apm-reach-check-") as scratch:
+        try:
+            _at_origin(
+                downloader,
+                dep_ref,
+                lambda url, env: require_reachable_commit(
+                    Path(scratch), url, "check", sha, env=env, persist=False
+                ),
+            )
+        except _Unverified:
+            return None
+        except CommitNotReachableError:
+            return False
+    return True
 
 
 def admit_and_resolve(downloader, dep_ref):
@@ -460,6 +699,7 @@ def admit_and_resolve(downloader, dep_ref):
         return downloader.resolve_git_reference(dep_ref)
     resolved = downloader.resolve_git_reference(dep_ref)
     admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
+    _note_admitted(ref, getattr(resolved, "resolved_commit", None))
     return resolved
 
 
@@ -519,32 +759,131 @@ class _NoSuchRef(CommitNotReachableError):
 
 
 def _listed_tip(downloader, dep_ref, ref: str) -> tuple[str, str]:
-    """Resolve *ref* to an exact origin branch or tag over the dependency's transport."""
+    """Resolve *ref* to an exact origin branch or tag over the dependency's transport.
+
+    The tip is recorded under the environment that listed it, so a verdict a
+    remote-activated mirror gave is keyed by that mirror, never the origin.
+    """
     found: list[tuple[str, str, dict]] = []
-    _at_origin(
-        downloader,
-        dep_ref,
-        lambda url, env: found.append((_exact_tip(url, ref, env), url, env)),
-    )
+
+    def _list(url: str, env) -> None:
+        listing = _probed_listing_env(url, env)
+        found.append((_exact_tip(url, ref, listing, probed=True), url, listing))
+
+    _at_origin(downloader, dep_ref, _list)
     sha, url, env = found[0]
     _record_observed_tip(downloader, dep_ref, sha, url, env)
     return sha, sha
 
 
-def _exact_tip(url: str, ref: str, env) -> str:
-    """Resolve *ref* to an exact origin branch or tag with ``git ls-remote``."""
-    from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
-    from ..utils.git_env import git_remote_refs
-    from .git_cache import _safe_git_args, _sanitize_url
+def _sanitize_origin(url: str) -> str:
+    from .git_cache import _sanitize_url
 
-    where = _sanitize_url(url)
+    return _sanitize_url(url)
+
+
+def _listing_env(url: str, env) -> dict[str, str] | None:
+    """The env a clone of *url* gets, so config its remote URL activates applies.
+
+    Only an ``includeIf`` section can make config depend on the remote, so
+    without one *env* already is that env and nothing is probed. With one
+    (or when that cannot be told), a scratch repository with *url* as its
+    origin is probed, so a remote-activated mirror rewrite sends the listing
+    where the fetch would go. An install attempt's verdict stage keeps each
+    answer, keyed by a digest of the URL and the whole environment
+    (credentials included, never stored in clear), and drops them when the
+    attempt ends: git config is read once per attempt. Without an open stage
+    nothing is kept.
+    """
+    import tempfile
+
+    from ..utils.git_env import git_clone_env
+
+    def _probe() -> dict[str, str]:
+        with tempfile.TemporaryDirectory(prefix="apm-clone-config-") as probe:
+            return git_clone_env(url, env, Path(probe) / "origin")
+
+    merged = {**os.environ, **(env or {})}
+    if not _remembered(("includeif", *sorted(_config_scope(merged))), _has_include_if, merged):
+        return env
+    return dict(_remembered(("probe", url, *sorted(merged.items())), _probe))
+
+
+def _config_scope(env: dict[str, str]) -> list[tuple[str, str]]:
+    """The environment entries that choose which git config is read."""
+    return [
+        (str(k), str(v))
+        for k, v in env.items()
+        if str(k).startswith("GIT_CONFIG") or k in ("HOME", "XDG_CONFIG_HOME")
+    ]
+
+
+def _remembered(parts: tuple, compute, *args):
+    """``compute(*args)``, kept by the open verdict stage for the attempt."""
+    import hashlib
+
+    stage = _stage()
+    if stage is None:
+        return compute(*args)
+    digest = hashlib.sha256()
+    for part in parts:
+        text = repr(part)
+        digest.update(f"{len(text)}:{text}".encode())
+    return stage.remember(digest.hexdigest(), lambda: compute(*args))
+
+
+def _has_include_if(env: dict[str, str]) -> bool:
+    """Whether any git config scope *env* reads has an ``includeIf`` entry.
+
+    *env* is the process environment with the call's overrides: the config
+    a listing applies is the parent's, snapshotted, plus those overrides.
+
+    True when it cannot be told: the caller then probes (fails closed).
+    """
+    import tempfile
+
+    from ..utils.git_env import get_git_executable, git_subprocess_env, run_git_text
+
     try:
-        refuse_non_branch_ref(ref, where)
-    except RuntimeError as exc:
-        raise CommitNotReachableError(str(exc)) from exc
+        found = run_git_text(
+            [get_git_executable(), "config", "--get-regexp", r"^includeif\."],
+            capture_output=True,
+            cwd=tempfile.gettempdir(),
+            env=git_subprocess_env(env),
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return True
+    return found.returncode != 1
+
+
+def _probed_listing_env(url: str, env) -> dict[str, str]:
+    """:func:`_listing_env`, unverified (never refused) when the probe fails."""
     try:
-        listing = git_remote_refs(
-            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
+        return _listing_env(url, env)
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        raise _Unverified(f"git ls-remote failed for {_sanitize_origin(url)}", exc) from exc
+
+
+def _branch_and_tag_records(url: str, env, *, probed: bool = False) -> list[tuple[str, str]]:
+    """The origin's ``(commit, name)`` branch and tag records, from ``git ls-remote``.
+
+    *env* is already the listing env when *probed*.
+    """
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
+    from .git_cache import _safe_git_args
+
+    where = _sanitize_origin(url)
+    listing_env = env if probed else _probed_listing_env(url, env)
+    try:
+        listing = branch_and_tag_refs(
+            url,
+            env=listing_env,
+            timeout=60,
+            git_args=_safe_git_args(),
+            memo=_attempt_listings(),
         )
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
@@ -554,6 +893,19 @@ def _exact_tip(url: str, ref: str, env) -> str:
     for line in (listing.stdout or "").splitlines():
         tip, _, name = line.partition("\t")
         records.append((tip.strip().lower(), name.strip()))
+    return records
+
+
+def _exact_tip(url: str, ref: str, env, *, probed: bool = False) -> str:
+    """Resolve *ref* to an exact origin branch or tag with ``git ls-remote``."""
+    from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
+
+    where = _sanitize_origin(url)
+    try:
+        refuse_non_branch_ref(ref, where)
+    except RuntimeError as exc:
+        raise CommitNotReachableError(str(exc)) from exc
+    records = _branch_and_tag_records(url, env, probed=probed)
     wanted = {ref} if ref.startswith("refs/") else {f"refs/heads/{ref}", f"refs/tags/{ref}"}
     try:
         return exact_branch_or_tag_sha(records, ref, where)
@@ -600,7 +952,7 @@ def require_reachable_commit(
 ) -> None:
     """Refuse *sha* unless an origin branch or tag reaches it.
 
-    *url* is the remote contacted; *origin* (default *url*) is the remote
+    *url* is the remote contacted, under the env a clone of it gets; *origin* (default *url*) is the remote
     the verdict is recorded for. With *persist* false (a read-only cache)
     an existing verdict is reused, but verification state lives in scratch
     storage and no verdict is written.
@@ -610,24 +962,31 @@ def require_reachable_commit(
             tag, or reachability cannot be verified (for example offline on
             the first install of this commit).
     """
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from ..deps.git_remote_ops import tag_commit_shas
-    from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args, _sanitize_url
 
     sha = sha.lower()
-    canonical = _verdict_key(origin or url, url, env)
-    marker = _marker(cache_root, shard_key, sha)
-    if canonical is not None and _recorded(marker, canonical):
-        return
     where = _sanitize_url(url)
     unverifiable = (
         f"Cannot verify that commit {sha} of {where} is reachable from a branch or tag: "
         "the first install of a pinned commit needs network access once. "
         "Re-run with network access, or pin a branch or tag instead."
     )
+    # The verdict key, the listing and the reachability fetch (whose persisted
+    # repository has an origin remote) all use the env a clone of *url* gets,
+    # so each names the server that answers, a remote-activated mirror included.
     try:
-        listing = git_remote_refs(
-            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
+        env = _listing_env(url, env)
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        raise _Unverified(unverifiable, exc) from exc
+    canonical = _verdict_key(origin or url, url, env)
+    marker = _marker(cache_root, shard_key, sha)
+    if canonical is not None and _recorded(marker, canonical):
+        return
+    try:
+        listing = branch_and_tag_refs(
+            url, env=env, timeout=60, git_args=_safe_git_args(), memo=_attempt_listings()
         )
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(unverifiable, exc) from exc
@@ -682,6 +1041,7 @@ def _reached_by_refs(
         RuntimeError: The fetch failed.
     """
     from ..utils.file_ops import robust_rmtree
+    from ..utils.git_config_memo import invalidate as invalidate_git_config
     from ..utils.git_env import get_git_executable, git_network_env, run_git_text
     from .cached_repo import cached_repo_env, cached_repo_is_trusted, inert_git_args
     from .git_cache import _safe_git_args, _sanitize_url
@@ -724,6 +1084,7 @@ def _reached_by_refs(
                 stdin=subprocess.DEVNULL,
                 check=True,
             )
+            invalidate_git_config(repo)
             run_git_text(
                 [*git, "fetch", "-q", "--filter=tree:0", "--prune", "origin", *_REACH_REFSPECS],
                 capture_output=True,
@@ -733,6 +1094,7 @@ def _reached_by_refs(
                 check=True,
             )
             _drop_promisor(git, child_env)
+            invalidate_git_config(repo)
             # Only the current heads and tags may answer: never lazy-fetch.
             probe = run_git_text(
                 [

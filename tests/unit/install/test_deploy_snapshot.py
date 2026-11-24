@@ -1988,3 +1988,723 @@ def test_a_file_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
 
     assert outside.stat().st_mode & 0o7777 == 0o400
     assert staged.is_symlink()
+
+
+# -- replay trusts only a store private to this user; recreated modes honor the umask --
+# (#5134) A snapshot store, and each journal file in it, must be a real directory or
+# regular file owned by this user with no group or other write; otherwise every path in
+# it is kept and reported. A path recreated from absence never gets more than the cap
+# (0o644 file, 0o755 directory) narrowed by the current umask.
+
+_NOT_PRIVATE = "the snapshot store is not private to this user; nothing was restored"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_a_store_others_can_write_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    store.chmod(0o775)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_a_store_another_user_owns_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    monkeypatch.setattr(os, "geteuid", lambda: os.stat(config).st_uid + 1)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_journal_that_is_a_link_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    planted = tmp_path / "planted.jsonl"
+    planted.write_bytes((store / "journal.jsonl").read_bytes())
+    (store / "journal.jsonl").unlink()
+    (store / "journal.jsonl").symlink_to(planted)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+def _with_umask(mask: int):
+    """Set the umask and forget the memoized read, so replay sees *mask*."""
+    from apm_cli.cache.deploy_store import process_umask
+
+    previous = os.umask(mask)
+    process_umask.cache_clear()
+    return previous
+
+
+def _restore_umask(previous: int) -> None:
+    from apm_cli.cache.deploy_store import process_umask
+
+    os.umask(previous)
+    process_umask.cache_clear()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_file_recreated_from_absence_honors_the_umask(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    config.chmod(0o644)
+    ledger = {".mcp.json": ledger[".mcp.json"]}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(config)
+    config.unlink()
+    journal.after_write(config)
+
+    previous = _with_umask(0o077)
+    try:
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        _restore_umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+    assert config.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_directory_recreated_from_absence_honors_the_umask(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill = project / ".kiro" / "skills" / "s"
+    skill.mkdir(parents=True)
+    skill.chmod(0o755)
+    (skill / "SKILL.md").write_bytes(b"prior\n")
+    (skill / "SKILL.md").chmod(0o644)
+    ledger = {".kiro/skills/s/SKILL.md": compute_file_hash(skill / "SKILL.md")}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    (skill / "SKILL.md").unlink()
+    skill.rmdir()
+    journal.after_write(skill)
+
+    previous = _with_umask(0o077)
+    try:
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        _restore_umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert skill.stat().st_mode & 0o7777 == 0o700
+    assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_planted_wider_mode_never_widens_a_recorded_0o644_file(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """W3d: a journal whose unit line claims 0o755 for a file apm recorded as 0o644."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    config.chmod(0o644)
+    store = _killed_journal(apm_home, project, config)
+    _rewrite_unit_mode(store, 0o755)
+
+    _replay(apm_home, project, lambda: ledger)
+
+    assert config.stat().st_mode & 0o7777 == 0o644
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_store_created_under_a_group_writable_umask_is_still_replayed(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The journal creates its store privately, so a 0o002 umask never makes it untrusted."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    previous = os.umask(0o002)
+    try:
+        _killed_journal(apm_home, project, config)
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        os.umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_an_apm_home_others_can_write_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    """Another user able to write APM_HOME could swap the snapshots directory: kept."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o777)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_a_group_writable_apm_home_is_still_trusted(tmp_path: Path, apm_home: Path) -> None:
+    """A user-private group (umask 0o002) leaves APM_HOME group writable: still replayed."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o775)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_symlinked_private_apm_home_is_still_replayed(tmp_path: Path, apm_home: Path) -> None:
+    """A dotfiles APM_HOME is a link to a private directory: its target is checked."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    target = tmp_path / "dotfiles" / "apm"
+    target.mkdir(parents=True, mode=0o700)
+    apm_home.symlink_to(target, target_is_directory=True)
+    _killed_journal(apm_home, project, config)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_symlinked_apm_home_others_can_write_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    target = tmp_path / "shared" / "apm"
+    target.mkdir(parents=True, mode=0o700)
+    apm_home.symlink_to(target, target_is_directory=True)
+    _killed_journal(apm_home, project, config)
+    target.chmod(0o777)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+def test_a_journal_that_is_a_directory_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    (store / "journal.jsonl").unlink()
+    (store / "journal.jsonl").mkdir(mode=0o700)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO")
+def test_a_journal_that_is_a_fifo_never_blocks_install(tmp_path: Path, apm_home: Path) -> None:
+    import threading
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError, has_abandoned_journals
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    (store / "journal.jsonl").unlink()
+    os.mkfifo(store / "journal.jsonl", 0o600)
+    found: list[bool] = []
+    probe = threading.Thread(
+        target=lambda: found.append(has_abandoned_journals(store.parent, project)), daemon=True
+    )
+
+    probe.start()
+    probe.join(timeout=10)
+
+    assert found == [True]
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_linked_journal_naming_another_project_is_kept_not_skipped(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The link is never followed, so it cannot pass the store off as another project's."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError, has_abandoned_journals
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    lines = (store / "journal.jsonl").read_text(encoding="utf-8").splitlines(keepends=True)
+    header = json.loads(lines[0])
+    elsewhere = str(tmp_path / "elsewhere")
+    header.update(root=elsewhere, workspace=elsewhere)
+    planted = tmp_path / "planted.jsonl"
+    planted.write_text(json.dumps(header) + "\n" + "".join(lines[1:]), encoding="utf-8")
+    (store / "journal.jsonl").unlink()
+    (store / "journal.jsonl").symlink_to(planted)
+
+    assert has_abandoned_journals(store.parent, project)
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+def test_a_rollback_keeps_a_path_whose_parent_became_a_link(tmp_path: Path, apm_home: Path) -> None:
+    """A deploy path whose parent directory is now a symbolic link is kept and reported:
+    the rollback never removes or writes through that link."""
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    deployed = project / "agents" / "a.md"
+    deployed.parent.mkdir(parents=True)
+    deployed.write_bytes(b"prior\n")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.write_bytes(b"installed\n")
+    journal.after_write(deployed)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.md").write_bytes(b"outside\n")
+    shutil.rmtree(project / "agents")
+    try:
+        (project / "agents").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    issues = journal.restore()
+
+    assert (outside / "a.md").read_bytes() == b"outside\n"
+    assert deployed in [path for path, _reason in issues]
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_rollback_keeps_a_path_whose_parent_became_a_junction(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A rollback treats a directory junction parent like a symbolic link: kept and reported (#5229)."""
+    import _winapi
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    deployed = project / "agents" / "a.md"
+    deployed.parent.mkdir(parents=True)
+    deployed.write_bytes(b"prior\n")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.write_bytes(b"installed\n")
+    journal.after_write(deployed)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.md").write_bytes(b"outside\n")
+    shutil.rmtree(project / "agents")
+    _winapi.CreateJunction(str(outside), str(project / "agents"))
+
+    issues = journal.restore()
+
+    assert (outside / "a.md").read_bytes() == b"outside\n"
+    assert deployed in [path for path, _reason in issues]
+    # The junction itself survives, still naming the outside directory.
+    assert os.lstat(project / "agents").st_file_attributes & 0x400  # a reparse point
+    assert (project / "agents" / "a.md").read_bytes() == b"outside\n"
+
+
+def test_a_rollback_never_cleans_a_directory_through_a_linked_parent(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Directories a rollback would remove as empty are left alone below a linked parent."""
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    project.mkdir()
+    deployed = project / "agents" / "sub" / "a.md"
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.parent.mkdir(parents=True)
+    deployed.write_bytes(b"installed\n")
+    journal.after_write(deployed)
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    shutil.rmtree(project / "agents")
+    try:
+        (project / "agents").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    issues = journal.restore()
+
+    assert (outside / "sub").is_dir()
+    assert deployed in [path for path, _reason in issues]
+
+
+def _shared_dir_install(apm_home: Path, project: Path, packages: int) -> Path:
+    """*packages* writers each ensure one shared directory, then write a file into it."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project.mkdir(parents=True, exist_ok=True)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    shared = project / ".github" / "prompts"
+
+    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        for index in range(packages):
+            write_seam.mkdir(shared, parents=True, exist_ok=True)
+            write_seam.write_text_lf(shared / f"p{index}.prompt.md", f"prompt {index}\n")
+    finally:
+        write_seam.stop_listening(record)
+    assert journal.store is not None
+    return journal.store
+
+
+def test_an_existing_directory_is_sealed_once_not_per_writer(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Re-ensuring a directory changes nothing, so it is not re-fingerprinted per package."""
+    import json
+
+    store = _shared_dir_install(apm_home, tmp_path / "project", packages=4)
+
+    lines = [json.loads(line) for line in (store / "journal.jsonl").read_text().splitlines()]
+    whole_dir_seals = [line for line in lines if line.get("sub") == "" and "sealed" in line]
+    assert len(whole_dir_seals) == 1
+    file_seals = [line for line in lines if "sealed" in line and line.get("sub")]
+    assert len(file_seals) == 4
+
+
+@pytest.mark.parametrize("user_file", [False, True])
+def test_a_killed_install_into_a_shared_directory_replays_as_before(
+    tmp_path: Path, apm_home: Path, user_file: bool
+) -> None:
+    """Every file below the directory carries its own seal, so replay decides as before."""
+    project = tmp_path / "project"
+    shared = project / ".github" / "prompts"
+    _shared_dir_install(apm_home, project, packages=3)
+    if user_file:
+        (shared / "mine.md").write_text("user\n", encoding="utf-8")
+
+    outcome = _replay(apm_home, project)
+
+    if user_file:
+        assert outcome.restored == 0 and len(outcome.kept) == 1
+        assert (shared / "mine.md").read_text(encoding="utf-8") == "user\n"
+    else:
+        assert (outcome.restored, outcome.kept) == (1, ())
+        assert not shared.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_shared_directory_swapped_for_a_link_is_journaled_and_never_followed(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Only a real directory skips the seam: a link takes the recording path."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import DeployJournal, JournalReplayError
+
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.md").write_text("not APM's\n", encoding="utf-8")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    shared = project / ".github" / "prompts"
+
+    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        write_seam.mkdir(shared, parents=True, exist_ok=True)
+        write_seam.write_text_lf(shared / "p0.prompt.md", "prompt 0\n")
+        shared.rename(tmp_path / "moved")
+        shared.symlink_to(outside, target_is_directory=True)
+        write_seam.mkdir(shared, parents=True, exist_ok=True)
+    finally:
+        write_seam.stop_listening(record)
+    assert journal.store is not None
+    manifest = (journal.store / "journal.jsonl").read_text(encoding="utf-8")
+    lines = [json.loads(line) for line in manifest.splitlines()]
+    whole = [line["state"] for line in lines if line.get("sub") == "" and "sealed" in line]
+    assert whole[-1] == {"link": str(outside)}
+
+    with pytest.raises(JournalReplayError):  # a link leaving the deploy root is refused
+        _replay(apm_home, project)
+
+    assert (outside / "keep.md").read_text(encoding="utf-8") == "not APM's\n"
+    assert sorted(p.name for p in outside.iterdir()) == ["keep.md"]
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_journal_path_through_a_junction_is_refused(tmp_path: Path, apm_home: Path) -> None:
+    """Replay treats a directory junction below the deploy root like a symbolic link (#5229)."""
+    import _winapi
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    claimed = project / ".kiro" / "claimed.md"
+    claimed.parent.mkdir(parents=True)
+    claimed.write_bytes(b"committed\n")
+    _winapi.CreateJunction(str(project / ".kiro"), str(project / "alias"))
+    store = _killed_journal(apm_home, project, project / "new.md")
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text().splitlines()]
+    lines[1]["path"] = "alias/claimed.md"
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: {".kiro/claimed.md": None})
+
+    assert "alias/claimed.md" in [path for path, _reason in kept.value.issues]
+    assert claimed.read_bytes() == b"committed\n"
+
+
+_APM_MCP_TWO = _APM_MCP.replace(b'"srv"', b'"srv2"')
+
+
+def _two_journal_bound_writes(apm_home: Path, project: Path, path: Path) -> Path:
+    """Two recorded config writes in one install through the real seam listener, then a kill.
+
+    The config file records keep the bytes before the first write, bound to
+    this journal's token (#5051).
+    """
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration.config_file_provenance import recorded_config_write
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def record(target: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(target, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write, journal=journal.token)
+    try:
+        for data in (_APM_MCP, _APM_MCP_TWO):
+            with recorded_config_write(path, manifest_root=project):
+                write_seam.atomic_write_text(path, data.decode("utf-8"))
+    finally:
+        write_seam.stop_listening(record)
+    assert path.read_bytes() == _APM_MCP_TWO
+    assert journal.store is not None
+    return journal.store
+
+
+def _rewrite_manifest(store: Path, edit) -> None:
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    edit(lines)
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+
+def _drop_token(lines: list) -> None:
+    del lines[0]["token"]
+
+
+def _replace_token(lines: list) -> None:
+    lines[0]["token"] = "0" * 32
+
+
+def test_a_journal_bound_config_history_restores_the_first_prior_bytes(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Untampered: two writes in one killed install restore the bytes before the first (#5188)."""
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _two_journal_bound_writes(apm_home, project, config)
+    header = json.loads((store / "journal.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert isinstance(header.get("token"), str)
+
+    outcome = _replay(apm_home, project)
+
+    # The config file and the records directory the killed install created.
+    assert outcome.restored == 2
+    assert config.read_bytes() == _USER_MCP
+    assert not (_receipts(apm_home) / "config-files").exists()
+    assert not store.exists()
+
+
+@pytest.mark.parametrize(
+    "tamper", [_drop_token, _replace_token], ids=["token-removed", "token-replaced"]
+)
+def test_a_journal_whose_header_token_was_tampered_keeps_the_config(
+    tmp_path: Path, apm_home: Path, tamper
+) -> None:
+    """A header token removed or replaced vouches for no journal-bound history: kept (#5188)."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _two_journal_bound_writes(apm_home, project, config)
+    _rewrite_manifest(store, tamper)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(".mcp.json", "the deployment ledger does not record these bytes")]
+    assert config.read_bytes() == _APM_MCP_TWO
+    assert kept.value.store.is_dir()
+
+
+def test_a_forged_journal_copy_with_a_matching_hash_keeps_the_config(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A saved copy replaced, with its unit hash rewritten to match, is not the prior (#5188)."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _two_journal_bound_writes(apm_home, project, config)
+    units = [
+        line
+        for line in (
+            json.loads(text)
+            for text in (store / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        )
+        if line.get("path") == ".mcp.json"
+    ]
+    assert len(units) == 1
+    copy = store / units[0]["copy"]
+    copy.write_bytes(b'{"mcpServers": {"forged": {"command": "forged"}}}\n')
+
+    def rehash(lines: list) -> None:
+        for line in lines:
+            if line.get("path") == ".mcp.json":
+                line["hash"] = compute_file_hash(copy)
+
+    _rewrite_manifest(store, rehash)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(".mcp.json", "the deployment ledger does not record these bytes")]
+    assert config.read_bytes() == _APM_MCP_TWO
+    assert kept.value.store.is_dir()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+def test_a_child_recreated_in_a_partly_removed_directory_honors_the_umask(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5134: a kill partway through an rmtree; the removed child is recreated from absence."""
+    project = tmp_path / "project"
+    skill, ledger = _partial_skill(project)
+    skill.chmod(0o755)
+    for child in skill.iterdir():
+        child.chmod(0o644)
+    _kill_partway_through_rmtree(monkeypatch, apm_home, project, lambda: write_seam.rmtree(skill))
+
+    previous = _with_umask(0o077)
+    try:
+        outcome = _replay(apm_home, project, lambda: ledger)
+    finally:
+        _restore_umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
+    assert (skill / "reference.md").stat().st_mode & 0o7777 == 0o644
+    assert skill.stat().st_mode & 0o7777 == 0o755
+
+
+def test_a_store_opens_its_journal_once_and_still_retains(tmp_path: Path, apm_home: Path) -> None:
+    """One private fd per store on POSIX (#4939); retain renames the store on every OS."""
+    from apm_cli.install import journal_modes
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from tests.unit.deps.test_lockfile_read_cost import _count_calls
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=tmp_path)
+
+    def record_five() -> None:
+        for index in range(5):
+            target = tmp_path / f"{index}.md"
+            target.write_bytes(b"prior\n")
+            journal.record(target)
+
+    opens = _count_calls(journal_modes.open_private_append.__code__, record_five)
+    lines = (journal.store / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    retained = journal._retain()
+
+    assert len(lines) > 5
+    assert opens == (len(lines) if os.name == "nt" else 1)
+    assert retained.name.startswith("retained-")
+    assert (retained / "journal.jsonl").read_text(encoding="utf-8").splitlines() == lines
+    journal.discard()
+    assert not retained.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows opens the journal per line")
+def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_home: Path) -> None:
+    """The held journal fd closes with its journal, not at process exit (#4939)."""
+    import gc
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=tmp_path)
+    target = tmp_path / "a.md"
+    target.write_bytes(b"prior\n")
+    journal.record(target)
+    manifest = journal.store / "journal.jsonl"
+    fd = journal._held_journal[1]
+    del journal
+    gc.collect()
+
+    try:
+        still_open = os.fstat(fd).st_ino == manifest.stat().st_ino
+    except OSError:
+        still_open = False
+    assert not still_open
+    assert manifest.read_text(encoding="utf-8").count("\n") >= 2

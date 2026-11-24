@@ -29,7 +29,6 @@ so a checkout that changes after verification is never trusted.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import os
 import re
 import stat
@@ -40,7 +39,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..utils.git_env import git_subprocess_env
+from ..utils.git_object_id import git_object_id, object_format
 from ..utils.git_sparse import _LINK_MODE, _TREE_MODE, _LinkResolver, _TreeEntry
+from ..utils.paths import relative_to
 from .cached_repo import cached_repo_env, inert_git_args
 
 _MODES = {"40000": _TREE_MODE, "160000": "160000"}
@@ -71,16 +72,6 @@ _MANIFESTS: dict[tuple[str, str], _Manifest] = {}
 _MANIFEST_LOCK = threading.Lock()
 
 
-def _algorithm(sha: str) -> str:
-    if len(sha) not in (40, 64) or any(c not in "0123456789abcdef" for c in sha):
-        raise ValueError("not a full object id")
-    return "sha256" if len(sha) == 64 else "sha1"
-
-
-def _object_id(algorithm: str, kind: str, data: bytes) -> str:
-    return hashlib.new(algorithm, f"{kind} {len(data)}\0".encode() + data).hexdigest()
-
-
 class _Objects:
     """Read objects through one inert ``git cat-file --batch``; every object is re-hashed."""
 
@@ -107,7 +98,7 @@ class _Objects:
             raise CheckoutVerificationError(f"object {oid[:12]} is not a {kind}")
         data = process.stdout.read(int(header[2]))
         process.stdout.read(1)
-        if _object_id(self._algorithm, kind, data) != oid:
+        if git_object_id(self._algorithm, kind, data) != oid:
             raise CheckoutVerificationError(f"{kind} {oid[:12]} does not hash to its id")
         return data
 
@@ -271,8 +262,20 @@ def _unquote(line: str) -> tuple[str, str] | None:
 _GIT_DIR_ALIAS = re.compile(r"(?:\.git|git~[0-9]+)[. ]*", re.IGNORECASE | re.ASCII)
 
 
+# Codepoints HFS+ ignores when comparing names (git's is_hfs_dotgit).
+_HFS_IGNORABLE = dict.fromkeys(
+    [0x200C, 0x200D, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF]
+)
+
+
 def _names_git_dir(name: str) -> bool:
-    return _GIT_DIR_ALIAS.fullmatch(name) is not None
+    """Whether *name* is ``.git`` on any host: NTFS short names and trailing dots/spaces, HFS+ ignorables."""
+    if _GIT_DIR_ALIAS.fullmatch(name) is not None:
+        return True
+    if name.isascii():  # every HFS+ ignorable is non-ASCII
+        return False
+    folded = name.translate(_HFS_IGNORABLE)
+    return folded != name and _GIT_DIR_ALIAS.fullmatch(folded) is not None
 
 
 class _Attributes:
@@ -427,7 +430,7 @@ def _worktree_files(repo: Path) -> Iterator[tuple[str, Path]]:
         subdirs[:] = [d for d in subdirs if d not in links]
         for name in (*names, *links):
             path = here / name
-            yield path.relative_to(repo).as_posix(), path
+            yield relative_to(path, repo).as_posix(), path
 
 
 def _in_scope(path: str, scope: tuple[str, ...]) -> bool:
@@ -453,7 +456,7 @@ def _accept_file(run: _Run, rel: str, path: Path, want: _Expect) -> str:
     """Return the blob id of the accepted on-disk bytes, or raise."""
     _check_mode(rel, os.lstat(path), want.executable)
     data = path.read_bytes()
-    observed = _object_id(run.algorithm, "blob", data)
+    observed = git_object_id(run.algorithm, "blob", data)
     if observed == want.oid:
         return observed
     blob = run.objects.read(want.oid, "blob")
@@ -480,7 +483,7 @@ def _verify(
     git_exe: str,
     env: dict[str, str] | None,
 ) -> _Manifest:
-    algorithm = _algorithm(sha)
+    algorithm = object_format(sha)
     objects = _Objects(git_exe, repo, env, algorithm)
     try:
         commit = objects.read(sha, "commit")
@@ -503,7 +506,9 @@ def _verify(
 
 
 def _key(repo: Path, sha: str) -> tuple[str, str]:
-    return sha.lower(), str(Path(repo).resolve())
+    from apm_cli.utils.realpath import resolve_path
+
+    return sha.lower(), str(resolve_path(Path(repo)))
 
 
 def verify_checkout(
@@ -577,7 +582,7 @@ def _manifest(
 
 def _check_bytes(manifest: _Manifest, rel: str, data: bytes, info: os.stat_result) -> None:
     want = manifest.files.get(rel)
-    if want is None or _object_id(manifest.algorithm, "blob", data) != want[0]:
+    if want is None or git_object_id(manifest.algorithm, "blob", data) != want[0]:
         raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
     _check_mode(rel, info, want[1])
 
@@ -652,11 +657,50 @@ def require_verified_bytes(
     """Raise unless *data*, read from *rel* in checkout *repo*, are the bytes verification accepted."""
     manifest = _manifest(repo, sha, [scope.strip("/")] if scope.strip("/") else None, None)
     want = manifest.files.get(rel.strip("/"))
-    if want is None or _object_id(manifest.algorithm, "blob", data) != want[0]:
+    if want is None or git_object_id(manifest.algorithm, "blob", data) != want[0]:
         raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
+
+
+# Guarantees the fresh landing proved while writing, each usable by ONE read.
+_FRESH_USES = frozenset({"verify", "links"})
+_INPROCESS: dict[tuple[str, str], tuple[int, int, set[str]]] = {}
+
+
+def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str, bool]]) -> None:
+    """Record the verdict an in-process fetch reached while writing *repo*.
+
+    The manifest stays for copy verification. The skip of the commit verify and
+    of the link scan applies once each, to the read of this fresh landing, and
+    only while *repo* is the same directory (dev, ino); every later read of the
+    cache verifies as usual.
+    """
+    key = _key(repo, sha)
+    info = os.lstat(repo)
+    with _MANIFEST_LOCK:
+        _MANIFESTS[key] = _Manifest(object_format(sha), dict(files))
+        _INPROCESS[key] = (info.st_dev, info.st_ino, set(_FRESH_USES))
+
+
+def inprocess_verified(repo: Path, sha: str | None = None, *, use: str) -> bool:
+    """Whether this read is the first *use* of a directory this process wrote and verified."""
+    if not _INPROCESS:  # nothing fetched in-process this run: skip the path resolve
+        return False
+    key = _key(repo, sha or Path(repo).parent.name)
+    with _MANIFEST_LOCK:
+        entry = _INPROCESS.get(key)
+        if entry is None or key not in _MANIFESTS or use not in entry[2]:
+            return False
+        entry[2].discard(use)
+        identity = entry[:2]
+    try:
+        info = os.lstat(repo)
+    except OSError:
+        return False
+    return stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == identity
 
 
 def forget_verdicts() -> None:
     """Drop every record (an evicted or rebuilt checkout, or a new run)."""
     with _MANIFEST_LOCK:
         _MANIFESTS.clear()
+        _INPROCESS.clear()

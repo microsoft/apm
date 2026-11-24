@@ -389,7 +389,10 @@ def test_symlinked_deploy_root_never_scans_outside_project(
         scenario_id="symlinked-deploy-root-contained",
     )
     assert _UNRECORDED not in audit.stdout
-    assert audit.stderr == "Error: Refusing deployment through symlinked target root: .claude\n"
+    assert audit.stderr == (
+        "Error: Refusing deployment through a symlinked path component: .claude. "
+        "Replace the symlink with a regular directory or remove it, then retry.\n"
+    )
     assert payload.read_bytes() == _BIDI_BYTES
 
 

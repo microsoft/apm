@@ -1,0 +1,95 @@
+name: Lifecycle Security
+
+# The tests/lifecycle/security cells (integrity, admission, egress, policy and
+# gate removal) on Linux. Before this workflow they ran only in the nightly
+# lifecycle-full job, so a security red could sit on main for hours unseen.
+#
+# - Every push to main: main-push-gate.yml calls this workflow (workflow_call)
+#   next to Tier 1 and Tier 2, so a security red turns the main push gate red.
+# - Pull requests: when the diff touches product code, the lifecycle harness
+#   or cells, the receipt ratchet, or the dependency set. Not a required check.
+#
+# The security cells run on Linux only, here and in the nightly
+# lifecycle-full job; Windows and macOS run only the nightly journeys. The job
+# restores and saves no cache, so a main push adds no default-branch cache.
+# tests/quality/test_ci_topology.py pins the triggers, the paths, the selection
+# and the main push gate wiring.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/apm_cli/**'
+      - 'tests/lifecycle/**'
+      - 'tests/quality/test_promise_obligations.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/lifecycle-security.yml'
+  workflow_call:
+
+permissions:
+  contents: read
+
+# PR runs group per PR and cancel superseded pushes; a main push (called from
+# main-push-gate.yml) keeps a unique group and is never cancelled.
+concurrency:
+  group: lifecycle-security-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  lifecycle-security:
+    name: Lifecycle Security (Linux)
+    runs-on: ubuntu-24.04
+    # Measured: about 12 minutes on 4 workers (878 cells, run 45268733186).
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install Unix shell startup test runtimes
+        run: bash scripts/ci-apt-install.sh fish zsh
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run the lifecycle security cells
+        env:
+          APM_E2E_TESTS: "1"
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 4 --dist loadgroup --durations=20 -m "not live" \
+            tests/lifecycle/security
+
+      # Every required security witness must have reported (#4586), so a cell
+      # that silently skips fails here instead of passing.
+      - name: Require a receipt from every security witness
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/security/
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet

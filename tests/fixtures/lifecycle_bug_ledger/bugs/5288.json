@@ -1,0 +1,14 @@
+{
+  "issue": 5288,
+  "fixed_in": "Unreleased",
+  "summary": "Install and uninstall read Claude's known_marketplaces.json and the APM_HOME receipt with Path.read_bytes, so a named pipe at either path blocked the command indefinitely; both are now read only as regular files.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/test_claude_marketplaces_registry.py::test_a_fifo_registry_or_receipt_never_blocks_install_or_uninstall"
+  ]
+}

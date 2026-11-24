@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from apm_cli.core.remediation import SKILL_CONFLICT_UNMANAGED
-from apm_cli.install.deployed_paths import deployed_path_entry
+from apm_cli.install.deployed_paths import deployed_path_entry, refuse_symlinked_deploy
 from apm_cli.integration.base_integrator import (
     BaseIntegrator,
     recovery_directory,
@@ -23,6 +23,7 @@ from apm_cli.integration.skill_adoption import (
 from apm_cli.integration.skill_support import skill_dir_has_content
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens, skill_subset_selects_all
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
+from apm_cli.utils.paths import relative_to
 
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
@@ -279,9 +280,15 @@ def find_unmanaged_conflicts(
         for target in targets:
             if target.supports("skills"):
                 destination = integrator._target_skill_dir(target, project_root, name)
-                destinations.setdefault(destination.resolve(), (destination, target))
+                try:
+                    resolved = destination.resolve()
+                except (OSError, RuntimeError):
+                    # A link loop cannot be resolved; it is refused like any link (#5287).
+                    refuse_symlinked_deploy(destination, project_root)
+                    raise
+                destinations.setdefault(resolved, (destination, target))
         for source in files:
-            suffix = source.relative_to(source_root)
+            suffix = relative_to(source, source_root)
             parent = source_root
             for part in suffix.parts:
                 if part in ignore(str(parent), [part]):

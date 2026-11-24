@@ -1,0 +1,18 @@
+{
+  "issue": 5037,
+  "fixed_in": "Unreleased",
+  "summary": "Every recorded config write reloaded and rewrote the one machine-wide config file record store, so its cost grew with other projects' records; records now live in one file per config file directory behind a layout 2 index marker that older readers reject (fail closed), and a layout 1 store migrates without loss even when killed midway.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/unit/integration/test_config_file_provenance.py::test_a_write_does_not_rewrite_unrelated_records",
+    "tests/unit/integration/test_config_file_provenance.py::test_an_older_apm_fails_closed_on_the_indexed_store",
+    "tests/unit/integration/test_config_file_provenance.py::test_a_version_1_store_is_read_without_losing_a_record",
+    "tests/unit/integration/test_config_file_provenance.py::test_a_kill_mid_write_loses_no_saved_record",
+    "tests/unit/integration/test_config_file_provenance.py::test_an_interrupted_migration_leaves_the_old_store_whole"
+  ]
+}

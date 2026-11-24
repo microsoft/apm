@@ -23,7 +23,9 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import stat
+import unicodedata
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
@@ -34,7 +36,13 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-_VERSION = 1
+# Layout 2 (#5037): ``records.json`` is an index marker a layout 1 reader rejects,
+# and records live beside it in one file per config file directory
+# (``d-<id>.json``), so a write reads and saves only its own directory's records.
+_VERSION = 2
+_V1 = 1
+_LAYOUT = "by-directory"
+_SHARD_GLOB = "d-*.json"
 _VCS_MARKERS = (".git", ".hg", ".svn")
 _LOCKFILE = "apm.lock.yaml"
 
@@ -128,6 +136,26 @@ class _UnreadableStore(ValueError):
     pass
 
 
+class _StoreBusy(OSError):
+    """Another apm holds APM_HOME's lifecycle lock (or the lock cannot be used)."""
+
+
+def _shard_id(key: str) -> str:
+    """The record file of *key*: its directory, every case and Unicode spelling alike."""
+    directory = unicodedata.normalize("NFC", key.rpartition("/")[0]).casefold()
+    # A POSIX name that is not UTF-8 is surrogate-escaped; its bytes key the file.
+    return hashlib.sha256(directory.encode("utf-8", "surrogateescape")).hexdigest()[:32]
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not _regular(path):
+        raise ValueError("not a regular file")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("not a mapping")
+    return data
+
+
 @dataclass
 class _Store:
     path: Path
@@ -135,57 +163,173 @@ class _Store:
     # Per recorded file, the digest of the bytes it held before APM's last write
     # (``prior``), so crash recovery can prove a journal copy (#5009). Kept under a
     # top-level ``history`` map: earlier contents, not the file's current record.
-    history: dict[str, str] = field(default_factory=dict)
+    # A write inside an install's deploy journal stores ``{"prior", "journal"}``:
+    # the bytes before that install's first write and the journal's token (#5051).
+    history: dict[str, str | dict[str, str]] = field(default_factory=dict)
+    # The record files read so far, and whether the store is still layout 1.
+    loaded: set[str] = field(default_factory=set)
+    legacy_layout: bool = False
+    indexed: bool = False
+    # The index marker's generation; a record file of another generation (left by a
+    # store removed by hand, or an interrupted migration) is never read (#5037).
+    generation: str = ""
+    # The index as this store last read or wrote it: a save re-reads it only if changed.
+    marker_stamp: tuple[int, int, int] | None = None
+    # The record files the index lists. A listed file that is gone or unreadable
+    # fails closed; it never reads as a directory with no records (#5037).
+    listed: set[str] | None = None
+
+    def _shard_path(self, shard: str) -> Path:
+        return self.path.parent / f"d-{shard}.json"
+
+    def _shard_files(self) -> list[Path]:
+        directory = self.path.parent
+        return sorted(directory.glob(_SHARD_GLOB)) if directory.is_dir() else []
 
     @classmethod
     def load(cls) -> _Store:
-        path = _store_path()
-        store = cls(path)
-        if not os.path.lexists(path):
+        """The store; each record file is read when a lookup or a save first needs it."""
+        store = cls(_store_path())
+        if not os.path.lexists(store.path):
             return store
         try:
-            if not _regular(path):
-                raise ValueError("not a regular file")
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("version") != _VERSION or not isinstance(data.get("files"), list):
-                raise ValueError("unknown version or layout")
+            store._stamp_marker()
+            data = _read_json(store.path)
+            if data.get("version") == _V1 and isinstance(data.get("files"), list):
+                store.legacy_layout = True  # read whole; the next save migrates it
+                store._absorb(data)
+                return store
+            store._adopt(data)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
-            raise _UnreadableStore(f"{path}: {exc}") from exc
+            raise _UnreadableStore(f"{store.path}: {exc}") from exc
+        return store
+
+    def _stamp_marker(self) -> None:
+        self.marker_stamp = _stamp(self.path)
+
+    def _adopt(self, marker: dict[str, Any]) -> None:
+        """Read the store through *marker* (a layout 2 index), or raise ``ValueError``."""
+        generation = marker.get("generation", "")
+        if marker.get("version") != _VERSION or marker.get("layout") != _LAYOUT:
+            raise ValueError("unknown version or layout")
+        if not isinstance(generation, str):
+            raise ValueError("unknown version or layout")
+        shards = marker.get("shards")
+        if shards is not None and not (
+            isinstance(shards, list) and all(isinstance(s, str) for s in shards)
+        ):
+            raise ValueError("unknown version or layout")
+        self.generation, self.indexed = generation, True
+        self.listed = set(shards) if shards is not None else None
+
+    def _absorb(self, data: dict[str, Any]) -> None:
+        if not isinstance(data.get("files"), list):
+            raise ValueError("unknown version or layout")
+        rows: dict[str, dict[str, Any]] = {}
         for row in data["files"]:
             key = row.get("path") if isinstance(row, dict) else None
             # A key not in canonical form (relative, ".", "..", "//") proves nothing. It is
             # checked as written, never re-resolved: a path linked for now keeps its record.
             if isinstance(key, str) and _canonical_key(key):
-                store.files[key] = {k: v for k, v in row.items() if k != "path"}
+                rows[key] = {k: v for k, v in row.items() if k != "path"}
         history = data.get("history")
-        if isinstance(history, dict):
-            store.history = {
-                key: prior
-                for key, prior in history.items()
-                if key in store.files and isinstance(prior, str)
-            }
-        return store
+        for key, row in rows.items():
+            # A record changed in memory before its file was read stays as changed.
+            if key not in self.files:
+                self.files[key] = row
+                prior = history.get(key) if isinstance(history, dict) else None
+                if _history_entry(prior):  # a str, or a journal's {"prior", "journal"}
+                    self.history[key] = prior
+
+    def _load_shard(self, shard: str) -> None:
+        if shard in self.loaded:
+            return
+        path = self._shard_path(shard)
+        listed = self.listed is not None and shard in self.listed
+        if not os.path.lexists(path):
+            if listed:
+                raise _UnreadableStore(f"{path}: a listed record file is missing")
+            self.loaded.add(shard)
+            return
+        try:
+            data = _read_json(path)
+            if data.get("version") != _VERSION:
+                raise ValueError("unknown version or layout")
+            if listed and data.get("generation", "") != self.generation:
+                raise ValueError("a listed record file belongs to another generation")
+            if data.get("generation", "") != self.generation:
+                # Another generation's leftover proves nothing. It is not loaded, so a
+                # save never deletes it; a save with records there overwrites it.
+                return
+            self._absorb(data)
+            self.loaded.add(shard)
+        except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+            raise _UnreadableStore(f"{path}: {exc}") from exc
+
+    def _load_all(self) -> None:
+        for path in self._shard_files():
+            self._load_shard(path.stem.removeprefix("d-"))
 
     def lookup(self, path: Path) -> tuple[str, dict[str, Any] | None]:
         """The key and record of *path*; another spelling of the same file finds it too."""
         key = config_file_key(path)
+        self._load_if_indexed(_shard_id(key))
         if key in self.files:
             return key, self.files[key]
         if os.path.lexists(path):
-            # Another spelling (case, Unicode form) or hard link of this existing file.
+            # Another spelling (case, Unicode form) shares the directory's record file; a
+            # hard link elsewhere is searched for only when the file has another link.
             # Callers never look up a file APM is about to create, so a new config
             # costs no identity checks however many records the machine holds.
-            for other, row in self.files.items():
-                try:
-                    # A key that now resolves elsewhere passes through a link: its
-                    # record never transfers to the file that link reaches.
-                    if config_file_key(other) == other and os.path.samefile(other, path):
-                        return other, row
-                except (OSError, RuntimeError):
-                    # RuntimeError: a key that became a symlink loop (Python < 3.13);
-                    # its record stays, it just never aliases another file.
-                    continue
+            found = self._same_file(path)
+            if found is None and self.indexed and _has_other_links(path):
+                self._load_all()
+                found = self._same_file(path)
+            if found is not None:
+                return found
         return key, None
+
+    def _load_if_indexed(self, shard: str) -> None:
+        if self.indexed:
+            self._load_shard(shard)
+
+    def _same_file(self, path: Path) -> tuple[str, dict[str, Any]] | None:
+        for other, row in self.files.items():
+            try:
+                # A key that now resolves elsewhere passes through a link: its
+                # record never transfers to the file that link reaches.
+                if config_file_key(other) == other and os.path.samefile(other, path):
+                    return other, row
+            except (OSError, RuntimeError):
+                # RuntimeError: a key that became a symlink loop (Python < 3.13);
+                # its record stays, it just never aliases another file.
+                continue
+        return None
+
+    def identity_recorded(self, path: Path) -> bool:
+        """Whether a record carries *path*'s device and inode and its current bytes (#5189).
+
+        Consulted only on a lookup miss, and only ever to keep a file. The
+        bytes APM last wrote must still be there too, so an inode a deleted
+        file freed and another file reused does not match.
+        """
+        if self.indexed:
+            try:
+                self._load_all()  # an identity can sit in any directory's record file
+            except _UnreadableStore:
+                return True  # a record elsewhere cannot be ruled out: keep the file
+        try:
+            info = os.stat(path)
+            current = _regular_bytes(path)
+        except OSError:
+            return True  # an identity that cannot be read keeps the file
+        if current is None:
+            return True
+        identity, digest = [info.st_dev, info.st_ino], _digest(current)
+        return any(
+            row.get("identity") == identity and row.get("hash") == digest
+            for row in self.files.values()
+        )
 
     def local(self) -> bool:
         """(c): the store is reached through no link below ``$APM_HOME`` and no ancestor
@@ -205,25 +349,200 @@ class _Store:
         )
 
     def save(self) -> None:
-        from apm_cli.integration.write_seam import atomic_write_text, mkdir, unlink
+        """Save under APM_HOME's lifecycle lock, after re-reading the index (#5037).
 
+        One writer at a time across processes: a writer that read the store before
+        another migrated it or started its index joins that index, so no record file
+        is ever written under a generation the index does not name.
+        """
+        from filelock import Timeout
+
+        from apm_cli.install.locking import LifecycleBusyError, lifecycle_lock
+
+        try:
+            lock = lifecycle_lock()
+            lock.acquire()
+        except Timeout as exc:
+            raise _StoreBusy("another apm is running on this APM_HOME") from exc
+        except LifecycleBusyError as exc:
+            raise _StoreBusy(f"another apm cannot be ruled out: {exc}") from exc
+        try:
+            self._refresh()
+            self._save_locked()
+        finally:
+            lock.release()
+
+    def _refresh(self) -> None:
+        stamp = _stamp(self.path)
+        if stamp is not None and stamp == self.marker_stamp:
+            return  # unchanged since this store read or wrote it (H20)
+        if stamp is None:
+            self.indexed = self.legacy_layout = False
+            return
+        self.marker_stamp = stamp
+        try:
+            data = _read_json(self.path)
+            if data.get("version") == _V1 and isinstance(data.get("files"), list):
+                self.legacy_layout = True
+                return
+            if self.legacy_layout or not self.indexed or data.get("generation") != self.generation:
+                self.legacy_layout = False
+                self._adopt(data)
+                self._loaded_generation_reset()
+        except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+            raise _UnreadableStore(f"{self.path}: {exc}") from exc
+
+    def _save_locked(self) -> None:
         # Never pruned by absence: the store is shared, and a file away for now (an
         # unmounted drive) keeps its record. Only a retirement forgets a record.
-        rows = [{"path": key, **self.files[key]} for key in sorted(self.files)]
-        if not rows:
-            if os.path.lexists(self.path):
-                unlink(self.path)  # like the other receipts: no records, no file
+        grouped = self._grouped()
+        if self.legacy_layout:
+            self._migrate(grouped)
             return
-        # Machine-local evidence, not a user-editable config.
-        data: dict[str, Any] = {"version": _VERSION, "files": rows}
-        history = {key: self.history[key] for key in sorted(self.history) if key in self.files}
+        if not self.indexed and grouped:
+            self._start_index()
+        for shard in sorted(set(grouped) - self.loaded):
+            self._load_if_indexed(shard)  # a record file is never saved unread
+            grouped = self._grouped()
+        shards = {shard: sorted(grouped.get(shard, ())) for shard in self.loaded | set(grouped)}
+        # A record file is written before the index lists it, and unlisted before it
+        # is removed, so a kill never leaves a listed file missing (#5037).
+        for shard in sorted(shards):
+            if shards[shard]:
+                self._save_shard(shard, shards[shard])
+        removed = {shard for shard, keys in shards.items() if not keys}
+        if self.indexed:
+            self._save_listing(removed, {shard for shard, keys in shards.items() if keys})
+        for shard in sorted(removed):
+            self._save_shard(shard, [])
+        if self.indexed and not grouped and not self._shard_files():
+            self._drop_index()  # like the other receipts: no records, no file
+
+    def _save_listing(self, removed: set[str], written: set[str]) -> None:
+        """Rewrite the index only when the record files it lists change."""
+        known = self.listed
+        if known is None:
+            known = {path.stem.removeprefix("d-") for path in self._shard_files()}
+        listed = (known - removed) | written
+        if listed == self.listed:
+            return
+        self._write(self.path, self._marker(listed))
+        self._stamp_marker()
+        self.listed = listed
+
+    def _marker(self, listed: set[str]) -> dict[str, Any]:
+        return {
+            "version": _VERSION,
+            "layout": _LAYOUT,
+            "generation": self.generation,
+            "shards": sorted(listed),
+        }
+
+    def _grouped(self) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for key in self.files:
+            grouped.setdefault(_shard_id(key), []).append(key)
+        return grouped
+
+    def _start_index(self) -> None:
+        """A new store: the marker first, so a record file is never read without it.
+
+        Created exclusively with a new generation, so record files left by a store
+        removed by hand are never read. A writer that finds another's marker joins
+        its generation; nothing is deleted, so two first writers keep each other's
+        records.
+        """
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
+
+        generation = secrets.token_hex(16)
+        marker = {"version": _VERSION, "layout": _LAYOUT, "generation": generation, "shards": []}
+        mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
+        try:
+            # Published whole or not at all: a kill never leaves an empty index.
+            text = json.dumps(marker, indent=2) + "\n"  # architecture-authority-exempt: evidence
+            atomic_write_text(self.path, text, create_only=True, new_file_mode=0o600)
+        except FileExistsError:
+            marker = _read_json(self.path)  # another writer started the store
+        self._stamp_marker()
+        self._adopt(marker)
+        self._loaded_generation_reset()
+
+    def _loaded_generation_reset(self) -> None:
+        # Record files read before the generation was known are read again under it.
+        pending = set(self.loaded)
+        self.loaded.clear()
+        for shard in sorted(pending):
+            self._load_shard(shard)
+
+    def _migrate(self, grouped: dict[str, list[str]]) -> None:
+        """Layout 1 to 2: every record file first, then the marker in one replace.
+
+        Until the marker is replaced the layout 1 file is whole and is the store, so a
+        kill midway leaves the old store and the next save starts again.
+        """
+        from apm_cli.integration.write_seam import unlink
+
+        self.generation = secrets.token_hex(16)  # leftovers of an earlier attempt: unread
+        for shard in sorted(grouped):
+            self._save_shard(shard, sorted(grouped[shard]))
+        if grouped:
+            self._write(self.path, self._marker(set(grouped)))
+            self._stamp_marker()
+        else:
+            unlink(self.path)
+        self.legacy_layout, self.indexed = False, bool(grouped)
+        self.listed = set(grouped) if grouped else None
+
+    def _save_shard(self, shard: str, keys: list[str]) -> None:
+        from apm_cli.integration.write_seam import unlink
+
+        path = self._shard_path(shard)
+        if not keys:
+            if os.path.lexists(path):
+                unlink(path)
+            return
+        data: dict[str, Any] = {
+            "version": _VERSION,
+            "generation": self.generation,
+            "files": [{"path": key, **self.files[key]} for key in keys],
+        }
+        history = {key: self.history[key] for key in keys if key in self.history}
         if history:
             data["history"] = history
+        self._write(path, data)
+
+    def _drop_index(self) -> None:
+        from apm_cli.integration.write_seam import unlink
+
+        if os.path.lexists(self.path):
+            unlink(self.path)
+        self.indexed = False
+
+    @staticmethod
+    def _write(path: Path, data: dict[str, Any]) -> None:
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
+
+        # Machine-local evidence, not a user-editable config.
         text = json.dumps(data, indent=2) + "\n"  # architecture-authority-exempt: evidence
-        if _regular(self.path) and self.path.read_text(encoding="utf-8") == text:
+        if _regular(path) and path.read_text(encoding="utf-8") == text:
             return  # a converged install rewrites nothing (I2)
-        mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
-        atomic_write_text(self.path, text, new_file_mode=0o600)
+        mkdir(path.parent, mode=0o700, parents=True, exist_ok=True)
+        atomic_write_text(path, text, new_file_mode=0o600)
+
+
+def _has_other_links(path: Path) -> bool:
+    try:
+        return os.lstat(path).st_nlink > 1
+    except OSError:
+        return False
+
+
+def _stamp(path: Path) -> tuple[int, int, int] | None:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return st.st_ino, st.st_mtime_ns, st.st_size
 
 
 def _origin(row: dict[str, Any] | None) -> Origin | None:
@@ -316,6 +635,11 @@ def _plan_write(path: Path, before: bytes | None, manifest_root: Path | None) ->
             store.files[key] = {"origin": origin.value, "hash": _digest(before)}
             store.save()
         return origin
+    except _StoreBusy as exc:
+        raise OSError(
+            f"Could not record that {path} existed before APM wrote to it: {exc}; "
+            "refusing to write it. Wait for the other apm to finish, then retry."
+        ) from exc
     except (OSError, ValueError) as exc:
         raise OSError(
             f"Could not record that {path} existed before APM wrote to it ({exc}); "
@@ -329,15 +653,47 @@ def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None)
     if before == after or origin is None:
         return  # nothing written (a converged install records nothing, I2), or unrecorded
     store = _Store.load()
-    if origin is Origin.LEGACY and store.lookup(path)[1] is None and not _holds_entries(after):
+    # Its record file, with its history, is read before the record changes (#5037).
+    recorded = store.lookup(path)[1]
+    if origin is Origin.LEGACY and recorded is None and not _holds_entries(after):
         return  # a new legacy record never claims a bare skeleton (#5038)
     key = config_file_key(path)
-    store.files[key] = {"origin": origin.value, "hash": _digest(after)}
-    if before is None:
+    row: dict[str, Any] = {"origin": origin.value, "hash": _digest(after)}
+    try:
+        # The file's identity, so another path to it still finds this record (#5189).
+        info = os.stat(path)
+        row["identity"] = [info.st_dev, info.st_ino]
+    except OSError:
+        pass
+    store.files[key] = row
+    from apm_cli.integration.write_seam import active_journal
+
+    journal = active_journal()
+    entry = store.history.get(key)
+    if journal is not None and isinstance(entry, dict) and entry.get("journal") == journal:
+        pass  # a later write of the same install: its journal keeps the first bytes
+    elif before is None:
         store.history.pop(key, None)  # created: no earlier bytes to restore
+    elif journal is not None:
+        store.history[key] = {"prior": _digest(before), "journal": journal}
     else:
         store.history[key] = _digest(before)
     store.save()
+
+
+def _history_entry(entry: Any) -> bool:
+    if isinstance(entry, dict):
+        return set(entry) == {"prior", "journal"} and all(
+            isinstance(value, str) for value in entry.values()
+        )
+    return isinstance(entry, str)
+
+
+def _prior_digest(entry: Any, journal: str | None) -> str | None:
+    """The prior digest *entry* vouches for when replaying *journal*'s writes."""
+    if isinstance(entry, dict):
+        return entry["prior"] if journal is not None and entry["journal"] == journal else None
+    return entry
 
 
 @contextmanager
@@ -383,12 +739,15 @@ def recorded_install_write(
     return recorded_config_write(path, manifest_root=installation_root(project_root, user_scope))
 
 
-def vouches_for_current_bytes(path: str | os.PathLike[str], prior: bytes) -> bool:
+def vouches_for_current_bytes(
+    path: str | os.PathLike[str], prior: bytes, *, journal: str | None = None
+) -> bool:
     """Whether this machine's record vouches for undoing APM's last write to *path*.
 
     APM last wrote exactly the bytes *path* holds, and *prior* (the copy crash
     recovery would put back, #5009) is exactly what the file held before that
-    write. A link or other non-regular file, a missing, unreadable or
+    write, or before the first write of the install whose deploy *journal* is
+    replayed (#5051). A link or other non-regular file, a missing, unreadable or
     VCS-tracked record, a record without its ``prior`` digest, or other bytes
     never vouch.
     """
@@ -398,14 +757,14 @@ def vouches_for_current_bytes(path: str | os.PathLike[str], prior: bytes) -> boo
     try:
         store = _Store.load()
         current = _regular_bytes(path)
+        key, row = store.lookup(path)
     except (OSError, _UnreadableStore):
         return False
-    key, row = store.lookup(path)
     return (
         current is not None
         and _origin(row) is not None
         and row.get("hash") == _digest(current)
-        and store.history.get(key) == _digest(prior)
+        and _prior_digest(store.history.get(key), journal) == _digest(prior)
         and store.local()
     )
 
@@ -442,13 +801,15 @@ def delete_emptied_config(
         return False
     try:
         store = _Store.load()
+        key, row = store.lookup(path)
     except _UnreadableStore:
         _log.debug("Unreadable config file records; keeping %s", path, exc_info=True)
         return False
-    key, row = store.lookup(path)
     origin = _origin(row)
-    if row is not None and origin is None:
-        return False  # a record APM cannot read proves nothing either way
+    if (row is not None and origin is None) or (row is None and store.identity_recorded(path)):
+        # A record APM cannot read proves nothing either way; one under another path
+        # (a second mount) means the unrecorded fallback never applies (#5189).
+        return False
     if origin is Origin.PREEXISTING:
         return False
     if origin is Origin.CREATED:

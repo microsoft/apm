@@ -189,6 +189,12 @@ ORPHANED_PACKAGES = _entry(
     "orphaned-packages", "apm install", "remove packages apm.yml no longer declares"
 )
 RESYNC_DEPLOYED = _entry("drift-resync", "apm install", "re-sync deployed files with the lockfile")
+CLAUDE_MARKETPLACE_TRUST = _entry(
+    "claude-marketplace-trust",
+    "apm install",
+    "list the project's marketplace for Claude Code",
+    before="open the folder in Claude and accept the trust prompt",
+)
 RESYNC_UNRECORDED = _entry(
     "drift-unrecorded",
     "apm install",
@@ -438,7 +444,8 @@ MARKETPLACE_ORIGIN_RESTORE = _entry(
     "marketplace-origin-restore",
     "apm marketplace add {source} --name {name}",
     "keep the locked marketplace (add --ref or --path if the original registration used them)",
-    before="verify that source first",
+    # A rebound name may be credential-bound, so it is freed before the re-add (#5264).
+    before="verify that source first, then run 'apm marketplace remove {name} --yes'",
 )
 MARKETPLACE_ORIGIN_SWITCH = _entry(
     "marketplace-origin-switch",
@@ -740,6 +747,14 @@ PRUNE_PARTIAL = _entry(
     "apm prune",
     "finish the filesystem cleanup",
     then="run 'apm audit'",
+)
+PRUNE_REPLACED_PARENT = _entry(
+    "prune-replaced-parent",
+    "apm install",
+    "rebuild the lockfile",
+    before="remove the replaced dependency's replace entry from apm.yml, or keep the "
+    "package that declares it",
+    then="run 'apm prune'",
 )
 PRUNE_NATIVE_GATE_UNCHECKED = _entry(
     "prune-native-gate-unchecked",
@@ -1562,6 +1577,11 @@ CODEX_NATIVE_LOOSE_FILES = _entry(
     before="preserve or relocate your edits and resolve the cleanup conflicts",
 )
 ROOT_CONTEXT_COMPILE = _entry("root-context-compile", "apm compile", "update {outputs}")
+CLAUDE_INSTRUCTIONS_UNCOMPILED = _entry(
+    "claude-instructions-uncompiled",
+    "apm compile",
+    "write the AGENTS.md Claude Code loads them from",
+)
 USER_ROOT_CONTEXT_COMPILE = _entry(
     "user-root-context-compile", "apm compile -g", "update root context files for {targets}"
 )

@@ -22,16 +22,41 @@ Design
 
 from __future__ import annotations
 
+import errno
 import os
 import urllib.parse as _up
 from pathlib import Path
-from stat import S_ISLNK
+from stat import S_ISLNK, S_ISREG
+from typing import BinaryIO
 
 from .file_ops import robust_rmtree
+from .paths import is_within, relative_posix, relative_to
+from .realpath import resolve_path
 
 
 class PathTraversalError(ValueError):
     """Raised when a computed path escapes its expected base directory."""
+
+
+def symlinked_deploy_refusal(link: str) -> str:
+    """The one refusal for a deploy reached through a linked directory (#5174, #5287).
+
+    *link* is repository- or user-controlled: it is shown as printable ASCII (#5215).
+    """
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    return (
+        f"Refusing deployment through a symlinked path component: {printable_ascii_text(link)}. "
+        "Replace the symlink with a regular directory or remove it, then retry."
+    )
+
+
+class SymlinkedDeployError(PathTraversalError):
+    """A deploy path crosses a symlinked directory; *link* is relative to its root."""
+
+    def __init__(self, link: str) -> None:
+        super().__init__(symlinked_deploy_refusal(link))
+        self.link = link
 
 
 def decode_url_path_segments(
@@ -211,13 +236,13 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     """
     return ensure_path_within_resolved(
         path,
-        _strip_extended_prefix(base_dir.resolve()),
+        _strip_extended_prefix(resolve_path(base_dir)),
     )
 
 
 def resolve_for_containment(path: Path) -> Path:
     """Resolve *path* once (symlinks followed) for a containment check made now."""
-    return _strip_extended_prefix(path.resolve())
+    return _strip_extended_prefix(resolve_path(path))
 
 
 def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
@@ -236,19 +261,17 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
         _strip_extended_prefix(resolved_base),
     )
     try:
-        if not resolved.is_relative_to(resolved_base):
-            return None
-        return resolved.relative_to(resolved_base).as_posix()
+        return relative_posix(resolved, resolved_base)
     except (TypeError, ValueError):
         return None
 
 
 def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     """Resolve *path* and assert containment against a pre-resolved base."""
-    resolved = _strip_extended_prefix(path.resolve())
+    resolved = _strip_extended_prefix(resolve_path(path))
     resolved_base = _strip_extended_prefix(resolved_base)
     try:
-        if not resolved.is_relative_to(resolved_base):
+        if not is_within(resolved, resolved_base):
             raise PathTraversalError(
                 f"Path '{path}' resolves to '{resolved}' which is outside "
                 f"the allowed base directory '{resolved_base}'"
@@ -299,7 +322,7 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     kept: list[str] = []
     for part in parts:
         if part == "..":
-            if not kept or base_dir.joinpath(*kept).is_symlink():
+            if not kept or _existing_link(base_dir.joinpath(*kept)):
                 return None
             kept.pop()
         elif part != ".":
@@ -307,26 +330,89 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     return kept
 
 
+# A reparse point whose tag is a name surrogate (a symbolic link, a directory junction,
+# a WSL symlink) names another path; data-only tags (cloud files) do not.
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_IO_REPARSE_TAG_NAME_SURROGATE = 0x20000000
+
+
+def _is_link(path: Path) -> bool:
+    """Whether *path* is a link of any kind (never its target), from one ``lstat``."""
+    info = path.lstat()
+    if S_ISLNK(info.st_mode):
+        return True
+    attributes = getattr(info, "st_file_attributes", 0)
+    tag = getattr(info, "st_reparse_tag", 0)
+    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT and tag & _IO_REPARSE_TAG_NAME_SURROGATE)
+
+
+def _existing_link(path: Path) -> bool:
+    """:func:`_is_link`, with a missing path counting as no link."""
+    try:
+        return _is_link(path)
+    except FileNotFoundError:
+        return False
+
+
+def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
+    """Return the first symlinked component of *path* below *base_dir*, or ``None``.
+
+    ``..`` is collapsed first; the walk stops at the first missing component.
+    Raises ``ValueError`` when *path* is not under *base_dir* or a ``..``
+    escapes it or steps back over a link, and ``OSError`` when a component
+    cannot be inspected; :func:`has_symlink_component` turns both into a refusal.
+    """
+    parts = _collapse_relative_parts(base_dir, relative_to(path, base_dir).parts)
+    if parts is None:
+        raise ValueError(f"{path} leaves {base_dir} or steps back over a link")
+    current = base_dir
+    for part in parts:
+        current /= part
+        try:
+            linked = _is_link(current)
+        except FileNotFoundError:
+            return None
+        if linked:
+            return current
+    return None
+
+
+def open_regular_file(path: Path) -> BinaryIO:
+    """Open *path* for binary reading only as a regular file.
+
+    Never through a final-component link and never blocking: the file is
+    opened non-blocking, then judged on the opened descriptor, so a FIFO or
+    device raises ``OSError`` instead of waiting for a writer. Where
+    ``O_NOFOLLOW`` is unavailable (Windows) a link is refused by ``lstat``
+    first.
+    """
+    if not hasattr(os, "O_NOFOLLOW") and _existing_link(Path(path)):
+        raise OSError(errno.ELOOP, "refusing to read through a link", str(path))
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        if not S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
-    """Reject linked components, optionally preserving access errors for diagnostics.
+    """Reject linked components (symbolic links and Windows junctions) below *base_dir*,
+    optionally preserving access errors for diagnostics.
 
     ``..`` is collapsed first, so a missing directory followed by ``..``
     cannot hide a linked component after it.
     """
     try:
-        parts = _collapse_relative_parts(base_dir, path.relative_to(base_dir).parts)
-        if parts is None:
-            return True
-        current = base_dir
-        for part in parts:
-            current /= part
-            try:
-                linked = S_ISLNK(current.lstat().st_mode)
-            except FileNotFoundError:
-                return False
-            if linked:
-                return True
-        return False
+        return first_symlink_component(base_dir, path) is not None
     except OSError:
         if raise_on_error:
             raise

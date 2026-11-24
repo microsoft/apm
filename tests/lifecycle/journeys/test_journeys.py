@@ -47,6 +47,7 @@ Journey YAML schema (``schema: 1``)
         key_lines: ["[+] ..."]   # must print (substring of the normalized output)
         file_lines: {apm.sarif: ['"level": "error"']}  # KEY: substrings of project files
         forbidden_lines: ["[!]"] # must not print
+        forbid_except: ["Claude Code does not load"]  # a forbidden line may print only with this
         docs:                    # O13 / O2 source of the step
           page: quickstart.mdx   # or /README.md (repository root)
           fence: <title>         # optional: the fence with this title= attribute
@@ -155,14 +156,22 @@ _JOURNEY_KEYS = {"schema", "id", "persona", "title", "docs", "steps"}
 _STEP_KEYS = {
     "n", "run", "exit", "edit", "cold_cache", "chdir", "converged", "drift", "git_clean",
     "files", "key_lines", "forbidden_lines", "docs", "help_docs", "remediate", "rerun",
-    "remediate_from", "note", "scope", "env", "file_lines", "diagnose",
+    "remediate_from", "note", "scope", "env", "file_lines", "diagnose", "forbid_except",
 }  # fmt: skip
 # O8 is split (#4571): O8a remediation advice, O8b diagnostic advice.
 _O_IDS = frozenset({*(f"O{i}" for i in range(1, 14) if i != 8), "O8a", "O8b"})
 _O_LAWS = _O_IDS | {"KEY", "FORBID"}
 _ADVICE_LAWS = frozenset({"O8a", "O8b"})
 # HOME paths a project command may write: receipts and bookkeeping (as in rows.py).
-_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
+_HOME_ALLOWED = (
+    ".apm/deployment-receipts",
+    ".apm-local",
+    ".local/state/gh",
+    ".cache/apm",
+    # Claude Code's marketplace registry and APM's record of its entry (#5176).
+    ".claude/plugins/known_marketplaces.json",
+    ".apm/claude-known-marketplaces.json",
+)
 # $APM_HOME entries that user-configuration commands own (declared write set for I5).
 _APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
     "marketplace": ("marketplaces.json", "marketplaces.lock", "cache"),
@@ -181,7 +190,7 @@ _APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
 # and an applied update refreshes the registered marketplace's metadata cache. A
 # --dry-run writes neither (#4484).
 _APM_HOME_WRITES_ON_SUCCESS: Mapping[str, tuple[str, ...]] = {
-    "install": ("cache/marketplace/version-pins.json",),
+    "install": ("cache/marketplace/version-pins.json", "cache/marketplace/version-pins.lock"),
     "update": ("cache/marketplace/lifecycle-market.meta.json",),
 }
 _UNTRACKED_ROOTS = frozenset({".git", ".apm-local"})
@@ -793,9 +802,20 @@ class JourneyRun:
     def _forbid(self, facts: _StepFacts) -> list[str]:
         found = []
         forbidden = [str(line) for line in facts.step.get("forbidden_lines") or ()]
-        facts.record("FORBID", Evidence(output_forbids=[re.escape(line) for line in forbidden]))
+        # forbid_except: substrings of the one documented line a step may print
+        # despite a forbidden marker (an intended "[!]" warning, #5344).
+        excepted = [str(text) for text in facts.step.get("forbid_except") or ()]
+        guard = "".join(f"(?!.*{re.escape(text)})" for text in excepted)
+        facts.record(
+            "FORBID",
+            Evidence(output_forbids=[f"^{guard}.*{re.escape(line)}" for line in forbidden]),
+        )
         for line in forbidden:
-            hits = [t.strip() for t in facts.text.splitlines() if line in t]
+            hits = [
+                t.strip()
+                for t in facts.text.splitlines()
+                if line in t and not any(text in t for text in excepted)
+            ]
             if hits:
                 found.append(f"forbidden {line!r} printed: {hits[0]!r}")
         return found

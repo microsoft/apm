@@ -1571,3 +1571,26 @@ class TestOpenCodeTarget:
             LSPIntegrator.target_choice_hint()
             == "--target copilot, --target claude or --target opencode"
         )
+
+
+def test_stale_cleanup_keeps_an_edited_entry_and_names_it_printably(tmp_path):
+    """A kept entry's name is escaped in the warning: ESC and newline never reach the terminal."""
+    name = "bad\x1b[2J\nname"
+    config = tmp_path / ".github" / "lsp.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"lspServers": {name: {"command": "hand"}}}), encoding="utf-8")
+    before = config.read_bytes()
+    logger = MagicMock()
+
+    LSPIntegrator.remove_stale_targets(
+        {"copilot": {name}},
+        project_root=tmp_path,
+        logger=logger,
+        locked_configs={name: {"command": "apm", "extensionToLanguage": {".x": "x"}}},
+    )
+
+    assert config.read_bytes() == before
+    (message,) = [call.args[0] for call in logger.warning.call_args_list]
+    assert "bad?[2J?name" in message
+    assert "\x1b" not in message
+    assert "\n" not in message
