@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.install.deployed_paths import deployed_path_entry
+from apm_cli.utils.path_security import SymlinkedDeployError
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I7")]
 
@@ -28,7 +29,7 @@ def test_a_symlinked_component_is_refused_with_the_standard_message(tmp_path: Pa
     except (OSError, NotImplementedError):
         pytest.skip("symbolic links are unavailable")
 
-    with pytest.raises(RuntimeError) as refused:
+    with pytest.raises(SymlinkedDeployError) as refused:
         deployed_path_entry(root / "skills" / "demo" / "SKILL.md", root, [])
 
     message = str(refused.value)
@@ -58,7 +59,7 @@ def test_the_message_names_the_first_linked_component_at_any_depth(tmp_path: Pat
     except (OSError, NotImplementedError):
         pytest.skip("symbolic links are unavailable")
 
-    with pytest.raises(RuntimeError) as refused:
+    with pytest.raises(SymlinkedDeployError) as refused:
         deployed_path_entry(root / "plain" / "linked" / "deeper" / "SKILL.md", root, [])
 
     assert str(refused.value).startswith(

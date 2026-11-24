@@ -6,8 +6,8 @@ tests/lifecycle/scenarios/test_platform.py, user scope in
 test_claude_config_dir_home_skill_lifecycle.py). These cells add the link kinds
 that resolve nowhere: a dangling link and a link loop, at project and user
 scope. Each install exits 1, writes nothing through the link and leaves the
-project, the user root and the lockfile unchanged. The refusal text is not yet
-the same across scopes and link kinds (#5287); a strict known cell tracks it.
+project, the user root and the lockfile unchanged. Every scope and link kind
+prints the same refusal, naming the link and the next step (#5287).
 Owners: integration/targets.py (_validate_project_target_root) and
 install/deployed_paths.py (deployed_path_entry).
 """
@@ -22,7 +22,6 @@ import pytest
 from tests.integration._install_audit_replay_kit import ReplayWorld, tree_digest
 from tests.integration.test_claude_config_dir_home_skill_lifecycle import _World
 from tests.integration.test_uninstall_local_reanchor_lifecycle import _manifest, _skill_package
-from tests.lifecycle.known import KnownFailure
 
 pytestmark = [
     pytest.mark.integration,
@@ -33,9 +32,6 @@ pytestmark = [
 ]
 
 _REMEDY = "Replace the symlink with a regular directory or remove it, then retry."
-_NONSTANDARD = KnownFailure(
-    "#5287", "a symlinked deploy directory refusal differs by scope and link kind", "nonstandard"
-)
 
 
 def _project(tmp_path: Path, apm_binary_path: Path, kind: str) -> tuple[ReplayWorld, Path]:
@@ -79,7 +75,9 @@ def test_install_refuses_a_broken_project_skills_link_before_any_write(
 
     assert result.returncode == 1, text
     assert "Traceback" not in text and "This is a bug" not in text, text
-    assert "Refusing deployment through symlinked target directory: .claude/skills" in text, text
+    assert (
+        f"Refusing deployment through a symlinked path component: .claude/skills. {_REMEDY}" in text
+    )
     assert not outside.exists(), "wrote through the link"
     assert not (world.project / "apm.lock.yaml").exists()
     assert tree_digest(world.project) == before
@@ -104,7 +102,6 @@ def test_install_g_refuses_a_broken_skills_link_before_any_write(
     assert not (world.manifest.parent / "apm.lock.yaml").exists()
 
 
-@_NONSTANDARD.mark()
 @pytest.mark.parametrize(
     ("scope", "kind"),
     [("project", "outside"), ("project", "dangling"), ("project", "loop"), ("user", "loop")],
