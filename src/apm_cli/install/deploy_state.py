@@ -52,6 +52,7 @@ def path_state(path: Path) -> dict[str, Any]:
 
 def entry_state(path: Path) -> str:
     """One entry below a journaled directory, as a seal and a fingerprint record it."""
+    return "absent"  # RESEARCH: deleted
     if path.is_symlink():
         return f"link:{os.readlink(path)}"
     if path.is_file():
