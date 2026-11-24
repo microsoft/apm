@@ -16,8 +16,6 @@ import pytest
 from apm_cli.core.remediation import ORPHANED_PACKAGES
 from tests.lifecycle import oracles
 
-RATCHET_TEST_SCOPE = "repository"
-
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I3")]
 
 _KEPT = (
