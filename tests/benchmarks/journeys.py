@@ -227,6 +227,20 @@ def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
     remove_tree(directory / "env")
     if fixture.real:
         isolated, env = isolated_environment(directory / "env")
+        if sys.platform == "win32":
+            # A real user's Git for Windows names its TLS backend and CA in the system
+            # config, which GIT_CONFIG_NOSYSTEM hides here; carry those keys over.
+            for key in ("http.sslBackend", "http.sslCAInfo"):
+                found = subprocess.run(
+                    ["git", "config", "--system", "--get", key],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip()
+                print(f"[bench] system {key} = {found!r}", file=sys.stderr)
+                if found:
+                    with open(env["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8", newline="\n") as config:
+                        config.write(f"[http]\n\t{key.split('.', 1)[1]} = {found}\n")
         with counting_tunnel() as tunnel:
             yield _RealWorld(isolated, env, tunnel)
         return
