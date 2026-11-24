@@ -285,26 +285,32 @@ def _user_private_group(gid: int) -> bool:
         return False
 
 
-# Name service sources whose account enumeration is complete: local files, and
-# systemd's, which enumerates the records it serves (#5371).
-_COMPLETE_SOURCES = frozenset({"files", "systemd"})
+# The one name service source whose account enumeration is complete: local files.
+# systemd's iterator may end early on an error after returning entries (#5371).
+_COMPLETE_SOURCES = frozenset({"files"})
 
 
 def _local_account_databases() -> bool:
-    """Whether the passwd and group databases come only from complete local sources.
+    """Whether account and group membership come only from local files.
 
+    The passwd and group databases, and initgroups (supplementary memberships;
+    glibc falls back to group when it is not named), must list only ``files``.
     A missing or unreadable name service switch configuration (macOS reads its
-    directory service instead), a database it does not name, a remote source
-    (``sss``, ``ldap``, ``nis``, ``compat``) or an action such as
+    directory service instead), a database it does not name, any other source
+    (``systemd``, ``sss``, ``ldap``, ``nis``, ``compat``) or an action such as
     ``[NOTFOUND=return]`` answers ``False``.
     """
     from apm_cli.utils.name_service import database_sources
 
     sources = database_sources()
-    return sources is not None and all(
-        sources.get(database) and set(sources[database]) <= _COMPLETE_SOURCES
-        for database in ("passwd", "group")
-    )
+    if sources is None:
+        return False
+    databases = {
+        "passwd": sources.get("passwd"),
+        "group": sources.get("group"),
+        "initgroups": sources.get("initgroups", sources.get("group")),
+    }
+    return all(listed and set(listed) <= _COMPLETE_SOURCES for listed in databases.values())
 
 
 def read_private_journal(path: Path, *, first_line: bool = False) -> str:
