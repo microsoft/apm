@@ -257,11 +257,11 @@ def test_a_carriage_return_in_an_attributes_record_refuses(tmp_path: Path) -> No
     """git splits records on LF and reads CR as whitespace: ``eol=crlf`` would apply."""
     attributes = tmp_path / "attributes"
     attributes.write_bytes(b"* diff\reol=crlf\n")
-    plain = tmp_path / "plain"
-    plain.write_bytes(b"*.pdf diff=astextplain\n")
+    crlf = tmp_path / "crlf"
+    crlf.write_bytes(b"*.pdf diff=astextplain\r\n*.c diff=cpp\r\n")
 
     assert not fetch._inert_attributes(str(attributes))
-    assert fetch._inert_attributes(str(plain))
+    assert fetch._inert_attributes(str(crlf)), "a CRLF line ending is only whitespace to git"
 
 
 @pytest.mark.parametrize("configured", ["~/.gitattributes", "%(prefix)/etc/attrs", "rel/attrs"])

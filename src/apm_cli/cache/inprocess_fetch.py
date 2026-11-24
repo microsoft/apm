@@ -664,10 +664,9 @@ def _inert_attributes(path: str) -> bool:
             data = handle.read()
     except OSError:
         return False
-    # git splits records on LF only and treats CR as attribute whitespace.
+    # git splits records on LF only and treats CR as attribute whitespace, so
+    # ``* diff\reol=crlf`` names eol=crlf while a CRLF line ending is harmless.
     for record in data.split(b"\n"):
-        if b"\r" in record:
-            return False
         try:
             line = record.decode("utf-8").strip()
         except UnicodeError:
