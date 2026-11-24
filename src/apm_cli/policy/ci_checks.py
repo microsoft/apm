@@ -985,6 +985,45 @@ def resolve_audit_scope(
     return deployment_root, user_scope, targets
 
 
+def resolve_claim_targets(
+    project_root: Path,
+    lock: LockFile,
+    *,
+    user_scope: bool,
+    targets: Sequence[TargetProfile],
+) -> list[TargetProfile]:
+    """Return the targets whose live roots resolve the lock's recorded claims (#5312).
+
+    At user scope a claim may sit under the relocated root (``CLAUDE_CONFIG_DIR``)
+    of a target the lock recorded but the manifest does not declare, from an
+    ``install -g --target`` deploy. Those targets resolve through the same
+    owner install uses; the audited target set itself is unchanged.
+    """
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.scope import get_workspace_deploy_root
+    from ..integration.skill_layout import recorded_deployed_paths, resolve_reintegration_targets
+    from ..integration.targets import KNOWN_TARGETS
+
+    audited = {target.name for target in targets}
+    recorded = {
+        record.locator.target
+        for record in DeploymentLedgerCodec.from_lockfile(lock).records.values()
+    }
+    undeclared = sorted(recorded.intersection(KNOWN_TARGETS).difference(audited))
+    if not user_scope or not undeclared:
+        return list(targets)
+    return [
+        *targets,
+        *resolve_reintegration_targets(
+            get_workspace_deploy_root(project_root),
+            user_scope=True,
+            explicit_target=undeclared,
+            recorded_paths=recorded_deployed_paths(lock),
+            create_config=False,
+        ),
+    ]
+
+
 def verify_deployed_file_hashes(
     deploy_root: Path,
     lock: LockFile,
@@ -1873,8 +1912,12 @@ def run_baseline_checks(
     if _run(_check_deployment_ledger_owners(lock)):
         return result
 
+    claim_targets = resolve_claim_targets(
+        project_root, lock, user_scope=user_scope, targets=resolved_targets
+    )
+
     # Check 4: Deployed files present
-    if _run(_check_deployed_files_present(deployment_root, lock, resolved_targets)):
+    if _run(_check_deployed_files_present(deployment_root, lock, claim_targets)):
         return result
 
     # Check 5: No orphaned packages
@@ -1946,7 +1989,7 @@ def run_baseline_checks(
     # Check 8: Content integrity; 8b: local-bundle hooks still admitted (#4027)
     if (
         _run(
-            _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+            _check_content_integrity(deployment_root, lock, claim_targets, user_scope=user_scope)
             if content_integrity
             else CheckResult(name="content-integrity", passed=True, message="proven by the caller")
         )
