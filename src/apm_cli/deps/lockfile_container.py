@@ -113,6 +113,21 @@ def _plain_copy(value: object) -> object:
     return _NOT_PLAIN
 
 
+def plain_lockfile_document(document: object) -> object | None:
+    """A private plain copy of *document* when the safe dumper round-trips it, else None."""
+    plain = _plain_copy(document)
+    return None if plain is _NOT_PLAIN else plain
+
+
+def render_staged_document(document: object) -> str:
+    """Emit a staged plain document, seeding the parse memo for later text reads."""
+    from ..utils import yaml_io
+
+    text = yaml_io.machine_yaml_to_str(document)
+    remember_lockfile_text(text, document)
+    return text
+
+
 def remember_lockfile_text(yaml_str: str, document: object) -> None:
     """Record *document* as the parse of *yaml_str*, the text dumped from it.
 

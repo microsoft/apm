@@ -108,11 +108,7 @@ def test_a_handler_running_a_bundle_script_through_its_cwd_is_in_use(tmp_path: P
 
 
 def test_a_handler_whose_cwd_points_elsewhere_is_not_in_use(tmp_path: Path) -> None:
-    """#5281 control: the same command in an unrelated directory runs another script.
-
-    A bare ``./x.sh`` stays in use under #5106's default-deny, so the control
-    names a directory that certainly resolves elsewhere from every base.
-    """
+    """#5281 control: a script path in an unrelated directory runs another script."""
     assert _user_hook_with_cwd(tmp_path, "./scripts/x.sh", "tools") == set()
 
 
@@ -193,6 +189,145 @@ def test_a_handler_whose_cwd_climbs_out_of_a_link_is_in_use(tmp_path: Path) -> N
     assert _user_hook_with_cwd(tmp_path, "./x.sh", "lk/..", link) == {".github/hooks/user.json"}
 
 
+@pytest.mark.parametrize(
+    ("command", "cwd"),
+    [
+        ("./x.sh", "tools"),
+        ("sh -e ./x.sh", "tools"),
+        ("bash -eu ./x.sh", "tools"),
+        ("./prefix-x.sh", _SCRIPT_DIR),
+        ("./scripts/x.sh", _SCRIPT_DIR),
+    ],
+    ids=[
+        "bare-name-elsewhere",
+        "shell-options-elsewhere",
+        "shell-flags-elsewhere",
+        "longer-name-in-script-dir",
+        "subdir-of-script-dir",
+    ],
+)
+def test_a_cwd_handler_running_another_script_is_not_in_use(
+    tmp_path: Path, command: str, cwd: str
+) -> None:
+    """#5332: the command resolves from its declared cwd, as a whole path, not as a substring."""
+    assert _user_hook_with_cwd(tmp_path, command, cwd) == set()
+
+
+@pytest.mark.parametrize(
+    ("command", "alias"),
+    [
+        ("./x.sh", "x.sh"),
+        ("sh -e ./x.sh", "x.sh"),
+        ("./lk/x.sh", "lk"),
+    ],
+    ids=["linked-script", "linked-script-shell-options", "linked-directory"],
+)
+def test_a_cwd_operand_through_a_link_to_the_bundle_script_is_in_use(
+    tmp_path: Path, command: str, alias: str
+) -> None:
+    """A link under the handler's cwd may alias the bundle script: never cleared lexically."""
+
+    def link(project: Path) -> None:
+        tools = project / "tools"
+        tools.mkdir()
+        script = project / _COPILOT_SCRIPT
+        target = script if alias == "x.sh" else script.parent
+        (tools / alias).symlink_to(target, target_is_directory=alias != "x.sh")
+
+    assert _user_hook_with_cwd(tmp_path, command, "tools", link) == {".github/hooks/user.json"}
+
+
+def test_a_linked_cwd_is_in_use_whatever_the_name(tmp_path: Path) -> None:
+    """A linked cwd may alias the script directory, so it is never cleared (fail closed)."""
+
+    def link(project: Path) -> None:
+        (project / "lk").symlink_to(project / _SCRIPT_DIR, target_is_directory=True)
+
+    assert _user_hook_with_cwd(tmp_path, "./prefix-x.sh", "lk", link) == {".github/hooks/user.json"}
+
+
+def _user_hook(project: Path, command: str, prepare) -> set[str]:
+    """Write an unowned Copilot hook running *command* with no cwd; return the hook files in use."""
+    from apm_cli.install.local_bundle_hook_trust import _per_file_configs_running
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (project / _COPILOT_SCRIPT).parent.mkdir(parents=True)
+    (project / _COPILOT_SCRIPT).write_bytes(b"#!/bin/sh\n")
+    prepare(project)
+    hook = project / ".github" / "hooks" / "user.json"
+    handler = {"type": "command", "bash": command}
+    hook.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": [handler]}}))
+    return _per_file_configs_running(project, [KNOWN_TARGETS["copilot"]], set(), {_COPILOT_SCRIPT})
+
+
+def _linked_leaf(project: Path) -> None:
+    (project / "tools").mkdir()
+    (project / "tools" / "x.sh").symlink_to(project / _COPILOT_SCRIPT)
+
+
+def _linked_parent(project: Path) -> None:
+    (project / "tools").symlink_to(project / _SCRIPT_DIR, target_is_directory=True)
+
+
+def _plain_copy(project: Path) -> None:
+    (project / "tools").mkdir()
+    (project / "tools" / "x.sh").write_bytes(b"#!/bin/sh\n")
+
+
+@pytest.mark.parametrize(
+    ("command", "prepare", "in_use"),
+    [
+        ("sh tools/x.sh", _linked_leaf, True),
+        ("sh tools/x.sh", _linked_parent, True),
+        ("sh {root}/tools/x.sh", _linked_leaf, True),
+        ("sh tools/x.sh", _plain_copy, False),
+    ],
+    ids=["linked-leaf", "linked-parent", "absolute-through-link", "plain-control"],
+)
+def test_an_operand_through_a_link_is_in_use(
+    tmp_path: Path, command: str, prepare, in_use: bool
+) -> None:
+    """A link on the operand path may alias the bundle script: in use; a plain file is not."""
+    found = _user_hook(tmp_path, command.format(root=tmp_path.as_posix()), prepare)
+
+    assert found == ({".github/hooks/user.json"} if in_use else set())
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["x.sh", "sh x.sh", "cd .. && ./scripts/x.sh", "./$NAME", "./../scripts/x.sh"],
+    ids=["path-lookup", "bare-argument", "moves", "expansion", "climbs"],
+)
+def test_a_cwd_handler_that_may_still_run_the_script_is_in_use(
+    tmp_path: Path, command: str
+) -> None:
+    """#5332 fail closed: a known cwd clears only a command that certainly resolves elsewhere."""
+    assert _user_hook_with_cwd(tmp_path, command, _SCRIPT_DIR + "/sub") == {
+        ".github/hooks/user.json"
+    }
+
+
+def test_a_known_cwd_does_not_clear_a_sibling_handler_without_one(tmp_path: Path) -> None:
+    """#5332: a handler without a cwd keeps the default bases and default-deny."""
+    from apm_cli.install.local_bundle_hook_trust import _per_file_configs_running
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (tmp_path / _COPILOT_SCRIPT).parent.mkdir(parents=True)
+    (tmp_path / _COPILOT_SCRIPT).write_bytes(b"#!/bin/sh\n")
+    handlers = [
+        {"type": "command", "bash": "./x.sh", "cwd": "tools"},
+        {"type": "command", "bash": "./x.sh"},
+    ]
+    hook = tmp_path / ".github" / "hooks" / "user.json"
+    hook.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": handlers}}))
+
+    found = _per_file_configs_running(
+        tmp_path, [KNOWN_TARGETS["copilot"]], set(), {_COPILOT_SCRIPT}
+    )
+
+    assert found == {".github/hooks/user.json"}
+
+
 _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
 
 
@@ -234,6 +369,21 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         ('sh .claude/hooks/hookpkg/hooks/scripts/"x"".sh"', True),
         ("sh .claude/hooks/hookpkg/hooks/scripts/x\\.sh", True),
         ("sh .claude/hooks/hookpkg/hooks/scripts/$'\\x78'.sh", True),
+        ('sh -e "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', False),
+        ('bash -eu "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', False),
+        ('sh -o errexit -x "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', False),
+        ('/bin/bash -e "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh" arg', False),
+        ("sh -c 'sh -e \"/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh\"'", False),
+        ("bash -e .claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ('sh -eu "/project/.claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        ('sh -Z "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        ('sh -s "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        ('bash --rcfile "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        (
+            'sh -e "/opt/other .claude/hooks/hookpkg/hooks/scripts/./x.sh" && sh .claude/hooks/hookpkg/hooks/scripts/x.sh',
+            True,
+        ),
+        ("echo .claude/hooks/hookpkg/hooks/scripts/x.sh", True),
     ],
     ids=[
         "project-dir-anchor",
@@ -267,6 +417,18 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         "adjacent-quoted-fragments",
         "escaped-dot",
         "ansi-c-quoting",
+        "shell-option-unrelated",
+        "shell-combined-options-unrelated",
+        "shell-o-option-unrelated",
+        "shell-path-option-unrelated",
+        "shell-c-then-option-unrelated",
+        "shell-option-bundle-script",
+        "shell-option-bundle-absolute",
+        "shell-unknown-option",
+        "shell-stdin-option",
+        "shell-long-option",
+        "shell-option-then-bundle-script",
+        "mention-without-run",
     ],
 )
 def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:
@@ -428,3 +590,55 @@ def test_a_lone_documented_anchor_never_refuses(command: str) -> None:
     root = Path("/project")
 
     assert not runs_script(command, script_refs(root, [_SCRIPT]), (root, root / ".claude"), root)
+
+
+def test_the_audit_reads_each_hook_config_and_record_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5211: the local-bundle-hooks audit reads every config, sidecar and record once."""
+    from collections import Counter
+
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.policy.ci_checks import _check_local_bundle_hooks
+
+    root, _targets = _project(tmp_path, local_bundle_hook_source_marker("hookpkg", _KEY))
+    record = {"_apm_source": local_bundle_hook_source_marker("hookpkg", _KEY), "hook_files": []}
+    (root / ".github").mkdir()
+    (root / ".github" / "apm-hooks.json").write_text(json.dumps({"local-bundle-hooks": [record]}))
+    reads: Counter[str] = Counter()
+    real_read_text = Path.read_text
+
+    def counting(self: Path, *args, **kwargs):
+        reads[self.relative_to(root).as_posix() if self.is_relative_to(root) else str(self)] += 1
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting)
+    # A merged target's sidecar is read as a regular file only (#5328).
+    from apm_cli.integration import hook_ownership
+
+    real_open_regular = hook_ownership.open_regular_file
+
+    def counting_regular(path: Path, *args, **kwargs):
+        reads[path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)] += 1
+        return real_open_regular(path, *args, **kwargs)
+
+    monkeypatch.setattr(hook_ownership, "open_regular_file", counting_regular)
+    targets = [KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]]
+
+    result = _check_local_bundle_hooks(
+        root,
+        LockFile(),
+        APMPackage(name="p", version="1.0.0"),
+        targets,
+        user_scope=False,
+        no_policy=True,
+    )
+
+    assert result.name == "local-bundle-hooks"
+    read = {path: count for path, count in reads.items() if path.endswith(".json")}
+    assert read[".claude/settings.json"] == 1, read
+    assert read[".claude/apm-hooks.json"] == 1, read
+    assert read[".github/apm-hooks.json"] == 1, read
+    assert max(read.values()) == 1, read

@@ -203,15 +203,26 @@ def record_bundle_canvas(
             )
 
 
-def _canvas_records(project_root: Path, targets: Any) -> dict[str, tuple[set, set[str]]]:
-    """Return ``slug -> (keys, contained files)`` from every canvas target's record."""
-    from ..integration.hook_ownership import BUNDLE_RECORD_CANVAS, per_file_bundle_hook_keys
+def _canvas_records(
+    project_root: Path, targets: Any, read: Any = None
+) -> dict[str, tuple[set, set[str]]]:
+    """Return ``slug -> (keys, contained files)`` from every canvas target's record.
+
+    *read*, when an audit passes its read-once reader, shares each sidecar read (#5211).
+    """
+    from ..integration.hook_ownership import (
+        BUNDLE_RECORD_CANVAS,
+        per_file_bundle_hook_keys,
+        read_hook_object,
+    )
 
     root = Path(project_root)
     found: dict[str, tuple[set, set[str]]] = {}
     for target in _canvas_targets(targets):
         try:
-            records = per_file_bundle_hook_keys(_sidecar(root, target), BUNDLE_RECORD_CANVAS)
+            records = per_file_bundle_hook_keys(
+                _sidecar(root, target), BUNDLE_RECORD_CANVAS, read or read_hook_object
+            )
         except (OSError, ValueError, TypeError):
             records = {}
         prefixes = _canvas_prefixes([target])
@@ -226,6 +237,7 @@ def deployed_bundle_canvas(
     project_root: Path,
     targets: Any,
     bundle_paths: Collection[str] | Callable[[], Collection[str]],
+    read: Any = None,
 ) -> list[BundleCanvas]:
     """Return the canvas files each local bundle deployed, as the lockfile still claims.
 
@@ -237,7 +249,7 @@ def deployed_bundle_canvas(
     if not prefixes:
         return []
     root = Path(project_root)
-    records = _canvas_records(root, targets)
+    records = _canvas_records(root, targets, read)
     # The lockfile is read only when a record or a canvas root exists.
     if not records and not any((root / prefix).is_dir() for prefix in prefixes):
         return []
@@ -265,8 +277,9 @@ def _unadmitted(
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]]],
     bundle_paths: Collection[str] | Callable[[], Collection[str]],
+    read: Any = None,
 ) -> list[tuple[BundleCanvas, str]]:
-    deployed = deployed_bundle_canvas(project_root, targets, bundle_paths)
+    deployed = deployed_bundle_canvas(project_root, targets, bundle_paths, read)
     if not deployed:
         return []
     allow_map = allow_executables()
@@ -295,6 +308,7 @@ def unadmitted_bundle_canvas(
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]]],
     bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
+    read: Any = None,
 ) -> list[UnadmittedBundleCanvas]:
     """Return deployed local-bundle canvas extensions the current trust does not admit.
 
@@ -304,7 +318,9 @@ def unadmitted_bundle_canvas(
     """
     return [
         UnadmittedBundleCanvas(holding.slug, reason, tuple(sorted(holding.files)), holding.recorded)
-        for holding, reason in _unadmitted(project_root, targets, allow_executables, bundle_paths)
+        for holding, reason in _unadmitted(
+            project_root, targets, allow_executables, bundle_paths, read
+        )
     ]
 
 

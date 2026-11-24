@@ -208,6 +208,48 @@ def _tls_peer(leaf: Path, key: Path) -> Iterator[tuple[int, list[bytes]]]:
         listener.close()
 
 
+@contextlib.contextmanager
+def _connect_proxy(target_port: int) -> Iterator[str]:
+    """An HTTP CONNECT proxy whose every tunnel reaches the local peer on *target_port*."""
+    listener = socket.create_server(("127.0.0.1", 0))
+
+    def pipe(source: socket.socket, sink: socket.socket) -> None:
+        with contextlib.suppress(OSError):
+            while data := source.recv(65536):
+                sink.sendall(data)
+        with contextlib.suppress(OSError):
+            sink.shutdown(socket.SHUT_WR)
+
+    def tunnel(client: socket.socket) -> None:
+        with client:
+            request = b""
+            while b"\r\n\r\n" not in request:
+                chunk = client.recv(4096)
+                if not chunk:
+                    return
+                request += chunk
+            with socket.create_connection(("127.0.0.1", target_port), timeout=30) as upstream:
+                client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                back = threading.Thread(target=pipe, args=(upstream, client), daemon=True)
+                back.start()
+                pipe(client, upstream)
+                back.join(10)
+
+    def serve() -> None:
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            threading.Thread(target=tunnel, args=(conn,), daemon=True).start()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        listener.close()
+
+
 def _handshake(context: ssl.SSLContext, port: int, host: str = "github.com") -> None:
     with socket.create_connection(("127.0.0.1", port), timeout=10) as raw:
         with context.wrap_socket(raw, server_hostname=host) as tls:
@@ -227,6 +269,14 @@ def _assert_peer_saw(received: _Seen, *, request: bool) -> None:
         assert data.startswith(b"GET / HTTP/1.1"), f"no request at the peer: {received.faults}"
     else:
         assert data == b"", "a refused handshake sends no application byte"
+
+
+def _assert_tunnels_reached(received: _Seen, count: int) -> None:
+    """Not vacuous: each tunnel reached the peer, which saw the client give up."""
+    deadline = time.monotonic() + 5
+    while len(received.faults) < count and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(received.faults) >= count, received.faults
 
 
 def _anchored(root: Path, *, revocation: bool = True) -> ssl.SSLContext:
@@ -329,3 +379,39 @@ def test_concurrent_handshakes_on_one_context_never_accept_an_untrusted_peer(
 
     assert sorted(set(outcomes)) == [("rogue", "refused"), ("trusted", "accepted")], outcomes
     assert len(outcomes) == 16
+
+
+def test_an_authenticated_request_to_an_untrusted_peer_sends_no_authorization(
+    tmp_path: Path,
+) -> None:
+    """SC6: A' over the Windows-store session. A peer the store does not trust
+    gets no application byte, so never the Authorization header (listing and fetch)."""
+    import requests
+
+    from apm_cli.cache import inprocess_fetch
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.deps import anonymous_ref_listing as arl
+
+    _rogue_root, leaf, key = _mint(tmp_path / "rogue", "github.com")
+    with (
+        _tls_peer(leaf, key) as (port, received),
+        _connect_proxy(port) as proxy,
+        invocation_scope(),
+    ):
+        with pytest.raises(arl._Fallback):
+            arl._fetch_within_deadline(
+                "https://github.com/o/r/info/refs?service=git-upload-pack",
+                proxy,
+                arl.OS_TRUST,
+                credential="Basic eC1hY2Nlc3MtdG9rZW46c2VjcmV0",
+            )
+        with pytest.raises(requests.exceptions.RequestException):
+            inprocess_fetch._post(
+                "https://github.com/o/r/git-upload-pack",
+                proxy,
+                ("file", arl.OS_TRUST),
+                b"0000",
+                "Authorization: Basic eC1hY2Nlc3MtdG9rZW46c2VjcmV0",
+            )
+        _assert_peer_saw(received, request=False)
+        _assert_tunnels_reached(received, 2)

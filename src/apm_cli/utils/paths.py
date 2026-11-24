@@ -11,7 +11,7 @@ import unicodedata
 from collections.abc import Callable, Container, Iterable, Iterator
 from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, WindowsPath
 
-from .realpath import resolve_path
+from .realpath import kernel_resolves, resolve_path
 
 # Marks an input the string comparison does not decide; pathlib decides it.
 _UNDECIDED = object()
@@ -126,8 +126,11 @@ def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     Each path is still resolved at use; only the shared base is not
     resolved again per path within this call.
     """
+    # The kernel form where it applies (Linux), as portable_relpath; elsewhere
+    # Path.resolve() itself.
+    resolve = resolve_path if kernel_resolves() else Path.resolve
     try:
-        resolved_base: Path | None = base.resolve()
+        resolved_base: Path | None = resolve(base)
     except (OSError, RuntimeError):
         resolved_base = None
     results: list[str] = []
@@ -135,12 +138,12 @@ def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
         relative = None
         if resolved_base is not None:
             try:
-                relative = relative_posix(path.resolve(), resolved_base)
+                relative = relative_posix(resolve(path), resolved_base)
             except (ValueError, OSError, RuntimeError):
                 relative = None
         if relative is None:
             try:
-                relative = path.resolve().as_posix()
+                relative = resolve(path).as_posix()
             except (OSError, RuntimeError):
                 relative = path.as_posix()
         results.append(relative)

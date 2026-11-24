@@ -1,0 +1,14 @@
+{
+  "issue": 5313,
+  "fixed_in": "Unreleased",
+  "summary": "Deploy-journal replay trusted any group-writable APM_HOME, so another member of its group could rename the user's own older store into place; group write is now accepted only for a verifiably user-private group, and an unknown group refuses.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_deploy_snapshot.py::test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group"
+  ]
+}

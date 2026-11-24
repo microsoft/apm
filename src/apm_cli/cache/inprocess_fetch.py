@@ -619,6 +619,64 @@ def _trust(child_env: Mapping[str, str], values: Mapping[str, str]) -> tuple[str
         raise _Refuse(str(reason)) from None
 
 
+_MANAGED_INTENT = "APM_GIT_MANAGED_AUTH_INTENT"
+_MANAGED_PREFIX = "Authorization: Basic "
+
+
+def _split_managed_auth(env: Mapping[str, str]) -> tuple[str | None, dict[str, str]]:
+    """``(APM's github-basic header, env without it)``; ``(None, env)`` when APM manages no auth.
+
+    W3d A': only the one header AuthResolver writes for github-basic is
+    consumed (``x-access-token:<token>``, Basic). Any other extraHeader stays in
+    the env and sends the fetch to git. The header is returned to the caller's
+    frame only: it never reaches the gate, a memo, a log or an exception.
+    """
+    import base64
+    import binascii
+
+    stripped = dict(env)
+    if stripped.pop(_MANAGED_INTENT, None) != "1":
+        return None, dict(env)
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT") or "0")
+    except ValueError:
+        raise _Refuse("managed auth env is malformed") from None
+    entries = []
+    for index in range(count):
+        key = env.get(f"GIT_CONFIG_KEY_{index}")
+        value = env.get(f"GIT_CONFIG_VALUE_{index}")
+        if key is None or value is None:
+            raise _Refuse("managed auth env is malformed")
+        entries.append((key, value))
+        stripped.pop(f"GIT_CONFIG_KEY_{index}", None)
+        stripped.pop(f"GIT_CONFIG_VALUE_{index}", None)
+    managed = [
+        index
+        for index, (key, value) in enumerate(entries)
+        if key.lower() == "http.extraheader" and value.startswith(_MANAGED_PREFIX)
+    ]
+    if len(managed) != 1:
+        raise _Refuse("managed auth header is not APM's")
+    header = entries[managed[0]][1]
+    if "\r" in header or "\n" in header:
+        raise _Refuse("managed auth header is not github-basic")
+    try:
+        decoded = base64.b64decode(header[len(_MANAGED_PREFIX) :], validate=True)
+    except (binascii.Error, ValueError):
+        raise _Refuse("managed auth header is not github-basic") from None
+    if not decoded.startswith(b"x-access-token:") or len(decoded) <= len(b"x-access-token:"):
+        raise _Refuse("managed auth header is not github-basic")
+    # Only the managed entry goes; any other extraHeader stays and sends the fetch to git.
+    kept = [entry for index, entry in enumerate(entries) if index != managed[0]]
+    stripped.pop("GIT_CONFIG_COUNT", None)
+    if kept:
+        stripped["GIT_CONFIG_COUNT"] = str(len(kept))
+        for index, (key, value) in enumerate(kept):
+            stripped[f"GIT_CONFIG_KEY_{index}"] = key
+            stripped[f"GIT_CONFIG_VALUE_{index}"] = value
+    return header, stripped
+
+
 def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str, str]]:
     """``(upload-pack URL, proxy, trust)`` when git's request is provably anonymous and equal."""
     from ..deps import anonymous_ref_listing as anon
@@ -803,19 +861,30 @@ def _rate_limited() -> bool:
     return bool(memo)
 
 
-def _admit(status: int, headers: Mapping[str, str]) -> None:
-    """Refuse a non-200 answer; a rate-limit answer also sends the rest of the command to git.
+def trip_if_rate_limited(status: int, headers: Mapping[str, str]) -> bool:
+    """Trip the command's breaker on a throttle (``deps/github_rate_limit``) or any 403.
 
-    A throttle (``deps/github_rate_limit``) or any 403 trips the breaker: no
-    retry, no sleep, and no further in-process request in this command.
+    Shared by the in-process fetch and ref listing: once tripped, neither
+    sends another in-process request in this command.
     """
     from ..core.invocation_memo import invocation_memo
     from ..deps.github_rate_limit import classify_github_throttle
 
-    if status == 403 or classify_github_throttle(status, headers) is not None:
-        memo = invocation_memo(_BREAKER_MEMO)
-        if memo is not None:
-            memo["tripped"] = True
+    if status != 403 and classify_github_throttle(status, headers) is None:
+        return False
+    memo = invocation_memo(_BREAKER_MEMO)
+    if memo is not None:
+        memo["tripped"] = True
+    return True
+
+
+def _admit(status: int, headers: Mapping[str, str]) -> None:
+    """Refuse a non-200 answer; a rate-limit answer also sends the rest of the command to git.
+
+    A throttle or any 403 trips the breaker: no retry, no sleep, and no
+    further in-process request in this command.
+    """
+    if trip_if_rate_limited(status, headers):
         raise _Refuse(f"rate limited (HTTP {status}); git serves the rest of this command")
     if headers.get("WWW-Authenticate") is not None:
         # W1: an auth challenge is git's to answer; nothing is retried in process.
@@ -837,20 +906,35 @@ def _requests_verify(ca: str) -> str | bool:
     return requests_verify(ca)
 
 
-def _post(upload_url: str, proxy: str | None, trust: tuple[str, str], body: bytes) -> bytes:
+def _post(
+    upload_url: str,
+    proxy: str | None,
+    trust: tuple[str, str],
+    body: bytes,
+    credential: str | None = None,
+) -> bytes:
     from ..utils.http_credentials import origin_bounded_request
 
     deadline = time.monotonic() + _DEADLINE_SECONDS
+    headers = {
+        "Content-Type": "application/x-git-upload-pack-request",
+        "Accept": "application/x-git-upload-pack-result",
+        "Git-Protocol": "version=2",
+    }
+    if credential is not None:
+        from ..utils.http_credentials import (
+            credential_header_value,
+            per_request_credential_headers,
+        )
+
+        # Per request only (never session.headers), exact origin, no redirect hop.
+        headers.update(per_request_credential_headers(credential_header_value(credential)))
     with origin_bounded_request(
         _session(trust),
         "POST",
         upload_url,
         base_url=upload_url,
-        headers={
-            "Content-Type": "application/x-git-upload-pack-request",
-            "Accept": "application/x-git-upload-pack-result",
-            "Git-Protocol": "version=2",
-        },
+        headers=headers,
         data=body,
         max_hops=0,
         ambient_credentials=False,
@@ -893,6 +977,7 @@ def _admitted_post(
     proxy: str | None,
     trust: tuple[str, str],
     body: bytes,
+    credential: str | None = None,
     *,
     post: Callable[..., bytes] | None = None,
 ) -> bytes:
@@ -914,12 +999,12 @@ def _admitted_post(
             if _rate_limited():
                 raise _Refuse("rate limited earlier in this command")
             if not settled.get("ok"):
-                answer = send(upload_url, proxy, trust, body)
+                answer = send(upload_url, proxy, trust, body, credential)
                 settled["ok"] = True
                 return answer
     if _rate_limited():  # another download tripped it while this one was gated or queued
         raise _Refuse("rate limited earlier in this command")
-    return send(upload_url, proxy, trust, body)
+    return send(upload_url, proxy, trust, body, credential)
 
 
 def _note(url: str, outcome: str) -> None:
@@ -991,8 +1076,10 @@ def fetch_worktree(
         _log.debug("in-process fetch skipped: rate limited earlier in this command")
         return None
     try:
-        upload_url, proxy, trust = _gate(url, env if env is not None else os.environ)
-        body = _admitted_post(upload_url, proxy, trust, _request_body(sha))
+        credential, env = _split_managed_auth(env if env is not None else os.environ)
+        upload_url, proxy, trust = _gate(url, env)
+        body = _admitted_post(upload_url, proxy, trust, _request_body(sha), credential)
+        del credential
         objects = parse_pack(_pack_from_response(body))
         files, reached = _plan(objects, sha)
         root = str(staged)

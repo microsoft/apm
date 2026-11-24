@@ -555,8 +555,20 @@ def parse_advertisement(data: bytes, prefixes: tuple[str, ...]) -> str:
     return "".join(lines)
 
 
-def _fetch(refs_url: str, proxy: str | None, ca: str, holder: dict) -> bytes:
-    from apm_cli.utils.http_credentials import origin_bounded_request
+def _fetch(
+    refs_url: str, proxy: str | None, ca: str, holder: dict, credential: str | None = None
+) -> bytes:
+    from apm_cli.cache.inprocess_fetch import _rate_limited, trip_if_rate_limited
+    from apm_cli.utils.http_credentials import (
+        origin_bounded_request,
+        per_request_credential_headers,
+    )
+
+    # Another listing or fetch may have tripped the breaker during this one's checks.
+    if _rate_limited():
+        raise _Fallback("rate limited earlier in this command")
+    # Per request only (never session.headers), exact origin, no redirect hop.
+    headers = per_request_credential_headers(credential) if credential else None
 
     deadline = time.monotonic() + _DEADLINE_SECONDS
     # max_hops=0: any redirect raises RedirectRefusedError and falls back.
@@ -571,8 +583,13 @@ def _fetch(refs_url: str, proxy: str | None, ca: str, holder: dict) -> bytes:
         verify=requests_verify(ca),
         timeout=_TIMEOUT,
         stream=True,
+        **({"headers": headers} if headers else {}),
     ) as response:
         holder["response"] = response
+        if trip_if_rate_limited(response.status_code, response.headers):
+            raise _Fallback(f"rate limited (HTTP {response.status_code})")
+        if response.headers.get("WWW-Authenticate") is not None:
+            raise _Fallback("auth challenge")
         if response.status_code != 200:
             raise _Fallback(f"HTTP {response.status_code}")
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
@@ -590,7 +607,11 @@ def _abort(response) -> None:
 
 
 def _fetch_within_deadline(
-    refs_url: str, proxy: str | None, ca: str, budget: float = _DEADLINE_SECONDS
+    refs_url: str,
+    proxy: str | None,
+    ca: str,
+    budget: float = _DEADLINE_SECONDS,
+    credential: str | None = None,
 ) -> bytes:
     """The advertisement body, or ``_Fallback`` on any error or past the budget.
 
@@ -602,7 +623,7 @@ def _fetch_within_deadline(
 
     def run() -> None:
         try:
-            holder["data"] = _fetch(refs_url, proxy, ca, holder)
+            holder["data"] = _fetch(refs_url, proxy, ca, holder, credential)
         except Exception as exc:
             holder["error"] = exc
 
@@ -623,12 +644,48 @@ def _fetch_within_deadline(
 
 
 def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, str]) -> str | None:
+    """``git ls-remote --tags [--heads] <url>`` stdout for an anonymous attempt, or ``None``."""
+    return _list_refs(url, include_heads=include_heads, env=env)
+
+
+def list_refs_authenticated(url: str, *, include_heads: bool, env: Mapping[str, str]) -> str | None:
+    """The same listing with AuthResolver's managed github-basic header, or ``None`` (run git).
+
+    RESEARCH (lever 1): A''s ``_split_managed_auth`` takes only the header
+    AuthResolver writes; the gates see the token-free env; the header goes on
+    the request only and is dropped after it.
+    """
+    from apm_cli.cache.inprocess_fetch import _Refuse, _split_managed_auth
+
+    try:
+        line, stripped = _split_managed_auth(env)
+    except _Refuse as reason:
+        _log.debug("authenticated ref listing falls back to git: %s", reason)
+        return None
+    if line is None:
+        return None
+    from apm_cli.utils.http_credentials import credential_header_value
+
+    value = credential_header_value(line)
+    try:
+        return _list_refs(url, include_heads=include_heads, env=stripped, credential=value)
+    finally:
+        del line, value
+
+
+def _list_refs(
+    url: str, *, include_heads: bool, env: Mapping[str, str], credential: str | None = None
+) -> str | None:
     """``git ls-remote --tags [--heads] <url>`` stdout for an anonymous attempt, or ``None``.
 
     ``None`` means "run git": the caller's existing anonymous ``git ls-remote``
     then runs with *env* exactly as before.
     """
+    from apm_cli.cache.inprocess_fetch import _rate_limited
+
     try:
+        if _rate_limited():
+            raise _Fallback("rate limited earlier in this command")
         path = _repository_path(url)
         for name in _FALLBACK_ENV:
             if env.get(name):
@@ -646,7 +703,7 @@ def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, st
         verify = _verify(child_env, config)
         prefixes = ("refs/tags/", "refs/heads/") if include_heads else ("refs/tags/",)
         refs_url = f"https://{_GITHUB_HOST}{path}/info/refs?service=git-upload-pack"
-        data = _fetch_within_deadline(refs_url, proxy, verify)
+        data = _fetch_within_deadline(refs_url, proxy, verify, credential=credential)
         return parse_advertisement(data, prefixes)
     except _Fallback as reason:
         _log.debug("anonymous ref listing falls back to git: %s", reason)
