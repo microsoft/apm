@@ -153,7 +153,12 @@ def _respelled_descendants(
             or via is None
             or via[1] is None
             or real_dir is None
-            or not _same_install_dir(row, declared, modules_dir)
+            or not _same_install_dir(
+                row,
+                declared,
+                modules_dir,
+                source=_edge_sources(walk, key, nearest[0], row, modules_dir),
+            )
         ):
             continue
         copy = row.to_dependency_ref().get_install_path(modules_dir)
@@ -181,7 +186,9 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
             f"{label(key)} stays, but the package that still needs it declares it under "
             f"another name ({alias or 'no alias'}), which installs elsewhere"
         )
-    if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
+    if declared != row.repo_url and not _same_install_dir(
+        row, declared, modules_dir, source=_edge_sources(walk, key, parent, row, modules_dir)
+    ):
         # An alias spelling (a symlink) installs as another package directory.
         raise LocalReanchorRefused(
             f"{label(key)} stays, but the package that still needs it declares it as "
@@ -190,14 +197,65 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
     return declared
 
 
-def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
-    """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem).
+class _SourceFacts:
+    """The filesystem facts a normalization respelling is proven on (#5222); a test seam."""
 
-    Only letter case may differ (#5091's scope); a Unicode-normalization
-    respelling refuses (#5222). The filesystem then decides.
+    def identity(self, path: Path) -> tuple[int, int] | None:
+        """``(device, inode)`` of a real directory, never through a final link."""
+        try:
+            found = path.lstat()
+        except OSError:
+            return None
+        return (found.st_dev, found.st_ino) if stat.S_ISDIR(found.st_mode) else None
+
+    def contained(self, root: Path, path: Path) -> bool:
+        """Whether *path* is reached from *root* with no linked component and stays inside."""
+        from ...utils.path_security import has_symlink_component
+
+        try:
+            return not has_symlink_component(root, path) and path.resolve().is_relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            return False
+
+
+def _edge_sources(walk, key: str, parent, row, modules_dir: Path) -> tuple[Path, Path, Path] | None:
+    """The recorded and the spelled source directory of *key* under *parent*, and the root.
+
+    Both are spelled lexically in the declaring parent's directory: the edge's
+    own ``local_path`` and the row's recorded leaf name (#5222).
     """
-    if declared is None or declared.casefold() != row.repo_url.casefold():
+    edge = walk.declaring_edges.get(key, {}).get(parent)
+    parent_dir = walk.local_dirs.get(parent)
+    if edge is None or edge[1] is None or parent_dir is None or not row.local_path:
+        return None
+    spelled = Path(os.path.normpath(Path(parent_dir) / edge[1]))
+    return spelled.parent / Path(row.local_path).name, spelled, modules_dir.parent.resolve()
+
+
+def _same_install_dir(
+    row, declared: str | None, modules_dir: Path, *, source=None, facts=None
+) -> bool:
+    """Whether *declared* names *row*'s own package directory.
+
+    A letter-case respelling is decided by the install paths on a
+    case-insensitive filesystem (#5091). A Unicode-normalization respelling
+    is proven on the SOURCE directories (*source*: the recorded and the
+    spelled directory and the project root): both inside the project, neither
+    reached through a link, and one inode (#5222).
+    """
+    if declared is None:
         return False
+    if declared.casefold() != row.repo_url.casefold():
+        from ...utils.paths import caseless
+
+        if source is None or caseless(declared) != caseless(row.repo_url):
+            return False
+        recorded, spelled, root = source
+        facts = facts or _SourceFacts()
+        if not all(facts.contained(root, path) for path in (recorded, spelled)):
+            return False
+        first = facts.identity(recorded)
+        return first is not None and first == facts.identity(spelled)
     ref = row.to_dependency_ref()
     try:
         current = ref.get_install_path(modules_dir)
