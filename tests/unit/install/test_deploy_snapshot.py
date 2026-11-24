@@ -2347,6 +2347,35 @@ def test_a_group_writable_apm_home_defers_replay_until_its_group_write_is_remove
     assert not store.exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell and group write")
+def test_the_printed_chmod_fixes_an_apm_home_whose_path_has_a_space(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5385 review: the printed recovery command quotes APM_HOME, so running it works."""
+    import subprocess
+
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+    from apm_cli.install.transaction import replay_abandoned_deploys
+
+    home = tmp_path / "APM home"
+    monkeypatch.setenv("APM_HOME", str(home))
+    project = tmp_path / "project"
+    config, _ledger = _private_config(project)
+    _killed_journal(home, project, config)
+    home.chmod(0o775)
+    _local_account_databases(tmp_path, monkeypatch, "files sss")
+    warnings: list[str] = []
+    logger = type("Logger", (), {"warning": lambda self, m: warnings.append(m)})()
+
+    with pytest.raises(InstallFailureAlreadyRendered):
+        replay_abandoned_deploys(project / "apm_modules", logger)
+
+    (command,) = [m.split("Run '", 1)[1].split("',", 1)[0] for m in warnings if "Run '" in m]
+    subprocess.run(["sh", "-c", command], cwd=tmp_path, check=True)
+    assert home.stat().st_mode & 0o020 == 0
+    assert config.read_bytes() == b"killed\n"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
 def test_a_symlinked_private_apm_home_is_still_replayed(tmp_path: Path, apm_home: Path) -> None:
     """A dotfiles APM_HOME is a link to a private directory: its target is checked."""
