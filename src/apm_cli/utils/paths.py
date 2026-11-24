@@ -120,6 +120,33 @@ def portable_relpath(path: Path, base: Path) -> str:
         return path.as_posix()
 
 
+def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
+    """:func:`portable_relpath` of each path against one *base*, resolving it once.
+
+    Each path is still resolved at use; only the shared base is not
+    resolved again per path within this call.
+    """
+    try:
+        resolved_base: Path | None = resolve_path(base)
+    except (OSError, RuntimeError):
+        resolved_base = None
+    results: list[str] = []
+    for path in paths:
+        relative = None
+        if resolved_base is not None:
+            try:
+                relative = relative_posix(resolve_path(path), resolved_base)
+            except (ValueError, OSError, RuntimeError):
+                relative = None
+        if relative is None:
+            try:
+                relative = resolve_path(path).as_posix()
+            except (OSError, RuntimeError):
+                relative = path.as_posix()
+        results.append(relative)
+    return results
+
+
 def portable_link_relpath(
     path: str | Path,
     base: str | Path,

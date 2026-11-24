@@ -20,7 +20,7 @@ from ..utils.path_security import (
     has_symlink_component,
     validate_path_segments,
 )
-from ..utils.paths import portable_relpath
+from ..utils.paths import portable_relpath, portable_relpaths
 from .content_scanner import ContentScanner, ScanFinding
 
 # ---------------------------------------------------------------------------
@@ -148,10 +148,8 @@ class SecurityGate:
         force: bool,
     ) -> ScanVerdict:
         """Scan explicit source paths without traversing unrelated directories."""
-        for fpath in candidates:
-            if fpath.is_symlink() or not fpath.is_file():
-                continue
-            rel = portable_relpath(fpath, root)
+        admitted = [f for f in candidates if not f.is_symlink() and f.is_file()]
+        for fpath, rel in zip(admitted, portable_relpaths(admitted, root), strict=True):
             scanned_files.add(rel)
             try:
                 file_findings = ContentScanner.scan_file(fpath)
