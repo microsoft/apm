@@ -133,6 +133,10 @@ def scope(
     factory = LocalPackageFactory(scene.isolated.package_root)
     packages = {
         "lsp-kit": factory.create("lsp-kit", lsp_dependencies=(_lsp("kit-lsp"),)),
+        "root-kit": factory.create(
+            "root-kit",
+            lsp_dependencies=({**_lsp("root-lsp"), "command": "${CLAUDE_PLUGIN_ROOT}/bin/lsp"},),
+        ),
         "keep-kit": factory.create("keep-kit", lsp_dependencies=(_lsp("keep-lsp"),)),
         "mixed-kit": factory.create(
             "mixed-kit",
@@ -233,6 +237,31 @@ def test_uninstall_keeps_a_user_edited_lsp_entry_and_reports_it(scope: _Scope) -
     assert scope.lsp_config.read_bytes() == edited
     assert "kit-lsp" in flat(result.stdout + result.stderr), describe(result)
     assert all(view == set() for view in scope.locked_views().values()), scope.locked_views()
+
+
+@pytest.mark.parametrize("edited", [False, True], ids=["as-written", "user-edited"])
+def test_uninstall_judges_a_plugin_root_entry_at_its_own_package_root(
+    scope: _Scope, edited: bool
+) -> None:
+    """A ${CLAUDE_PLUGIN_ROOT} entry is APM's only at its package's root: an edit to
+    another absolute path is kept and named, an untouched entry still goes (#5263)."""
+    scope.declare("root-kit")
+    scope.install()
+    data = json.loads(scope.lsp_config.read_text(encoding="utf-8"))
+    assert "${CLAUDE_PLUGIN_ROOT}" not in json.dumps(data["lspServers"]["root-lsp"])
+    if edited:
+        data["lspServers"]["root-lsp"]["command"] = "/user/custom/bin/lsp"
+        scope.lsp_config.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    before = scope.lsp_config.read_bytes()
+
+    result = scope.uninstall("root-kit")
+
+    assert result.returncode == 0, describe(result)
+    if edited:
+        assert scope.lsp_config.read_bytes() == before
+        assert "Kept LSP server root-lsp" in flat(result.stdout + result.stderr), describe(result)
+    else:
+        assert scope.configured() == set(), describe(result)
 
 
 def test_uninstall_changes_no_lsp_config_when_a_later_one_is_unreadable(scope: _Scope) -> None:
