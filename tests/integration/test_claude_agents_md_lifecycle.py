@@ -104,3 +104,92 @@ def test_hand_authored_claude_md_keeps_rules_until_it_imports_agents_md(
     assert sorted(path.name for path in rules.glob("*.md")) == ["py.md"]
     assert "STYLE_BODY" in (project / "AGENTS.md").read_text(encoding="utf-8")
     assert (project / "CLAUDE.md").read_text(encoding="ascii") == "@AGENTS.md\n# Team notes\n"
+
+
+# -- Never drop without a replacement (#5343) ------------------------------------
+
+_TARGETS = pytest.mark.parametrize(
+    "targets", ["[claude]", "[claude, copilot]"], ids=["claude", "claude-copilot"]
+)
+
+
+def _routed_project(scenario: Scenario, targets: str) -> Path:
+    project = scenario.isolated.work_root / "proj"
+    _seed(project)
+    write(project / "apm.yml", f"name: proj\nversion: 1.0.0\ntargets: {targets}\n")
+    return project
+
+
+def _rules(project: Path) -> dict[str, str]:
+    rules = project / ".claude" / "rules"
+    return {path.name: path.read_text(encoding="utf-8") for path in sorted(rules.glob("*.md"))}
+
+
+@_TARGETS
+def test_install_without_compile_keeps_every_rule_claude_loads(
+    tmp_path: Path, apm_binary_path: Path, targets: str
+) -> None:
+    """No compiled AGENTS.md carries the routed instructions yet: install keeps their
+    .claude/rules/ files, so Claude Code never loses one (#5343)."""
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    project = _routed_project(scenario, targets)
+
+    installed = output(scenario.run("install", "--no-policy", cwd=project))
+    rules = _rules(project)
+    again = output(scenario.run("install", "--no-policy", cwd=project))
+
+    assert sorted(rules) == ["py.md", "src.md", "style.md"], installed
+    assert "STYLE_BODY" in rules["style.md"] and "SRC_BODY" in rules["src.md"]
+    assert _rules(project) == rules, again
+    assert "routed to AGENTS.md" in installed, installed
+    assert not (project / "AGENTS.md").exists()
+
+
+@_TARGETS
+def test_compile_then_install_retires_the_rules_agents_md_carries(
+    tmp_path: Path, apm_binary_path: Path, targets: str
+) -> None:
+    """Once a compiled AGENTS.md Claude loads carries a routed instruction, the next
+    install retires its rule: exactly one copy, never none (#5343)."""
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    project = _routed_project(scenario, targets)
+    scenario.run("install", "--no-policy", cwd=project)
+
+    scenario.run("compile", cwd=project)
+    settled = output(scenario.run("install", "--no-policy", cwd=project))
+
+    assert sorted(_rules(project)) == ["py.md"], settled
+    compiled = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (project / "AGENTS.md", project / "src/AGENTS.md")
+        if path.is_file()
+    )
+    # With Copilot too, the shared optimizer may place src/** in the root file (#4005).
+    assert compiled.count("STYLE_BODY") == 1 and compiled.count("SRC_BODY") == 1, compiled
+    assert "routed to AGENTS.md" not in settled, settled
+
+
+@_TARGETS
+def test_an_edited_routed_instruction_is_kept_once_until_it_is_compiled(
+    tmp_path: Path, apm_binary_path: Path, targets: str
+) -> None:
+    """After compile, editing a routed instruction and reinstalling restores exactly one
+    rule with the new body; compile then install retires it again (#5343)."""
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    project = _routed_project(scenario, targets)
+    scenario.run("install", "--no-policy", cwd=project)
+    scenario.run("compile", cwd=project)
+    scenario.run("install", "--no-policy", cwd=project)
+    source = project / ".apm/instructions/style.instructions.md"
+    source.write_text(source.read_text(encoding="ascii") + "STYLE_EDIT.\n", encoding="ascii")
+
+    edited = output(scenario.run("install", "--no-policy", cwd=project))
+    rules = _rules(project)
+
+    assert sorted(rules) == ["py.md", "style.md"], edited
+    assert "STYLE_EDIT" in rules["style.md"]
+    assert sum("STYLE_BODY" in text for text in rules.values()) == 1
+    scenario.run("compile", cwd=project)
+    scenario.run("install", "--no-policy", cwd=project)
+    assert sorted(_rules(project)) == ["py.md"]
+    assert "STYLE_EDIT" in (project / "AGENTS.md").read_text(encoding="utf-8")
