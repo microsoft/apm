@@ -899,8 +899,14 @@ class TestUpdateNoChanges:
             assert json.loads(pins_file.read_text(encoding="utf-8")) == legacy_pins
 
             decline_tty = True
-            with patch(
-                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            with (
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+                ),
+                patch(
+                    "apm_cli.install.manifest_reconcile.reconcile_project_deployed_state"
+                ) as reconcile,
+                patch("apm_cli.commands.update._run_mcp_lsp_integration") as mcp_lsp,
             ):
                 decline_result = runner.invoke(cli, ["update"], input="n\n")
 
@@ -909,6 +915,39 @@ class TestUpdateNoChanges:
             assert "Apply these changes?" in decline_result.output
             assert "No changes applied." in decline_result.output
             assert json.loads(pins_file.read_text(encoding="utf-8")) == legacy_pins
+            # A declined repair is a refusal: nothing reconciles or writes (#5243).
+            assert reconcile.call_count == 0
+            assert mcp_lsp.call_count == 0
+
+    def test_a_pin_repair_the_commit_could_not_save_is_not_reported_as_repaired(
+        self, runner, tmp_path
+    ):
+        """A skipped advisory pins write reports the repair as unsaved (#5243)."""
+        from apm_cli.marketplace.version_pins import open_ref_pin_stage, stage_ref_pin
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                stage = open_ref_pin_stage()
+                stage_ref_pin("mkt", "plug", "v1", repair=True)
+                assert kwargs["plan_callback"](UpdatePlan(entries=())) is True
+                with patch("apm_cli.marketplace.version_pins.save_ref_pins", return_value=False):
+                    stage.commit(pins_dir=str(Path.cwd() / "pins"))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+
+            assert result.exit_code == 0, result.output
+            output = " ".join(result.output.split())
+            assert "Repaired" not in output, output
+            assert "Could not save 1 marketplace ref pin repair" in output, output
+            assert "No dependency changes were applied." in output, output
 
 
 def test_module_cache_rehydration_requires_locked_dependencies(tmp_path: Path) -> None:
