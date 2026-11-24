@@ -149,6 +149,7 @@
         "src/apm_cli/install/verdict_policy.py",
         "src/apm_cli/install/verdict_record.py",
         "src/apm_cli/install/verdict_attest.py",
+        "src/apm_cli/install/verdict_write.py",
         "src/apm_cli/integration/mcp_install_summary.py"
       ],
       "guards": ["install-deployment-install-entry-routing"]

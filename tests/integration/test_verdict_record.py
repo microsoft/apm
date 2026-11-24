@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.install import verdict_record
+from apm_cli.install import verdict_attest, verdict_record
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I2")]
 
@@ -1158,8 +1158,8 @@ def _attest(project: Path, line: str | None = None, during=None, printed: str = 
     """A converged full install: it announced its targets and attested the state."""
     with verdict_record.recording(["install"]):
         sys.stdout.write(printed + "[+] Installed 1 APM dependency.\n")
-        verdict_record.note_run_targets(line if line is not None else _target_line(project))
-        verdict_record.note_attested_install()
+        verdict_attest.note_run_targets(line if line is not None else _target_line(project))
+        verdict_attest.note_attested_install()
         if during is not None:
             during()
 
@@ -1167,7 +1167,7 @@ def _attest(project: Path, line: str | None = None, during=None, printed: str = 
 def _attested_hit(argv: list[str] | None = None) -> bool:
     """What the next install's engine sees, inside its own recorded run."""
     with verdict_record.recording(argv or ["install"]):
-        return verdict_record.attested_state(argv or ["install"], Path.cwd())
+        return verdict_attest.attested_state(argv or ["install"], Path.cwd())
 
 
 def _stored(project: Path) -> dict:

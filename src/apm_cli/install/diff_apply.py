@@ -717,12 +717,12 @@ def try_apply(
         import click
 
         from apm_cli.deps.lockfile_generator import require_current_cli
-        from apm_cli.install import verdict_record
+        from apm_cli.install import verdict_attest
 
         # An attested record MACs these exact lock bytes and this build, which
         # passed the generator gate when it committed them: the gate's answer is
         # the same, so only a run without a matching attestation re-reads it.
-        attested = verdict_record.attested_state(list(argv or []), project_root)
+        attested = verdict_attest.attested_state(list(argv or []), project_root)
         try:
             if not attested:
                 # The command's own gate: the full run renders its refusal.
