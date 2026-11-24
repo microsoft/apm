@@ -293,8 +293,15 @@ def _trusted_by_windows(ca_pem: Path) -> Iterator[None]:
     try:
         yield
     finally:
-        subprocess.run(
+        removed = subprocess.run(
             ["certutil", "-delstore", "Root", serial],
             capture_output=True,
+            text=True,
             check=False,
         )
+        if removed.returncode != 0:
+            # Never report success while the mirror CA stays trusted machine-wide.
+            raise RuntimeError(
+                f"could not remove the mirror CA (serial {serial}) from the machine Root store: "
+                f"{removed.stdout[-300:]}{removed.stderr[-300:]}"
+            )
