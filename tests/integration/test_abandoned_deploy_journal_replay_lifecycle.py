@@ -907,3 +907,45 @@ def test_a_cold_clone_without_the_journal_converges_on_the_next_install(
     _assert_lock_matches_disk(chain.project)
     audit = chain.run("audit", "--ci")
     assert audit.returncode == 0, _evidence(audit)
+
+
+def test_two_racing_installs_replay_an_abandoned_journal_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two installs started together after a two-writer kill: the lifecycle lock lets
+    exactly one replay the journal; both exit 0 and the project converges (#5051)."""
+    chain, before = _killed_two_writers(tmp_path, apm_binary_path)
+    racers = [
+        subprocess.Popen(
+            (str(apm_binary_path), "install"),
+            cwd=chain.project,
+            env=chain.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    outputs = []
+    try:
+        for racer in racers:
+            stdout, stderr = racer.communicate(timeout=240)
+            outputs.append((racer.returncode, stdout + stderr))
+    finally:
+        # A hung racer must not keep the lifecycle lock or write after the test.
+        for racer in racers:
+            if racer.poll() is None:
+                racer.kill()
+                racer.communicate()
+
+    evidence = repr(outputs)
+    assert [code for code, _text in outputs] == [0, 0], evidence
+    replayed = [" ".join(text.split()) for _code, text in outputs]
+    assert sum("interrupted install" in text for text in replayed) == 1, evidence
+    # The raw streams: normalizing whitespace first would hide non-ASCII spaces.
+    assert all(text.isascii() for _code, text in outputs), evidence
+    assert _stores(chain) == [], evidence
+    assert _tree_state(chain.project) == before, evidence
+    _assert_lock_matches_disk(chain.project)
+    audit = chain.run("audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)
