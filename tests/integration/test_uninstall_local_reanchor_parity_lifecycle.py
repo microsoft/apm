@@ -899,21 +899,68 @@ def test_two_packages_that_differ_only_by_case_stay_distinct(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
-def test_an_nfd_descendant_spelling_reanchors_to_the_fresh_spelling(
+def test_an_nfd_descendant_spelling_is_refused(tmp_path: Path, apm_binary_path: Path) -> None:
+    """vendor/<NFD> links to vendor/<NFC>: only letter case is in #5091's scope, so a
+    Unicode-normalization respelling refuses before any write (accepting it is #5222)."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    nfc, nfd = "caf\u00e9", "cafe\u0301"
+
+    def link_nfd(vendor: Path) -> None:
+        if (vendor / nfd).exists():
+            pytest.skip("this volume folds Unicode normalization: one name, nothing to link")
+        (vendor / nfd).symlink_to(vendor / nfc, target_is_directory=True)
+
+    world = _respelled_world(tmp_path, apm_binary_path, link_nfd, spellings=(nfc, nfd))
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "installs elsewhere" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_an_aliased_respelled_descendant_with_stale_excluded_files_refuses(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """vendor/<NFD> links to vendor/<NFC>: a's NFD spelling wins, so the copy takes it."""
-    nfc, nfd = "caf\u00e9", "cafe\u0301"
-    world = _respelled_world(
-        tmp_path,
-        apm_binary_path,
-        lambda vendor: (vendor / nfd).symlink_to(vendor / nfc, target_is_directory=True),
-        spellings=(nfc, nfd),
+    """Both edges alias F as x: the copy stays at apm_modules/x and is not refreshed, so
+    its stale .git/HEAD refuses instead of being kept silently."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "F", "F")
+    if _case_insensitive(vendor):
+        pytest.skip("vendor/f and vendor/F are one name here")
+    head = vendor / "F/.git/HEAD"
+    head.parent.mkdir(parents=True)
+    head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (vendor / "f").symlink_to(vendor / "F", target_is_directory=True)
+    _aliased_package(vendor / "e", "e", "../F", "x")
+    _aliased_package(vendor / "a", "a", "../f", "x")
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d", "./vendor/a"]},
+        },
+        world.project / "apm.yml",
     )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    head.write_text("ref: refs/heads/other\n", encoding="utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
 
-    world.apm("uninstall", "./vendor/e")
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
 
-    _assert_no_frozen_rewrites_nothing(world)
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "differs from its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")

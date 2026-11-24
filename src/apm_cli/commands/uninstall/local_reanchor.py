@@ -155,8 +155,12 @@ def _respelled_descendants(
             continue
         copy = row.to_dependency_ref().get_install_path(modules_dir)
         _require_copy(copy, key, label, modules_dir)
-        # It moves like a root, so stale excluded files take the fresh-copy path.
-        _require_fresh_copy(row, real_dir, copy, key, label, modules_dir, unhashed=False)
+        # A copy that moves like a root takes the fresh-copy path for stale excluded
+        # files; one that stays put (an alias names its path) gets no refresh, so its
+        # excluded files must match too.
+        spelled = replace(row.to_dependency_ref(), local_path=via[1], repo_url=declared)
+        stays = os.fspath(spelled.get_install_path(modules_dir)) == os.fspath(copy)
+        _require_fresh_copy(row, real_dir, copy, key, label, modules_dir, unhashed=stays)
         respelled[key] = (via[1], nearest[0], real_dir, declared)
     return respelled
 
@@ -186,12 +190,10 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
 def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
     """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem).
 
-    Spellings are first matched by the canonical caseless key (NFD, case
-    folding, then NFC; ``path_security._caseless``); the filesystem decides.
+    Only letter case may differ (#5091's scope); a Unicode-normalization
+    respelling refuses (#5222). The filesystem then decides.
     """
-    from ...utils.path_security import _caseless
-
-    if declared is None or _caseless(Path(declared)) != _caseless(Path(row.repo_url)):
+    if declared is None or declared.casefold() != row.repo_url.casefold():
         return False
     ref = row.to_dependency_ref()
     try:
