@@ -440,3 +440,27 @@ def test_catalog_declaration_installs_under_a_default_registry(
     assert "_marketplace/" not in installed.stdout + installed.stderr, _evidence(installed)
     assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == [declaration]
     _assert_registry_state(project, artifacts, world.registry)
+
+
+def test_a_shorthand_routes_to_the_default_registry_beside_a_catalog(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A plain shorthand naming a catalog plugin's package still routes to the
+    default registry; the catalog never claims it (#5256)."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    with world.serve() as proxy:
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer", (f"acme/widget#{VERSION}",))
+        consumer["targets"] = ["copilot"]
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+        world.egress_step(
+            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
+        )
+        world.egress_step(proxy, env, project, *INSTALL, step="install")
+    _assert_registry_state(project, artifacts, world.registry)
+    widget = _locked(project)["acme/widget"]
+    assert "discovered_via" not in widget and "marketplace_plugin_name" not in widget, widget
