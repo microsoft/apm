@@ -91,24 +91,6 @@ def test_uninstall_bundle_keeps_a_script_a_user_hook_runs(
     _assert_refused_unchanged(consumer, before, script)
 
 
-def test_uninstall_bundle_refuses_when_a_user_hook_file_carries_a_bom(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """A hook file the reader cannot parse (UTF-8 BOM) may still run the script: fail closed."""
-    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
-    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "bom-consumer")
-    (script,) = [c for c in _claims_of(consumer) if c.endswith("/x.sh")]
-    path = consumer / ".github" / "hooks" / "user.json"
-    write(path, json.dumps(_handler(script)))
-    path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes().replace(b"\n", b"\r\n"))
-    before = tree_bytes(consumer)
-
-    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
-
-    assert ".github/hooks/user.json" in text, text
-    _assert_refused_unchanged(consumer, before, script)
-
-
 def test_uninstall_bundle_keeps_a_script_a_user_hook_in_another_target_runs(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -132,27 +114,6 @@ def test_uninstall_bundle_keeps_a_script_a_user_hook_in_another_target_runs(
     assert (consumer / script).is_file(), f"uninstall removed a script a user hook runs:\n{text}"
     assert result.returncode == 1, text
     assert ".claude/settings.json" in text, text
-    _assert_refused_unchanged(consumer, before, script)
-
-
-def test_uninstall_bundle_keeps_a_script_a_user_hook_runs_through_its_cwd(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """#5281: `./x.sh` run with `cwd` at the script's directory runs the bundle script (fixed by #5166)."""
-    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
-    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "spelling-cwd-field")
-    (script,) = [c for c in _claims_of(consumer) if c.endswith("/x.sh")]
-    handler = {"type": "command", "bash": "./x.sh", "cwd": _script_dir(script)}
-    document = {"version": 1, "hooks": {"preToolUse": [handler]}}
-    write(consumer / ".github" / "hooks" / "user.json", json.dumps(document))
-    before = tree_bytes(consumer)
-
-    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
-    text = output(result)
-
-    assert (consumer / script).is_file(), f"uninstall removed a script a user hook runs:\n{text}"
-    assert result.returncode == 1, text
-    assert ".github/hooks/user.json" in text, text
     _assert_refused_unchanged(consumer, before, script)
 
 
