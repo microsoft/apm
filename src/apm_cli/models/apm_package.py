@@ -715,6 +715,8 @@ class APMPackage:
         Raises:
             ValueError: If interpreted manifest fields are invalid.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         data = dict(manifest_data)
         from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
 
@@ -736,7 +738,7 @@ class APMPackage:
         from apm_cli.core.scope import manifest_file
 
         source_manifest = manifest_path or manifest_file(package_path)
-        resolved_source = source_path.resolve() if source_path is not None else None
+        resolved_source = resolve_path(source_path) if source_path is not None else None
 
         from .manifest_contract import negotiate_manifest_contract
 
@@ -931,11 +933,13 @@ class APMPackage:
         different anchors for relative ``local_path`` dependencies each get
         their own package instance.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         if not apm_yml_path.exists():
             raise FileNotFoundError(f"apm.yml not found: {apm_yml_path}")
 
-        resolved = apm_yml_path.resolve()
-        resolved_source = source_path.resolve() if source_path is not None else None
+        resolved = resolve_path(apm_yml_path)
+        resolved_source = resolve_path(source_path) if source_path is not None else None
         cache_key = (resolved, resolved_source, create_config)
         cached = _apm_yml_cache.get(cache_key)
         if cached is not None:
