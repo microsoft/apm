@@ -55,7 +55,11 @@ CLAUDE_BUILTIN_TOOLS = frozenset(
         "SlashCommand",
         "SubagentHandback",
         "Task",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
         "TaskStop",
+        "TaskUpdate",
         "TodoWrite",
         "ToolSearch",
         "WaitForMcpServers",
@@ -144,19 +148,34 @@ def _bounded_names(entries: tuple[str, ...]) -> str:
     return text
 
 
+def claude_unverified_message(source_name: str, issue: str, fix: str) -> str:
+    """Warning that *source_name*'s tool restriction could not be verified.
+
+    Rendered as one default-visible line (warnings show ``detail`` only
+    under ``--verbose``), so the ``Fix:`` clause lives in the message.
+    """
+    return (
+        f"Claude agent {source_name}: {issue}. Tool restrictions could not be "
+        f"verified, so the agent may inherit broader tool access. Fix: {fix}."
+    )
+
+
 def claude_tools_messages(check: ClaudeToolsCheck, source_name: str) -> tuple[str, str] | None:
     """Return ``(message, detail)`` for the req-tg-006 diagnostic, or None.
 
     *source_name* must already be sanitized for display. Entry names are
     rendered through ``ascii()`` so user frontmatter never leaks raw
-    non-ASCII into CLI output.
+    non-ASCII into CLI output. A malformed ``tools`` shape yields a
+    single-line message with the fix inline and an empty detail.
     """
     if check.malformed:
         return (
-            f"Claude agent {source_name}: frontmatter field 'tools' is not a list or "
-            "comma-separated string, so tool restrictions could not be verified; the "
-            "agent may inherit broader tool access.",
-            "Fix: write 'tools' as a YAML list or 'tools: Read, Grep, Bash'.",
+            claude_unverified_message(
+                source_name,
+                "frontmatter field 'tools' is not a list or comma-separated string",
+                "write 'tools' as a YAML list or as 'tools: Read, Grep, Bash'",
+            ),
+            "",
         )
     if not check.unrecognized:
         return None
