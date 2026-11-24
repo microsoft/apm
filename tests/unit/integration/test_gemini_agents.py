@@ -221,6 +221,9 @@ def test_gemini_agent_empty_tools_list_is_kept(tmp_path: Path) -> None:
         ("a.agent.md", "---\ndescription: d\ntemperature: hot\n---\nB\n", "'temperature'"),
         ("a.agent.md", "---\ndescription: d\ntemperature: .nan\n---\nB\n", "'temperature'"),
         ("a.agent.md", "---\ndescription: d\nmax_turns: 0\n---\nB\n", "'max_turns'"),
+        ("a.agent.md", "---\ndescription: d\nmax_turns: 10.5\n---\nB\n", "'max_turns'"),
+        ("a.agent.md", "---\ndescription: d\nmax_turns: 0.0\n---\nB\n", "'max_turns'"),
+        ("a.agent.md", "---\ndescription: d\nmax_turns: .inf\n---\nB\n", "'max_turns'"),
         ("a.agent.md", "---\ndescription: d\ntimeout_mins: true\n---\nB\n", "'timeout_mins'"),
         ("a.agent.md", "---\ndescription: d\ndisplay_name: 3\n---\nB\n", "'display_name'"),
         ("a.agent.md", "---\ndescription: [unclosed\n---\nB\n", "not valid YAML"),
@@ -322,6 +325,36 @@ def test_gemini_large_finite_integer_temperature_is_kept(tmp_path: Path) -> None
     assert result.files_integrated == 1
     deployed = tmp_path / ".gemini" / "agents" / "t.md"
     assert _frontmatter(deployed.read_text(encoding="utf-8"))["temperature"] == int("9" * 308)
+
+
+def test_gemini_integral_float_turns_and_timeout_deploy(tmp_path: Path) -> None:
+    # Gemini v0.70.0's z.number().int() accepts 10.0 and 5.0: integrality is
+    # checked on the value, not on how the YAML scalar is spelled.
+    _write_agent(
+        tmp_path,
+        "w.agent.md",
+        "---\ndescription: d\nmax_turns: 10.0\ntimeout_mins: 5.0\n---\nB\n",
+    )
+
+    result, diagnostics = _integrate(tmp_path)
+
+    assert result.files_integrated == 1
+    fm = _frontmatter((tmp_path / ".gemini" / "agents" / "w.md").read_text(encoding="utf-8"))
+    assert (fm["max_turns"], fm["timeout_mins"]) == (10.0, 5.0)
+    assert _warnings(diagnostics) == []
+
+
+@pytest.mark.parametrize("field", ["max_turns", "timeout_mins"])
+def test_gemini_huge_integer_turns_or_timeout_skip_the_agent(tmp_path: Path, field: str) -> None:
+    # Gemini reads a 401-digit integer as a string, so the agent would not load.
+    _write_agent(tmp_path, "a.agent.md", f"---\ndescription: d\n{field}: {'9' * 401}\n---\nB\n")
+
+    result, diagnostics = _integrate(tmp_path)
+
+    assert result.files_skipped == 1
+    assert not (tmp_path / ".gemini" / "agents").exists()
+    [message] = _warnings(diagnostics)
+    assert f"'{field}' must be a positive integer" in message
 
 
 def test_gemini_invalid_agent_does_not_block_siblings(tmp_path: Path) -> None:

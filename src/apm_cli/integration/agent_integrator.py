@@ -1371,12 +1371,12 @@ class AgentIntegrator(BaseIntegrator):
             number = AgentIntegrator._gemini_number(temperature)
             if number is None or math.isnan(number):
                 return "'temperature' must be a number"
+        # z.number().int().positive() checks the value, so 10.0 passes like 10.
         for field in ("max_turns", "timeout_mins"):
-            value = fm.get(field)
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value <= 0
-            ):
-                return f"'{field}' must be a positive integer"
+            if fm.get(field) is not None:
+                number = AgentIntegrator._gemini_number(fm[field])
+                if number is None or not number.is_integer() or number <= 0:
+                    return f"'{field}' must be a positive integer"
         return None
 
     def _preflight_render_gemini_agent(
