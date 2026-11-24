@@ -405,6 +405,7 @@ def test_a_junction_below_the_base_counts_as_a_link(tmp_path) -> None:
     _winapi.CreateJunction(str(outside), str(base / "agents"))
 
     assert has_symlink_component(base, base / "agents" / "a.md") is True
+    assert has_symlink_component(base, base / "agents" / ".." / "a.md") is True
 
 
 @pytest.mark.windows_compat
@@ -453,3 +454,24 @@ def test_a_name_surrogate_reparse_point_below_the_base_counts_as_a_link(
     monkeypatch.setattr(Path, "lstat", _lstat)
 
     assert has_symlink_component(base, reparse / "a.md") is linked
+
+
+def test_stepping_back_over_a_name_surrogate_reparse_point_counts_as_a_link(
+    tmp_path, monkeypatch
+) -> None:
+    """``..`` after a junction is judged like ``..`` after a symbolic link."""
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(0xA0000003) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / ".." / "a.md") is True
