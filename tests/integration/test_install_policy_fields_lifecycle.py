@@ -736,6 +736,18 @@ def _forged_bundle_marker(claude: Path) -> None:
     sidecar.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+# What the local-bundle-hooks check, which runs before unmanaged-files, names for a
+# tamper it refuses (#5078); either refusal is fail-closed.
+_LOCAL_BUNDLE_HOOK_REFUSALS = {
+    _edit_sidecar_entry: "- p-exec: a deployed hook entry was changed outside APM",
+    _drop_settings_hooks: "- p-exec: a deployed hook entry was changed outside APM",
+    _truncate_sidecar: (
+        "- .claude/settings.json: the hook config or its ownership record cannot be read"
+    ),
+    _forged_bundle_marker: "- x: approval no longer granted",
+}
+
+
 def _fingerprint(path: Path) -> object:
     """Bytes of a regular file; the file type of anything else (a FIFO is never read)."""
     mode = path.lstat().st_mode
@@ -784,9 +796,10 @@ def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_v
     text = _text(audit)
 
     assert audit.returncode == 1, _evidence(audit)
-    if tamper is _forged_bundle_marker and "local-bundle-hooks details:" in text:
-        # The local-bundle-hooks check refuses the forged marker first: still fail-closed.
-        assert "- x: approval no longer granted" in text, _evidence(audit)
+    refusal = _LOCAL_BUNDLE_HOOK_REFUSALS.get(tamper)
+    if refusal is not None and "local-bundle-hooks details:" in text:
+        # The local-bundle-hooks check refuses the tampered files first: still fail-closed.
+        assert refusal in text, _evidence(audit)
     else:
         assert "2 unmanaged file(s) in governance directories" in text, _evidence(audit)
         assert ".claude/apm-hooks.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
