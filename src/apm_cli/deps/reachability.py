@@ -790,6 +790,7 @@ def retained_lock_keys(
     apm_modules_dir: Path,
     declared_refs: list[DependencyReference],
     *,
+    dev_refs: Sequence[DependencyReference] = (),
     unverified: dict[str, str] | None = None,
     anchored: dict[str, str] | None = None,
     walks: list[ReachabilityResult] | None = None,
@@ -810,6 +811,8 @@ def retained_lock_keys(
     The walk, when one ran, is appended to *walks* for parent repairs. A row
     kept because a survivor reached through a symlink alias still resolves
     through it is named in *anchored*; what it declares is retained too.
+    *dev_refs* names the dev-only declarations among *declared_refs*; the
+    walk visits them after production roots, as install does.
     """
     declared = {ref.get_unique_key() for ref in declared_refs}
     retained: set[str] = set()
@@ -851,8 +854,15 @@ def retained_lock_keys(
         retained |= candidates
         candidates = set()
     if candidates:
+        # Dev-only roots walk after production, so dev status is install's (#5126).
+        dev_keys = {ref.get_unique_key() for ref in dev_refs}
         walk = compute_forward_reachable_keys(
-            lockfile, project_root, apm_modules_dir, declared_refs, frozenset(candidates)
+            lockfile,
+            project_root,
+            apm_modules_dir,
+            [ref for ref in declared_refs if ref.get_unique_key() not in dev_keys],
+            frozenset(candidates),
+            dev_refs=dev_refs,
         )
         if walks is not None:
             walks.append(walk)

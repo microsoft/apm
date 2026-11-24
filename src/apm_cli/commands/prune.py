@@ -199,8 +199,8 @@ def prune(ctx, dry_run):
                 reachability=ReachabilityProbe(
                     project_root=project_root,
                     apm_modules_dir=apm_modules_dir,
-                    direct_refs=tuple(declared_deps),
-                    dev_refs=(),
+                    direct_refs=tuple(apm_package.get_apm_dependencies()),
+                    dev_refs=tuple(_dev_only_refs(apm_package)),
                 ),
                 deployment_claims=None,
             )
@@ -557,9 +557,31 @@ def _warn_retained_rows(decision, lockfile, logger) -> None:
         )
 
 
+def _dev_only_refs(apm_package):
+    """Dev declarations not also declared for production: install's is_dev roots."""
+    production = {ref.get_unique_key() for ref in apm_package.get_apm_dependencies()}
+    return [
+        ref
+        for ref in apm_package.get_dev_apm_dependencies()
+        if ref.get_unique_key() not in production
+    ]
+
+
 def _reparent_survivors(lockfile, decision) -> None:
-    """Record each survivor whose parent was pruned under the parent install records (#4989)."""
-    if not decision.rescued_parents or decision.reachability is None:
+    """Record each survivor's parent, depth and dev status as install records them.
+
+    A survivor whose parent was pruned takes the parent install records
+    (#4989); every walked survivor takes the depth and dev status (#5126).
+    """
+    if decision.reachability is None:
+        return
+    for key, is_dev in decision.rescued_dev.items():
+        if key in lockfile.dependencies:
+            lockfile.dependencies[key].is_dev = is_dev
+    for key, depth in decision.rescued_depths.items():
+        if key in lockfile.dependencies:
+            lockfile.dependencies[key].depth = depth
+    if not decision.rescued_parents:
         return
     from .uninstall.local_reanchor import LocalReanchorPlan, apply_local_reanchor, reparent_rows
 
@@ -572,9 +594,6 @@ def _reparent_survivors(lockfile, decision) -> None:
     for key, parent in resolved.items():
         if key in lockfile.dependencies and parent is not None:
             lockfile.dependencies[key].resolved_by = parent
-    for key, depth in decision.rescued_depths.items():
-        if key in lockfile.dependencies:
-            lockfile.dependencies[key].depth = depth
 
 
 def _native_ownership(lockfile, lockfile_path):

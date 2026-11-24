@@ -487,7 +487,8 @@ def _decide_installed_paths(
             lockfile,
             reachability.project_root,
             reachability.apm_modules_dir,
-            list(reachability.direct_refs),
+            [*reachability.direct_refs, *reachability.dev_refs],
+            dev_refs=reachability.dev_refs,
             unverified=unverified,
             anchored=anchors,
             walks=walks,
@@ -535,6 +536,11 @@ def _decide_installed_paths(
     for keys in path_keys.values():
         removed_keys.update(keys)
     reparented = _reparented_survivors(lockfile, removed_keys, retained, walk)
+    repaired = (
+        _repaired_survivors(lockfile, retained, walk, reparented)
+        if removed_keys and not unverified and not anchors
+        else []
+    )
     return OrphanRemovalDecision(
         operation=operation,
         candidate_keys=frozenset(removed_keys),
@@ -550,8 +556,11 @@ def _decide_installed_paths(
             {key: walk.reachable_via[key] for key in reparented} if walk else {}
         ),
         rescued_depths=MappingProxyType(
-            {key: walk.depths[key] for key in reparented if key in walk.depths} if walk else {}
+            {key: walk.depths[key] for key in (*reparented, *repaired) if key in walk.depths}
+            if walk
+            else {}
         ),
+        rescued_dev=MappingProxyType({key: key in walk.dev_only for key in repaired}),
         reachability=walk,
     )
 
@@ -576,6 +585,29 @@ def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
         and key in walk.reachable_via
         and lockfile.dependencies[key].resolved_by in gone
     )
+
+
+def _repaired_survivors(lockfile, retained, walk, reparented) -> list[str]:
+    """Surviving transitive rows whose depth and dev status a fresh resolve re-derives (#5126).
+
+    A row qualifies when the complete walk reached it under its own lock key
+    and its recorded parent is the walk's nearest parent (or prune re-parents
+    it to that parent); any other row keeps its metadata unchanged.
+    """
+    if walk is None or lockfile is None:
+        return []
+    repaired = []
+    for key in sorted(retained):
+        row = lockfile.dependencies.get(key)
+        if row is None or not row.depth or row.depth < 2 or walk.depths.get(key, 1) < 2:
+            continue
+        parent = lockfile.dependencies.get(walk.parent_keys.get(key, ""))
+        if key in reparented or (
+            parent is not None
+            and lockfile_parent_identity(parent, lockfile.replacements) == row.resolved_by
+        ):
+            repaired.append(key)
+    return repaired
 
 
 def _lock_keys_by_install_path(
