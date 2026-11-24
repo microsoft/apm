@@ -86,7 +86,7 @@ def _hash_package_tree(
     for rel_path in _package_files(package_path):
         if exclude and rel_path.as_posix() in exclude:
             continue
-        payload = (package_path / rel_path).read_bytes()
+        payload = _read_regular_bytes(package_path / rel_path)
         if legacy_hasher is not None:
             legacy_hasher.update(rel_path.as_posix().encode("utf-8"))
             legacy_hasher.update(payload)
@@ -119,7 +119,15 @@ def compute_package_hash(
 
 
 # PERF PROTOTYPE (stat-cut): compute the original too and fail loudly on any difference.
-_STAT_DIFFERENTIAL = False
+_STAT_DIFFERENTIAL = True
+
+
+def _read_regular_bytes(path: Path) -> bytes:
+    """W3d S3: the bytes of *path*, refusing anything that is not a regular file once opened."""
+    with open(path, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise IsADirectoryError(f"not a regular file: {path}")
+        return handle.read()
 
 
 def _package_files(
@@ -155,6 +163,21 @@ def _package_files_scandir(
         for entry in entries:
             parts = (*rel_parts, entry.name)
             if entry.name in excluded or (not rel_parts and entry.name in skip_roots):
+                continue
+            try:
+                attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+            except OSError:
+                attributes = 0
+            if attributes & 0x400:  # W3d S1: reparse point -> the original per-item probes
+                item = package_path.joinpath(*parts)
+                if item.is_symlink():
+                    if native:
+                        raise PathTraversalError(f"Native bundle integrity refuses symlink: {item}")
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append((entry.path, parts))  # Path.walk descends it, as rglob did
+                if item.is_file() and not (len(parts) == 1 and entry.name in _EXCLUDED_ROOT_FILES):
+                    regular_files.append(Path(*parts))
                 continue
             if entry.is_symlink():
                 if native:

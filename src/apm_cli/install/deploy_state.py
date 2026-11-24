@@ -12,7 +12,11 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
+from apm_cli.utils.content_hash import (
+    compute_exact_file_hash,
+    compute_file_hash,
+    exact_hash_of_bytes,
+)
 
 ABSENT: dict[str, Any] = {"absent": True}
 OTHER: dict[str, Any] = {"other": True}
@@ -51,7 +55,7 @@ def path_state(path: Path) -> dict[str, Any]:
 
 
 # PERF PROTOTYPE (stat-cut): compute the original too and fail loudly on any difference.
-_STAT_DIFFERENTIAL = False
+_STAT_DIFFERENTIAL = True
 _REPARSE_POINT = 0x400
 
 
@@ -77,7 +81,17 @@ def _entry_state_lstat(path: Path) -> str | None:
     if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT:
         return None  # links and junctions: the original follows them as before
     if stat.S_ISREG(info.st_mode):
-        return f"{compute_exact_file_hash(path)}:{stat.S_IMODE(info.st_mode)}"
+        if not info.st_ino:
+            return None  # W3d S5: no file identity -> the original sequence
+        try:
+            with open(path, "rb") as handle:
+                opened = os.fstat(handle.fileno())
+                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                    return None  # replaced between lstat and open -> re-take
+                data = handle.read()
+        except OSError:
+            return None
+        return f"{exact_hash_of_bytes(data)}:{stat.S_IMODE(info.st_mode)}"
     if stat.S_ISDIR(info.st_mode):
         return f"dir:{stat.S_IMODE(info.st_mode)}"
     return "other"
