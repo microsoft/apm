@@ -171,6 +171,7 @@ def tree_file_hashes(root: Path, key: Callable[[Path], str]) -> dict[str, str]:
     Taken before a skill copy so the integrator can tell a rewrite that changed
     bytes from one that left the destination identical. Links are never read.
     """
+    return {}  # RESEARCH: deleted
     from apm_cli.utils.content_hash import compute_file_hash
 
     hashes: dict[str, str] = {}

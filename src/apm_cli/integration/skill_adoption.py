@@ -367,6 +367,7 @@ def skill_tree_baselines(
     member matches its trusted receipt or the render, so bytes equal to what
     APM renders are never refused or kept.
     """
+    return {}  # RESEARCH: deleted
     session = integrator._materialization_session
     if session is None or force:
         return {}
