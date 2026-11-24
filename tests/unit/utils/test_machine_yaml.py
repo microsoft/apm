@@ -218,9 +218,8 @@ def _random_emit_tree(rng: random.Random, depth: int = 0) -> object:
     if rng.random() < 0.5:
         return [_random_emit_tree(rng, depth + 1) for _ in range(rng.randrange(4))]
     return {
-        rng.choice(["k", "key " * rng.randrange(1, 40), "\u00fc"]) + str(i): _random_emit_tree(
-            rng, depth + 1
-        )
+        rng.choice(["k", "key " * rng.randrange(1, 40), "\u00fc", "p" * rng.randrange(100, 140)])
+        + str(i): _random_emit_tree(rng, depth + 1)
         for i in range(rng.randrange(4))
     }
 
@@ -235,3 +234,16 @@ def test_a_typical_lockfile_takes_the_libyaml_emitter() -> None:
     texts = [path.read_text(encoding="utf-8") for path in _LOCKFILES]
     agnostic = [yaml_io._emitter_agnostic(yaml_io.load_yaml_str(text)) for text in texts]
     assert sum(agnostic) >= len(agnostic) // 2
+
+
+@pytest.mark.parametrize("length", range(118, 132))
+def test_a_long_key_emits_the_same_bytes(length: int) -> None:
+    key = "deployed/" + "k" * (length - 9)
+    for data in ({key: "v"}, {"root": {key: "x" * 90}}, {"rows": [{key: 1}]}):
+        assert yaml_io.machine_yaml_to_str(data) == yaml_io.yaml_to_str(data)
+
+
+def test_a_long_tab_quoted_value_keeps_the_python_emitter() -> None:
+    data = {"mcp": {"args": ["\t" + "}} b] " * 30]}}
+    assert yaml_io._emitter_agnostic(data) is False
+    assert yaml_io.machine_yaml_to_str(data) == yaml_io.yaml_to_str(data)

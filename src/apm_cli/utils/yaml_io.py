@@ -823,8 +823,9 @@ else:  # pragma: no cover - PyYAML built without libyaml
 
 
 # Scalars both emitters write identically: printable ASCII that is short or
-# has no space to fold at (hashes, URLs, paths). Other text can be folded or
-# escaped differently, so a document holding any keeps the Python emitter.
+# has no space to fold at (hashes, URLs, paths). Keys stay short too: past
+# ~123 chars the Python emitter writes ``? key`` where libyaml keeps
+# ``key:``. A document holding anything else keeps the Python emitter.
 _EMITTER_SAFE_MAX = 64
 
 
@@ -838,6 +839,9 @@ def _emitter_agnostic(value: Any) -> bool:
             if len(item) > _EMITTER_SAFE_MAX and " " in item:
                 return False
         elif isinstance(item, dict):
+            for key in item:
+                if isinstance(key, str) and len(key) > _EMITTER_SAFE_MAX:
+                    return False
             stack.extend(item.keys())
             stack.extend(item.values())
         elif isinstance(item, list):
