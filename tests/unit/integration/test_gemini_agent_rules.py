@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from apm_cli.integration.agent_integrator import is_gemini_agent_tool
+from apm_cli.integration.agent_integrator import AgentIntegrator, is_gemini_agent_tool
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("req-tg-009")]
@@ -27,6 +27,12 @@ def test_gemini_profile_maps_agents_to_project_and_user_dirs() -> None:
     assert user is not None
     assert user.root_dir == ".gemini"
     assert "agents" in user.primitives
+
+
+@pytest.mark.parametrize("target_name", ["gemini", "kiro"])
+def test_rendered_agent_targets_have_no_verbatim_destinations(target_name: str) -> None:
+    # Drift replay may serve only byte copies; Gemini and Kiro agents are rendered.
+    assert AgentIntegrator().verbatim_destinations(None, None, KNOWN_TARGETS[target_name]) is None
 
 
 @pytest.mark.parametrize(

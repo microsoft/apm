@@ -349,13 +349,14 @@ class AgentIntegrator(BaseIntegrator):
         """``{target_path: source}`` this integrator may copy for *target*, else ``None``.
 
         The same directory and ``get_target_filename_for_target`` the agent
-        path uses; Kiro agents are rendered, so they are ``None``. Whether a
-        given agent is a byte copy is proven by its bytes, not assumed here.
+        path uses; Kiro and Gemini agents are rendered, so they are ``None``.
+        Whether a given agent is a byte copy is proven by its bytes, not
+        assumed here.
         """
         mapping = target.primitives.get("agents")
         if not mapping:
             return {}
-        if mapping.format_id == "kiro_agent":
+        if mapping.format_id in ("kiro_agent", "gemini_agent"):
             return None
         agents_dir = self._agents_dir(target, mapping, project_root)
         name = getattr(getattr(package_info, "package", None), "name", "")
