@@ -976,11 +976,29 @@ def test_the_ref_listing_goes_where_a_remote_activated_mirror_sends_the_clone(
     assert marker.name == origin.m2
 
 
-def test_two_listings_of_one_origin_probe_its_clone_config_once(
-    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+class _CredentialDownloader(_CloneFailsDownloader):
+    """Runs each transport attempt under its own credential environment."""
+
+    def __init__(self, *args, credential: str, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.credential = credential
+
+    def _execute_transport_plan(self, _base, target, *, dep_ref, clone_action, **_kw) -> None:
+        for url in self.attempts:
+            clone_action(url, {"GIT_TOKEN": self.credential}, target)
+            return
+
+
+@pytest.mark.parametrize(
+    ("credentials", "probes"),
+    [(("one", "one"), 1), (("one", "two"), 2)],
+    ids=["same-credentials-probe-once", "other-credentials-probe-again"],
+)
+def test_listings_of_one_origin_in_an_install_attempt_probe_clone_config_once_per_env(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, credentials, probes
 ) -> None:
-    """#5138: the clone-config probe of a listing (two git spawns) runs once per origin."""
-    from apm_cli.cache.commit_reachability import admit_fetch_ref
+    """#5138: a listing's clone-config probe (two git spawns) is kept for the attempt only."""
+    from apm_cli.cache.commit_reachability import admit_fetch_ref, open_verdict_stage
 
     git_env = importlib.import_module("apm_cli.utils.git_env")
     spawned: list[list[str]] = []
@@ -991,17 +1009,28 @@ def test_two_listings_of_one_origin_probe_its_clone_config_once(
         return real_init_run(args, *rest, **kwargs)
 
     monkeypatch.setattr("apm_cli.utils.git_env._git_init_run", _count)
-    first = _CloneFailsDownloader(tmp_path / "one", [origin.url], predicted=origin.url)
-    second = _CloneFailsDownloader(tmp_path / "two", [origin.url], predicted=origin.url)
+    stage = open_verdict_stage()
+    try:
+        for name, credential in zip(("one", "two"), credentials, strict=True):
+            downloader = _CredentialDownloader(
+                tmp_path / name, [origin.url], predicted=origin.url, credential=credential
+            )
+            assert admit_fetch_ref(downloader, _ref("main"), "main") == origin.m2
+        stage.commit()
+    finally:
+        stage.discard()
 
-    assert admit_fetch_ref(first, _ref("main"), "main") == origin.m2
-    assert admit_fetch_ref(second, _ref("main"), "main") == origin.m2
-
-    # One probe: its ``git init`` and ``git remote add``.
+    # Each probe is one ``git init`` and one ``git remote add``.
     assert [("init" in args, "remote" in args) for args in spawned] == [
         (True, False),
         (False, True),
-    ]
-    for cache in ("one", "two"):
-        [marker] = (tmp_path / cache / "reachability").rglob("verified-v2/*")
+    ] * probes
+    for name in ("one", "two"):
+        [marker] = (tmp_path / name / "reachability").rglob("verified-v2/*")
         assert marker.name == origin.m2
+    spawned.clear()
+    after = _CredentialDownloader(
+        tmp_path / "after", [origin.url], predicted=origin.url, credential=credentials[0]
+    )
+    assert admit_fetch_ref(after, _ref("main"), "main") == origin.m2
+    assert len(spawned) == 2, "a closed attempt kept its probe"

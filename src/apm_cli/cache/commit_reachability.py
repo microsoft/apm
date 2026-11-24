@@ -53,6 +53,7 @@ class VerdictStage:
         self._pending: dict[Path, str] = {}
         self._lock = threading.Lock()
         self._scratch: str | None = None
+        self._listing_envs: dict[str, dict[str, str]] = {}
 
     def add(self, marker: Path, canonical: str) -> None:
         with self._lock:
@@ -69,6 +70,16 @@ class VerdictStage:
             if self._scratch is None:
                 self._scratch = tempfile.mkdtemp(prefix="apm-reach-")
             return Path(self._scratch)
+
+    def listing_env(self, key: str, probe) -> dict[str, str]:
+        """The probed listing env for digest *key*, probing once per attempt."""
+        with self._lock:
+            known = self._listing_envs.get(key)
+        if known is None:
+            known = probe()
+            with self._lock:
+                known = self._listing_envs.setdefault(key, known)
+        return dict(known)
 
     def commit(self) -> None:
         """Write the staged verdicts (best effort: a missing one is re-checked)."""
@@ -92,6 +103,7 @@ class VerdictStage:
 
         with self._lock:
             scratch, self._scratch = self._scratch, None
+            self._listing_envs = {}
         if scratch is not None:
             shutil.rmtree(scratch, ignore_errors=True)
         with _stage_lock:
@@ -706,27 +718,33 @@ def _sanitize_origin(url: str) -> str:
     return _sanitize_url(url)
 
 
-_LISTING_ENVS: dict[tuple, dict[str, str]] = {}
-
-
 def _listing_env(url: str, env) -> dict[str, str]:
     """The env a clone of *url* gets, so config its remote URL activates applies.
 
     A remote-activated mirror rewrite then sends the listing where the fetch
-    would go. Probing costs a scratch repository, so it is memoized per run
-    by the URL, the whole environment and the state of the config files.
+    would go. Probing costs a scratch repository, so an install attempt's
+    verdict stage keeps each probe, keyed by a digest of the URL and the
+    whole environment (credentials included, never stored in clear), and
+    drops them when the attempt ends. Git config is read once per attempt.
+    Without an open stage every listing probes.
     """
+    import hashlib
     import tempfile
 
     from ..utils.git_env import git_clone_env
 
-    merged = {**os.environ, **(env or {})}
-    key = (url, tuple(sorted((str(k), str(v)) for k, v in merged.items())))
-    key += (_config_files_state(merged),)
-    if key not in _LISTING_ENVS:
+    def _probe() -> dict[str, str]:
         with tempfile.TemporaryDirectory(prefix="apm-ls-remote-") as probe:
-            _LISTING_ENVS[key] = git_clone_env(url, env, Path(probe) / "origin")
-    return dict(_LISTING_ENVS[key])
+            return git_clone_env(url, env, Path(probe) / "origin")
+
+    stage = _stage()
+    if stage is None:
+        return _probe()
+    merged = {**os.environ, **(env or {})}
+    digest = hashlib.sha256()
+    for name, value in sorted((str(k), str(v)) for k, v in (("", url), *merged.items())):
+        digest.update(f"{len(name)}:{name}={len(value)}:{value}\0".encode())
+    return stage.listing_env(digest.hexdigest(), _probe)
 
 
 def _branch_and_tag_records(url: str, env) -> list[tuple[str, str]]:
