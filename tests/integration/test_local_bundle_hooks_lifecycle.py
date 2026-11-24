@@ -1686,6 +1686,29 @@ def test_audit_names_a_sidecar_record_with_malformed_hook_files(
     assert tree_bytes(consumer) == before
 
 
+@pytest.mark.skipif(os.name == "nt", reason="FIFOs and unprivileged links are POSIX here")
+@pytest.mark.parametrize("kind", ["fifo", "link"])
+def test_audit_refuses_a_copilot_sidecar_that_is_not_a_regular_file(
+    tmp_path: Path, apm_binary_path: Path, kind: str
+) -> None:
+    """#5328: the per-file Copilot sidecar is read as a regular file only, never blocking."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, f"{kind}-sidecar-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    kept = tmp_path / "sidecar-copy.json"
+    shutil.copyfile(sidecar, kept)
+    sidecar.unlink()
+    if kind == "fifo":
+        os.mkfifo(sidecar)
+    else:
+        sidecar.symlink_to(kept)
+
+    audited = output(world.apm(consumer, "audit", "--ci", "--no-policy", expect=1))
+
+    assert ".github/apm-hooks.json" in audited, audited
+    assert "Traceback" not in audited, audited
+
+
 def test_install_retires_nothing_from_a_corrupt_sidecar_and_names_it(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

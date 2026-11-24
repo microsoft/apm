@@ -305,7 +305,7 @@ def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
                 blockers.append(f"{label} (linked path)")
                 continue
             try:
-                read_hook_object(path)
+                read_hook_object(path, regular_only=path.name == _APM_HOOKS_SIDECAR)
                 if config is None:
                     # A per-file sidecar's bundle records are read again on removal.
                     per_file_bundle_hook_keys(path)
@@ -642,7 +642,7 @@ def _configs_still_running(
             continue
         try:
             hooks = read_hook_object(json_path).get(config.event_container_key)
-            sidecar = read_hook_object(json_path.parent / _APM_HOOKS_SIDECAR)
+            sidecar = read_hook_object(json_path.parent / _APM_HOOKS_SIDECAR, regular_only=True)
         except (OSError, ValueError, TypeError):
             continue
         if not isinstance(hooks, dict):

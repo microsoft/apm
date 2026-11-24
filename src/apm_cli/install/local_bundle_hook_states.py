@@ -56,8 +56,8 @@ class ReadOnce:
     def __init__(self) -> None:
         self._documents: dict[tuple[Path, bool], tuple[Any, Exception | None]] = {}
 
-    def __call__(self, path: Path, *, regular_only: bool = False) -> dict[str, Any]:
-        """*regular_only* reads an APM sidecar as a regular file only (#5328)."""
+    def __call__(self, path: Path, *, regular_only: bool = True) -> dict[str, Any]:
+        """Sidecars are read as regular files only (#5328); a native config passes False."""
         import copy
 
         from apm_cli.integration.hook_ownership import read_hook_object

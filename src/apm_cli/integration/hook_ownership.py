@@ -27,9 +27,13 @@ def read_hook_object(path: Path, *, regular_only: bool = False) -> dict[str, Any
     following a link and read only if it is a regular file (#5328): a link,
     FIFO, socket or device raises ``OSError`` instead of being read or blocking.
     """
-    if regular_only and (path.is_symlink() or path.exists()):
-        with open_regular_file(path) as handle:
-            text = handle.read().decode("utf-8")
+    if regular_only:
+        # Always through the safe opener: no exists-then-read window (#5328).
+        try:
+            with open_regular_file(path) as handle:
+                text = handle.read().decode("utf-8")
+        except FileNotFoundError:
+            return {}
     elif not path.exists():
         return {}
     else:
@@ -372,7 +376,7 @@ def apm_owned_hook_entry_pointers(config_path: Path, event_container_key: str) -
     """
     try:
         config = read_hook_object(config_path)
-        sidecar = read_hook_object(config_path.parent / "apm-hooks.json")
+        sidecar = read_hook_object(config_path.parent / "apm-hooks.json", regular_only=True)
     except (OSError, ValueError, TypeError):
         return frozenset()
     container = config.get(event_container_key)
@@ -821,7 +825,7 @@ def per_file_bundle_records(
 
     *read* reads the sidecar; an audit passes one that reads each file once (#5211).
     """
-    data = read(sidecar_path)
+    data = read(sidecar_path, regular_only=True)  # APM's own record (#5328)
     records = data.get(_RECORD_KINDS[kind][0], [])
     if not isinstance(records, list):
         raise TypeError(f"local-bundle {kind} records must be a list")
@@ -879,9 +883,11 @@ def write_per_file_bundle_record(
     file to the content the key admitted (#5254).
     """
     records_key, files_key = _RECORD_KINDS[kind]
+    # A linked sidecar is no APM record (#5328): it is replaced, never read through.
+    existing = sidecar_path.exists() and not sidecar_path.is_symlink()
     kept = [
         record
-        for record in (per_file_bundle_records(sidecar_path, kind) if sidecar_path.exists() else [])
+        for record in (per_file_bundle_records(sidecar_path, kind) if existing else [])
         if record.get("_apm_source") not in LocalBundleMarkers(bundle_id)
     ]
     if hook_files:
@@ -894,7 +900,7 @@ def write_per_file_bundle_record(
                 path: file_hashes[path] for path in sorted(hook_files) if path in file_hashes
             }
         kept.append(record)
-    data = read_hook_object(sidecar_path) if sidecar_path.exists() else {}
+    data = read_hook_object(sidecar_path, regular_only=True) if existing else {}
     if kept:
         data[records_key] = kept
     else:
