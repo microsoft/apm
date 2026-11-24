@@ -237,6 +237,7 @@ hooks must be exactly those entries. Any user-authored hook in the file, or a
 linked, unreadable or hand-edited file, leaves both files unmanaged. Other
 keys in the config are covered at file granularity. A special file (such as a
 FIFO) in a governed directory is always reported.
+With no executables block, bundle hook files count as unmanaged; approve them to attest.
 
 ## security
 
