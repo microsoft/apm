@@ -2684,3 +2684,27 @@ def test_a_store_opens_its_journal_once_and_still_retains(tmp_path: Path, apm_ho
     assert (retained / "journal.jsonl").read_text(encoding="utf-8").splitlines() == lines
     journal.discard()
     assert not retained.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows opens the journal per line")
+def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_home: Path) -> None:
+    """The held journal fd closes with its journal, not at process exit (#4939)."""
+    import gc
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=tmp_path)
+    target = tmp_path / "a.md"
+    target.write_bytes(b"prior\n")
+    journal.record(target)
+    manifest = journal.store / "journal.jsonl"
+    fd = journal._held_journal[1]
+    del journal
+    gc.collect()
+
+    try:
+        still_open = os.fstat(fd).st_ino == manifest.stat().st_ino
+    except OSError:
+        still_open = False
+    assert not still_open
+    assert manifest.read_text(encoding="utf-8").count("\n") >= 2

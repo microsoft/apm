@@ -14,6 +14,7 @@ import contextlib
 import errno
 import os
 import stat
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -255,7 +256,9 @@ def append_held(owner: Any, path: Path, text: str) -> None:
     held = getattr(owner, "_held_journal", None)
     if held is None or held[0] != path:
         close_held(owner)
-        held = owner._held_journal = (path, open_private_append(path))
+        fd = open_private_append(path)
+        # Closed with its owner too: a journal dropped without discard() leaks nothing.
+        held = owner._held_journal = (path, fd, weakref.finalize(owner, _close_quietly, fd))
     os.write(held[1], text.encode("utf-8"))
 
 
@@ -264,8 +267,12 @@ def close_held(owner: Any) -> None:
     held = getattr(owner, "_held_journal", None)
     owner._held_journal = None
     if held is not None:
-        with contextlib.suppress(OSError):
-            os.close(held[1])
+        held[2]()
+
+
+def _close_quietly(fd: int) -> None:
+    with contextlib.suppress(OSError):
+        os.close(fd)
 
 
 def require_private_store(store: Path) -> None:
