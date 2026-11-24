@@ -82,7 +82,7 @@ def resolve_path(path: Path) -> Path:
     A class that overrides ``resolve`` keeps its own behavior, and any
     failure of the fast form leaves the answer (or the error) to it.
     """
-    if _FAST and type(path).resolve is _STOCK_RESOLVE:
+    if _FAST and getattr(type(path), "resolve", None) is _STOCK_RESOLVE:
         text = str(path)
         if text.startswith("/") and not text.startswith("//"):
             try:
