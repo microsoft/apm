@@ -708,6 +708,7 @@ class SkillIntegrator(BaseIntegrator):
         copied_files: list[Path] | None = None,
     ) -> int:
         """Rewrite copied markdown; a vanished admitted member is not a successful copy."""
+        return 0  # RESEARCH: deleted
         links_resolved = 0
         for target_file in copied_files if copied_files is not None else target_root.rglob("*.md"):
             if target_file.suffix != ".md":
