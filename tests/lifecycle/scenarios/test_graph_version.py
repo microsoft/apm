@@ -46,6 +46,7 @@ pytestmark = [
         "P-OWN-ls-remote-tag-commits",
         "P-OWN-git-semver-preflight-resolution",
         "P-OWN-prospective-dry-run-install-plan",
+        "P-OWN-dependency-identity-materialization",
     ),
 ]
 
@@ -177,6 +178,42 @@ def test_constraint_compatibility(lifecycle_world, root_ref, parent_ref, exit_co
         assert skill_rows[0].resolved_ref == "v1.0.0"
         scenario.assert_deployed()
         scenario.pair()
+    scenario.finish()
+
+
+def test_max_depth_reuses_a_direct_dependency_across_declared_refs(lifecycle_world) -> None:
+    """A direct org/b#main remains depth 1 when org/a also declares unpinned org/b."""
+    factory = LocalPackageFactory(lifecycle_world.root / "depth-identity")
+    package_a = skill_package(factory, "a", dependencies=("org/b",))
+    package_b = skill_package(factory, "b")
+    lifecycle_world.services.publish("org/a", package_a, tag=None)
+    lifecycle_world.services.publish("org/b", package_b, tag=None)
+    use_policy(lifecycle_world, "max-depth-1")
+    scenario = Scenario(
+        lifecycle_world,
+        {"a": "org/a", "b": "org/b#main"},
+        kinds={"a": ("skill",), "b": ("skill",)},
+        policy="allow",
+        requires={"a": ("b",)},
+    )
+
+    installed = scenario.run("install a b")
+
+    assert_changes(
+        installed.changed,
+        (*INSTALL_WRITES, *_skills("a", "b")),
+        label="install first-wins dependency graph",
+    )
+    rows = scenario.lock().get_package_dependencies()
+    assert {row.repo_url: row.depth for row in rows} == {"org/a": 1, "org/b": 1}, rows
+    child = next(row for row in rows if row.repo_url == "org/b")
+    assert child.resolved_ref == "main"
+
+    audit = scenario.run("audit --ci", read_only=True)
+    assert audit.result.returncode == 0, audit.output
+    assert "All dependencies within depth limit (1)" in audit.output
+    frozen = scenario.run("install --frozen")
+    assert frozen.result.returncode == 0, frozen.output
     scenario.finish()
 
 
