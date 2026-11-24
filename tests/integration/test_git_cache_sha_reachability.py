@@ -266,7 +266,9 @@ class TestVerdictScope:
         def _unreadable(*_args, **_kwargs):
             raise ValueError("git config could not be read")
 
-        monkeypatch.setattr("apm_cli.utils.git_env.effective_git_url", _unreadable)
+        monkeypatch.setattr("apm_cli.utils.git_env.git_url_rewrites", _unreadable)
+        # A fresh config location keys a fresh rewrite probe (the memo is per config state).
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
         root = tmp_path / "cache"
         require_reachable_commit(root, origin.url, cache_shard_key(origin.url), origin.m1)
 
