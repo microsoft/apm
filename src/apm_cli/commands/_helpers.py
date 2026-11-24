@@ -550,12 +550,34 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     found, whichever comes first. Returns the absolute path to the
     ``apm.yml`` file when found; ``None`` when no project root is
     discoverable from ``start`` upward.
+
+    An ancestor ``apm.yml`` another user owns is never adopted (git's
+    ``safe.directory`` class, #4545): ``/tmp/work`` must not run another
+    user's ``/tmp/apm.yml``. It is skipped with a warning naming it, and the
+    walk continues. Windows ownership (SIDs) is not checked.
     """
+    import stat
+
     cwd = (start or Path.cwd()).resolve()
+    geteuid = getattr(os, "geteuid", None)
     for candidate in (cwd, *cwd.parents):
         manifest = manifest_file(candidate)
-        if manifest.is_file():
-            return manifest
+        try:
+            info = manifest.lstat()
+            if stat.S_ISLNK(info.st_mode) and not manifest.is_file():
+                continue
+        except OSError:
+            continue
+        if not stat.S_ISLNK(info.st_mode) and not stat.S_ISREG(info.st_mode):
+            continue
+        if candidate != cwd and geteuid is not None and info.st_uid != geteuid():
+            _rich_warning(
+                f"Skipping {manifest}: another user owns it, so APM does not use it as "
+                "this project's apm.yml.",
+                symbol="warning",
+            )
+            continue
+        return manifest
     return None
 
 
@@ -569,9 +591,9 @@ def resolve_cli_packages_for_project_root(
         return packages
     resolved: list[str] = []
     for pkg in packages:
-        is_rel_prefix = pkg.startswith(("./", "../", ".\\", "..\\"))
-        is_local_in_cwd = "/" not in pkg and "\\" not in pkg and (invoking_dir / pkg).exists()
-        if is_rel_prefix or is_local_in_cwd:
+        # Only an explicit relative path names the invoking directory; a bare
+        # name (``foo``, ``name@market``) never depends on what the subdir holds.
+        if pkg.startswith(("./", "../", ".\\", "..\\")):
             target_path = (invoking_dir / pkg).resolve()
             try:
                 rel = target_path.relative_to(project_root.resolve()).as_posix()
