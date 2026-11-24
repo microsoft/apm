@@ -612,6 +612,7 @@ class Cell:
             "mcp_tools_listed": "tools/list" in mcp,
             "mcp_tool_called": "tools/call" in mcp,
             "plugin_listed": PLUGIN in lists.get("plugin_list", ""),
+            "list_mcp_spawned": "initialize" in self.evidence.get("list_mcp_marker", "").split(),
         }
         if self.harness == "claude":
             sig["details_listed"] = SKILL in lists.get("plugin_details", "")
@@ -649,6 +650,9 @@ class Cell:
             runtime.append(bool(sig.get("init_path_in_cwd")))
         if self.harness == "copilot":
             runtime.append(sig["skill_listed"])
+        if self.env.endswith("untrusted") and sig["list_mcp_spawned"] and not all(runtime):
+            # No harness command may run plugin code in a folder it does not trust.
+            return "PARTIAL", "plugin MCP server spawned by a list command without folder trust"
         if all(runtime):
             return "LOADS", ", ".join(k for k, v in sig.items() if v)
         output = self.evidence.get("headless_tail", "") + self.evidence.get("screen_tail", "")
