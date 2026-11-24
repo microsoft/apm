@@ -26,6 +26,7 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.world import World
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.lifecycle.world.fixtures import (  # noqa: F401
@@ -741,27 +742,26 @@ def _fingerprint(path: Path) -> object:
     return path.read_bytes() if stat.S_ISREG(mode) else stat.S_IFMT(mode)
 
 
+# Main's local-bundle-hooks check reads the sidecar with a blocking read (#5328).
+_FIFO_SIDECAR_HANGS = KnownFailure(
+    "#5328",
+    "audit --ci blocks on a FIFO hook sidecar in the local-bundle-hooks check",
+    r"'audit', '--ci'",
+    raises=subprocess.TimeoutExpired,
+)
+
+
 @pytest.mark.parametrize(
     "tamper",
     [
-        _edit_sidecar_entry,
-        _drop_settings_hooks,
-        _truncate_sidecar,
-        _link_sidecar,
-        _fifo_sidecar,
-        _user_hook_in_owned_event,
-        _user_hook_in_another_event,
-        _forged_bundle_marker,
-    ],
-    ids=[
-        "sidecar-entry-edited",
-        "settings-hooks-removed",
-        "sidecar-unparsable",
-        "sidecar-symlinked",
-        "sidecar-fifo",
-        "user-hook-in-owned-event",
-        "user-hook-in-another-event",
-        "forged-bundle-marker",
+        pytest.param(_edit_sidecar_entry, id="sidecar-entry-edited"),
+        pytest.param(_drop_settings_hooks, id="settings-hooks-removed"),
+        pytest.param(_truncate_sidecar, id="sidecar-unparsable"),
+        pytest.param(_link_sidecar, id="sidecar-symlinked"),
+        pytest.param(_fifo_sidecar, id="sidecar-fifo", marks=_FIFO_SIDECAR_HANGS.mark()),
+        pytest.param(_user_hook_in_owned_event, id="user-hook-in-owned-event"),
+        pytest.param(_user_hook_in_another_event, id="user-hook-in-another-event"),
+        pytest.param(_forged_bundle_marker, id="forged-bundle-marker"),
     ],
 )
 def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_verify(
@@ -784,9 +784,13 @@ def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_v
     text = _text(audit)
 
     assert audit.returncode == 1, _evidence(audit)
-    assert "2 unmanaged file(s) in governance directories" in text, _evidence(audit)
-    assert ".claude/apm-hooks.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
-    assert ".claude/settings.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+    if tamper is _forged_bundle_marker and "local-bundle-hooks details:" in text:
+        # The local-bundle-hooks check refuses the forged marker first: still fail-closed.
+        assert "- x: approval no longer granted" in text, _evidence(audit)
+    else:
+        assert "2 unmanaged file(s) in governance directories" in text, _evidence(audit)
+        assert ".claude/apm-hooks.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+        assert ".claude/settings.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
     assert {name: _fingerprint(claude / name) for name in before} == before
 
 

@@ -631,11 +631,8 @@ def clear_git_auth_env(
     remove_helpers: bool = False,
     keep_url_rewrites: bool = False,
 ) -> None:
-    """Remove inherited Git authorization channels while retaining other config.
-
-    With *keep_url_rewrites*, only the ``url.*`` rewrites of
-    ``GIT_CONFIG_PARAMETERS`` stay, for a probe of which server answers (#5246).
-    """
+    """Remove inherited Git authorization channels while retaining other config; with
+    *keep_url_rewrites* only GIT_CONFIG_PARAMETERS ``url.*`` rewrites stay (#5246)."""
     from apm_cli.utils.git_config_parameters import url_rewrites_only
 
     env.pop(_MANAGED_GIT_AUTH_INTENT_ENV, None)
