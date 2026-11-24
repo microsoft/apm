@@ -11,6 +11,8 @@
   ],
   "regression_tests": [
     "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells",
-    "tests/unit/bundle/test_plugin_exporter_lockfile.py::test_a_whole_native_plugin_is_named_not_a_provenance_gap"
+    "tests/unit/bundle/test_plugin_exporter_lockfile.py::test_a_whole_native_plugin_is_named_not_a_provenance_gap",
+    "tests/unit/test_lockfile_enrichment.py::TestLockfileEnrichment::test_a_bundle_lock_carries_no_native_plugin_record",
+    "tests/integration/test_pack_native_plugin_bundle_lock.py::test_a_mixed_row_packs_its_loose_files_and_no_native_plugin_record"
   ]
 }
