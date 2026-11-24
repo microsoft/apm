@@ -30,6 +30,8 @@ pytestmark = [
 
 _NAME = "always.instructions.md"
 _COPILOT_ONLY = "copilot-only.instructions.md"
+_LEAD = "Claude Code does not load"
+_SUMMARY = f"{_LEAD} 1 instruction(s) routed to AGENTS.md yet. Run 'apm compile'"
 
 
 def _evidence(result: CommandResult) -> str:
@@ -75,8 +77,12 @@ def test_an_instruction_routed_to_agents_md_is_named_until_compiled(
     install = runner.run(("install",), cwd=project, env=env, scenario_id="install")
 
     assert install.returncode == 0, _evidence(install)
+    # One summary line with the count; file names only under --verbose.
     assert "[!]" in install.stdout + install.stderr, _evidence(install)
-    assert _NAME in _text(install), _evidence(install)
+    assert _SUMMARY in _text(install), _evidence(install)
+    assert "Use --verbose to list them." in _text(install), _evidence(install)
+    assert _text(install).count(_LEAD) == 1, _evidence(install)
+    assert _NAME not in _text(install), _evidence(install)
     assert not (project / ".claude" / "rules" / "always.md").exists()
     assert not (project / "CLAUDE.md").exists()
 
@@ -88,13 +94,20 @@ def test_an_instruction_routed_to_agents_md_is_named_until_compiled(
     assert _NAME in _text(audit), _evidence(audit)
     assert _COPILOT_ONLY not in _text(install) + _text(audit), _evidence(audit)
 
+    verbose = runner.run(("install", "--verbose"), cwd=project, env=env, scenario_id="verbose")
+
+    assert verbose.returncode == 0, _evidence(verbose)
+    assert _SUMMARY in _text(verbose), _evidence(verbose)
+    assert f"Not compiled for Claude Code: {_NAME}" in _text(verbose), _evidence(verbose)
+    assert _COPILOT_ONLY not in _text(verbose), _evidence(verbose)
+
     compiled = runner.run(("compile",), cwd=project, env=env, scenario_id="compile")
     assert compiled.returncode == 0, _evidence(compiled)
     again = runner.run(("install",), cwd=project, env=env, scenario_id="reinstall")
     audit_after = runner.run(("audit", "--ci"), cwd=project, env=env, scenario_id="audit-after")
 
     assert again.returncode == 0, _evidence(again)
-    assert _NAME not in _text(again), _evidence(again)
+    assert _LEAD not in _text(again), _evidence(again)
     assert audit_after.returncode == 0, _evidence(audit_after)
     assert _NAME not in _text(audit_after), _evidence(audit_after)
 
@@ -105,4 +118,5 @@ def test_an_instruction_routed_to_agents_md_is_named_until_compiled(
 
     assert fresh.returncode == 0, _evidence(fresh)
     assert fresh_install.returncode == 0, _evidence(fresh_install)
-    assert _NAME not in _text(fresh) + _text(fresh_install), _evidence(fresh_install)
+    assert _NAME not in _text(fresh), _evidence(fresh)
+    assert _LEAD not in _text(fresh_install), _evidence(fresh_install)
