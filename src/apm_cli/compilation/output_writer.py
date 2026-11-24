@@ -80,11 +80,17 @@ def refuse_unsafe_output(path: Path, base_dir: Path, *, managed: bool) -> None:
             raise ManagedSectionError(
                 f"{path} is a symlink. Managed-section output must be a regular file."
             )
-        return
+        try:
+            # A link is read through: what it names must be a regular file too (#5187).
+            mode = path.stat().st_mode
+        except OSError:
+            return
     if not stat.S_ISREG(mode):
         from ..utils.diagnostics import printable_ascii_text
 
-        shown = printable_ascii_text(portable_relpath(path, base_dir))
+        # Named as spelled: a link's own name, never the file it points to.
+        parent = portable_relpath(path.parent, base_dir)
+        shown = printable_ascii_text(path.name if parent == "." else f"{parent}/{path.name}")
         raise CompiledOutputSpecialFileError(
             f"Refusing to compile: {shown} is not a regular file "
             "(a FIFO, socket, device or directory), so it was not read."
