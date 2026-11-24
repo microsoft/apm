@@ -49,6 +49,9 @@ ATTRIBUTES = "*.c\tdiff=cpp\n*.doc\tdiff=astextplain\n*.pdf\tdiff=astextplain\n"
 
 @pytest.fixture
 def windows_like_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from apm_cli.core.invocation_memo import forget_invocation_memos
+
+    forget_invocation_memos()
     fixture = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
     with serve_offline(fixture, tmp_path / "world") as world:
         with open(world.env["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8", newline="\n") as config:
