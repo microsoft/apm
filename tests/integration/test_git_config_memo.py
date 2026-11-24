@@ -225,16 +225,15 @@ def test_a_failed_probe_is_never_kept(world: _World) -> None:
 
 def test_a_relative_include_in_a_subdirectory_is_resolved_and_kept(world: _World) -> None:
     (world.home / "conf.d").mkdir()
-    (world.home / "conf.d" / "extra.cfg").write_text('[url "https://h.example/"]\n\tinsteadOf = hh:\n')
+    extra = world.home / "conf.d" / "extra.cfg"
+    extra.write_text('[url "https://h.example/"]\n\tinsteadOf = hh:\n')
     (world.home / ".gitconfig").write_text("[include]\n\tpath = conf.d/extra.cfg\n")
     with invocation_scope():
         world.read()
         kept = world.read()  # kept from the second miss, once the include is known
         world.read()
         _assert_probes(world, 2)
-        (world.home / "conf.d" / "extra.cfg").write_text(
-            '[url "https://i.example/"]\n\tinsteadOf = ii:\n'
-        )
+        extra.write_text('[url "https://i.example/"]\n\tinsteadOf = ii:\n')
         after = world.read()
     _assert_probes(world, 3)
     assert kept.rewrites == (("https://h.example/", "hh:"),)
