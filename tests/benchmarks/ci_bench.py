@@ -94,6 +94,7 @@ def abab(args: argparse.Namespace) -> int:
                     "--runs",
                     "1",
                     "--counts",
+                    "--count-fs",
                     "--max-load",
                     "1000000",
                     "--load-wait-min",
