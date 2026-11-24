@@ -4648,10 +4648,11 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/install/local_bundle_hook_trust.py",
-        old="                or runs_through_cwd(document, project_root, scripts)\n",
+        old="            ) or runs_through_cwd(document, project_root, scripts):\n",
         new=(
-            "                or runs_through_cwd(document, project_root, scripts)\n"
-            "                or not Path(os.path.realpath(path)).is_relative_to(project_root)\n"
+            "            ) or runs_through_cwd(document, project_root, scripts) or not Path(\n"
+            "                os.path.realpath(path)\n"
+            "            ).is_relative_to(project_root):\n"
         ),
         intent="The bundle in-use check adds an inline realpath containment beside the cwd owner (#5310).",
     ),
