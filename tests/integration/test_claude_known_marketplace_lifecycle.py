@@ -509,6 +509,9 @@ def test_a_failed_uninstall_cleanup_converges_on_the_next_install(
     plugins.unlink()
     real.rename(plugins)
     assert name in _known(world)
+    before = world.known.read_bytes()
+    world.ok("lock")
+    assert world.known.read_bytes() == before, "apm lock writes only the lockfile"
 
     result = world.ok("install", "--no-policy")
 
