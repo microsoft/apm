@@ -11,6 +11,7 @@ A disagreement fixes the engine, and with it the verifier.
 
 from __future__ import annotations
 
+import os
 import random
 import subprocess
 from pathlib import Path
@@ -78,9 +79,14 @@ _TOKENS = [
 _GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"]
 
 
+# No system or global config: a host's git-lfs filter would store a .gitattributes
+# that names filter=lfs as an LFS pointer, so the commit would not hold the rules.
+_ENV = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+
+
 def _git(cwd: Path, *args: str, stdin: bytes | None = None) -> bytes:
     return subprocess.run(
-        [*_GIT, *args], cwd=cwd, input=stdin, capture_output=True, check=True
+        [*_GIT, *args], cwd=cwd, input=stdin, capture_output=True, check=True, env=_ENV
     ).stdout
 
 

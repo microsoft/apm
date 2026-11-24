@@ -170,8 +170,10 @@ jobs:
         PYTHONUNBUFFERED: '1'
       run: >-
         uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q -rA
-        tests/unit/cache tests/integration/test_inprocess_sparse_live.py
-        tests/integration/test_inprocess_fetch_world.py tests/integration/test_inprocess_fetch_windows_world.py
+        tests/unit/cache tests/integration/test_inprocess_fetch_world.py
+        tests/integration/test_inprocess_fetch_windows_world.py
+        && uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q -rA -m live
+        tests/integration/test_inprocess_sparse_live.py
     - if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
