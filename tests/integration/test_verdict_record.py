@@ -1241,7 +1241,7 @@ def test_a_tree_changed_after_the_attested_install_never_skips_the_proof(
             encoding="utf-8",
         )
 
-    assert _attested_hit() is False
+    _assert_proves_itself()
 
 
 def test_a_target_set_widened_by_the_install_is_never_attested(project: Path) -> None:
@@ -1307,4 +1307,15 @@ def test_a_parked_mcp_notice_is_re_judged_live_and_still_attests(project: Path) 
         printed="  [!] Parked MCP server 'm' from transitive package o/p (self-defined, not approved)\n",
     )
 
+    _assert_attested_record(project)
+
+
+def _assert_proves_itself() -> None:
+    """Run 2 does not match the attestation: the engine proves its verdict itself."""
+    assert _attested_hit() is False
+
+
+def _assert_attested_record(project: Path) -> None:
+    """The durable attested record exists and run 2 matches it."""
+    assert _stored(project)["kind"] == "attested"
     assert _attested_hit() is True

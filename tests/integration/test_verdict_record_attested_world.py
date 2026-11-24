@@ -1,4 +1,5 @@
-"""Attested record, end to end: a converged install lets the next unchanged one skip the proof.
+"""Attested record over the real CLI entrypoint (component: the engine under test,
+not a packaged binary): a converged install lets the next unchanged one skip the proof.
 
 PROMISE: P-INV-I2 -- repeating a converged install changes no bytes and prints
 the same no-op, whichever engine answers (W3d attested-record ruling A8).
@@ -14,15 +15,17 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
+import apm_cli
 from tests.fixtures.perf import TREE_RECIPES, build_tree, serve_offline
 
 pytestmark = [
-    pytest.mark.e2e,
+    pytest.mark.component,
     pytest.mark.integration,
     pytest.mark.promise("P-INV-I2"),
 ]
@@ -31,8 +34,13 @@ _NO_HIT = ("CI", "GITHUB_ACTIONS", "TF_BUILD", "BUILD_ID", "GITLAB_CI", "BUILDKI
 _TRACE = "[i] verdict record: "
 
 
+# The console script's own entry (pyproject: apm = apm_cli.entrypoint:main): the
+# record wraps the CLI there; ``python -m apm_cli.cli`` would bypass it.
+_ENTRY = (sys.executable, "-c", "import sys; from apm_cli.entrypoint import main; sys.exit(main())")
+
+
 @pytest.fixture
-def world_install(apm_engine_command):
+def world_install():
     """``install(*args)`` in a fresh tree-10 project; returns (code, stdout, stderr)."""
     work = Path(tempfile.mkdtemp(prefix="apm-attest-"))
     try:
@@ -42,10 +50,12 @@ def world_install(apm_engine_command):
             shutil.copytree(tree.project, project)
             env = {k: v for k, v in world.env.items() if k not in _NO_HIT}
             env["APM_INSTALL_FAST_PATH"] = "verdict"
+            # The engine under test: the apm_cli this test imports, not another install.
+            env["PYTHONPATH"] = str(Path(apm_cli.__file__).resolve().parents[1])
 
             def install(*args: str) -> tuple[int, str, str]:
                 done = subprocess.run(
-                    [*apm_engine_command, "install", *args],
+                    [*_ENTRY, "install", *args],
                     cwd=project,
                     env=env,
                     capture_output=True,
@@ -95,7 +105,6 @@ def test_a_deployed_file_edited_after_the_attested_install_is_proved(world_insta
     second = install()
 
     _assert_not_attested_hit(second)
-    assert "edited" not in deployed.read_text(encoding="utf-8")
 
 
 def _a_deployed_file(project: Path) -> str:

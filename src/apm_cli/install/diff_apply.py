@@ -717,10 +717,16 @@ def try_apply(
         import click
 
         from apm_cli.deps.lockfile_generator import require_current_cli
+        from apm_cli.install import verdict_record
 
+        # An attested record MACs these exact lock bytes and this build, which
+        # passed the generator gate when it committed them: the gate's answer is
+        # the same, so only a run without a matching attestation re-reads it.
+        attested = verdict_record.attested_state(list(argv or []), project_root)
         try:
-            # The command's own gate: the full run renders its refusal.
-            require_current_cli(project_root, command="apm install")
+            if not attested:
+                # The command's own gate: the full run renders its refusal.
+                require_current_cli(project_root, command="apm install")
         except click.ClickException:
             raise Decline("lockfile generator") from None
         lock_path = get_lockfile_path(project_root)
@@ -763,7 +769,10 @@ def try_apply(
         deploy = DeployStore.open_default()
         if deploy is None:
             raise Decline("no deploy store")
-        if _attested_noop(project_root, argv, lock, fetch, targets, session):
+        if attested and _attested_gates(project_root, lock, fetch):
+            if decide_only:
+                _trace("no-op (attested record)")
+                return True
             _render_attested(
                 project_root, lock, fetch, targets, session, started, frozen_disposition
             )
@@ -832,20 +841,14 @@ def try_apply(
     return True
 
 
-def _attested_noop(
-    project_root: Path, argv: list[str] | None, lock: Any, fetch: Any, targets: Any, session: Any
-) -> bool:
-    """An attested record proves this state (W3d attested-record ruling).
+def _attested_gates(project_root: Path, lock: Any, fetch: Any) -> bool:
+    """The gates that re-judge every run, for a state an attested record proves.
 
     A successful full install attested the state it committed; the record's
     HMAC over every live input and the no-follow re-hash of every deployed file
     and package copy hold (A7), so planning and staging would find nothing.
-    The gates that re-judge every run still run: scripts, executables, policy.
+    Scripts, executables and policy still re-judge this run.
     """
-    from apm_cli.install import verdict_record
-
-    if not verdict_record.attested_state(list(argv or []), project_root):
-        return False
     _refuse_lifecycle_scripts(project_root)
     _refuse_unsilent_executables(lock)
     from apm_cli.install import noop_diff

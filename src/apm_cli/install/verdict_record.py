@@ -1104,7 +1104,7 @@ def _write(
         stderr_kept = "".join(
             line
             for line in stderr_text.splitlines(keepends=True)
-            if "install fast path:" not in line
+            if "install fast path:" not in line and "verdict record:" not in line
         )
         issued = time.time()
         record = {
