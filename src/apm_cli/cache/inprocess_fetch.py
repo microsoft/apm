@@ -34,6 +34,10 @@ _MAX_BODY = 64 * 1024 * 1024
 _MAX_INFLATED = 1024 * 1024 * 1024
 _MAX_OBJECT = 256 * 1024 * 1024
 _MAX_DELTA_DEPTH = 50
+# Worktree bounds, far above any real package; past them git does the checkout.
+_MAX_OBJECTS = 1_000_000
+_MAX_ENTRIES = 200_000
+_MAX_PATH = 4096
 _TIMEOUT = (10.0, 30.0)
 _DEADLINE_SECONDS = 120.0
 _CONFIG_UNSAFE = frozenset('\r\n"[\\')
@@ -209,6 +213,8 @@ def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
     count = int.from_bytes(pack[8:12], "big")
     if version not in (2, 3):
         raise _Refuse("pack version")
+    if count > _MAX_OBJECTS:
+        raise _Refuse("pack object count exceeds the cap")
     buf = memoryview(pack)[:-20]
     budget = [_MAX_INFLATED]
     pos = 12
@@ -355,6 +361,9 @@ def _plan(
     files: list[tuple[str, str, bool]] = []
     reached = {sha}
     stack = [("", first[5:].decode("ascii"))]
+    # Shared subtrees expand per path, so a tiny pack can name billions of
+    # entries: count each one before building its path.
+    entries = 0
     while stack:
         prefix, tree_id = stack.pop()
         reached.add(tree_id)
@@ -362,6 +371,11 @@ def _plan(
         if tree is None or tree[0] != "tree":
             raise _Refuse("tree missing")
         for mode, raw_name, oid in _tree_entries(tree[1]):
+            entries += 1
+            if entries > _MAX_ENTRIES:
+                raise _Refuse("worktree entry count exceeds the cap")
+            if len(prefix) + len(raw_name) > _MAX_PATH:
+                raise _Refuse("worktree path exceeds the length cap")
             name = _safe_name(raw_name)
             path = f"{prefix}{name}"
             if mode == "40000":
