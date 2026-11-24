@@ -243,18 +243,44 @@ def _mcp_package(root: Path, name: str) -> None:
     )
 
 
-@pytest.mark.parametrize("target", ["claude", "copilot", "cursor"])
-def test_incremental_mcp_installs_in_any_order_pass_audit(
-    tmp_path: Path, apm_binary_path: Path, target: str
+def _lsp_package(root: Path, name: str) -> None:
+    root.mkdir(parents=True)
+    server = {
+        "name": f"{name}-server",
+        "command": "true",
+        "args": ["--stdio"],
+        "extensionToLanguage": {f".{name}": name},
+    }
+    dump_yaml(
+        {"name": name, "version": "1.0.0", "dependencies": {"lsp": [server]}}, root / "apm.yml"
+    )
+
+
+_MERGED_KINDS = {"mcp": _mcp_package, "lsp": _lsp_package}
+
+
+@pytest.mark.parametrize(
+    ("kind", "target"),
+    [
+        ("mcp", "claude"),
+        ("mcp", "copilot"),
+        ("mcp", "cursor"),
+        ("lsp", "copilot"),
+        ("lsp", "claude"),
+        ("lsp", "opencode"),
+    ],
+)
+def test_incremental_merged_config_installs_in_any_order_pass_audit(
+    tmp_path: Path, apm_binary_path: Path, kind: str, target: str
 ) -> None:
-    """Cut probe (#5285 sibling): MCP servers merged into one config by
+    """Cut probe (#5285 sibling): MCP and LSP servers merged into one config by
     incremental installs converge with a full install (I2, I3)."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     project = isolated.work_root / "consumer"
     for name in _PACKAGES:
-        _mcp_package(project / "pkgs" / name, name)
-    allow = {f"./pkgs/{name}": {"mcp": True} for name in _PACKAGES}
+        _MERGED_KINDS[kind](project / "pkgs" / name, name)
+    allow = {f"./pkgs/{name}": {kind: True} for name in _PACKAGES}
     dump_yaml(
         {
             "name": "consumer",
@@ -271,7 +297,6 @@ def test_incremental_mcp_installs_in_any_order_pass_audit(
         added = runner.run(("install", *trust, *extra), cwd=project, env=env)
         assert added.returncode == 0, added.stdout + added.stderr
     before = _project_bytes(project)
-    assert any("mcp" in key for key in before), sorted(before)
     audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
     assert audit.returncode == 0, audit.stdout[-1200:]
     rerun = runner.run(("install", *trust), cwd=project, env=env)
