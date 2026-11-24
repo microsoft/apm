@@ -521,6 +521,81 @@ def test_tampered_bundle_refusal_names_the_reason_and_remedy(
     assert tree_bytes(consumer) == before
 
 
+# -- the bundle's hook sidecar is in the config file records (#5039) -------------------
+
+_SIDECAR = ".github/apm-hooks.json"
+
+
+def _named_bundle(world: MarketplacePackWorld, tmp_path: Path, name: str) -> tuple[Path, str]:
+    producer = _hooked_package(world.isolated.work_root / name, name, "Bash", f"{name}-skill")
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / f"out-{name}"))
+    bundle = tmp_path / f"out-{name}" / f"{name}-1.0.0"
+    info = detect_local_bundle(bundle)
+    return bundle, local_bundle_approval_key(
+        info.package_id, str(info.plugin_json.get("version") or ""), info.source_dir, info.lockfile
+    )
+
+
+def _recorded(world: MarketplacePackWorld, path: Path) -> dict | None:
+    """This machine's config file record of *path* (what crash recovery verifies)."""
+    records = Path(world.env["APM_HOME"]) / "deployment-receipts" / "config-files"
+    store = records / "records.json"
+    if not store.is_file():
+        return None
+    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    return next((row for row in rows if row["path"] == path.resolve().as_posix()), None)
+
+
+def test_bundle_sidecar_writes_keep_the_config_file_records_current(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Every write of the bundle hook sidecar is recorded with the bytes it left, so
+    crash recovery can verify the sidecar when a journaled install later changes it."""
+    import hashlib
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle_a, key_a = _named_bundle(world, tmp_path, "pkga")
+    bundle_b, key_b = _named_bundle(world, tmp_path, "pkgb")
+    consumer = world.consumer("bundle-consumer", targets=("copilot",))
+    _allow(consumer, key_a, key_b)
+    sidecar = consumer / _SIDECAR
+
+    for bundle in (bundle_a, bundle_b):
+        world.apm(consumer, "install", str(bundle), "--no-policy")
+        row = _recorded(world, sidecar)
+        assert row is not None, f"no record of {_SIDECAR} after installing {bundle.name}"
+        digest = "sha256:" + hashlib.sha256(sidecar.read_bytes()).hexdigest()
+        assert row["hash"] == digest, (row, sidecar.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("outside", ["dangling", "json"])
+def test_bundle_sidecar_link_is_replaced_and_its_target_left_alone(
+    tmp_path: Path, apm_binary_path: Path, outside: str
+) -> None:
+    """A linked hook record file is replaced by a regular file; what it linked to is untouched."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _named_bundle(world, tmp_path, "pkga")
+    consumer = world.consumer("linked-sidecar", targets=("copilot",))
+    _allow(consumer, key)
+    target = tmp_path / "outside" / "hooks.json"
+    target.parent.mkdir()
+    if outside == "json":
+        target.write_text('{"keep": true}\n', encoding="utf-8")
+    before = target.read_bytes() if target.exists() else None
+    sidecar = consumer / _SIDECAR
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        sidecar.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+
+    assert (target.read_bytes() if target.exists() else None) == before
+    assert sidecar.is_file() and not sidecar.is_symlink()
+
+
 def _bundle_hook_claims(world: MarketplacePackWorld, project: Path) -> list[str]:
     lock = world.lock(project)
     return [p for p in lock.get("local_deployed_files") or [] if "/hooks/" in p]
@@ -1452,3 +1527,151 @@ def test_uninstall_bundle_ignores_a_matcher_naming_its_script(
     assert not (consumer / script).exists()
     assert script not in _claims(world, consumer)
     assert _hook_entries(consumer) == {"Stop": ["hooks/hookpkg/hooks/scripts/x.sh"]}
+
+
+def test_uninstall_bundle_by_name_reaches_a_gate_off_partial_retirement(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: a gate-off bundle whose native entries are gone is still selected by name."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, _key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("gate-off-partial-consumer", targets=("claude",))
+    world.apm(consumer, "install", str(bundle))
+    write(consumer / ".claude" / "settings.json", "{}\n")
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    assert script in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg"))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / script).exists()
+    assert script not in _claims(world, consumer)
+
+
+def test_uninstall_bundle_path_finds_a_partially_retired_alias(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: an alias whose native entries are gone is matched by the key its sidecar keeps."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "partial-alias-consumer", key)
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    write(consumer / ".claude" / "settings.json", "{}\n")
+    script = ".claude/hooks/team-hooks/hooks/scripts/x.sh"
+    assert script in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'team-hooks'" in text, text
+    sidecar = consumer / ".claude" / "apm-hooks.json"
+    assert not sidecar.exists() or "local-bundle::team-hooks" not in sidecar.read_text()
+    assert script not in _claims(world, consumer)
+
+
+def test_uninstall_bundle_removes_kiro_scripts_and_claims(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: Kiro copies scripts to .kiro/hooks/<slug>/; uninstall removes them and their claims."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "kiro-consumer", key)
+    (consumer / ".kiro").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,kiro")
+    kiro_scripts = [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/hookpkg/")]
+    assert kiro_scripts, _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/")]
+    assert not (consumer / ".kiro" / "hooks" / "hookpkg").exists()
+
+
+def test_uninstall_bundle_keeps_kiro_scripts_an_unrecorded_hook_file_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4903 review: without its Kiro record, no kept hook file runs a deleted script."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "kiro-no-record-consumer", key)
+    (consumer / ".kiro").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,kiro")
+    kiro_scripts = [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/hookpkg/")]
+    assert kiro_scripts, _claims(world, consumer)
+    hooks_dir = consumer / ".kiro" / "hooks"
+
+    def runs(path: Path) -> list[str]:
+        body = path.read_text(encoding="utf-8").replace("\\", "/")
+        return [c for c in kiro_scripts if c.removeprefix(".kiro/") in body]
+
+    descriptors = [p for p in hooks_dir.glob("*.json") if runs(p)]
+    assert descriptors, sorted(hooks_dir.iterdir())
+    (consumer / ".kiro" / "apm-hooks.json").unlink()
+
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    text = output(result)
+
+    assert "Traceback" not in text, text
+    claims = _claims(world, consumer)
+    for path in (p for p in descriptors if p.is_file()):
+        # A hook file left registered keeps every script it runs, and is named.
+        assert all((consumer / c).is_file() and c in claims for c in runs(path)), text
+        assert result.returncode == 1 and path.name in text, text
+        assert "Removed hooks from local bundle 'hookpkg'" not in text, text
+
+
+def test_uninstall_bundle_keeps_kiro_scripts_beside_an_unreadable_hook_file(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4903 review: an unreadable per-file hook file may run the scripts; they stay."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "kiro-unreadable-consumer", key)
+    (consumer / ".kiro").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,kiro")
+    kiro_scripts = [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/hookpkg/")]
+    assert kiro_scripts, _claims(world, consumer)
+    write(consumer / ".kiro" / "hooks" / "stray.json", "{not json\n")
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".kiro/hooks/stray.json" in text, text
+    assert "Removed hooks from local bundle 'hookpkg'" not in text, text
+    assert "Traceback" not in text, text
+    claims = _claims(world, consumer)
+    assert all((consumer / c).is_file() and c in claims for c in kiro_scripts), claims
+
+
+def test_uninstall_bundle_refuses_a_malformed_per_file_sidecar_before_writing(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: a per-file sidecar whose bundle records are malformed is refused up front."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "malformed-sidecar-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    write(consumer / ".github" / "apm-hooks.json", json.dumps({"local-bundle-hooks": {}}))
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert ".github/apm-hooks.json (unreadable)" in refused, refused
+    assert "Traceback" not in refused, refused
+    assert tree_bytes(consumer) == before
+
+
+def test_uninstall_bundle_path_refuses_a_keyed_and_a_keyless_copy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: a keyed alias plus a gate-off default copy of one bundle is ambiguous by path."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "mixed-identity-consumer", key)
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest.pop("executables")
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle))
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash", "Bash"]}
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert "hookpkg, team-hooks" in refused, refused
+    assert "Run 'apm uninstall <installed-name>'" in refused, refused
+    assert tree_bytes(consumer) == before

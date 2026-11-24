@@ -14,7 +14,11 @@ from apm_cli.commands.uninstall.cli import (
     _StillNeededRepair,
 )
 from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
-from apm_cli.commands.uninstall.local_reanchor import LocalReanchorPlan, snapshot_for_rollback
+from apm_cli.commands.uninstall.local_reanchor import (
+    LocalReanchorPlan,
+    _abort_unsaved_reanchor,
+    snapshot_for_rollback,
+)
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I3", "P-INV-I1")]
 
@@ -226,3 +230,26 @@ def test_a_repeated_failed_rollback_keeps_the_earlier_backup(
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert str(fresh) in message, message
     assert manifest.read_text(encoding="utf-8") == "name: proj\n"
+
+
+def test_a_rollback_never_rewrites_a_file_still_holding_its_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5077 review: unchanged receipts in a read-only directory do not fail the rollback."""
+    receipts = tmp_path / "receipts.json"
+    receipts.write_bytes(b'{"records": {}}\r\n')
+    plan = snapshot_for_rollback(LocalReanchorPlan(renames={"./vendor/e": "_local/e"}), (receipts,))
+
+    def read_only(path, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr("apm_cli.integration.write_seam.atomic_write_text", read_only)
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _abort_unsaved_reanchor(_StillNeededRepair({}, {}, {}, frozenset(), plan), logger)
+
+    assert exc.value.code == 1
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "were restored" in message and "could not be restored" not in message, message
+    assert receipts.read_bytes() == b'{"records": {}}\r\n'

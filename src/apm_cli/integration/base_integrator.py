@@ -2,6 +2,7 @@
 
 import errno
 import os
+import posixpath
 import re
 import stat
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -288,6 +289,10 @@ class BaseIntegrator:
     # than churned. Making the mode an explicit, named class attribute keeps
     # it out of a hardcoded literal buried inside the predicate.
     _LF_NORMALIZED_DEPLOY = False
+
+    # How a path two packages deploy is settled, as this integrator applies it.
+    # ``None`` = not declared: a caller predicting the final writer refuses.
+    SHARED_PATH_RULE: str | None = None
 
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
@@ -1070,14 +1075,15 @@ class BaseIntegrator:
         Set *allow_final_symlink* only when unlinking the final path itself.
 
         Checks:
-        1. No path-traversal components (``..``)
+        1. No path-traversal components (``..``) and no ``.`` segment:
+           only canonical paths are admitted
         2. Starts with an allowed integration prefix
         3. Resolves within *project_root*, a configured absolute target root,
            or the cowork root for ``cowork://`` paths
         """
         from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
-        if ".." in rel_path:
+        if ".." in rel_path or "." in rel_path.replace("\\", "/").split("/"):
             return False
 
         candidate = Path(rel_path)
@@ -1238,11 +1244,13 @@ class BaseIntegrator:
                         prefix_map[COPILOT_APP_LOCKFILE_PREFIX] = bucket_key
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
-                prefix = (
-                    f"{effective_root}/{mapping.subdir}/"
-                    if mapping.subdir
-                    else f"{effective_root}/"
+                # Canonical spelling, so a root of "." routes "skills/..." claims (#5096).
+                prefix = posixpath.normpath(
+                    f"{effective_root}/{mapping.subdir}" if mapping.subdir else effective_root
                 )
+                prefix = "" if prefix == "." else f"{prefix}/"
+                if not prefix:
+                    continue  # a primitive at the root itself owns no prefix
                 if prim_name == "skills":
                     skill_prefixes.append(prefix)
                 elif prim_name == "hooks":

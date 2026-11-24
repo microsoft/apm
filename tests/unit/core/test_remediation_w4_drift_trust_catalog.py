@@ -59,6 +59,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "and an approval route for an unpacked bundle",
     "bundle-instructions-staged": "an informational hint every local bundle install with "
     "staged instructions prints; the advised compile does not silence it",
+    "cached-checkout-tampered": "needs a tampered persistent git cache shard read by "
+    "apm audit --ci; the install heal is executed by tests/lifecycle/security/test_integrity.py",
     "claude-plugin-cache-invalid": "needs a corrupted legacy Claude Plugin cache entry",
     "local-bundle-executables-denied": "executed by test_bundle_deny_retires_lsp_lifecycle "
     "and test_bundle_deny_retires_executables_lifecycle (RA-041): the reinstall names the deny",

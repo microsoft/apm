@@ -1,4 +1,4 @@
-"""Canonical parsing for plugin-root paths in hook commands."""
+"""Canonical parsing for plugin-root paths in hook commands, and the copied script layout."""
 
 from __future__ import annotations
 
@@ -128,3 +128,15 @@ def splice_references(text: str, edits: list[tuple[int, int, str]]) -> str:
         position = end
     parts.append(text[position:])
     return "".join(parts)
+
+
+# Copilot (rewritten as "vscode") copies a package's hook scripts to
+# hooks/scripts/<package>/; every other hook target copies them to hooks/<package>/.
+SCRIPTS_SUBDIR_HOOK_TARGETS = frozenset({"vscode", "copilot"})
+
+
+def hook_scripts_parent(target: str, root_dir: str) -> str:
+    """Return the directory holding each package's copied hook scripts for *target*."""
+    if target in SCRIPTS_SUBDIR_HOOK_TARGETS:
+        return f"{root_dir}/hooks/scripts/"
+    return f"{root_dir}/hooks/"

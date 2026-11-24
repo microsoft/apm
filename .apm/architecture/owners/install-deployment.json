@@ -10,8 +10,8 @@
     },
     {
       "id": "single-file-package-materialization",
-      "decision": "Single-file dependency package layout, local source admission and the local package image shared by install, uninstall refresh and audit replay",
-      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, materialize_local_package, compute_local_package_hash, materialize_local_package_for_replay); DependencyReference owns suffix vocabulary",
+      "decision": "Single-file dependency package layout, local source admission, the local package image shared by install, uninstall refresh and audit replay, and whether a local source still matches its materialized copy",
+      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, materialize_local_package, compute_local_package_hash, materialize_local_package_for_replay, local_source_matches_copy, which normalizes through install/drift.py); DependencyReference owns suffix vocabulary; the uninstall survivor refresh and re-anchor checks consume local_source_matches_copy",
       "selectors": [
         "src/apm_cli/deps/virtual_file.py",
         "src/apm_cli/deps/github_downloader.py",
@@ -22,9 +22,9 @@
     {
       "id": "orphan-package-selection",
       "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
-      "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner); a still-needed local root re-keys through commands/uninstall/local_reanchor.py from the same walk (#4889)",
-      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py", "src/apm_cli/commands/uninstall/local_reanchor.py"],
-      "guards": ["install-deployment-orphan-selection"]
+      "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner); a still-needed local root re-keys through commands/uninstall/local_reanchor.py from the same walk (#4889), and a path the re-key re-ranks takes the writer install's order selects, proven by an offline audit replay or refused (commands/uninstall/local_reanchor_writers.py, #5048)",
+      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py", "src/apm_cli/commands/uninstall/local_reanchor.py", "src/apm_cli/commands/uninstall/local_reanchor_writers.py"],
+      "guards": ["install-deployment-orphan-selection", "install-deployment-reanchor-writer-prediction"]
     },
     {
       "id": "immutable-dependency-requirements",
@@ -152,6 +152,8 @@
       "selectors": [
         "src/apm_cli/install/commit_gate.py",
         "src/apm_cli/install/deploy_snapshot.py",
+        "src/apm_cli/install/deploy_state.py",
+        "src/apm_cli/install/journal_modes.py",
         "src/apm_cli/adapters/client/config_journal.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",
@@ -259,6 +261,12 @@
         "src/apm_cli/commands/uninstall/hook_absence.py"
       ],
       "guards": [
+        "install-deployment-uninstall-absence-proof",
+        "install-deployment-uninstall-absence-proof-access",
+        "install-deployment-uninstall-absence-proof-binding",
+        "install-deployment-uninstall-absence-proof-child-no-follow",
+        "install-deployment-uninstall-absence-proof-helper",
+        "install-deployment-uninstall-absence-proof-moved-pin",
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
         "install-deployment-cleanup-spelling-aliases",

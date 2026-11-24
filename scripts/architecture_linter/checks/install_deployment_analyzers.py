@@ -182,6 +182,10 @@ from scripts.architecture_linter.checks.install_reanchor_receipts import (
     GUARD_REANCHOR_RECEIPT_HISTORY,
     check_reanchor_receipt_history,
 )
+from scripts.architecture_linter.checks.install_reanchor_writers import (
+    GUARD_REANCHOR_WRITER_PREDICTION,
+    check_reanchor_writer_prediction,
+)
 from scripts.architecture_linter.checks.install_receipt_collection import (
     GUARD_RECEIPT_COLLECTION,
     check_receipt_collection,
@@ -252,6 +256,10 @@ from scripts.architecture_linter.checks.install_trust_integrity import (
     check_update_marketplace_provenance,
     check_update_registry_integrity,
 )
+from scripts.architecture_linter.checks.install_uninstall_absence_proof import (
+    GUARD_UNINSTALL_ABSENCE_PROOF,
+    check_uninstall_absence_proof,
+)
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
     _GUARD_RESOLUTION_REPLACEMENT,
@@ -292,6 +300,20 @@ RULES: tuple[Rule, ...] = (
         "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
         check_cleanup_target_roots,
     ),
+    Rule(
+        id=GUARD_UNINSTALL_ABSENCE_PROOF,
+        group="install_deployment",
+        guard_ids=(
+            GUARD_UNINSTALL_ABSENCE_PROOF,
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-access",
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-binding",
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-child-no-follow",
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-helper",
+            f"{GUARD_UNINSTALL_ABSENCE_PROOF}-moved-pin",
+        ),
+        description="An aborted uninstall sync proves a removed file absent only through its owner.",
+        check=check_uninstall_absence_proof,
+    ),
     _rule(
         GUARD_RECEIPT_COLLECTION,
         "Orphaned deployment receipts are collected only by the receipt owner.",
@@ -301,6 +323,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_REANCHOR_RECEIPT_HISTORY,
         "A re-anchored local owner's receipts keep their hash history.",
         check_reanchor_receipt_history,
+    ),
+    _rule(
+        GUARD_REANCHOR_WRITER_PREDICTION,
+        "A re-anchor predicts a shared path's writer only through install's owners.",
+        check_reanchor_writer_prediction,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,

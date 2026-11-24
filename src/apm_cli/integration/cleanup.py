@@ -559,6 +559,17 @@ class DeploymentEvidence:
         self._consent_refused[_claim_key(claim)] = None
         return True
 
+    def consent_keep_noncanonical(self, claim: str) -> bool:
+        """Whether consent keeps a claim recorded with a ``.`` segment (#5096).
+
+        Nothing is written or removed through a non-canonical spelling, so
+        under ``--trust-lockfile`` the file stays and is recorded as kept.
+        """
+        if not self._lockfile_consent:
+            return False
+        self._consent_refused[_claim_key(claim)] = None
+        return True
+
     def kept_under_consent(self) -> frozenset[str]:
         """Claims a deletion decision kept, despite ``--trust-lockfile`` consent, for their evidence."""
         return frozenset(self._consent_refused)
@@ -788,12 +799,22 @@ def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
 
 
 def _render_locked(
-    lockfile: LockFile, owner: str | None, lockfile_root: Path, user_scope: bool, diagnostics
+    lockfile: LockFile,
+    owner: str | None,
+    lockfile_root: Path,
+    user_scope: bool,
+    diagnostics,
+    *,
+    cache_only: bool = False,
+    on_package=None,
+    records: bool = True,
 ) -> Path | None:
     """Render the locked packages (or only *owner*) into a private scratch tree.
 
     The replay uses every target the lock recorded as well as the current
     manifest's, so files of a target the manifest just dropped stay provable.
+    *cache_only* never fetches; *on_package* is the replay's per-package hook,
+    which needs *records* off so every package renders live.
     """
     from apm_cli.install.drift import (
         CheckLogger,
@@ -811,7 +832,9 @@ def _render_locked(
     config = ReplayConfig(
         project_root=lockfile_root,
         lockfile_path=snapshot,
-        cache_only=False,
+        cache_only=cache_only,
+        records=records,
+        on_package=on_package,
         scratch_root=scratch,
         modules_root=scratch / "apm_modules",
         user_scope=user_scope,
@@ -1201,6 +1224,36 @@ def _keep_consent_link(result: CleanupResult, diagnostics, stale_path: str, dep_
     )
 
 
+def _consent_kept_noncanonical(
+    stale_path: str, project_root: Path, evidence: DeploymentEvidence, *, targets, user_scope: bool
+) -> bool:
+    """Whether a path the gate refused only for a ``.`` segment is consent-kept (#5096).
+
+    Its canonical spelling must pass the same gate; anything else stays a
+    safety rejection, and nothing is ever removed through the claim.
+    """
+    segments = stale_path.replace("\\", "/").split("/")
+    # Only a pure "." spelling qualifies: ".." is traversal and is never kept.
+    if not evidence.lockfile_consent or "." not in segments or ".." in segments:
+        return False
+    return BaseIntegrator.validate_deploy_path(
+        _claim_key(stale_path), project_root, targets=targets, user_scope=user_scope
+    ) and evidence.consent_keep_noncanonical(stale_path)
+
+
+def _keep_noncanonical(result: CleanupResult, diagnostics, stale_path: str, dep_key: str) -> None:
+    """Keep a claim recorded with a ``.`` segment under ``--trust-lockfile`` and name it."""
+    result.skipped_unmanaged.append(stale_path)
+    diagnostics.warn(
+        kept_note(
+            stale_path,
+            "it is recorded with a '.' path segment, which APM never removes through",
+            KEPT_DELETE_MANUALLY,
+        ),
+        package=dep_key,
+    )
+
+
 def _consent_kept_final_link(
     stale_path: str, project_root: Path, evidence: DeploymentEvidence, *, targets, user_scope: bool
 ) -> bool:
@@ -1572,6 +1625,11 @@ def remove_stale_deployed_files(
                     stale_path, project_root, evidence, targets=targets, user_scope=user_scope
                 ):
                     _keep_consent_link(result, diagnostics, stale_path, dep_key)
+                    continue
+                if _consent_kept_noncanonical(
+                    stale_path, project_root, evidence, targets=targets, user_scope=user_scope
+                ):
+                    _keep_noncanonical(result, diagnostics, stale_path, dep_key)
                     continue
                 result.reject(stale_path, REJECTED_UNSAFE_PATH)
                 continue

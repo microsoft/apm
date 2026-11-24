@@ -247,8 +247,12 @@ still cleans up its managed files, subject to the usual user-edit protections.
   one found at the MCP write keeps the deployed files the lockfile records. A killed process (SIGKILL, power loss)
   cannot restore itself: the next `apm install` in that project (including
   `--mcp` and local-bundle installs) restores every file first and prints `Restored N deployed path(s) left by an interrupted
-  install.` It restores only bytes that `apm.lock.yaml` records for the path,
-  and never removes or replaces a file that changed after the interrupted
+  install.` It restores only bytes that `apm.lock.yaml` records for the path.
+  A shared config file the lockfile does not record (hook settings such as
+  `.claude/settings.json`, the `apm-hooks.json` sidecar, an MCP config file) is
+  restored only when it still holds exactly what the interrupted install wrote
+  and this machine's record of APM's config file writes confirms those bytes.
+  It never removes or replaces a file that changed after the interrupted
   install (for example one you wrote there): it keeps that file and names it
   in a warning. A directory a killed removal left half-deleted is restored
   whole, unless you changed it.
@@ -256,9 +260,14 @@ still cleans up its managed files, subject to the usual user-edit protections.
   cannot be restored, it restores the others. Either way it names each path,
   keeps the copies under `~/.apm/install-snapshots/retained-*` and exits 1.
   Restore or remove the listed paths by hand, then run the command again.
-  Shared settings the lockfile does not record (hook settings, MCP
-  configuration) are not restored this way: the copies are kept and reported
-  for you to restore by hand.
+  A shared config file this machine's records cannot confirm is not restored
+  either: its copy is kept and reported for you to restore by hand.
+  A journal left by an earlier apm version, which did not record permissions,
+  is not replayed: the next install keeps it under
+  `~/.apm/install-snapshots/retained-*`, names that directory and exits 1; its
+  `journal.jsonl` lists the paths to restore or remove by hand. A
+  restored file never gets permissions wider than it has at replay time, and
+  a file that carries a POSIX ACL is kept and reported.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed
@@ -369,7 +378,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
 - **Local edit hint.** Before re-syncing a project install, `apm install` compares the managed files of the remote dependencies being installed with the hashes recorded at deployment. When some were edited locally, it prints one `[i]` hint that this install may overwrite them; run [`apm export-patch`](../export-patch/) before the next install to keep such edits as upstream patches. The install still proceeds. `--dry-run`, global installs, and `apm lock` skip the check.
-- **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces, and files of removed dependencies, are removed only with evidence that APM deployed their current bytes: a local deployment receipt, or byte equality with what the locked package version renders (fetched from its locked commit when needed). Lockfile hashes alone are never that evidence. Edited files, and files with no evidence, are kept with a warning naming them; delete them manually if no longer needed. The same checks apply to project-local `.apm/` output with recorded concrete target ownership, including after renames, deletions, or target removal; [ambiguous legacy rows](../../lockfile-spec/#unattributed-rows) remain untouched. Shared `.agents/skills/` files stay while another package or target claims them, including a declared target skipped by `--target`. When a removed dependency's skill directory also holds your own files, install deletes APM's files, keeps the directory with yours, and drops the dependency from `apm.lock.yaml`; `apm deps list` then reports it as orphaned and `apm prune` removes its `apm_modules/` copy, as for any removed dependency.
+- **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces, and files of removed dependencies, are removed only with evidence that APM deployed their current bytes: a local deployment receipt, or byte equality with what the locked package version renders (fetched from its locked commit when needed). Lockfile hashes alone are never that evidence. Edited files, and files with no evidence, are kept with a warning naming them; delete them manually if no longer needed. A removed dependency's hook entries merged into a shared config such as Claude `settings.json` are retired as `apm uninstall` retires them; entries APM did not write, or ones you edited, stay. The same checks apply to project-local `.apm/` output with recorded concrete target ownership, including after renames, deletions, or target removal; [ambiguous legacy rows](../../lockfile-spec/#unattributed-rows) remain untouched. Shared `.agents/skills/` files stay while another package or target claims them, including a declared target skipped by `--target`. When a removed dependency's skill directory also holds your own files, install deletes APM's files, keeps the directory with yours, and drops the dependency from `apm.lock.yaml`; `apm deps list` then reports it as orphaned and `apm prune` removes its `apm_modules/` copy, as for any removed dependency.
   Narrowing one dependency's `targets:` also reconciles its removed targets
   within the current install scope, even when the consumer still enables those
   targets. Successfully removed files lose their file/hash/ledger claims;
@@ -382,6 +391,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   exit `1`; fix the reported files in the package source and reinstall. Use
   `--force` only after reviewing the findings.
 - **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
+- **Malformed hook events.** A deployed hook config (for example `.claude/settings.json`) whose event is not a list of entries, such as `"PreToolUse": null`, is left as written. When a package must merge hooks into that event, install fails naming the file and the event; fix or remove the event, then run `apm install` again.
 - **Unresolved hook roots.** A hook command that leaves a supported `${PLUGIN_ROOT}` alias unresolved emits a warning naming the package and a concrete repair. Balance quotes around the complete package-relative path, keep it inside the package, then run `apm install` again. See [Hooks and commands](../../../producer/write-primitives/#hooks-and-commands) for accepted quoting forms.
 - **Declared plugin components.** Every path explicitly listed under a recognized plugin manifest's `agents`, `skills`, `commands`, or `hooks` field must resolve inside that plugin root. A missing or escaping path fails before deployment and lockfile commit; remove the declaration or add the component, then reinstall. Omitted fields and empty lists remain valid.
 - **Default registry routing.** When a default registry is configured (project `registries.default` in `apm.yml` or `registry.<name>.default true` in `$APM_HOME/config.json`), unscoped `owner/repo#ref` shorthand deps passed to `apm install` route to the registry instead of GitHub. A `#<version>` selector is required; omitting it exits `1`. The selector may be a semver range (`^1.0.0`), an exact version (`1.2.3`), or a non-semver label (`main`, `stable`, `v1.4.2`) -- the registry exact-matches non-semver selectors against its published version list. GitHub probe is skipped for these deps; use the `git:` URL form in `apm.yml` to force the GitHub path (e.g., `- git: https://github.com/owner/repo.git`).

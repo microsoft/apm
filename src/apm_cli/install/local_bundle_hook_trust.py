@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -247,7 +247,7 @@ def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
     any change instead of reported as done (#3700).
     """
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
-    from apm_cli.integration.hook_ownership import read_hook_object
+    from apm_cli.integration.hook_ownership import per_file_bundle_hook_keys, read_hook_object
     from apm_cli.utils.path_security import has_symlink_component
 
     blockers: list[str] = []
@@ -269,6 +269,9 @@ def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
                 continue
             try:
                 read_hook_object(path)
+                if config is None:
+                    # A per-file sidecar's bundle records are read again on removal.
+                    per_file_bundle_hook_keys(path)
             except (OSError, ValueError, TypeError):
                 blockers.append(f"{label} (unreadable)")
     return blockers
@@ -297,6 +300,7 @@ def _retire_per_file(
     sidecar that cannot be rewritten keeps its record and is reported, so the
     deleted files' lock rows are still reconciled.
     """
+    from apm_cli.integration import write_seam
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
     from apm_cli.integration.hook_ownership import (
         per_file_bundle_hook_keys,
@@ -310,7 +314,7 @@ def _retire_per_file(
         if hook_file is not None and hook_file.is_file():
             # A failed removal leaves the file on disk; it is retained below.
             with contextlib.suppress(OSError):
-                hook_file.unlink()
+                write_seam.unlink(hook_file)  # journaled like the deploy (#5130)
         literal = Path(value) if Path(value).is_absolute() else Path(project_root) / value
         if literal.is_symlink() or literal.exists():
             kept.add(value)
@@ -435,19 +439,15 @@ def _bundle_script_rows(
 
 
 def _script_bases(targets: Any) -> tuple[str, ...]:
-    """Each hook target's script directory parent: merged ``hooks/``, per-file ``hooks/scripts/``.
+    """Each hook target's script directory parent, as the hook integrator lays it out.
 
-    The hook integrator copies a merged target's scripts to ``hooks/<slug>/``
-    and a per-file target's to ``hooks/scripts/<slug>/``; only the layout a
-    target actually uses is matched, so a slug named ``scripts`` never covers
-    another bundle's per-file scripts.
+    Only the layout a target actually uses is matched, so a slug named
+    ``scripts`` never covers another bundle's Copilot scripts.
     """
-    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+    from apm_cli.integration.hook_command_paths import hook_scripts_parent
 
     return tuple(
-        _hooks_dir_prefix(
-            target.root_dir, *(() if target.name in _MERGE_HOOK_TARGETS else ("scripts",))
-        )
+        Path(hook_scripts_parent(target.name, target.root_dir)).as_posix() + "/"
         for target in targets or ()
         if callable(getattr(target, "supports", None)) and target.supports("hooks")
     )
@@ -462,15 +462,9 @@ def bundle_hook_leftovers(
     its native entries are gone; uninstall must still reach them. A bundle whose
     hooks were only parked has neither, so it is not reported.
     """
-    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
-
     found: dict[str, set[str]] = {}
-    for _data, sidecar, _container in _merged_hook_documents(project_root, targets):
-        for entries in (sidecar or {}).values():
-            for entry in entries if isinstance(entries, list) else ():
-                marker = entry.get("_apm_source") if isinstance(entry, dict) else None
-                if (parsed := parse_local_bundle_hook_source(marker)) is not None:
-                    found.setdefault(parsed[0], set())
+    for slug, _key in _sidecar_identities(project_root, targets):
+        found.setdefault(slug, set())
     bases = _script_bases(targets)
     for value in lock_paths:
         rel = _relative_value(value, Path(project_root))
@@ -483,9 +477,101 @@ def bundle_hook_leftovers(
     return found
 
 
+def _sidecar_identities(project_root: Path, targets: Any) -> set[tuple[str, str | None]]:
+    """Return ``(slug, approval_key)`` for every bundle marker the merged sidecars keep."""
+    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
+
+    found: set[tuple[str, str | None]] = set()
+    for _data, sidecar, _container in _merged_hook_documents(project_root, targets):
+        for entries in (sidecar or {}).values():
+            for entry in entries if isinstance(entries, list) else ():
+                marker = entry.get("_apm_source") if isinstance(entry, dict) else None
+                if (parsed := parse_local_bundle_hook_source(marker)) is not None:
+                    found.add(parsed)
+    return found
+
+
+def bundle_hook_identities(
+    project_root: Path, targets: Any, lock_paths: Collection[str]
+) -> dict[str, set[str | None]]:
+    """Return each slug with hook ownership left and the approval keys it records.
+
+    Covers deployed hooks and partial-retirement leftovers: a sidecar marker
+    keeps its key after the native entry is gone. ``None`` (or no key at all)
+    means no content identity was recorded.
+    """
+    found = {
+        slug: set(state.keys)
+        for slug, state in deployed_bundle_hook_keys(project_root, targets, lock_paths).items()
+    }
+    for slug, key in _sidecar_identities(project_root, targets):
+        found.setdefault(slug, set()).add(key)
+    for slug in bundle_hook_leftovers(project_root, targets, lock_paths):
+        found.setdefault(slug, set())
+    return found
+
+
 def _relative_value(value: str, project_root: Path) -> str:
     path = Path(value)
     return _record_value(path, project_root) if path.is_absolute() else value
+
+
+def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
+    """Return each script row under *target_root*, spelled relative to it."""
+    tails = []
+    for value in scripts:
+        spelled = Path(value) if Path(value).is_absolute() else project_root / value
+        if spelled.is_relative_to(target_root):
+            tails.append(spelled.relative_to(target_root).as_posix())
+    return tails
+
+
+def _hook_commands(node: Any) -> Iterator[str]:
+    """Yield every hook command field anywhere in a per-file hook document."""
+    from apm_cli.hook_contract import HOOK_COMMAND_KEYS
+
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in HOOK_COMMAND_KEYS and isinstance(value, str):
+                yield value.replace("\\", "/")
+            else:
+                yield from _hook_commands(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _hook_commands(item)
+
+
+def _per_file_configs_running(
+    project_root: Path, targets: Any, owned: Collection[str], scripts: Collection[str]
+) -> set[str]:
+    """Return per-file hook files outside *owned* whose commands run *scripts*.
+
+    Without its approval record a per-file hook file cannot be attributed to
+    a bundle (Kiro folds the package slug into a longer file stem), so a hook
+    file that still runs the bundle's scripts, or cannot be read, keeps them
+    and refuses retirement.
+    """
+    from apm_cli.integration.hook_ownership import read_hook_object
+
+    found: set[str] = set()
+    for target in _per_file_targets(targets):
+        target_root = project_root / target.root_dir
+        tails = _script_tails(project_root, target_root, scripts)
+        hooks_dir = target_root / "hooks"
+        if not tails or not hooks_dir.is_dir():
+            continue
+        for path in sorted(hooks_dir.glob("*.json")):
+            value = _record_value(path, project_root)
+            if value in owned:
+                continue
+            try:
+                document = read_hook_object(path)
+            except (OSError, ValueError, TypeError):
+                found.add(value)  # an unreadable hook file may still run the scripts
+                continue
+            if any(tail in text for text in _hook_commands(document) for tail in tails):
+                found.add(value)
+    return found
 
 
 def _configs_still_running(
@@ -527,11 +613,7 @@ def _configs_still_running(
         if config is None:
             continue
         target_root = project_root / target.root_dir
-        tails = []
-        for value in scripts:
-            spelled = Path(value) if Path(value).is_absolute() else project_root / value
-            if spelled.is_relative_to(target_root):
-                tails.append(spelled.relative_to(target_root).as_posix())
+        tails = _script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
         if not tails or not json_path.is_file():
             continue
@@ -589,6 +671,7 @@ def _remove_unedited(
     Returns the rows whose file could not be removed, including a present file
     whose path is refused; their claims must stay.
     """
+    from apm_cli.integration import write_seam
     from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.utils.content_hash import compute_file_hash
 
@@ -607,7 +690,7 @@ def _remove_unedited(
         try:
             digest = recorded.get(value)
             if digest is None or digest == compute_file_hash(path):
-                path.unlink()
+                write_seam.unlink(path)
                 removed.setdefault(root, []).append(path)
         except OSError:
             failed.add(value)
@@ -651,7 +734,9 @@ def retire_bundle_hooks(
     rows = scripts | {
         value for value in lock_paths if _relative_value(value, project_root) in hook_files
     }
-    still_running = _configs_still_running(project_root, targets, slug, scripts)
+    still_running = _configs_still_running(
+        project_root, targets, slug, scripts
+    ) | _per_file_configs_running(project_root, targets, hook_files, scripts)
     if still_running:
         # Nothing is retired: the bundle keeps the ownership trust checks read.
         return BundleHookRetirement(True, tuple(sorted(still_running)))

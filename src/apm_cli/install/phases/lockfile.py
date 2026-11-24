@@ -703,20 +703,20 @@ class LockfileBuilder:
         # deployment records together in _maybe_merge_partial.
         if self.ctx.only_packages:
             return
-        if self.ctx.existing_lockfile and not self.ctx.update_refs:
+        if self.ctx.existing_lockfile:
             retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
             decision = self._orphan_decision()
             for dep_key, dep in self.ctx.existing_lockfile.dependencies.items():
                 if dep_key not in lockfile.dependencies:
-                    if dep_key in decision.rescued_keys:
+                    # A row kept for a cleanup retry survives a ref refresh (#5057).
+                    if not self.ctx.update_refs and dep_key in decision.rescued_keys:
                         # Preserve: package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
-                    elif dep_key in decision.retained_keys and (
-                        retained := retained_orphans.get(dep_key)
-                    ):
-                        self._keep_retained_orphan(
-                            lockfile, dep_key, dep, retained, self.ctx.existing_lockfile
-                        )
+                    elif dep_key in decision.retained_keys and dep_key in retained_orphans:
+                        # By membership: a row kept for a hook retry claims no file.
+                        retained = retained_orphans[dep_key]
+                        existing = self.ctx.existing_lockfile
+                        self._keep_retained_orphan(lockfile, dep_key, dep, retained, existing)
                     # else: orphan -- package was in lockfile but is no longer in
                     # the manifest (full install only). Don't preserve so the
                     # lockfile stays in sync with what apm.yml declares.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -390,7 +391,7 @@ def _killed_journal(apm_home: Path, project: Path, path: Path, *, seal: bool = T
 def test_shared_config_the_ledger_does_not_claim_keeps_the_journal(
     tmp_path: Path, apm_home: Path
 ) -> None:
-    """Shared settings are outside the ledger: kept and reported, never restored (#5009)."""
+    """Shared settings outside the ledger, with no config file record: kept and reported (#5009)."""
     from apm_cli.install.deploy_snapshot import JournalReplayError
 
     project = tmp_path / "project"
@@ -819,6 +820,30 @@ def test_a_journal_without_a_manifest_is_reclaimed(tmp_path: Path, apm_home: Pat
     assert not store.parent.exists()
 
 
+@pytest.mark.parametrize(
+    ("store", "counts"),
+    [("own", True), ("another-workspace", False), ("unreadable", True), ("no-manifest", True)],
+)
+def test_an_abandoned_journal_counts_only_where_replay_would_handle_it(
+    tmp_path: Path, apm_home: Path, store: str, counts: bool
+) -> None:
+    """The fast path asks the replay owner's question: would this install replay it? (#5064)"""
+    from apm_cli.install.deploy_snapshot import has_abandoned_journals
+
+    project, other = tmp_path / "project", tmp_path / "other"
+    root = other if store == "another-workspace" else project
+    kept = _killed_journal(apm_home, root, root / "a.md")
+    if store == "unreadable":
+        (kept / "journal.jsonl").write_text("not json\n", encoding="utf-8")
+    if store == "no-manifest":
+        (kept / "journal.jsonl").unlink()
+
+    assert has_abandoned_journals(kept.parent, project, workspace=project) is counts
+    assert has_abandoned_journals(kept.parent)
+    assert kept.is_dir(), "asking never touches the journal"
+    assert (root / "a.md").read_bytes() == b"killed\n"
+
+
 def test_a_malformed_seal_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
     import json
 
@@ -969,12 +994,12 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
     hook = project / ".github" / "hooks" / "run.sh"
     hook.parent.mkdir(parents=True)
     hook.write_bytes(b"#!/bin/sh\necho prior\n")
-    hook.chmod(0o755)
+    hook.chmod(0o700)
     ledger = {".github/hooks/run.sh": compute_file_hash(hook)}
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     journal.record(hook)
     hook.write_bytes(b"#!/bin/sh\necho killed\n")
-    hook.chmod(0o644)
+    hook.chmod(0o755)
     journal.after_write(hook)
 
     restored = replay_abandoned_journals(
@@ -983,7 +1008,7 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
 
     assert (restored.restored, restored.kept) == (1, ())
     assert hook.read_bytes() == b"#!/bin/sh\necho prior\n"
-    assert hook.stat().st_mode & 0o777 == 0o755
+    assert hook.stat().st_mode & 0o777 == 0o700
     assert not (apm_home / "install-snapshots").exists()
 
 
@@ -1198,6 +1223,157 @@ def test_a_legacy_lockfile_migrated_by_the_attempt_follows_its_outcome(
     assert not gone.exists()
 
 
+_USER_MCP = b'{\n  "mcpServers": {\n    "mine": {"command": "mine"}\n  }\n}\n'
+_APM_MCP = b'{\n  "mcpServers": {\n    "mine": {"command": "mine"},\n    "srv": {"command": "srv"}\n  }\n}\n'
+
+
+def _apm_killed_write(apm_home: Path, project: Path, path: Path) -> Path:
+    """Journal *path*, then let APM write it through its config file records and die."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration.config_file_provenance import recorded_config_write
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(path)
+    with recorded_config_write(path, manifest_root=project):
+        path.write_bytes(_APM_MCP)
+    journal.after_write(path)
+    assert journal.store is not None
+    return journal.store
+
+
+def _user_mcp(project: Path) -> Path:
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_bytes(_USER_MCP)
+    return config
+
+
+def test_an_mcp_config_the_records_vouch_for_is_restored(tmp_path: Path, apm_home: Path) -> None:
+    """#5009: the killed install's recorded write to the user's .mcp.json is undone."""
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _apm_killed_write(apm_home, project, config)
+
+    outcome = _replay(apm_home, project)
+
+    assert outcome.restored == 1
+    assert config.read_bytes() == _USER_MCP
+    assert not store.exists()
+
+
+def test_a_tampered_seal_over_an_edited_mcp_config_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A seal rewritten to match the user's later edit is not APM's write: kept."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError, _state
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _apm_killed_write(apm_home, project, config)
+    edited = _APM_MCP.replace(b'"srv"', b'"edited"')
+    config.write_bytes(edited)
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    for line in lines:
+        if "sealed" in line:
+            line["state"] = _state(config)
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(".mcp.json", "the deployment ledger does not record these bytes")]
+    assert config.read_bytes() == edited
+
+
+def test_a_shared_config_replaced_by_a_link_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Checklist path: a link (whatever it points to) is never restored over."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    _apm_killed_write(apm_home, project, config)
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(_APM_MCP)
+    config.unlink()
+    try:
+        config.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project)
+
+    assert config.is_symlink()
+    assert outside.read_bytes() == _APM_MCP
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFO support")
+def test_a_shared_config_replaced_by_a_fifo_is_kept_and_named(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Checklist path: a FIFO swapped in after the kill is a later write, kept unopened."""
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    _apm_killed_write(apm_home, project, config)
+    config.unlink()
+    os.mkfifo(config)
+
+    outcome = _replay(apm_home, project)
+
+    assert [rel for rel, _ in outcome.kept] == [".mcp.json"]
+    assert config.exists() and not config.is_file()
+
+
+def test_a_shared_config_replaced_by_a_directory_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Checklist path: an (empty) directory swapped in after the kill is never replaced."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    _apm_killed_write(apm_home, project, config)
+    config.unlink()
+    config.mkdir()
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project)
+
+    assert config.is_dir()
+
+
+def test_a_forged_journal_copy_with_a_matching_hash_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The records vouch for the pre-install bytes too: a journal copy swapped, with its
+    manifest hash updated to match, is never written into the user's config."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _apm_killed_write(apm_home, project, config)
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    unit = next(line for line in lines if line.get("path") == ".mcp.json")
+    forged = b'{"mcpServers": {"evil": {"command": "evil"}}}\n'
+    (store / unit["copy"]).write_bytes(forged)
+    unit["hash"] = compute_file_hash(store / unit["copy"])
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project)
+
+    assert config.read_bytes() == _APM_MCP
+
+
 class _Killed(BaseException):
     """A kill: no handler between the write and the process exit runs."""
 
@@ -1366,3 +1542,449 @@ def test_a_partial_directory_with_an_unlistable_subtree_is_kept(
 
     assert outcome.kept == ((".kiro/skills/s", "it changed after the interrupted install"),)
     assert (assets / "mine.md").read_bytes() == b"mine\n"
+
+
+_CONFIG_BYTES = b'{"mcpServers": {"s": {"command": "c"}}}\n'
+
+
+def _private_config(project: Path) -> tuple[Path, dict[str, str]]:
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_bytes(_CONFIG_BYTES)
+    config.chmod(0o600)
+    return config, {".mcp.json": compute_file_hash(config)}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_replay_never_takes_a_journal_copys_mode(tmp_path: Path, apm_home: Path) -> None:
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    (store / "0").chmod(0o666)  # the copy's bytes are unchanged; only its mode widened
+
+    restored = _replay(apm_home, project, lambda: ledger)
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+    assert config.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_replay_never_takes_the_modes_inside_a_journal_copy_directory(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill = project / ".kiro" / "skills" / "s"
+    skill.mkdir(parents=True)
+    skill.chmod(0o750)
+    (skill / "SKILL.md").write_bytes(b"prior\n")
+    (skill / "SKILL.md").chmod(0o600)
+    (skill / "run.sh").write_bytes(b"#!/bin/sh\n")
+    (skill / "run.sh").chmod(0o700)
+    ledger = {
+        f".kiro/skills/s/{name}": compute_file_hash(skill / name) for name in ("SKILL.md", "run.sh")
+    }
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    (skill / "SKILL.md").write_bytes(b"killed\n")
+    journal.after_write(skill / "SKILL.md")
+    assert journal.store is not None
+    (journal.store / "0" / "SKILL.md").chmod(0o666)
+    (journal.store / "0" / "run.sh").chmod(0o777)
+    (journal.store / "0").chmod(0o777)
+
+    restored = _replay(apm_home, project, lambda: ledger)
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert (skill / "SKILL.md").read_bytes() == b"prior\n"
+    assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
+    assert (skill / "run.sh").stat().st_mode & 0o7777 == 0o700
+    assert skill.stat().st_mode & 0o7777 == 0o750
+
+
+def _rewrite_unit_mode(store: Path, mode: object) -> None:
+    """Set (or, with ``...``, drop) the recorded mode of the journal's first unit."""
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    unit = next(line for line in lines[1:] if "kind" in line)
+    unit.pop("mode", None)
+    if mode is not ...:
+        unit["mode"] = mode
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+@pytest.mark.parametrize(
+    "mode",
+    [..., "0600", -1, 0o10000, 0o4600, True],
+    ids=["older-apm-no-mode", "text", "negative", "out-of-range", "setuid", "bool"],
+)
+def test_a_unit_without_a_verifiable_mode_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path, mode: object
+) -> None:
+    """Downgrade safety: a unit line an older apm wrote (no mode), or one whose mode is
+    not valid permission bits, is never restored with guessed permissions."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    _rewrite_unit_mode(store, mode)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert kept.value.issues == [(".mcp.json", "the journal does not record a verifiable mode")]
+    assert config.read_bytes() == b"killed\n"
+
+
+def _killed_skill(apm_home: Path, project: Path, mode: int):
+    """A skill directory with mode *mode*, journaled, then written by a killed install."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    skill = project / ".kiro" / "skills" / "s"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"prior\n")
+    (skill / "SKILL.md").chmod(0o600)
+    ledger = {".kiro/skills/s/SKILL.md": compute_file_hash(skill / "SKILL.md")}
+    skill.chmod(mode)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    skill.chmod(0o750)
+    (skill / "SKILL.md").write_bytes(b"killed\n")
+    journal.after_write(skill / "SKILL.md")
+    journal.after_write(skill)
+    assert journal.store is not None
+    return skill, ledger, journal.store
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_users_mode_change_after_the_kill_is_kept_whatever_the_copy_says(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The keep-or-restore decision compares against the recorded mode, never the copy's:
+    a copy whose mode matches the user's post-kill change does not make it APM's."""
+    skill, ledger, store = _killed_skill(apm_home, tmp_path / "project", 0o750)
+    skill.chmod(0o700)  # the user's own change after the kill
+    (store / "0").chmod(0o700)  # the copy now claims that mode
+
+    restored = _replay(apm_home, tmp_path / "project", lambda: ledger)
+
+    assert restored.kept == ((".kiro/skills/s", "it changed after the interrupted install"),)
+    assert skill.stat().st_mode & 0o7777 == 0o700
+    assert (skill / "SKILL.md").read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_read_only_directory_is_restored_with_its_recorded_mode(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o550)
+
+    restored = _replay(apm_home, tmp_path / "project", lambda: ledger)
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert (skill / "SKILL.md").read_bytes() == b"prior\n"
+    assert skill.stat().st_mode & 0o7777 == 0o550
+    skill.chmod(0o755)  # let pytest clean up
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_directory_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
+    """The restored directory swapped for a link before its own mode is applied: the
+    link's target keeps its mode and the restore fails (kept and reported)."""
+    from apm_cli.install.journal_modes import apply_own_mode
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside.chmod(0o700)
+    restored = tmp_path / "project" / "skill"
+    restored.parent.mkdir()
+    restored.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        apply_own_mode(restored, {"": 0o777})
+
+    assert outside.stat().st_mode & 0o7777 == 0o700
+    assert restored.is_symlink()
+
+
+def _header(store: Path) -> dict:
+    return json.loads((store / "journal.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+
+def test_a_journal_with_recorded_modes_is_refused_by_older_readers(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """An older apm replays only format version 1 journals, and it would restore a
+    copy's mode bits: a journal that records modes is a version it refuses."""
+    project = tmp_path / "project"
+    config, _ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+
+    header = _header(store)
+    assert (store / "journal.jsonl").read_text(encoding="utf-8").startswith("{")
+    assert header["format"] == "apm-deploy-journal"
+    assert header["version"] != 1
+
+
+def test_an_older_apms_journal_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    manifest = store / "journal.jsonl"
+    lines = manifest.read_text(encoding="utf-8").splitlines()
+    lines[0] = json.dumps({**json.loads(lines[0]), "version": 1})
+    manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project, lambda: ledger)
+
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_sticky_directory_is_kept_not_restored_without_its_sticky_bit(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o1777)
+    skill.chmod(0o1777)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, tmp_path / "project", lambda: ledger)
+
+    assert kept.value.issues == [
+        (".kiro/skills/s", "the journal does not record a verifiable mode")
+    ]
+    assert (skill / "SKILL.md").read_bytes() == b"killed\n"
+    assert skill.stat().st_mode & 0o7777 == 0o1777
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_recorded_mode_wider_than_the_path_has_now_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The recorded mode is journal data: replay never widens a path beyond the mode it
+    has now, even for valid permission bits (#5134)."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    _rewrite_unit_mode(store, 0o666)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == ((".mcp.json", "its recorded mode is wider than it has now"),)
+    assert config.read_bytes() == b"killed\n"
+    assert config.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_path_that_is_now_a_link_is_refused_and_its_target_untouched(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(b"{}\n")
+    outside.chmod(0o600)
+    config.unlink()
+    config.symlink_to(outside)
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [path for path, _reason in kept.value.issues] == [".mcp.json"]
+    assert config.is_symlink()
+    assert outside.read_bytes() == b"{}\n"
+    assert outside.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_an_entry_the_path_cannot_reach_now_is_kept_not_a_crash(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A sealed write turned a journaled entry's parent directory into a file: the
+    entry's mode cannot be bounded, so the unit is kept and reported."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill = project / ".kiro" / "skills" / "s"
+    (skill / "ref").mkdir(parents=True)
+    (skill / "ref" / "notes.md").write_bytes(b"prior\n")
+    ledger = {".kiro/skills/s/ref/notes.md": compute_file_hash(skill / "ref" / "notes.md")}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    (skill / "ref" / "notes.md").unlink()
+    (skill / "ref").rmdir()
+    (skill / "ref").write_bytes(b"now a file\n")
+    (skill / "ref").chmod(0o777)  # no narrower than the directory it replaced
+    journal.after_write(skill)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert [rel for rel, _reason in outcome.kept] == [".kiro/skills/s"]
+    assert (skill / "ref").read_bytes() == b"now a file\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows read-only flag")
+def test_on_windows_only_clearing_a_read_only_flag_is_wider(tmp_path: Path, apm_home: Path) -> None:
+    """Windows reports coarse modes (0o666 or 0o444 for a file): a restore is refused only
+    when it would clear a read-only flag the path has now, so a removed file restores."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(config)
+    config.unlink()
+    journal.after_write(config)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+
+
+def _set_restrictive_acl(path: Path) -> None:
+    """Give *path* a POSIX ACL (user rw, a named user r, group none), or skip."""
+    import struct
+
+    undefined = 0xFFFFFFFF
+    entries = [(0x01, 6, undefined), (0x02, 4, 65534), (0x04, 0, undefined)]
+    entries += [(0x10, 4, undefined), (0x20, 0, undefined)]
+    data = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    try:
+        os.setxattr(path, "system.posix_acl_access", data)
+    except OSError as exc:
+        pytest.skip(f"POSIX ACLs unavailable here: {exc}")
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="Linux extended attributes")
+def test_a_path_that_carries_a_posix_acl_is_kept_not_restored_without_it(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Restored bytes are staged with permission bits only, so a restrictive ACL would be
+    lost: such a path is kept and reported instead."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _set_restrictive_acl(config)
+    _killed_journal(apm_home, project, config)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == ((".mcp.json", "it carries a POSIX ACL"),)
+    assert config.read_bytes() == b"killed\n"
+    assert "system.posix_acl_access" in os.listxattr(config)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_restored_directory_is_never_published_with_staging_permissions(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rename that publishes a restored directory already sees its recorded mode."""
+    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o550)
+    published: list[int] = []
+    real_replace = os.replace
+
+    def replace(source, destination, *args, **kwargs):
+        if Path(destination) == skill:
+            published.append(os.lstat(source).st_mode & 0o7777)
+        return real_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", replace)
+    restored = _replay(apm_home, tmp_path / "project", lambda: ledger)
+    monkeypatch.undo()
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert published == [0o550]
+    assert skill.stat().st_mode & 0o7777 == 0o550
+    skill.chmod(0o755)  # let pytest clean up
+
+
+@pytest.mark.skipif(not hasattr(os, "listxattr"), reason="Linux extended attributes")
+def test_a_path_whose_extended_attributes_cannot_be_read_is_kept(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ACL that cannot be checked is not assumed absent: the unit is kept."""
+    import errno
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+
+    def unreadable(path, *args, **kwargs):
+        raise OSError(errno.EACCES, "permission denied", str(path))
+
+    monkeypatch.setattr(os, "listxattr", unreadable)
+    outcome = _replay(apm_home, project, lambda: ledger)
+    monkeypatch.undo()
+
+    assert outcome.kept == ((".mcp.json", "it carries a POSIX ACL"),)
+    assert config.read_bytes() == b"killed\n"
+
+
+def _set_default_acl(directory: Path) -> None:
+    """Give *directory* a default POSIX ACL granting a named user read, or skip."""
+    import struct
+
+    undefined = 0xFFFFFFFF
+    entries = [(0x01, 7, undefined), (0x02, 4, 65534), (0x04, 0, undefined)]
+    entries += [(0x10, 4, undefined), (0x20, 0, undefined)]
+    data = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    try:
+        os.setxattr(directory, "system.posix_acl_default", data)
+    except OSError as exc:
+        pytest.skip(f"POSIX ACLs unavailable here: {exc}")
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="Linux extended attributes")
+def test_a_restore_that_would_inherit_a_default_acl_is_not_published(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The staged restore inherits its parent's default ACL: it is never published."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    _set_default_acl(project)
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project, lambda: ledger)
+
+    assert config.read_bytes() == b"killed\n"
+    assert "system.posix_acl_access" not in os.listxattr(config)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_file_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
+    """The staged file swapped for a link before its mode is applied: the link's target
+    keeps its mode and the restore fails (kept and reported)."""
+    from apm_cli.install.journal_modes import apply_entry_modes
+
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"x\n")
+    outside.chmod(0o400)
+    staged = tmp_path / "project" / ".apm-replay-staged"
+    staged.parent.mkdir()
+    staged.symlink_to(outside)
+
+    with pytest.raises(OSError):
+        apply_entry_modes(staged, 0o600)
+
+    assert outside.stat().st_mode & 0o7777 == 0o400
+    assert staged.is_symlink()

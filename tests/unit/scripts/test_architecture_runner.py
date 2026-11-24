@@ -684,6 +684,7 @@ install-deployment-lockfile-required
 install-deployment-locked-source-cache
 install-deployment-package-content-hash
 install-deployment-reanchor-receipt-history
+install-deployment-reanchor-writer-prediction
 install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight
@@ -737,6 +738,7 @@ install-deployment-target-file-contraction
 install-deployment-trust-fingerprint
 install-deployment-trust-policy-outcome
 install-deployment-local-bundle-hook-trust
+install-deployment-uninstall-absence-proof
 install-deployment-uninstall-preflight
 install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability

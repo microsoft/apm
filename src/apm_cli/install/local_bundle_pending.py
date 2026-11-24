@@ -73,14 +73,16 @@ def _write(scope_dir: Path, bundles: dict[str, dict]) -> None:
         from ..utils.path_security import PathTraversalError
 
         raise PathTraversalError(f"Refusing to write the local bundle record through {blocker}")
-    if not bundles:
-        path.unlink(missing_ok=True)
-        return
-    from ..integration.write_seam import atomic_write_text
+    from ..integration import write_seam
 
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not bundles:
+        write_seam.unlink(path, missing_ok=True)  # journaled like its write (#5130)
+        return
+    write_seam.mkdir(path.parent, parents=True, exist_ok=True)
     # Atomic: a failed update leaves the previous record (and its notes) intact.
-    atomic_write_text(path, json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n")
+    write_seam.atomic_write_text(
+        path, json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n"
+    )
 
 
 @dataclass
