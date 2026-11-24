@@ -97,9 +97,6 @@ def test_audit_ci_and_frozen_install_agree_on_locked_content_hash(
 
     installed = apm("install", cwd=world.project)
     assert installed.returncode == 0, _evidence(installed)
-    # Audit fails while a routed Claude instruction is uncompiled (#5344).
-    compiled = apm("compile", cwd=world.project)
-    assert compiled.returncode == 0, _evidence(compiled)
     project = world.cold_clone() if deployed == "cold" else world.project
     baseline = apm("audit", "--ci", cwd=project)
     assert baseline.returncode == 0, _evidence(baseline)

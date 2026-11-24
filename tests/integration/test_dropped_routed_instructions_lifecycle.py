@@ -82,7 +82,8 @@ def test_an_instruction_routed_to_agents_md_is_named_until_compiled(
 
     audit = runner.run(("audit", "--ci"), cwd=project, env=env, scenario_id="audit")
 
-    assert audit.returncode == 1, _evidence(audit)
+    # A warning in 0.39.0: reported, never failing CI.
+    assert audit.returncode == 0, _evidence(audit)
     assert "claude-instructions-compiled" in _text(audit), _evidence(audit)
     assert _NAME in _text(audit), _evidence(audit)
     assert _COPILOT_ONLY not in _text(install) + _text(audit), _evidence(audit)

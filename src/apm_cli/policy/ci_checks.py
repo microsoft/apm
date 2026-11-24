@@ -2057,18 +2057,22 @@ def run_baseline_checks(
                 policy_provider=policy_provider,
             )
         )
-        # 8e: an instruction routed to AGENTS.md has a compiled copy Claude loads (#5344)
-        or _run(
-            check_claude_instructions_compiled(
-                project_root,
-                resolved_targets,
-                user_scope=user_scope,
-                modules_root=(
-                    prepared_replay.modules_root
-                    if prepared_replay is not None
-                    else project_root / APM_MODULES_DIR
-                ),
-                lock=lock,
+        # 8e: an instruction routed to AGENTS.md has a compiled copy Claude loads
+        # (#5344); project scope only, so a user-scope audit does not list it.
+        or (
+            not user_scope
+            and _run(
+                check_claude_instructions_compiled(
+                    project_root,
+                    resolved_targets,
+                    user_scope=user_scope,
+                    modules_root=(
+                        prepared_replay.modules_root
+                        if prepared_replay is not None
+                        else project_root / APM_MODULES_DIR
+                    ),
+                    lock=lock,
+                )
             )
         )
     ):

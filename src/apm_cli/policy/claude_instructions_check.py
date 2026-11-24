@@ -37,7 +37,10 @@ def check_claude_instructions_compiled(
     modules_root: Path,
     lock: Any = None,
 ) -> CheckResult:
-    """Fail while a routed Claude instruction has no compiled AGENTS.md carrying it.
+    """Warn while a routed Claude instruction has no compiled AGENTS.md carrying it.
+
+    A warning in 0.39.0: the check passes (``audit --ci`` exits 0) and names
+    the instructions.
 
     Install names the same instructions with a warning; both use the routing
     owner in compilation/claude_agents_md.py, so they never disagree.
@@ -56,7 +59,8 @@ def check_claude_instructions_compiled(
         )
     return CheckResult(
         name=CHECK_NAME,
-        passed=False,
+        passed=True,
+        warned=True,
         message=f"{len(names)} instruction(s) routed to AGENTS.md are not compiled",
         details=[uncompiled_instructions_warning(names)],
     )

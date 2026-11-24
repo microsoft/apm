@@ -185,9 +185,6 @@ def test_c1_unedited_pre036_files_re_render_silently_once(
     _assert_lock_matches_disk(world)
     assert world.receipts(), "the 0.37 evidence model records local receipts"
 
-    # The routed Claude rule loads from AGENTS.md only once compiled (#5344).
-    world.ok("compile")
-    after = world.snapshot()
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")
     assert world.snapshot() == after
@@ -561,9 +558,6 @@ def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_p
     after = world.snapshot()
     assert {p: after.get(p) for p in deployed} == {p: before[p] for p in deployed}
     assert set(after) == set(before) - {ROUTED_CLAUDE_RULE}
-    # The routed Claude rule loads from AGENTS.md only once compiled (#5344).
-    world.ok("compile")
-    after = world.snapshot()
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")
     assert world.snapshot() == after
@@ -600,9 +594,6 @@ def test_c5b_036_stamped_project_whose_render_changed_converges(
     deployed = {p for p in expected if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"}}
     assert {p: after.get(p) for p in deployed} == {p: expected[p] for p in deployed}
     _assert_lock_matches_disk(world)
-    # The routed Claude rule loads from AGENTS.md only once compiled (#5344).
-    world.ok("compile")
-    after = world.snapshot()
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")
     assert world.snapshot() == after

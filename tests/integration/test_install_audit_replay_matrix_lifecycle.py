@@ -205,14 +205,12 @@ def test_install_and_audit_replay_agree_across_lifecycle(
     world.manifest(shape)
     project = world.project
 
-    # 1. install, then the replay agrees with what was deployed. Compile
-    # first: audit fails while a routed Claude instruction is uncompiled (#5344).
+    # 1. install, then the replay agrees with what was deployed.
     world.apm("install", NO_POLICY, *shape.install_args)
     deployed = deployed_files(project)
     for expected in shape.expect_files:
         assert expected in deployed, sorted(deployed)
         assert (project / expected).is_file(), expected
-    world.apm("compile")
     world.audit_clean()
 
     # 2. a second install is a byte-level no-op.

@@ -727,9 +727,6 @@ class TestSectionDMultiTarget:
         _install(project, monkeypatch)
         assert (project / ".claude" / "rules" / "docs.md").is_file()
         assert (project / ".claude" / "rules" / "rules.md").is_file() is hand_authored_claude_md
-        # audit fails while a routed Claude instruction is uncompiled (#5344).
-        compiled = CliRunner().invoke(cli, ["compile"], catch_exceptions=False)
-        assert compiled.exit_code == 0, compiled.output
 
         result = _audit(project, monkeypatch, "--ci", "-f", "json")
         assert result.exit_code == 0, result.output

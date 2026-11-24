@@ -46,7 +46,7 @@ first failure to skip expensive I/O.
 | `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it no longer deploys |
 | `content-integrity` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
-| `claude-instructions-compiled` | block | `claude_instructions_check.py` | project scope with a Claude target |
+| `claude-instructions-compiled` | warning | `claude_instructions_check.py` | project scope with a Claude target |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
 | `drift` | block | `_check_drift` in `ci_checks.py`, invoked from `commands/audit.py` | yes, unless `--no-drift` |
 
@@ -204,8 +204,8 @@ the [policy schema](../policy-schema/).
 ### `claude-instructions-compiled`
 
 - **What it verifies.** That every instruction routed to `AGENTS.md` for Claude Code (`applyTo: "**"` or one directory) has a compiled copy Claude loads: an APM-generated `AGENTS.md` imported by `CLAUDE.md`. Install no longer writes these to `.claude/rules/`.
-- **Fails when.** A project or dependency instruction routes to `AGENTS.md` and no compiled file carries it. The detail names the instructions. `apm install` warns with the same names.
-- **Remediation.** Run `apm compile`, or narrow the instruction's `applyTo` to keep it in `.claude/rules/`.
+- **Warns when.** A project or dependency instruction routes to `AGENTS.md` and no compiled file carries it. The detail names the instructions. `apm install` warns with the same names. It is a warning: `apm audit --ci` reports it and still exits 0.
+- **Remediation.** Run `apm compile`, or narrow the instruction's `applyTo` to keep it in `.claude/rules/`. See [Claude plus Copilot projects that never compile](../../consumer/update-and-refresh/#claude-plus-copilot-projects-that-never-compile).
 
 ### `includes-consent`
 

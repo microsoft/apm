@@ -261,7 +261,9 @@ def uncompiled_instructions_warning(names: list[str]) -> str:
     return (
         f"Claude Code does not load {shown} yet: they route to AGENTS.md and no "
         f"compiled file carries them. {CLAUDE_INSTRUCTIONS_UNCOMPILED.sentence()} "
-        "Or narrow their applyTo to keep them in .claude/rules/."
+        "Or narrow their applyTo to keep them in .claude/rules/. See "
+        "https://microsoft.github.io/apm/consumer/update-and-refresh/"
+        "#claude-plus-copilot-projects-that-never-compile"
     )
 
 
