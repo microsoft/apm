@@ -284,6 +284,7 @@ def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tall
     "vacuous", never "converged".
     """
     settled = _graph_rows(project)
+    tally["lock_before"] = load_yaml(project / "apm.lock.yaml")
     if exempt.unchanged:
         # Prune removed nothing and wrote no lock: the rows are the last
         # install's, not prune's to repair (#5126 repairs after a removal).
@@ -292,6 +293,7 @@ def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tall
     clear_apm_yml_cache()
     resolved = _run(project, "install", "--no-frozen")
     after = _graph_rows(project)
+    tally["lock_after"] = load_yaml(project / "apm.lock.yaml")
     if resolved.exit_code != 0:
         return f"seed {seed}: install --no-frozen after prune failed: {resolved.output[:500]}"
     if rekeyed:
@@ -338,14 +340,17 @@ def _check_seed(
     graph.roots.remove(dropped)
     _write_project(project, graph)
     # One manifest loses an edge: the planted top its chain edge, else any.
+    edited_manifest = None
     if graph.motif:
         top, child = graph.motif
         graph.edges[top] = [edge for edge in graph.edges[top] if edge[0] != child]
         _write_package(vendor, graph, top)
+        edited_manifest = top
     elif edited := [name for name in graph.names if graph.edges[name]]:
         parent = rng.choice(edited)
         graph.edges[parent].pop(rng.randrange(len(graph.edges[parent])))
         _write_package(vendor, graph, parent)
+        edited_manifest = parent
     # Sometimes apm.yml now declares a transitive survivor directly.
     promotable = sorted(_needed(graph) - set(graph.roots))
     promoted = rng.choice(promotable) if promotable and rng.random() < 0.3 else None
@@ -383,6 +388,7 @@ def _check_seed(
         unchanged=lock_before == (project / "apm.lock.yaml").read_bytes(),
     )
     tally = {} if tally is None else tally
+    tally["edited"] = edited_manifest
     return _converges(seed, project, exempt, rekeyed=rekeyed, tally=tally), removed
 
 
@@ -482,10 +488,19 @@ def test_prune_then_install_keeps_the_diamond_parent_of_seed_398718870(
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
-    verdict, _ = _check_seed(398718870, tmp_path)
+    tally: dict = {}
+    verdict, _ = _check_seed(398718870, tmp_path, tally=tally)
     monkeypatch.chdir(tmp_path)
 
     assert verdict == "converged", verdict
+    # The whole lockfile, not only the graph fields: only the content hash of the
+    # package whose manifest the scenario edited may change on the final install.
+    before, after = tally["lock_before"], tally["lock_after"]
+    for lock in (before, after):
+        for row in lock["dependencies"]:
+            if row.get("name") == tally["edited"]:
+                row.pop("content_hash", None)
+    assert after == before
 
 
 def _diamond(project: Path, order: tuple[str, str]) -> None:
@@ -539,3 +554,42 @@ def test_a_diamond_records_one_parent_whatever_the_manifest_order(
         "../d",
     ), d
     assert second == first
+
+
+def test_prune_reparents_a_three_parent_survivor_as_install_records_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5386: a, c and b each declare d; dropping a leaves c (met first) and b (lowest key).
+
+    Prune re-parents d under the parent install records, so install leaves the
+    lockfile unchanged.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    project = tmp_path / "proj"
+    (project / ".claude").mkdir(parents=True)
+    graph = _Graph(
+        names=["a", "c", "b", "d"],
+        edges={"a": [("d", "../d")], "c": [("d", "../d")], "b": [("d", "../d")], "d": []},
+        roots=["a", "c", "b"],
+    )
+    for name in graph.names:
+        _write_package(project / "vendor", graph, name)
+    _write_project(project, graph)
+    installed = _run(project, "install")
+    graph.roots.remove("a")
+    _write_project(project, graph)
+
+    pruned = _run(project, "prune")
+    lock = (project / "apm.lock.yaml").read_bytes()
+    clear_apm_yml_cache()
+    reinstalled = _run(project, "install", "--no-frozen")
+    monkeypatch.chdir(tmp_path)
+
+    assert installed.exit_code == 0, installed.output
+    assert pruned.exit_code == 0, pruned.output
+    assert reinstalled.exit_code == 0, reinstalled.output
+    d = _graph_rows(project)["d"]
+    assert d["resolved_by"] == "_local/b", d
+    assert d["declaring_parent"] == "./vendor/b", d
+    assert (project / "apm.lock.yaml").read_bytes() == lock
