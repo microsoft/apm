@@ -638,8 +638,11 @@ def _runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str
             return True
         if "$" in cwd or "%" in cwd or "\x00" in cwd:
             return True
-        base = Path(os.path.normpath(root / cwd.replace("\\", "/")))
-        if not base.is_relative_to(root) or _escapes_through_a_link(base, root):
+        spelled = root / cwd.replace("\\", "/")
+        base = Path(os.path.normpath(spelled))
+        # Links are followed before "..", so identity and containment use the
+        # spelled path; the lexical form only refuses an obvious escape.
+        if not base.is_relative_to(root) or _escapes_through_a_link(spelled, root):
             return True
         text = command.replace("\\", "/")
         if any(
@@ -648,7 +651,7 @@ def _runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str
         ):
             return True
         try:
-            identity = os.stat(base)
+            identity = os.stat(spelled)
         except FileNotFoundError:
             continue
         except OSError:
@@ -660,13 +663,15 @@ def _runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str
     return False
 
 
-def _escapes_through_a_link(base: Path, root: Path) -> bool:
-    """Whether *base* resolves outside the resolved *root*, or cannot be resolved."""
+def _escapes_through_a_link(spelled: Path, root: Path) -> bool:
+    """Whether *spelled* resolves outside the project, or cannot be resolved (refuse)."""
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
     try:
-        resolved = Path(os.path.realpath(base, strict=False))
-        return not resolved.is_relative_to(Path(os.path.realpath(root)))
-    except (OSError, ValueError):
+        ensure_path_within(spelled, root)
+    except (PathTraversalError, OSError, ValueError, RuntimeError):
         return True
+    return False
 
 
 def _script_directories(root: Path, scripts: Collection[Path]) -> dict[tuple[int, int], set[str]]:
