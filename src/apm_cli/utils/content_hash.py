@@ -84,6 +84,36 @@ def seed_package_tree(root: str, payload, files: dict, dirs: dict) -> None:
     """PERF B3 PROTOTYPE: bytes APM wrote into *root* this command, with a stat proof."""
     with _SEED_LOCK:
         _SEEDS[os.path.abspath(root)] = (payload, files, dirs)
+        _SEEDS[os.path.realpath(root)] = (payload, files, dirs)
+
+
+def seeded_listing(root) -> dict[str, list[str]] | None:
+    """PERF B3 PROTOTYPE: ``{relative dir ('' = root): file names}`` of a tree APM wrote
+    from verified blobs this command, or ``None``.
+
+    Proof: every directory of the tree keeps the (dev, ino, mtime, ctime) recorded right
+    after the write, so no entry was added, removed, renamed or retyped since (one lstat
+    per directory instead of a walk).
+    """
+    with _SEED_LOCK:
+        seed = _SEEDS.get(os.path.abspath(root))
+    if seed is None:
+        return None
+    payload, _files, dirs = seed
+    try:
+        for directory, proof in dirs.items():
+            info = os.lstat(directory)
+            if (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns) != proof:
+                return None
+    except OSError:
+        return None
+    listing: dict[str, list[str]] = {"": []}
+    for rel, _data, _executable in payload:
+        parts = rel.split("/")
+        for depth in range(1, len(parts)):
+            listing.setdefault("/".join(parts[:depth]), [])
+        listing["/".join(parts[:-1])].append(parts[-1])
+    return listing
 
 
 def _seeded_tree(

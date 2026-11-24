@@ -31,6 +31,32 @@ class InventoryDirectory:
 
 
 @dataclass(frozen=True)
+def _seeded_listing(root: Path):
+    from ..utils.content_hash import seeded_listing
+
+    return seeded_listing(root)
+
+
+def _seeded_walk(root: Path, listing: dict[str, list[str]]):
+    """PERF B3 PROTOTYPE: ``os.walk`` (top-down, honours pruning) over a proven seeded tree."""
+    children: dict[str, list[str]] = {}
+    for rel in listing:
+        if rel:
+            parent, _, name = rel.rpartition("/")
+            children.setdefault(parent, []).append(name)
+    stack = [""]
+    while stack:
+        rel = stack.pop()
+        dirnames = list(children.get(rel, ()))
+        filenames = list(listing.get(rel, ()))
+        yield (os.path.join(str(root), *rel.split("/")) if rel else str(root)), dirnames, filenames
+        stack.extend(f"{rel}/{name}" if rel else name for name in reversed(dirnames))
+
+
+# PERF B3 PROTOTYPE: compute the walk too and fail loudly on any difference.
+_B3_DIFFERENTIAL = True
+
+
 class CompileInventory:
     """Deterministic, read-only filesystem snapshot for one compile invocation.
 
@@ -49,6 +75,7 @@ class CompileInventory:
         root: Path,
         *,
         exclude_patterns: list[str] | None = None,
+        _force_walk: bool = False,
     ) -> CompileInventory:
         """Collect one exclusion-aware, symlink-safe project snapshot."""
         try:
@@ -59,7 +86,11 @@ class CompileInventory:
         directories: list[InventoryDirectory] = []
         nested_repository_roots: set[Path] = set()
 
-        for directory, child_dirs, file_names in os.walk(root, followlinks=False):
+        listing = None if _force_walk else _seeded_listing(root)
+        walk = (
+            _seeded_walk(root, listing) if listing is not None else os.walk(root, followlinks=False)
+        )
+        for directory, child_dirs, file_names in walk:
             path = Path(directory)
             if should_exclude(path, root, safe_patterns):
                 child_dirs[:] = []
@@ -87,12 +118,22 @@ class CompileInventory:
                 )
             )
 
-        return cls(
+        inventory = cls(
             root=root,
             directories=tuple(directories),
             nested_repository_roots=frozenset(nested_repository_roots),
             _directory_positions={entry.path: index for index, entry in enumerate(directories)},
         )
+        if listing is not None and _B3_DIFFERENTIAL:
+            walked = cls.collect(root, exclude_patterns=exclude_patterns, _force_walk=True)
+            if (
+                walked.directories != inventory.directories
+                or walked.nested_repository_roots != inventory.nested_repository_roots
+            ):
+                raise RuntimeError(
+                    f"PERF B3 differential mismatch: seeded listing != walk at {root}"
+                )
+        return inventory
 
     def contains_directory(self, path: Path) -> bool:
         """Return whether *path* was observed as a directory."""

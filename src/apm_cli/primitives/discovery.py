@@ -638,6 +638,10 @@ def _find_primitive_inventory_files(
 ) -> list[Path]:
     """Classify a compile inventory with the existing primitive glob grammar."""
     candidates = inventory.files_within(base_path)
+    from ..utils.content_hash import seeded_listing
+
+    # PERF B3 PROTOTYPE: a proven seeded tree holds only regular files APM wrote.
+    proven = seeded_listing(base_path) is not None
     valid_files: list[Path] = []
     for file_path in candidates:
         relative_path = file_path.relative_to(base_path)
@@ -648,7 +652,7 @@ def _find_primitive_inventory_files(
             continue
         if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
             continue
-        if file_path.is_file() and not file_path.is_symlink():
+        if proven or (file_path.is_file() and not file_path.is_symlink()):
             valid_files.append(file_path)
 
     perf_stats.record_walk(
