@@ -27,7 +27,8 @@ def _assert_declares(path: Path, expected: bool, expected_when_converted: bool) 
         pytest.param("a.md", b"# body\n", False, False, id="no-frontmatter"),
         pytest.param("a.md", b"---\nname: [x\n---\nbody\n", True, False, id="bad-yaml"),
         pytest.param("a.md", b"---\nname: x\nbody\n", True, False, id="unclosed"),
-        pytest.param("a.md", b"---\nname: \xff\n---\nbody\n", True, False, id="bad-fm-bytes"),
+        # Undecodable frontmatter fails closed even where a converter would judge YAML.
+        pytest.param("a.md", b"---\nname: \xff\n---\nbody\n", True, True, id="bad-fm-bytes"),
         pytest.param("a.md", b"---\nname: x\n---\n\xff\xfe\n", False, False, id="bad-body-bytes"),
         pytest.param("a.md", b"\xef\xbb\xbf---\nhooks: {}\n---\n", True, True, id="bom"),
         pytest.param(
@@ -77,3 +78,35 @@ def test_only_a_prefix_is_read_when_the_fence_closes_inside_it(tmp_path: Path, m
 
     _assert_declares(path, True, True)
     assert reads == [local_bundle_paths._FRONTMATTER_PREFIX_BYTES] * 2
+
+
+def _assert_skipped_as_hooks(rel: str, source: Path) -> None:
+    from apm_cli.install.local_bundle_paths import (
+        bundle_deploy_relative_path,
+        bundle_deploy_skip_warning,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    route = {
+        "allowed_prefixes": frozenset(),
+        "known_deploy_prefixes": frozenset(),
+        "target": KNOWN_TARGETS["claude"],
+        "hooks_approved": False,
+        "canvas_approved": False,
+        "source": source,
+    }
+    assert bundle_deploy_relative_path(rel, **route) is None
+    warning = bundle_deploy_skip_warning(rel, **route)
+    assert warning is not None
+    assert f"Skipped packed bundle hooks file {rel!r}" in warning
+
+
+def test_converted_instruction_with_undecodable_frontmatter_is_skipped_as_hooks(
+    tmp_path: Path,
+) -> None:
+    rel = "instructions/bad.instructions.md"
+    source = tmp_path / rel
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"---\napplyTo: '**'\nnote: \xff\n---\nbody\n")
+
+    _assert_skipped_as_hooks(rel, source)
