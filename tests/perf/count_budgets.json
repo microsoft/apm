@@ -15,9 +15,9 @@
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 3389555,
-        "measured": 3228147,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "budget": 3370353,
+        "measured": 3209860,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -27,10 +27,10 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 81282,
-        "measured": 77411,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 55780,
+        "measured": 53123,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "fs.realpath_calls": {
         "budget": 8554,
@@ -39,10 +39,10 @@
         "pr": "#5338"
       },
       "fs.stat_calls": {
-        "budget": 21960,
-        "measured": 20914,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 21996,
+        "measured": 20948,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "git.cat-file": {
         "budget": 21,
@@ -107,10 +107,10 @@
     },
     "install-warm": {
       "fs.files_written": {
-        "budget": 856,
-        "measured": 815,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 861,
+        "measured": 820,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "fs.hash_objects": {
         "budget": 1955,
@@ -119,9 +119,9 @@
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 3493509,
-        "measured": 3327151,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "budget": 3468522,
+        "measured": 3303354,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -131,22 +131,22 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 79484,
-        "measured": 75699,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 54448,
+        "measured": 51855,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "fs.realpath_calls": {
-        "budget": 8384,
-        "measured": 7984,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 8386,
+        "measured": 7986,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "fs.stat_calls": {
-        "budget": 21844,
-        "measured": 20803,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 21897,
+        "measured": 20854,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "git.cat-file": {
         "budget": 11,
@@ -205,9 +205,9 @@
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 533224,
-        "measured": 507832,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "budget": 532985,
+        "measured": 507604,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -217,10 +217,10 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 23099,
-        "measured": 21999,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 14875,
+        "measured": 14166,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "fs.realpath_calls": {
         "budget": 2762,
@@ -229,10 +229,10 @@
         "pr": "#5338"
       },
       "fs.stat_calls": {
-        "budget": 6999,
-        "measured": 6665,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 6997,
+        "measured": 6663,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
+        "pr": "#5345"
       },
       "git.remote": {
         "budget": 3,
@@ -279,9 +279,9 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 153,
-        "measured": 145,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 140,
+        "measured": 133,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.realpath_calls": {
@@ -291,9 +291,9 @@
         "pr": "#5345"
       },
       "fs.stat_calls": {
-        "budget": 170,
-        "measured": 161,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 166,
+        "measured": 158,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "git.config": {
@@ -335,33 +335,33 @@
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 1094586,
-        "measured": 1042462,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "budget": 1091551,
+        "measured": 1039572,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
-        "budget": 15,
-        "measured": 14,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 16,
+        "measured": 15,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 14478,
-        "measured": 13788,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 10320,
+        "measured": 9828,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.realpath_calls": {
-        "budget": 1439,
-        "measured": 1370,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 1441,
+        "measured": 1372,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.stat_calls": {
-        "budget": 7805,
-        "measured": 7433,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 7850,
+        "measured": 7476,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "git.cat-file": {
@@ -415,9 +415,9 @@
     },
     "install-cold-auth": {
       "fs.files_written": {
-        "budget": 1196,
-        "measured": 1139,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 1202,
+        "measured": 1144,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.hash_objects": {
@@ -427,9 +427,9 @@
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 3502306,
-        "measured": 3335529,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "budget": 3477798,
+        "measured": 3312188,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -439,21 +439,21 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 81300,
-        "measured": 77428,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 55835,
+        "measured": 53176,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.realpath_calls": {
-        "budget": 8574,
-        "measured": 8165,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 8576,
+        "measured": 8167,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.stat_calls": {
-        "budget": 21891,
-        "measured": 20848,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 21944,
+        "measured": 20899,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "git.cat-file": {
@@ -525,9 +525,9 @@
     },
     "install-warm-auth": {
       "fs.files_written": {
-        "budget": 864,
-        "measured": 822,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 869,
+        "measured": 827,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.hash_objects": {
@@ -537,9 +537,9 @@
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 3494819,
-        "measured": 3328399,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "budget": 3469912,
+        "measured": 3304678,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -549,21 +549,21 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 79518,
-        "measured": 75731,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 54494,
+        "measured": 51899,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.realpath_calls": {
-        "budget": 8406,
-        "measured": 8005,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 8408,
+        "measured": 8007,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "fs.stat_calls": {
-        "budget": 21767,
-        "measured": 20730,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 21822,
+        "measured": 20782,
+        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
         "pr": "#5345"
       },
       "git.cat-file": {
