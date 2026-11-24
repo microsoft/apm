@@ -468,3 +468,74 @@ def test_prune_converges_on_graphs_install_rekeys(
 
     assert not other, "\n".join(other)
     assert not rekeyed, "\n".join(rekeyed)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_then_install_keeps_the_diamond_parent_of_seed_398718870(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5386: p4 is declared by p2 and p3 at one depth; the dropped root p0 met p2 first.
+
+    After prune, install met p3 first (p1 declares it first) and recorded p3 as
+    p4's declaring_parent while resolved_by stayed p2.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+    verdict, _ = _check_seed(398718870, tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert verdict == "converged", verdict
+
+
+def _diamond(project: Path, order: tuple[str, str]) -> None:
+    """Root declares a; a declares both *order* parents; each declares d."""
+    vendor = project / "vendor"
+    graph = _Graph(
+        names=["a", "b", "c", "d"],
+        edges={"a": [(name, f"../{name}") for name in order], "b": [], "c": [], "d": []},
+        roots=["a"],
+    )
+    graph.edges["b"] = [("d", "../d")]
+    graph.edges["c"] = [("d", "../../vendor/d")]
+    for name in graph.names:
+        _write_package(vendor, graph, name)
+    _write_project(project, graph)
+
+
+@pytest.mark.parametrize("order", [("b", "c"), ("c", "b")], ids=["b-first", "c-first"])
+def test_a_diamond_records_one_parent_whatever_the_manifest_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
+) -> None:
+    """#5386: d is declared by b and c at one depth: its row names b for both fields.
+
+    resolved_by, declaring_parent and local_path come from one edge, the
+    nearest declaring parent with the lowest key, so no lock row depends on
+    which parent a's manifest lists first, and a re-install keeps every row.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    project = tmp_path / "proj"
+    (project / ".claude").mkdir(parents=True)
+    _diamond(project, order)
+
+    installed = _run(project, "install")
+    first = _rows(project)
+    _diamond(project, tuple(reversed(order)))
+    clear_apm_yml_cache()
+    reinstalled = _run(project, "install", "--no-frozen")
+    second = _rows(project)
+    monkeypatch.chdir(tmp_path)
+    # a's manifest was rewritten: its content hash is the one row field to change.
+    for rows in (first, second):
+        next(row for row in rows if row.get("name") == "a").pop("content_hash")
+
+    assert installed.exit_code == 0, installed.output
+    assert reinstalled.exit_code == 0, reinstalled.output
+    d = _graph_rows(project)["d"]
+    assert (d["resolved_by"], d["declaring_parent"], d["local_path"]) == (
+        "_local/b",
+        "local:vendor/b",
+        "../d",
+    ), d
+    assert second == first
