@@ -25,13 +25,33 @@ def test_real_engagement(tmp_path: Path, world: str) -> None:
         "HOME": str(tmp_path / "home"),
     }
     if world == "bench-isolated":
+        import contextlib
+
+        from tests.fixtures.perf import counting_tunnel
         from tests.fixtures.perf.offline import isolated_environment
 
-        _isolated, env = isolated_environment(tmp_path / "env")
+        _isolated, base = isolated_environment(tmp_path / "env")
+        stack = contextlib.ExitStack()
+        tunnel = stack.enter_context(counting_tunnel())
+        env = tunnel.child_environment(base)
         env["APM_LOG_LEVEL"] = "DEBUG"
         for key in sorted(env):
-            if key.startswith(("GIT_", "SSL_", "REQUESTS_", "CURL_")):
+            if (
+                key.startswith(
+                    ("GIT_", "SSL_", "REQUESTS_", "CURL_", "HTTP", "ALL_PROXY", "NO_PROXY")
+                )
+                or "proxy" in key.lower()
+            ):
                 print("ENV", world, key, "=", env[key][-80:])
+        for args in (
+            ["--get-all", "http.sslbackend"],
+            ["--get", "http.sslcainfo"],
+            ["--list", "--show-origin"],
+        ):
+            out = subprocess.run(
+                ["git", "config", "--show-origin", *args], env=env, capture_output=True, text=True
+            )
+            print("GITCFG", args[-1], repr(out.stdout[-600:]))
     env.pop("GITHUB_TOKEN", None)
     env.pop("GH_TOKEN", None)
     result = subprocess.run(
@@ -43,6 +63,6 @@ def test_real_engagement(tmp_path: Path, world: str) -> None:
         timeout=600,
     )
     for line in (result.stdout + result.stderr).splitlines():
-        if "in-process" in line or "In-process" in line or "rror" in line:
+        if "in-process" in line or "In-process" in line or "falls back" in line:
             print("ENGAGE", world, line[-300:])
     assert result.returncode == 0, result.stderr[-3000:]
