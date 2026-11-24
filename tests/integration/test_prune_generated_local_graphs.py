@@ -49,6 +49,7 @@ class _Graph:
     edges: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     roots: list[str] = field(default_factory=list)
     aliased: set[str] = field(default_factory=set)
+    dev_roots: set[str] = field(default_factory=set)
     motif: tuple[str, str] | None = None
 
 
@@ -96,6 +97,9 @@ def _generate(seed: int) -> _Graph:
     graph.roots = [name for name in names if name not in children]
     if len(graph.roots) < 2:
         graph.roots.append(rng.choice([name for name in names if name not in graph.roots]))
+    # Production and dev roots mix; a separate stream keeps each seed's graph shape.
+    dev = random.Random(seed ^ 0xDE7)  # noqa: S311 -- reproducible test graphs
+    graph.dev_roots = {root for root in graph.roots if dev.random() < 0.5}
     return graph
 
 
@@ -113,14 +117,18 @@ def _write_package(vendor: Path, graph: _Graph, name: str) -> None:
     )
 
 
-def _write_project(project: Path, roots: list[str]) -> None:
+def _write_project(project: Path, graph: _Graph) -> None:
     dump_yaml(
         {
             "name": "proj",
             "version": "1.0.0",
             "targets": ["claude"],
-            "dependencies": {"apm": []},
-            "devDependencies": {"apm": [f"./vendor/{root}" for root in roots]},
+            "dependencies": {
+                "apm": [f"./vendor/{root}" for root in graph.roots if root not in graph.dev_roots]
+            },
+            "devDependencies": {
+                "apm": [f"./vendor/{root}" for root in graph.roots if root in graph.dev_roots]
+            },
         },
         project / "apm.yml",
     )
@@ -154,11 +162,32 @@ def _rows(project: Path) -> list[dict]:
     return list(lock.get("dependencies") or [])
 
 
-def _check_seed(seed: int, root: Path) -> tuple[str | None, bool | None]:
+_GRAPH_FIELDS = (
+    "depth",
+    "is_dev",
+    "resolved_by",
+    "declaring_parent",
+    "local_path",
+    "anchored_local_path",
+)
+
+
+def _graph_rows(project: Path) -> dict[str, tuple]:
+    """Each lock row's graph metadata, the part prune repairs (#5126)."""
+    return {
+        row["repo_url"]: tuple(row.get(name) for name in _GRAPH_FIELDS) for row in _rows(project)
+    }
+
+
+def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | None, bool | None]:
     """``(verdict, dropped root removed)``.
 
-    The verdict is None when prune kept every declared package, "skipped"
-    when install refused the graph, else the failure with its seed first.
+    The verdict is "converged" when prune kept every declared package and a
+    fresh resolve keeps its lock bytes, None when it kept every declared
+    package behind a named fail-closed keep or a root another package still
+    declares, "rekeyed" for a graph only install re-keys (#5238; with
+    *rekeyed* its convergence is checked too), "skipped" when install refused
+    the graph, else the failure with its seed first.
     The second value is None when a fail-closed rule is meant to keep the
     dropped root (the planted chain, a promoted survivor, or a root another
     survivor declares), else whether prune removed it.
@@ -172,13 +201,13 @@ def _check_seed(seed: int, root: Path) -> tuple[str | None, bool | None]:
     for name in sorted(graph.aliased):
         (vendor / f"{name}-link").symlink_to(name, target_is_directory=True)
     (project / ".claude").mkdir()
-    _write_project(project, graph.roots)
+    _write_project(project, graph)
     installed = _run(project, "install")
     if installed.exit_code != 0:
         return "skipped", None  # install's own limits on this graph are not prune's promise
     dropped = graph.motif[0] if graph.motif else rng.choice(graph.roots)
     graph.roots.remove(dropped)
-    _write_project(project, graph.roots)
+    _write_project(project, graph)
     # One manifest loses an edge: the planted top its chain edge, else any.
     if graph.motif:
         top, child = graph.motif
@@ -193,7 +222,7 @@ def _check_seed(seed: int, root: Path) -> tuple[str | None, bool | None]:
     promoted = bool(promotable) and rng.random() < 0.3
     if promoted:
         graph.roots.append(rng.choice(promotable))
-        _write_project(project, graph.roots)
+        _write_project(project, graph)
     clear_apm_yml_cache()
 
     pruned = _run(project, "prune")
@@ -217,7 +246,25 @@ def _check_seed(seed: int, root: Path) -> tuple[str | None, bool | None]:
     for row in rows:
         if row.get("name") not in needed:
             return f"seed {seed}: {row['repo_url']} kept without a name; {output}", removed
-    return None, removed
+    if named or dropped in needed:
+        # A fail-closed keep is named; a hand-dropped root another package
+        # still declares stays direct until install records it (#3668).
+        return None, removed
+    if promoted or graph.aliased & needed:
+        # A survivor now declared directly, or one reached through an alias
+        # spelling, is re-keyed only by install (#5238); the strict companion
+        # cell below fails once prune converges on these too.
+        if not rekeyed:
+            return "rekeyed", removed
+    # Converged: a fresh resolve of the pruned project records the same graph.
+    # The edited manifest's new content hash is install's to record, not prune's.
+    settled = _graph_rows(project)
+    clear_apm_yml_cache()
+    resolved = _run(project, "install", "--no-frozen")
+    if resolved.exit_code != 0 or _graph_rows(project) != settled:
+        changed = sorted(map(repr, set(_graph_rows(project).items()) ^ set(settled.items())))
+        return f"seed {seed}: install --no-frozen after prune changed {changed}", removed
+    return "converged", removed
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
@@ -235,7 +282,7 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
         print(f"generated-graph run seed: {run_seed}")
         seeds.append(run_seed)
     failures = []
-    skipped = removed = eligible = 0
+    skipped = removed = eligible = converged = 0
     for seed in seeds:
         root = tmp_path / f"s{seed}"
         root.mkdir()
@@ -246,10 +293,15 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
         if dropped_removed is not None:
             eligible += 1
             removed += dropped_removed
-        if verdict is not None:
+        if verdict == "converged":
+            converged += 1
+        elif verdict is not None and verdict != "rekeyed":
             failures.append(verdict[:1500])
     monkeypatch.chdir(tmp_path)
-    print(f"seeds: {len(seeds)}, install refused: {skipped}, root removed: {removed}/{eligible}")
+    print(
+        f"seeds: {len(seeds)}, install refused: {skipped}, "
+        f"root removed: {removed}/{eligible}, converged: {converged}"
+    )
 
     assert not failures, f"{len(failures)} failing seed(s):\n" + "\n".join(failures)
     # Most graphs must reach prune, or the cell proves nothing.
@@ -259,3 +311,28 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
     # least half of those graphs, and those graphs are not a token few.
     assert eligible >= len(seeds) // 5, eligible
     assert removed * 2 >= eligible, (removed, eligible)
+    # The convergence oracle runs on graphs prune settles without a named keep.
+    assert converged >= len(seeds) // 4, converged
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+@pytest.mark.xfail(
+    strict=True,
+    reason="#5238: prune keeps a promoted or alias-spelled survivor's row; install re-keys it",
+)
+def test_prune_converges_on_graphs_install_rekeys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The graphs the main cell exempts as #5238's: a fresh resolve keeps prune's lock."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    failures = []
+    for seed in _FIXED_SEEDS[:_CHUNK]:
+        root = tmp_path / f"s{seed}"
+        root.mkdir()
+        verdict, _ = _check_seed(seed, root, rekeyed=True)
+        if verdict not in (None, "converged", "skipped"):
+            failures.append(verdict[:500])
+    monkeypatch.chdir(tmp_path)
+
+    assert not failures, "\n".join(failures)
