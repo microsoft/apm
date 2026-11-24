@@ -33,9 +33,10 @@ _IDX_MAGIC = b"\xfftOc"
 _BASE_CACHE_BYTES = 32 * 1024 * 1024
 
 
-def _switched_off(name: str) -> bool:
-    """A kill switch reads like ``APM_NO_INPROCESS_FETCH``: 1, true, yes or on."""
-    return (os.environ.get(name) or "").lower() in _TRUE
+def _switched_off(name: str, env=None) -> bool:
+    """A kill switch reads like ``APM_NO_INPROCESS_FETCH``: 1, true, yes or on,
+    in the command's git env or the process env."""
+    return any((source.get(name) or "").lower() in _TRUE for source in (env or {}, os.environ))
 
 
 class _Unsupported(Exception):
@@ -149,9 +150,9 @@ def _objects_dirs(repo: Path) -> list[str]:
 class PackObjects:
     """``read(oid, kind) -> bytes | None`` from the packs; ``None`` means ask git."""
 
-    def __init__(self, repo: Path, algorithm: str) -> None:
+    def __init__(self, repo: Path, algorithm: str, env=None) -> None:
         self._packs: list[_Pack] | None = None
-        if algorithm != "sha1" or _switched_off("APM_NO_INPROCESS_VERIFY"):
+        if algorithm != "sha1" or _switched_off("APM_NO_INPROCESS_VERIFY", env):
             return
         packs: list[_Pack] = []
         try:
@@ -262,24 +263,9 @@ def materialize_tree(
     )
     from .inprocess_fetch import _tree_entries as entries_of
 
-    if _switched_off("APM_NO_INPROCESS_CHECKOUT"):
+    if _switched_off("APM_NO_INPROCESS_CHECKOUT", env):
         return None
-    from ..utils.git_env import _read_effective_git_config
-    from .inprocess_fetch import _frozen_entries, _network_env, _require_inert_attributes
-
-    try:
-        # The user's config as git's checkout sees it (the B1 W4 gate's reading).
-        child_env = _network_env(env)
-        entries = _frozen_entries(child_env)
-        if entries is None:
-            entries = _read_effective_git_config(child_env).entries
-        # A filter, eol or encoding applies only through an attribute: with every
-        # attributes source outside the commit inert (W4) and the commit's own
-        # .gitattributes refused, filter.* definitions cannot change a byte.
-        _require_inert_attributes(child_env, entries)
-    except Exception:
-        return None
-    objects = PackObjects(repo, "sha1")
+    objects = PackObjects(repo, "sha1", env)
     try:
 
         def read(oid: str, kind: str) -> bytes:
@@ -314,6 +300,23 @@ def materialize_tree(
         return None
     finally:
         objects.close()
+    from ..utils.git_env import _read_effective_git_config
+    from .inprocess_fetch import _frozen_entries, _network_env, _require_inert_attributes
+
+    # The gate reads git config (a spawn), so it runs only once the pack can serve
+    # the whole tree, and still before the first write.
+    try:
+        # The user's config as git's checkout sees it (the B1 W4 gate's reading).
+        child_env = _network_env(env)
+        entries = _frozen_entries(child_env)
+        if entries is None:
+            entries = _read_effective_git_config(child_env).entries
+        # A filter, eol or encoding applies only through an attribute: with every
+        # attributes source outside the commit inert (W4) and the commit's own
+        # .gitattributes refused, filter.* definitions cannot change a byte.
+        _require_inert_attributes(child_env, entries)
+    except Exception:
+        return None
     root = str(repo)
     manifest: dict[str, tuple[str, bool]] = {}
     try:

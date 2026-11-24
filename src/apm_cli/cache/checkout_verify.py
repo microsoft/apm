@@ -486,7 +486,7 @@ def _verify(
     algorithm = object_format(sha)
     from .pack_objects import PackObjects
 
-    pack = PackObjects(repo, algorithm)
+    pack = PackObjects(repo, algorithm, env)
     try:
         return _verify_with(repo, sha, scope, cone, algorithm, _PackSource(pack, algorithm))
     except _PackMiss:
