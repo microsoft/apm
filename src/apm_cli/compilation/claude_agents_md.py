@@ -528,6 +528,7 @@ class CompiledCoverage:
         self._index: dict[str, list[Path]] | None = None
         self._current: dict[Path, bool] = {}
         self._loads: dict[Path, bool] = {}
+        self._texts: dict[Path, str | None] = {}
 
     def _fingerprint_index(self) -> dict[str, list[Path]]:
         """Map each recorded fingerprint to the compiled files that carry it."""
@@ -564,6 +565,27 @@ class CompiledCoverage:
         return any(
             self._current.get(agents_md) and self._claude_loads(agents_md.parent)
             for agents_md in files
+        ) or (not self._current and self._destination_carries(apply_to, body))
+
+    def _destination_carries(self, apply_to: object, body: str) -> bool:
+        """With no record for this root (a fresh clone), read the destination (#5344).
+
+        The record lives in APM home, so a committed compiled ``AGENTS.md`` is
+        recognized when Claude loads it and it holds the body verbatim; a body
+        compile rewrote (links) still asks for ``apm compile``.
+        """
+        text = body.replace("\r\n", "\n").strip()
+        prefix = "" if _is_always_on(apply_to) else directory_scope(apply_to)
+        if not text or prefix is None:
+            return False
+        directory = self.project_root / prefix if prefix else self.project_root
+        if directory not in self._texts:
+            self._texts[directory] = _read_text(directory / "AGENTS.md", self.project_root)
+        compiled = self._texts[directory]
+        return (
+            compiled is not None
+            and text in compiled.replace("\r\n", "\n")
+            and self._claude_loads(directory)
         )
 
 

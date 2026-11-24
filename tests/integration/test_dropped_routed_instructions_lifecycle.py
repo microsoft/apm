@@ -13,6 +13,7 @@ SCOPE=project COMPILE=absent|done APPLY_TO=**
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -82,3 +83,12 @@ def test_an_instruction_routed_to_agents_md_is_named_until_compiled(
     assert _NAME not in _text(again), _evidence(again)
     assert audit_after.returncode == 0, _evidence(audit_after)
     assert _NAME not in _text(audit_after), _evidence(audit_after)
+
+    # A fresh clone has the committed AGENTS.md but no compile record in APM home.
+    shutil.rmtree(Path(env["APM_HOME"]) / "compiled-agents-md")
+    fresh = runner.run(("audit", "--ci"), cwd=project, env=env, scenario_id="audit-fresh")
+    fresh_install = runner.run(("install",), cwd=project, env=env, scenario_id="install-fresh")
+
+    assert fresh.returncode == 0, _evidence(fresh)
+    assert fresh_install.returncode == 0, _evidence(fresh_install)
+    assert _NAME not in _text(fresh) + _text(fresh_install), _evidence(fresh_install)
