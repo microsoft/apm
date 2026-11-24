@@ -481,6 +481,7 @@ def test_an_ancestor_apm_yml_another_user_owns_is_skipped_and_named(
     assert _find_apm_yml(work) is None
     out = " ".join(capsys.readouterr().out.split())
     assert str(planted) in out, out
+    assert f"owned by uid {planted.stat().st_uid}" in out, out
 
 
 @pytest.mark.skipif(not hasattr(__import__("os"), "geteuid"), reason="POSIX ownership")

@@ -572,8 +572,8 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
             continue
         if candidate != cwd and geteuid is not None and info.st_uid != geteuid():
             _rich_warning(
-                f"Skipping {manifest}: another user owns it, so APM does not use it as "
-                "this project's apm.yml.",
+                f"Skipping {manifest}: owned by uid {info.st_uid}, not you, so APM does "
+                "not use it as this project's apm.yml.",
                 symbol="warning",
             )
             continue
