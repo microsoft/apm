@@ -255,3 +255,51 @@ def test_fetches_queued_behind_the_first_answer_then_run_concurrently() -> None:
             thread.join(15)
 
     assert sorted(answered) == [b"first"] + [b"later"] * queued
+
+
+def _shared_tree_pack(fanouts: list[int], leaf_files: int) -> tuple[str, bytes]:
+    """``(commit id, pack)``: every level's entries all name the one tree below it."""
+    blob = b"x\n"
+    blob_id = _oid("blob", blob)
+    objects = [("blob", blob)]
+    tree = b"".join(b"100644 f%d\x00" % i + bytes.fromhex(blob_id) for i in range(leaf_files))
+    objects.append(("tree", tree))
+    below = _oid("tree", tree)
+    for fanout in fanouts:
+        tree = b"".join(b"40000 d%d\x00" % i + bytes.fromhex(below) for i in range(fanout))
+        objects.append(("tree", tree))
+        below = _oid("tree", tree)
+    commit = f"tree {below}\nauthor a <a> 0 +0000\ncommitter a <a> 0 +0000\n\nm\n".encode()
+    objects.append(("commit", commit))
+    return _oid("commit", commit), _pack([_obj(k, d) for k, d in objects])
+
+
+def test_a_shared_subtree_bomb_falls_back_fast_with_bounded_memory() -> None:
+    import tracemalloc
+
+    sha, pack = _shared_tree_pack([2] * 20, 2)  # 2**21 files from a pack of a few KB
+    assert len(pack) < 8192
+    parsed = fetch.parse_pack(pack)
+    tracemalloc.start()
+    try:
+        with pytest.raises(fetch._Refuse, match="entry count exceeds the cap"):
+            fetch._plan(parsed, sha)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 128 * 1024 * 1024
+
+
+def test_a_worktree_just_under_the_entry_cap_still_engages() -> None:
+    # 19 + 19 * (100 + 100 * 100) = 191,919 entries, under the 200,000 cap.
+    sha, pack = _shared_tree_pack([100, 19], 100)
+    files, _reached = fetch._plan(fetch.parse_pack(pack), sha)
+    assert len(files) == 19 * 100 * 100
+
+
+def test_a_pack_claiming_too_many_objects_is_refused_before_parsing() -> None:
+    body = b"PACK" + (2).to_bytes(4, "big") + (fetch._MAX_OBJECTS + 1).to_bytes(4, "big")
+    body += b"\x00" * 16
+    pack = body + hashlib.new("sha1", body, usedforsecurity=False).digest()
+    with pytest.raises(fetch._Refuse, match="object count exceeds the cap"):
+        fetch.parse_pack(pack)
