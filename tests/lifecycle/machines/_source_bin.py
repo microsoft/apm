@@ -47,6 +47,8 @@ FORMS = {"native": PLUGIN, "shorthand": f"{PLUGIN}:git"}
 # Commands that resolve the graph but must leave a deployed, trusted root alone.
 _KEEPING = ("lock", "compile", "audit", "update", "approve-deny")
 _REMOVING = ("uninstall", "prune")
+# Commands that, right after a converged install, must change no byte at all (I2).
+_CONVERGED = ("lock", "audit", "update")
 
 
 @dataclass
@@ -84,7 +86,12 @@ class SourceBin(StepRunner):
             if op == "audit":
                 fields["read_only"] = True
             step = self.step(
-                words, exits=frozenset({0}), cells=(cell,), model=requested.model(), **fields
+                words,
+                exits=frozenset({0}),
+                cells=(cell,),
+                model=requested.model(),
+                converged=op in _CONVERGED,
+                **fields,
             )
             self._check_outcome(op, requested, step)
             self._credit(op, cell, step)
@@ -132,7 +139,8 @@ class SourceBin(StepRunner):
         else:
             present["project"] = [BIN_PATH]
             if op in _KEEPING:
-                unchanged["project"] = (ROOT,)
+                # The root and its harness registration survive together.
+                unchanged["project"] = (ROOT, *SETTINGS)
         check_obligation(
             cell,
             strength="e2e-evidence",
