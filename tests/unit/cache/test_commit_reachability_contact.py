@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,8 @@ def test_url_rewrites_are_probed_once_for_many_origins(
 
     assert len(probes) == 1
     assert all(contact is not None and "/o/pkg-" in contact for contact in plain)
-    assert rewritten is not None and rewritten.startswith("https://mirror.example")
+    assert rewritten is not None
+    assert urllib.parse.urlsplit(rewritten).hostname == "mirror.example"
 
 
 def test_a_ref_tip_of_the_fresh_clone_needs_no_object_probe(tmp_path: Path) -> None:
@@ -163,3 +165,47 @@ def test_a_non_ascii_or_reftable_clone_asks_git(tmp_path: Path) -> None:
     reftable = _clone_dir(tmp_path / "rt", f"{_HEADER}{_A} refs/heads/main\n", {})
     (reftable / "reftable").mkdir()
     assert _is_ref_tip(reftable, _A) is False
+
+
+def _indexed(*entries: tuple[str, str]) -> dict[str, str]:
+    env = {"GIT_CONFIG_COUNT": str(len(entries))}
+    for index, (key, value) in enumerate(entries):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
+    return env
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param(
+            _indexed(
+                ("url.https://a.example/.insteadOf", "https://github.com/"),
+                ("url.https://b.example/.insteadOf", "https://github.com/"),
+            ),
+            _indexed(
+                ("url.https://b.example/.insteadOf", "https://github.com/"),
+                ("url.https://a.example/.insteadOf", "https://github.com/"),
+            ),
+            id="reversed-equal-prefix-rules",
+        ),
+        pytest.param(
+            _indexed(("include.path", "/cfg/one")),
+            _indexed(("include.path", "/cfg/two")),
+            id="different-included-file",
+        ),
+        pytest.param(
+            _indexed(("url.https://a.example/.insteadOf", "https://github.com/")),
+            {
+                **_indexed(("url.https://a.example/.insteadOf", "https://github.com/")),
+                "GIT_CONFIG_COUNT": "0",
+            },
+            id="different-active-count",
+        ),
+    ],
+)
+def test_envs_that_can_rewrite_differently_never_share_a_rewrite_table(first, second) -> None:
+    from apm_cli.cache.commit_reachability import _rewrite_config
+
+    assert _rewrite_config(first) != _rewrite_config(second)
+    assert _rewrite_config(first) == _rewrite_config(dict(first))

@@ -334,7 +334,7 @@ def effective_contact(contact: str, env) -> str | None:
 
 
 def _rewrite_config(env: dict[str, str]) -> tuple:
-    """Only what can rewrite a URL: config file locations and ``url.*`` entries.
+    """Only what can rewrite a URL: config file locations and indexed rewrite/include entries.
 
     Per-attempt credentials and headers never change the contacted URL, so a
     run computes the contact once per origin.
@@ -346,11 +346,19 @@ def _rewrite_config(env: dict[str, str]) -> tuple:
             *("XDG_CONFIG_HOME", "GIT_CONFIG_PARAMETERS"),
         )
     )
+    # Indexed process config in order (later rules win, includes select files),
+    # plus the active count: any difference keys a separate rewrite table.
+    count = env.get("GIT_CONFIG_COUNT")
+    try:
+        active = max(0, int(count or 0))
+    except ValueError:
+        active = 0
     entries = []
-    for k, v in env.items():
-        if k.startswith("GIT_CONFIG_KEY_") and v.lower().startswith("url."):
-            entries.append((v, env.get("GIT_CONFIG_VALUE_" + k.removeprefix("GIT_CONFIG_KEY_"))))
-    return files + tuple(sorted(entries, key=str))
+    for index in range(active):
+        key = env.get(f"GIT_CONFIG_KEY_{index}") or ""
+        if key.lower().startswith(("url.", "include.", "includeif.")):
+            entries.append((index, key, env.get(f"GIT_CONFIG_VALUE_{index}")))
+    return (*files, ("GIT_CONFIG_COUNT", count), *entries)
 
 
 def _config_files_state(env: dict[str, str]) -> tuple:
