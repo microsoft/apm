@@ -41,11 +41,12 @@ _ENTRY = (sys.executable, "-c", "import sys; from apm_cli.entrypoint import main
 
 
 @pytest.fixture
-def world_install():
+def world_install(request):
     """``install(*args)`` in a fresh tree-10 project; returns (code, stdout, stderr)."""
     work = Path(tempfile.mkdtemp(prefix="apm-attest-"))
     try:
-        tree = build_tree(TREE_RECIPES["tree-10"], work / "tree")
+        recipe = getattr(request, "param", "tree-10")
+        tree = build_tree(TREE_RECIPES[recipe], work / "tree")
         with serve_offline(tree, work / "world") as world:
             project = work / "project"
             shutil.copytree(tree.project, project)
@@ -109,6 +110,28 @@ def test_a_deployed_file_edited_after_the_attested_install_is_proved(world_insta
     second = install()
 
     _assert_not_attested_hit(second)
+
+
+@pytest.mark.parametrize("world_install", ["tree-10-claude"], indirect=True)
+def test_a_valid_attestation_never_skips_the_claude_carried_rules_refusal(world_install) -> None:
+    """#5394: with claude targeted and a root AGENTS.md that may carry its rules, the
+    fast path declines; an attestation install #1 wrote must not take precedence."""
+    install, project, _world = world_install
+    (project / "AGENTS.md").write_text("# Project notes\n", encoding="utf-8")
+    _assert_attested(install())
+
+    second = install()
+
+    _assert_full_pipeline_ran(second)
+
+
+def _assert_full_pipeline_ran(result: tuple[int, str, str]) -> None:
+    """The record matched ("attested hit" is the check, not the outcome), yet the fast
+    path declined: the full pipeline re-attested and no attested commit recorded output."""
+    code, stdout, stderr = result
+    assert code == 0, stdout + stderr
+    assert "attested" in _traces(stderr), stderr
+    assert "recorded" not in _traces(stderr), stderr
 
 
 def _a_deployed_file(project: Path) -> str:
