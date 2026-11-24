@@ -259,13 +259,21 @@ def _join_local(anchor: Path, local_path: str) -> Path:
     return raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
 
 
-def _dir_identity(path: Path) -> tuple[int, int] | None:
-    """Return the ``(device, inode)`` of an existing directory, else None."""
+def _dir_identity(path: Path, *, strict: bool = False) -> tuple[int, int] | None:
+    """Return the ``(device, inode)`` of an existing directory, else None.
+
+    With *strict*, only a missing path is None; any other stat error raises,
+    since an unknown identity cannot rule out an aliased spelling.
+    """
     import stat as stat_module
 
     try:
         stat = path.stat()
+    except FileNotFoundError:
+        return None
     except (OSError, ValueError):
+        if strict:
+            raise
         return None
     # Files keep path identities: two hard-linked primitive files are distinct.
     if not stat.st_ino or not stat_module.S_ISDIR(stat.st_mode):
@@ -304,11 +312,11 @@ def _build_local_dir_index(
                 parent_index=parent_index,
                 resolved_cache=resolved_cache,
             )
-        except (LocalResolutionError, OSError, RuntimeError) as exc:
-            # A symlink loop cannot be resolved either: the walk is incomplete.
+            identity = _dir_identity(directory, strict=True)
+        except (LocalResolutionError, OSError, RuntimeError, ValueError) as exc:
+            # A symlink loop or a denied stat cannot be resolved: the walk is incomplete.
             unverifiable.append((key, str(exc)))
             continue
-        identity = _dir_identity(directory)
         other = index.get(directory) or (identities.get(identity) if identity else None)
         if other is not None:
             # Two rows in one directory: a reached edge cannot say which one
