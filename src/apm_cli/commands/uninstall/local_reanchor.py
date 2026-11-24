@@ -122,7 +122,7 @@ def _won_children(walk, nodes, renames: dict[str, str]) -> dict[str, tuple[str, 
     for child in sorted(walk.declaring_edges):
         nearest = _nearest_parents(walk, child)
         if nearest:
-            winner = min(nearest, key=lambda parent: renames.get(parent, parent))
+            winner = _ranked_parent(nearest, renames)
             if winner in won:
                 won[winner].append(child)
     return {key: tuple(children) for key, children in won.items()}
@@ -273,25 +273,19 @@ def plan_local_reanchor(
     }
     moves = _materialization_moves(lockfile, nodes, modules_dir, label)
     fresh = _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir)
-    declaring_parents: dict[str, tuple[str, str | None]] = {}
-    resolved_by: dict[str, str | None] = {}
-    for key in decision.rescued_parents:
-        nearest = _nearest_parents(walk, key)
-        if not nearest:
-            continue
-        edges = walk.declaring_edges[key]
-        # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
-        resolved_by[key] = edges[min(nearest, key=lambda parent: renames.get(parent, parent))][0]
+    # One re-parent rule for uninstall and prune (#5161).
+    declaring_parents, resolved_by = reparent_rows(
+        lockfile, walk, decision.rescued_parents, renames, skip=frozenset(nodes)
+    )
+    for key in resolved_by:
         row = lockfile.get_dependency(key)
         if row is not None and row.source == "local" and key not in nodes:
             # A re-parented descendant must still install where its row says, from a copy.
-            _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
+            first = _nearest_parents(walk, key)[0]
+            _winning_edge_installs_here(walk, key, first, lockfile, label, modules_dir)
             copy = row.to_dependency_ref().get_install_path(modules_dir)
             _require_copy(copy, key, label, modules_dir)
             _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label, modules_dir)
-        if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
-            first = nearest[0]
-            declaring_parents[key] = (renames.get(first, first), edges[first][1])
     return LocalReanchorPlan(
         renames,
         identities,
@@ -332,8 +326,7 @@ def reparent_rows(
         if not nearest:
             continue
         edges = walk.declaring_edges[key]
-        # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
-        parent_key = min(nearest, key=lambda parent: renames.get(parent, parent))
+        parent_key = _ranked_parent(nearest, renames)
         resolved_by[key] = edges[parent_key][0]
         parent_row = lockfile.dependencies.get(parent_key) if locked_identity else None
         if parent_row is not None:
@@ -352,6 +345,12 @@ def reparent_rows(
             first = nearest[0] if row.declaring_parent else parent_key
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
     return declaring_parents, resolved_by
+
+
+def _ranked_parent(nearest, renames: dict[str, str]) -> str:
+    """The nearest parent a re-parented row records: ties go to the lowest key, as
+    install ranks the new keys (#4833). The one ranking uninstall and prune share."""
+    return min(nearest, key=lambda parent: renames.get(parent, parent))
 
 
 def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> tuple:
