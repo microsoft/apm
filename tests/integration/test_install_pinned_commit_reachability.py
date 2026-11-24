@@ -812,3 +812,49 @@ with open({str(calls_log)!r}, "a") as log:
     assert [call for call in calls if " fetch " in call and call.endswith(origin.m2)]
     listed = [call for call in calls if {"ls-remote", "--branch"} & set(call.split())]
     assert not listed, listed
+
+
+@pytest.mark.parametrize("include_if", [False, True], ids=["none", "one"])
+def test_a_warm_pinned_install_probes_clone_config_only_when_config_has_an_include_if(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, include_if
+) -> None:
+    """#5138: without an includeIf, config cannot depend on the remote: nothing is probed."""
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        '[includeIf "gitdir:/nonexistent/"]\n\tpath = /nonexistent.gitconfig\n'
+        if include_if
+        else "",
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    project = _project(tmp_path, origin.m1)
+    env = {"APM_CACHE_DIR": str(tmp_path / "cache")}
+    assert _install(project, origin, monkeypatch, **env).exit_code == 0
+    shutil.rmtree(project / "apm_modules")
+    calls_log = tmp_path / "git-calls"
+    _wrapped_git(
+        tmp_path,
+        monkeypatch,
+        f"""
+with open({str(calls_log)!r}, "a") as log:
+    log.write(" ".join(args) + "\\n")
+""",
+    )
+
+    result = _install(project, origin, monkeypatch, **env)
+
+    assert result.exit_code == 0, result.output
+    assert origin.m1 in (project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert _installed(project)
+    calls = calls_log.read_text(encoding="utf-8").splitlines() if calls_log.exists() else []
+    # A probe adds the origin remote to a scratch repository named "origin".
+    probed = [
+        c
+        for c in map(str.split, calls)
+        if c[:1] == ["-C"] and c[1].endswith("/origin") and c[2:4] == ["remote", "add"]
+    ]
+    # Once per URL the attempt contacts (a hasconfig pattern matches the URL
+    # as spelled, so the admission's and the cache's spellings each count).
+    urls = [call[-1] for call in probed]
+    assert sorted(set(urls)) == sorted(urls), probed
+    assert bool(urls) is include_if, probed

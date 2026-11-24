@@ -53,7 +53,7 @@ class VerdictStage:
         self._pending: dict[Path, str] = {}
         self._lock = threading.Lock()
         self._scratch: str | None = None
-        self._listing_envs: dict[str, dict[str, str]] = {}
+        self._memo: dict[str, object] = {}
 
     def add(self, marker: Path, canonical: str) -> None:
         with self._lock:
@@ -71,15 +71,14 @@ class VerdictStage:
                 self._scratch = tempfile.mkdtemp(prefix="apm-reach-")
             return Path(self._scratch)
 
-    def listing_env(self, key: str, probe) -> dict[str, str]:
-        """The probed listing env for digest *key*, probing once per attempt."""
+    def remember(self, key: str, compute):
+        """*compute()*'s value for digest *key*, computed once per attempt."""
         with self._lock:
-            known = self._listing_envs.get(key)
-        if known is None:
-            known = probe()
-            with self._lock:
-                known = self._listing_envs.setdefault(key, known)
-        return dict(known)
+            if key in self._memo:
+                return self._memo[key]
+        value = compute()
+        with self._lock:
+            return self._memo.setdefault(key, value)
 
     def commit(self) -> None:
         """Write the staged verdicts (best effort: a missing one is re-checked)."""
@@ -103,7 +102,7 @@ class VerdictStage:
 
         with self._lock:
             scratch, self._scratch = self._scratch, None
-            self._listing_envs = {}
+            self._memo = {}
         if scratch is not None:
             shutil.rmtree(scratch, ignore_errors=True)
         with _stage_lock:
@@ -397,14 +396,17 @@ def _record_tip(downloader, dep_ref, sha: str) -> None:
     contact = downloader._build_repo_url(dep_ref.repo_url, use_ssh=ssh, dep_ref=dep_ref)
     if not _persists(downloader):
         return
-    # Keyed under the env a listing or clone of *contact* gets, as _listed_tip
-    # records: a tip a remote-activated mirror served names that mirror.
+    # The resolver may have listed *contact* plainly or cloned it, which can
+    # activate a remote-dependent rewrite; which one is unknown here. A tip is
+    # recorded only when both name the same server, else it is verified at
+    # the fetch destination when next admitted.
+    transport = getattr(downloader, "git_env", None)
     try:
-        env = _probed_listing_env(contact, getattr(downloader, "git_env", None))
+        probed = _probed_listing_env(contact, transport)
     except _Unverified:
         return
-    key = _verdict_key(origin, contact, env)
-    if key is None:
+    key = _verdict_key(origin, contact, probed)
+    if key is None or key != _verdict_key(origin, contact, transport):
         return
     _record(_marker(root, cache_shard_key(origin), sha.lower()), key)
 
@@ -731,33 +733,81 @@ def _sanitize_origin(url: str) -> str:
     return _sanitize_url(url)
 
 
-def _listing_env(url: str, env) -> dict[str, str]:
+def _listing_env(url: str, env) -> dict[str, str] | None:
     """The env a clone of *url* gets, so config its remote URL activates applies.
 
-    A remote-activated mirror rewrite then sends the listing where the fetch
-    would go. Probing costs a scratch repository, so an install attempt's
-    verdict stage keeps each probe, keyed by a digest of the URL and the
-    whole environment (credentials included, never stored in clear), and
-    drops them when the attempt ends. Git config is read once per attempt.
-    Without an open stage every listing probes.
+    Only an ``includeIf`` section can make config depend on the remote, so
+    without one *env* already is that env and nothing is probed. With one
+    (or when that cannot be told), a scratch repository with *url* as its
+    origin is probed, so a remote-activated mirror rewrite sends the listing
+    where the fetch would go. An install attempt's verdict stage keeps each
+    answer, keyed by a digest of the URL and the whole environment
+    (credentials included, never stored in clear), and drops them when the
+    attempt ends: git config is read once per attempt. Without an open stage
+    nothing is kept.
     """
-    import hashlib
     import tempfile
 
     from ..utils.git_env import git_clone_env
 
     def _probe() -> dict[str, str]:
-        with tempfile.TemporaryDirectory(prefix="apm-ls-remote-") as probe:
+        with tempfile.TemporaryDirectory(prefix="apm-clone-config-") as probe:
             return git_clone_env(url, env, Path(probe) / "origin")
+
+    merged = {**os.environ, **(env or {})}
+    if not _remembered(("includeif", *sorted(_config_scope(merged))), _has_include_if, merged):
+        return env
+    return dict(_remembered(("probe", url, *sorted(merged.items())), _probe))
+
+
+def _config_scope(env: dict[str, str]) -> list[tuple[str, str]]:
+    """The environment entries that choose which git config is read."""
+    return [
+        (str(k), str(v))
+        for k, v in env.items()
+        if str(k).startswith("GIT_CONFIG") or k in ("HOME", "XDG_CONFIG_HOME")
+    ]
+
+
+def _remembered(parts: tuple, compute, *args):
+    """``compute(*args)``, kept by the open verdict stage for the attempt."""
+    import hashlib
 
     stage = _stage()
     if stage is None:
-        return _probe()
-    merged = {**os.environ, **(env or {})}
+        return compute(*args)
     digest = hashlib.sha256()
-    for name, value in sorted((str(k), str(v)) for k, v in (("", url), *merged.items())):
-        digest.update(f"{len(name)}:{name}={len(value)}:{value}\0".encode())
-    return stage.listing_env(digest.hexdigest(), _probe)
+    for part in parts:
+        text = repr(part)
+        digest.update(f"{len(text)}:{text}".encode())
+    return stage.remember(digest.hexdigest(), lambda: compute(*args))
+
+
+def _has_include_if(env: dict[str, str]) -> bool:
+    """Whether any git config scope *env* reads has an ``includeIf`` entry.
+
+    *env* is the process environment with the call's overrides: the config
+    a listing applies is the parent's, snapshotted, plus those overrides.
+
+    True when it cannot be told: the caller then probes (fails closed).
+    """
+    import tempfile
+
+    from ..utils.git_env import get_git_executable, git_subprocess_env, run_git_text
+
+    try:
+        found = run_git_text(
+            [get_git_executable(), "config", "--get-regexp", r"^includeif\."],
+            capture_output=True,
+            cwd=tempfile.gettempdir(),
+            env=git_subprocess_env(env),
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return True
+    return found.returncode != 1
 
 
 def _probed_listing_env(url: str, env) -> dict[str, str]:

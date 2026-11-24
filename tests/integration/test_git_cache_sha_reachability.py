@@ -1011,6 +1011,10 @@ def test_listings_of_one_origin_in_an_install_attempt_probe_clone_config_once_pe
         return real_init_run(args, *rest, **kwargs)
 
     monkeypatch.setattr("apm_cli.utils.git_env._git_init_run", _count)
+    # Only config with an includeIf can depend on the remote, so only it is probed.
+    config = tmp_path / "global.gitconfig"
+    config.write_text('[includeIf "gitdir:/nonexistent/"]\n\tpath = /x\n', encoding="ascii")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     stage = open_verdict_stage()
     try:
         for name, credential in zip(("one", "two"), credentials, strict=True):
@@ -1081,7 +1085,10 @@ class _RemotelyResolved:
 def test_a_resolved_tip_a_mirror_served_is_not_trusted_for_the_origin_without_the_rewrite(
     tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#5138: a remotely resolved tip is recorded for the mirror its clone reached."""
+    """#5138: a resolved tip is not trusted while a remote-activated rewrite applies.
+
+    The resolver may have listed the origin or cloned through the mirror.
+    """
     from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
     from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
@@ -1098,6 +1105,8 @@ def test_a_resolved_tip_a_mirror_served_is_not_trusted_for_the_origin_without_th
     downloader._tiered_resolver = _RemotelyResolved()
     resolved = ResolvedReference("main", GitReferenceType.BRANCH, origin.m2, "main")
     admit_pinned_commit(downloader, _ref("main"), "main", resolved=resolved)
+    # Which server the resolver saw is unknown under the rewrite: nothing is trusted.
+    assert not (tmp_path / "cache" / "reachability").exists()
     config.write_text("[core]\n\tbare = false\n", encoding="ascii")
     contacted = len(downloader.contacted)
 
@@ -1105,8 +1114,7 @@ def test_a_resolved_tip_a_mirror_served_is_not_trusted_for_the_origin_without_th
         admit_pinned_commit(downloader, _ref(origin.m2), origin.m2)
 
     assert len(downloader.contacted) > contacted, "the origin was never checked"
-    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
-    assert marker.name == origin.m2
+    assert not list((tmp_path / "cache" / "reachability").rglob("verified-v2/*"))
 
 
 def test_a_commit_only_a_mirror_holds_is_never_recorded_as_the_origins_verdict(
