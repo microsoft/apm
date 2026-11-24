@@ -162,16 +162,24 @@ def entry_stamp() -> list[Any]:
     return [time.time(), fetch_attempts(), policy_cache_shape()]
 
 
-def policy_cache_shape() -> str:
-    """Every policy cache file's path, size and mtime (the cache discovery reads)."""
-    from apm_cli.install.verdict_record import _cache_root
+def policy_cache_shape() -> str | None:
+    """Every policy cache file's path, mtime and content digest (the cache discovery
+    reads), read no-follow; None when any of it cannot be read (no record)."""
+    import hashlib
 
-    cache = _cache_root()
-    if cache is None:
-        return ""
-    rows = []
-    for rel, files, _dirs in _tree(str(cache / "policy_v1")):
-        for entry in files:
-            info = entry.stat(follow_symlinks=False)
-            rows.append(f"{rel}/{entry.name}:{info.st_size}:{info.st_mtime_ns}")
-    return "\n".join(rows)
+    from apm_cli.install.verdict_record import _cache_root, _read_nofollow
+
+    try:
+        cache = _cache_root()
+        if cache is None:
+            return ""
+        rows = []
+        for rel, files, _dirs in _tree(str(cache / "policy_v1")):
+            for entry in files:
+                data = _read_nofollow(entry.path)
+                digest = "absent" if data is None else hashlib.sha256(data).hexdigest()
+                mtime = entry.stat(follow_symlinks=False).st_mtime_ns
+                rows.append(f"{rel}/{entry.name}:{mtime}:{digest}")
+        return "\n".join(rows)
+    except (OSError, ValueError):
+        return None

@@ -1093,3 +1093,52 @@ def test_a_policy_cache_changed_after_discovery_is_never_recorded(project: Path)
         shutil.rmtree(project.parent / "cache" / "policy_v1")
 
     assert not (_home(project) / "verdicts").exists()
+
+
+def _cached_ado_project(project: Path) -> Path:
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+
+    _hosted_project(project, "ado")
+    policy, _warnings = load_policy("enforcement: warn\ncache:\n  ttl: 3600\n")
+    discovery._write_cache("dev.azure.com/acme/apm/apm-policy", policy, project)
+    (cached,) = (p for p in (project.parent / "cache" / "policy_v1").rglob("*.yml"))
+    return cached
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_a_policy_cache_rewritten_in_place_after_discovery_is_never_recorded(
+    project: Path,
+) -> None:
+    """Same size and mtime, other bytes: the cache's content is bound too."""
+    cached = _cached_ado_project(project)
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+        info = cached.stat()
+        data = cached.read_bytes()
+        cached.write_bytes(data.replace(b"warn", b"bloc"))
+        os.utime(cached, ns=(info.st_atime_ns, info.st_mtime_ns))
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None or os.name == "nt" or os.geteuid() == 0,
+    reason="needs git and a POSIX non-root user",
+)
+def test_an_unreadable_policy_cache_at_entry_records_nothing_and_runs_on(
+    project: Path, capsys
+) -> None:
+    """W3d R3: a cache the snapshot cannot read never aborts the install."""
+    cached = _cached_ado_project(project)
+    cached.chmod(0)
+    try:
+        with verdict_record.recording(["install"]):
+            sys.stdout.write(_OUTPUT)
+            verdict_record.note_verified_noop()
+    finally:
+        cached.chmod(0o600)
+
+    assert capsys.readouterr().out == _OUTPUT
+    assert not (_home(project) / "verdicts").exists()

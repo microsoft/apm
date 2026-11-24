@@ -145,10 +145,13 @@ def _discovery_unproven(root: Path, identity: Any) -> bool:
         from apm_cli.install.verdict_record import _ENTRY_TIME
 
         # The cache discovery read must still be the cache the record keys.
+        shape = policy_cache_shape()
         return (
             len(_ENTRY_TIME) < 3
             or fetch_attempts() != _ENTRY_TIME[1]
-            or policy_cache_shape() != _ENTRY_TIME[2]
+            or _ENTRY_TIME[2] is None
+            or shape is None
+            or shape != _ENTRY_TIME[2]
         )
     refs = candidate_refs(org, host, discovery._policy_repo_candidates(host))
     pin = read_project_policy_hash_pin(root)
