@@ -307,8 +307,28 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     return kept
 
 
+# A directory junction is a mount-point reparse point (Python < 3.12 has no isjunction).
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+
+
+def _is_link(path: Path) -> bool:
+    """Whether *path* is a symbolic link or a Windows directory junction (never its target)."""
+    info = path.lstat()
+    if S_ISLNK(info.st_mode):
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    if isjunction is not None:
+        return isjunction(path)
+    attributes = getattr(info, "st_file_attributes", 0)
+    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT) and (
+        getattr(info, "st_reparse_tag", 0) == _IO_REPARSE_TAG_MOUNT_POINT
+    )
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
-    """Reject linked components, optionally preserving access errors for diagnostics.
+    """Reject linked components (symbolic links and Windows junctions) below *base_dir*,
+    optionally preserving access errors for diagnostics.
 
     ``..`` is collapsed first, so a missing directory followed by ``..``
     cannot hide a linked component after it.
@@ -321,7 +341,7 @@ def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = 
         for part in parts:
             current /= part
             try:
-                linked = S_ISLNK(current.lstat().st_mode)
+                linked = _is_link(current)
             except FileNotFoundError:
                 return False
             if linked:

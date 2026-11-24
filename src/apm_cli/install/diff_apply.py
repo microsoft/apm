@@ -137,11 +137,11 @@ def _within(root: Path, rel: str, prefixes: tuple[str, ...] | None = None) -> Pa
         if not BaseIntegrator.validate_deploy_path(rel, root, allowed_prefixes=prefixes):
             raise Decline(f"path outside the target roots {rel!r}")
     path = root / rel
-    current = root
-    for part in rel.split("/")[:-1]:
-        current = current / part
-        if current.is_symlink():
-            raise Decline("symlink in a deployed path")
+    from apm_cli.utils.path_security import has_symlink_component
+
+    # The owner also treats a Windows directory junction as a link (#5229).
+    if has_symlink_component(root, path.parent):
+        raise Decline("symlink in a deployed path")
     return path
 
 
