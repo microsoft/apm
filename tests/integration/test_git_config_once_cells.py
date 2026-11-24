@@ -335,3 +335,15 @@ def test_an_empty_header_value_selects_what_git_selects(
 def test_port_zero_is_left_to_git() -> None:
     """Git rejects port 0 in a URL key, so it never overrides the generic header here."""
     _assert_git_decides(URL, _headers(GENERIC, "http.https://github.com:0.extraheader"))
+
+
+@pytest.mark.parametrize("name", ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"])
+def test_a_relative_config_path_keeps_the_probe_repository(
+    user_config: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Git resolves a relative config path from the probe repository's directory, which
+    the repository-less read does not run in: the probe repository decides."""
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+    monkeypatch.setenv(name, "gitconfig")
+    with invocation_scope():
+        _assert_probe_repository_used(user_config.parent / "fresh")

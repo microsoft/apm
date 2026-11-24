@@ -170,9 +170,14 @@ def clone_env(
         return None
     from apm_cli.utils import git_env
 
+    envs = (git_env.git_subprocess_env(), git_env.git_subprocess_env(overrides))
+    for env in envs:
+        for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
+            if env.get(name) and not Path(env[name]).is_absolute():
+                return None  # Git resolves it from the probe's directory, not ours
     try:
-        parent = git_env._read_effective_git_config(git_env.git_subprocess_env())
-        child = git_env._read_effective_git_config(git_env.git_subprocess_env(overrides))
+        parent = git_env._read_effective_git_config(envs[0])
+        child = git_env._read_effective_git_config(envs[1])
     except (git_env.GitUrlRewriteProbeError, ValueError):
         return None
     if needs_probe_repository(parent) or needs_probe_repository(child):
