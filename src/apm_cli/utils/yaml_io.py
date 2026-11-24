@@ -16,6 +16,7 @@ Public API::
 
 import copy
 import threading
+from collections import OrderedDict
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -392,7 +393,7 @@ def load_yaml(path: str | Path) -> dict[str, Any] | None:
     ``yaml.YAMLError`` (see ``_bounded_load``) instead of hanging or escaping.
     """
     with open(path, encoding="utf-8") as fh:
-        return _bounded_load(fh)
+        return _memo_load(fh.read())
 
 
 def load_yaml_str(text: str) -> dict[str, Any] | None:
@@ -410,7 +411,39 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     Returns parsed data or ``None`` for empty input. Raises ``yaml.YAMLError``
     on malformed, over-budget, huge-int, or deeply-nested input.
     """
-    return _bounded_load(text)
+    return _memo_load(text) if isinstance(text, str) else _bounded_load(text)
+
+
+# One install parses each package's apm.yml in several owners (MCP view,
+# license, materialization, validation): memoize the bounded parse by exact
+# text. Only successful parses are kept; every caller gets a private copy (#4939).
+_PARSE_MEMO_LIMIT = 256
+_PARSE_MEMO_MAX_CHARS = 64 * 1024
+_parse_memo: OrderedDict[str, Any] = OrderedDict()
+_parse_memo_lock = threading.Lock()
+
+
+def _memo_load(text: str) -> Any:
+    """``_bounded_load(text)`` memoized by exact content; returns a private copy."""
+    if len(text) > _PARSE_MEMO_MAX_CHARS:
+        return _bounded_load(text)
+    with _parse_memo_lock:
+        parsed = _parse_memo.get(text, _parse_memo)
+        if parsed is not _parse_memo:
+            _parse_memo.move_to_end(text)
+    if parsed is _parse_memo:
+        parsed = _bounded_load(text)
+        with _parse_memo_lock:
+            _parse_memo[text] = parsed
+            while len(_parse_memo) > _PARSE_MEMO_LIMIT:
+                _parse_memo.popitem(last=False)
+    if "&" not in text and "*" not in text:
+        # No anchor or alias: the tree shares no node, so a plain copy equals deepcopy.
+        return copy_plain_tree(parsed)
+    try:
+        return copy.deepcopy(parsed)
+    except RecursionError:
+        return _bounded_load(text)
 
 
 def copy_plain_tree(node: Any) -> Any:

@@ -65,6 +65,33 @@ class TestLoadYaml:
         with pytest.raises(yaml.YAMLError):
             load_yaml(p)
 
+    @pytest.mark.parametrize("glob", ["", "*.md"], ids=["plain-copy", "deep-copy"])
+    def test_a_manifest_read_by_several_owners_is_parsed_once(self, tmp_path, glob):
+        """Each owner gets a private copy; edited bytes parse again (#4939)."""
+        import uuid
+
+        from apm_cli.utils import yaml_io
+        from tests.unit.deps.test_lockfile_read_cost import _count_calls
+
+        p = tmp_path / "apm.yml"
+        text = f"name: pkg-{uuid.uuid4().hex}\nincludes: ['{glob}']\n"
+        p.write_text(text, encoding="utf-8")
+        loads: list = []
+
+        def owners() -> None:
+            loads.append(load_yaml(p))
+            loads.append(load_yaml(p))
+            loads.append(yaml_io.load_yaml_str(p.read_text(encoding="utf-8")))
+
+        parses = _count_calls(yaml_io._bounded_load.__code__, owners)
+        loads[0]["includes"].append("mutated")
+        p.write_text(text.replace("pkg-", "other-"), encoding="utf-8")
+
+        assert parses == 1
+        assert loads[1] == loads[2] == yaml.safe_load(text)
+        assert load_yaml(p) == yaml.safe_load(p.read_text(encoding="utf-8"))
+        assert load_yaml(p)["name"].startswith("other-")
+
 
 class TestDumpYaml:
     """Tests for dump_yaml()."""
