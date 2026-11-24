@@ -810,6 +810,54 @@ def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
     return yaml.dump(data, Dumper=_NoAliasSafeDumper, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
 
 
+if yaml.__with_libyaml__:
+
+    class _NoAliasCSafeDumper(yaml.CSafeDumper):
+        """libyaml's emitter with ``_NoAliasSafeDumper``'s no-alias rule."""
+
+        def ignore_aliases(self, data: Any) -> bool:
+            return True
+
+else:  # pragma: no cover - PyYAML built without libyaml
+    _NoAliasCSafeDumper = _NoAliasSafeDumper  # type: ignore[misc]
+
+
+# Scalars both emitters write identically: printable ASCII that is short or
+# has no space to fold at (hashes, URLs, paths). Other text can be folded or
+# escaped differently, so a document holding any keeps the Python emitter.
+_EMITTER_SAFE_MAX = 64
+
+
+def _emitter_agnostic(value: Any) -> bool:
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            if not (item.isascii() and item.isprintable()):
+                return False
+            if len(item) > _EMITTER_SAFE_MAX and " " in item:
+                return False
+        elif isinstance(item, dict):
+            stack.extend(item.keys())
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+        elif not (item is None or isinstance(item, (bool, int, float))):
+            return False
+    return True
+
+
+def machine_yaml_to_str(data: Any) -> str:
+    """:func:`yaml_to_str` for APM-written machine documents (``apm.lock.yaml``).
+
+    Emitted by libyaml when every scalar is one both emitters write the same
+    way, so the bytes equal :func:`yaml_to_str`'s on every host (a
+    differential over every lockfile fixture and fuzzed documents guards it).
+    """
+    dumper = _NoAliasCSafeDumper if _emitter_agnostic(data) else _NoAliasSafeDumper
+    return yaml.dump(data, Dumper=dumper, **_DUMP_DEFAULTS)
+
+
 def write_yaml_text_atomic(
     path: str | Path,
     content: str,
