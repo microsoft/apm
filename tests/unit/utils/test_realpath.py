@@ -238,3 +238,55 @@ def test_a_case_variant_leaf_resolves_to_the_disk_case_on_windows(tree: Path) ->
         for _ in range(2):
             probe = tree / "dir" / "FILE.MD"
             assert resolve_path(probe) == probe.resolve()
+
+
+@_LINKS
+def test_a_missing_directory_is_not_proven_before_it_exists(tree: Path) -> None:
+    """R1: a later link at the not-yet-existing directory is still followed and found."""
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.path_security import first_symlink_component
+
+    later = tree / "dir" / "later"
+    leaf = later / "x.md"
+    with invocation_scope():
+        assert resolve_path(leaf) == leaf.resolve()
+        assert not realpath.proven_link_free(later)
+        later.symlink_to(tree / "outside", target_is_directory=True)
+        for _ in range(2):
+            assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+            assert first_symlink_component(tree, leaf) == later
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(leaf, tree / "dir")
+
+
+@_LINKS
+def test_apm_replacing_a_tree_drops_its_proofs(tree: Path) -> None:
+    """R2: release_held (called before APM renames or deletes) forgets proofs below it."""
+    import shutil
+
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.realpath_win import release_held
+
+    leaf = tree / "dir" / "sub" / "x.md"
+    with invocation_scope():
+        assert resolve_path(leaf) == leaf
+        assert realpath.proven_link_free(tree / "dir" / "sub")
+        release_held(tree / "dir" / "sub")
+        assert not realpath.proven_link_free(tree / "dir" / "sub")
+        assert realpath.proven_link_free(tree / "dir")
+        shutil.rmtree(tree / "dir" / "sub")
+        (tree / "dir" / "sub").symlink_to(tree / "outside", target_is_directory=True)
+        assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+
+
+@pytest.mark.parametrize("volatile", [".git", "pkg.inc.0a1b2c3d", "x.tmp", "staging"])
+def test_nothing_under_a_volatile_component_is_proven(tree: Path, volatile: str) -> None:
+    """R3: APM renames and deletes there."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    directory = tree / "dir" / volatile
+    directory.mkdir()
+    with invocation_scope():
+        for _ in range(2):
+            assert resolve_path(directory / "x.md") == (directory / "x.md").resolve()
+        assert not realpath.proven_link_free(directory)

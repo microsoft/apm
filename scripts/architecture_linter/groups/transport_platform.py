@@ -43,6 +43,9 @@ from scripts.architecture_linter.checks.transport_github_credential_class import
 from scripts.architecture_linter.checks.transport_gitlab_sparse import (
     RULES as _GITLAB_SPARSE_RULES,
 )
+from scripts.architecture_linter.checks.transport_held_directory_release import (
+    RULES as _HELD_DIRECTORY_RULES,
+)
 from scripts.architecture_linter.checks.transport_ls_remote_tags import (
     COLLECTORS as _LS_REMOTE_TAG_COLLECTORS,
 )
@@ -88,6 +91,7 @@ RULES = (
     + _CACHE_RULES
     + _CLEANUP_RULES
     + _RMTREE_LINK_RULES
+    + _HELD_DIRECTORY_RULES
     + _DEPLOY_STORE_RULES
     + _CACHED_REPO_GIT_RULES
     + _CHECKOUT_VERIFY_RULES
