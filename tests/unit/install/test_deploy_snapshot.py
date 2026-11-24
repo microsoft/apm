@@ -2752,3 +2752,43 @@ def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_hom
         still_open = False
     assert not still_open
     assert manifest.read_text(encoding="utf-8").count("\n") >= 2
+
+
+@pytest.mark.parametrize(
+    ("name", "pending", "restored"),
+    [
+        ("apm-atomic-k3x9", True, True),
+        ("apm-atomic-k3x9", False, False),
+        ("notes.md", True, False),
+    ],
+    ids=["staging-beside-unsealed-write", "staging-with-no-open-write", "user-file"],
+)
+def test_a_staging_file_is_apms_only_beside_an_unsealed_write(
+    tmp_path: Path, name: str, pending: bool, restored: bool
+) -> None:
+    """#5395: an atomic write killed before its rename left its staging file.
+
+    It is APM's in-flight state only next to a write APM began in that
+    directory and never sealed; any other unknown file is kept.
+    """
+    from apm_cli.install.deploy_snapshot import _apply, _decide, _Replay
+    from apm_cli.install.deploy_state import file_mode
+
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / name).write_bytes(b"partial bytes")
+    sealed_dir = {"dir": {}, "mode": file_mode(skill)}
+    write = ("pending", "sha256:" + "0" * 64, None) if pending else "0" * 64 + ":420"
+    unit = _Replay(
+        "skill", skill, "absent", None, {}, (), events={"": sealed_dir, "SKILL.md": write}
+    )
+
+    apply, kept = _decide([unit])
+    for decided in apply:
+        _apply(decided)
+
+    assert kept == ([] if restored else [("skill", "it changed after the interrupted install")])
+    # Restored: the directory APM created is gone; kept: the file is untouched.
+    assert skill.exists() is not restored
+    if not restored:
+        assert (skill / name).read_bytes() == b"partial bytes"
