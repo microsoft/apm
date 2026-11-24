@@ -125,14 +125,15 @@ def serve_offline(
     rtt_ms: float = 0.0,
     base_env: Mapping[str, str] | None = None,
     policy: bool = False,
-    tls_mode: str = "system",
+    tls_mode: str = "openssl",
 ) -> Iterator[OfflineWorld]:
     """Serve every package of *fixtures* offline; yield the world for ``apm`` children.
 
     ``policy`` also serves ``POLICY_DOCUMENT`` as org ``POLICY_ORG``'s policy.
-    ``tls_mode`` (Windows only): ``"system"`` models the default Git for Windows
-    TLS config (its system backend, schannel on default installs); ``"openssl"``
-    forces OpenSSL with the mirror CA file.
+    ``tls_mode`` (Windows only): ``"openssl"`` (the default, for tests that need
+    APM's OpenSSL paths) forces OpenSSL with the mirror CA file; ``"system"``
+    models the default Git for Windows TLS config (its system backend, schannel
+    on default installs) and is what the bench measures.
     """
     if isinstance(fixtures, TreeFixture):
         fixtures = (fixtures,)
