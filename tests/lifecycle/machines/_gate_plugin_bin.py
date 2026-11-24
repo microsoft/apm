@@ -233,7 +233,9 @@ class GatePluginBin(StepRunner):
 
     def _check_outcome(self, op: str, requested: PluginBinState, step: Step, retires: bool) -> None:
         """What I1-I9 cannot see: the whole root and its declarations go or stay together."""
-        if op == "pack":
+        if op == "pack" and not requested.denied_by_policy:
+            # An admitted pack leaves the plugin out; under the org deny it refuses
+            # (its message is the step's ``says``) and changes nothing, checked below.
             self._check_pack(step)
             return
         after = set(step.after.deployed)
