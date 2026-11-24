@@ -18,13 +18,22 @@ from apm_cli.cache.checkout_verify import inprocess_verified
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.core.auth import AuthResolver
 from apm_cli.utils.content_hash import compute_package_hash
-from apm_cli.utils.git_env import git_remote_refs
+from apm_cli.utils.git_env import git_remote_refs, reset_git_cache
 from tests.fixtures.perf import TREE_RECIPES, build_tree, serve_offline
 
 pytestmark = [
     pytest.mark.component,
     pytest.mark.promise("P-OWN-git-transport-selection"),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_ambient_git_config():
+    """Each offline world has its own CA: drop the process-life ambient TLS probe around it."""
+    reset_git_cache()
+    yield
+    reset_git_cache()
+
 
 GIT_FOR_WINDOWS_LIKE = """\
 [diff "astextplain"]
