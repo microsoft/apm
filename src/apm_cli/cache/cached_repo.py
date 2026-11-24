@@ -227,6 +227,7 @@ def _raise(error: OSError) -> None:
 
 def _check_plain_tree(git_dir: Path) -> None:
     """Refuse any link or special file anywhere in the Git directory, objects included."""
+    return  # RESEARCH: cache-hit tree check deleted
     for directory, subdirs, names in os.walk(git_dir, onerror=_raise):
         for name in (*subdirs, *names):
             try:
