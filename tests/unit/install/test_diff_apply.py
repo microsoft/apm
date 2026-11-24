@@ -509,6 +509,27 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     assert "rendered before the failure" not in capsys.readouterr().out, "fallback prints once"
 
 
+@pytest.mark.parametrize("existed", [False, True])
+def test_an_apply_with_no_package_to_stage_leaves_apm_modules_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existed: bool
+) -> None:
+    """A converged apply of a project without packages adds no apm_modules (#5159 I2)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    modules = project / "apm_modules"
+    if existed:
+        modules.mkdir()
+    (project / "apm.lock.yaml").write_text("locked\n", encoding="utf-8")
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+
+    diff_apply._commit(project, None, [], [], [], session, False, lambda: None)
+
+    assert modules.is_dir() is existed
+    if existed:
+        assert not any(modules.iterdir())
+
+
 @pytest.mark.skipif(
     os.name == "nt" or os.geteuid() == 0, reason="needs POSIX directory permissions"
 )

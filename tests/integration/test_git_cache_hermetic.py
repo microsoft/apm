@@ -18,9 +18,9 @@ import pytest
 from apm_cli.cache.git_cache import (
     CachePruneError,
     GitCache,
-    _dir_size,
     _safe_git_args,
     _sanitize_url,
+    dir_size,
 )
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
@@ -922,7 +922,7 @@ class TestHelperFunctions:
         nested.mkdir()
         (nested / "two.bin").write_bytes(b"xyz")
 
-        assert _dir_size(root) == 7
+        assert dir_size(root) == 7
 
     def test_dir_size_ignores_lstat_errors(self, tmp_path: Path) -> None:
         root = tmp_path / "payload"
@@ -937,7 +937,7 @@ class TestHelperFunctions:
             return original_lstat(path)
 
         with patch("os.lstat", side_effect=_fake_lstat):
-            assert _dir_size(root) == 0
+            assert dir_size(root) == 0
 
     def test_dir_size_ignores_walk_errors(self, tmp_path: Path) -> None:
         root = tmp_path / "payload"
@@ -948,7 +948,7 @@ class TestHelperFunctions:
             yield from ()
 
         with patch("os.walk", side_effect=_raise):
-            assert _dir_size(root) == 0
+            assert dir_size(root) == 0
 
     def test_sanitize_url_redacts_userinfo_and_preserves_port(self) -> None:
         sanitized = _sanitize_url("https://alice:secret@example.com:8443/repo.git")
