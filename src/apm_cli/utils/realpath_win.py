@@ -390,8 +390,6 @@ def _held_realpath(text: str) -> str | None:
         return resolved
     parts = text[len(anchor) + 1 :].split("\\")
     inside_package = _registered_cover(text)
-    if len(parts) > 1 and not inside_package:
-        return None  # nothing below would be held: form B's one open is cheaper
     current = anchor
     for position, part in enumerate(parts):
         candidate = f"{current}\\{part}"
