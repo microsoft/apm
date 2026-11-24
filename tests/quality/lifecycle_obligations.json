@@ -18607,11 +18607,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=pack|PRIM=bin": {
+   "credited_by": [
+    "G1|pack|bin|allowed|project",
+    "G1|pack|bin|none|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "pair|OP=pack|PRIM=canvas": {
    "credited_by": [

@@ -386,6 +386,16 @@ class TestFilesystemContainment:
         assert filesystem_containment(variant / "bin", root) is None
 
 
+def test_the_refusal_names_a_link_as_printable_ascii() -> None:
+    """A link name with control characters is rendered printable before display (#5215)."""
+    from apm_cli.utils.path_security import symlinked_deploy_refusal
+
+    message = symlinked_deploy_refusal("skills\x1b[31m\u202e")
+
+    assert message.isascii() and message.isprintable()
+    assert "\x1b" not in message and "\u202e" not in message
+
+
 # ---------------------------------------------------------------------------
 # has_symlink_component(): a Windows junction below the base is a link (#5229)
 # ---------------------------------------------------------------------------

@@ -80,7 +80,7 @@ def test_install_writes_regular_project_mcp_config(
 
 _MCP_LINK = "does not write MCP config through symlinks"
 # A linked harness root is refused before any write, MCP included.
-_ROOT_LINK = "Refusing deployment through symlinked target root: .codex"
+_ROOT_LINK = "Refusing deployment through a symlinked path component: .codex."
 
 
 @pytest.mark.parametrize(

@@ -107,3 +107,25 @@ def test_compile_writes_into_regular_github_directory(
     written = kit.project / ".github/copilot-instructions.md"
     assert "Global body." in written.read_text(encoding="utf-8")
     assert snapshot(kit.outside) == {}
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO")
+def test_compile_refuses_a_fifo_at_an_output_path_without_blocking(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A FIFO where AGENTS.md goes is refused by name; compile never reads it (#5187)."""
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+
+    kit = build_containment_kit(tmp_path, apm_binary_path)
+    _write_compile_project(kit.project)
+    fifo = kit.project / "AGENTS.md"
+    os.mkfifo(fifo)
+    env = kit.isolated.subprocess_env(overrides={"NO_COLOR": "1"})
+
+    result = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=30).run(
+        ("compile",), cwd=kit.project, env=env, scenario_id="compile-fifo-output"
+    )
+
+    assert result.returncode != 0, output(result)
+    assert "AGENTS.md is not a regular file" in output(result), output(result)
+    assert fifo.is_fifo()

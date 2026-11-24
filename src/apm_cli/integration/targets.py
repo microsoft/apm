@@ -37,6 +37,7 @@ from apm_cli.integration import write_seam
 from apm_cli.utils.file_ops import obstructed_path_message
 from apm_cli.utils.path_security import (
     PathTraversalError,
+    SymlinkedDeployError,
     ensure_path_within,
     has_symlink_component,
 )
@@ -1769,9 +1770,7 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
     if profile.resolved_deploy_root is not None:
         return deploy_path
     if has_symlink_component(project_root, deploy_path):
-        raise PathTraversalError(
-            f"Refusing deployment through symlinked target root: {profile.root_dir}"
-        )
+        raise SymlinkedDeployError(Path(profile.root_dir).as_posix())
     for mapping in profile.primitives.values():
         primitive_rel = Path(mapping.deploy_root or profile.root_dir, mapping.subdir)
         try:
@@ -1783,10 +1782,7 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
             # root) is reported by the obstructed-path diagnostics instead.
             continue
         if linked:
-            raise PathTraversalError(
-                "Refusing deployment through symlinked target directory: "
-                f"{primitive_rel.as_posix()}"
-            )
+            raise SymlinkedDeployError(primitive_rel.as_posix())
     return ensure_path_within(deploy_path, project_root)
 
 
