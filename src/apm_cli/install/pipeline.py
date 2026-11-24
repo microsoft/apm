@@ -687,7 +687,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         from .phases.policy_gate import PolicyViolationError
 
         try:
-            _run_phase("policy_gate", _policy_gate_phase, ctx)
+            pass  # RESEARCH: deleted policy_gate
         except PolicyViolationError:
             raise  # re-raise through the outer except -> RuntimeError wrapper
 
@@ -714,7 +714,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         from .phases import policy_target_check as _policy_target_check_phase
 
         try:
-            _run_phase("policy_target_check", _policy_target_check_phase, ctx)
+            pass  # RESEARCH: deleted policy_target_check
         except PolicyViolationError:
             raise  # re-raise through the outer except -> RuntimeError wrapper
 
@@ -915,7 +915,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         if not lockfile_only:
             from .phases import audit as _audit_phase
 
-            _run_phase("audit", _audit_phase, ctx)
+            pass  # RESEARCH: deleted audit
         commit_point_seam_for_tests()
         transaction.release_deploy_targets()
 
