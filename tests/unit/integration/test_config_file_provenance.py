@@ -16,6 +16,8 @@ import json
 import os
 import sys
 import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,7 @@ from apm_cli.integration.config_file_provenance import (
     config_file_origin,
     delete_emptied_config,
     recorded_config_write,
+    vouches_for_current_bytes,
 )
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-ownership.preserve_unowned")]
@@ -541,6 +544,49 @@ def test_a_record_of_a_file_linked_for_now_survives_other_saves(tmp_path, apm_ho
     assert a_config.read_bytes() == held
 
 
+# -- a cleanup rewrite of an unrecorded file records it as legacy (#5038) ---------------
+
+
+def test_a_cleanup_rewrite_of_an_unrecorded_file_records_it_as_legacy(tmp_path, apm_home) -> None:
+    """MCP and hook cleanup pass no manifest root. A file an older APM wrote into still
+    gets a record, so crash recovery can verify the cleanup's write and undo it."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_WITH_ENTRY, encoding="utf-8")  # written by an older APM
+    before = config.read_bytes()
+    with recorded_config_write(config):  # cleanup removes one entry
+        config.write_text(_WITH_ENTRY.replace("srv", "kept"), encoding="utf-8")
+
+    assert config_file_origin(config) is Origin.LEGACY
+    assert vouches_for_current_bytes(config, before) is True
+    assert vouches_for_current_bytes(config, b"{}") is False
+
+
+def test_a_cleanup_rewrite_of_an_unrecorded_skeleton_records_nothing(tmp_path, apm_home) -> None:
+    """Without entries before the write there is no content proof of an older APM."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")
+    before = config.read_bytes()
+    with recorded_config_write(config):
+        config.write_text(_SKELETON.replace("{}", "{ }"), encoding="utf-8")
+
+    assert config_file_origin(config) is None
+    assert vouches_for_current_bytes(config, before) is False
+
+
+def test_a_cleanup_that_leaves_an_unrecorded_file_bare_records_nothing(tmp_path, apm_home) -> None:
+    """A new legacy record never claims a skeleton: a later install still decides its origin."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_WITH_ENTRY, encoding="utf-8")
+    with recorded_config_write(config):  # cleanup removes the last entry
+        config.write_text(_SKELETON, encoding="utf-8")
+
+    assert config_file_origin(config) is None
+    assert config.read_text(encoding="utf-8") == _SKELETON
+
+
 # -- a Windows UNC key survives a reload (#5016 review) ---------------------------------
 
 _UNC_KEY = "//server/share/project/.mcp.json"
@@ -586,6 +632,58 @@ def test_a_users_config_on_a_unc_path_is_never_deleted(tmp_path, apm_home) -> No
     assert config_file_origin(config) is Origin.PREEXISTING
     assert _apm_empties(config, root=config.parent) is False
     assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+# -- the first bytes of an install's deploy journal (#5051) ------------------------------
+
+
+@contextmanager
+def _journal(token: str) -> Iterator[None]:
+    """APM writes inside an install whose deploy journal is *token*."""
+    from apm_cli.integration import write_seam
+
+    def recorder(path, contents, expected=None) -> None:
+        return None
+
+    write_seam.listen(recorder, journal=token)
+    try:
+        yield
+    finally:
+        write_seam.stop_listening(recorder)
+
+
+def test_every_write_of_one_install_vouches_for_its_first_bytes(tmp_path, apm_home) -> None:
+    """Two packages rewrite one config in one install: the journal keeps the bytes the
+    install first found, and the records vouch for undoing both writes to them."""
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    first = config.read_bytes()
+    with _journal("install-1"):
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "a"))
+        middle = config.read_bytes()
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "b"))
+
+    assert vouches_for_current_bytes(config, first, journal="install-1") is True
+    assert vouches_for_current_bytes(config, middle, journal="install-1") is False
+    assert vouches_for_current_bytes(config, first, journal="another-install") is False
+    assert vouches_for_current_bytes(config, first) is False
+    assert '"b"' in config.read_text(encoding="utf-8")
+
+
+def test_the_next_install_starts_its_own_first_bytes(tmp_path, apm_home) -> None:
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    first = config.read_bytes()
+    with _journal("install-1"):
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "a"))
+    between = config.read_bytes()
+    with _journal("install-2"):
+        _apm_writes(config, _WITH_ENTRY.replace("srv", "b"))
+
+    assert vouches_for_current_bytes(config, between, journal="install-2") is True
+    assert vouches_for_current_bytes(config, first, journal="install-2") is False
+    assert vouches_for_current_bytes(config, first, journal="install-1") is False
+    assert '"b"' in config.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="a backslash is a separator on Windows")

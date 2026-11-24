@@ -359,6 +359,8 @@ class SkillIntegrator(BaseIntegrator):
 
     selected_skill_sources = staticmethod(selected_skill_sources)
     find_unmanaged_conflicts = find_unmanaged_conflicts
+    # A skill another package deployed is replaced: the last installed wins.
+    SHARED_PATH_RULE = "last-installed-wins"
     preflight_skill_selection = staticmethod(_preflight_selection)
 
     def __init__(self) -> None:

@@ -659,6 +659,9 @@ def _commit(
             raise  # an interrupt is restored, then propagates
         raise Decline(f"write failed ({type(exc).__name__})") from exc
     staging.commit()
+    # Scratch staging alone must not leave an apm_modules the full run would
+    # not create, e.g. for a project with only MCP servers (#5159, I2).
+    staging.remove_created_modules_dir()
     return held
 
 
