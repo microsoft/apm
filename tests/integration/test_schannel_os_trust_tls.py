@@ -167,7 +167,13 @@ class _Seen(list):
 @contextlib.contextmanager
 def _tls_peer(leaf: Path, key: Path) -> Iterator[tuple[int, list[bytes]]]:
     """``(port, application bytes received)`` of a local TLS server presenting *leaf*."""
-    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # The CLI's TLS setup may have injected truststore into ``ssl`` for this
+    # process; its context verifies the peer even server-side, so serve with
+    # the standard library class it wraps.
+    server_class = ssl.SSLContext
+    while server_class.__module__.startswith("truststore"):
+        server_class = server_class.__mro__[1]
+    server_context = server_class(ssl.PROTOCOL_TLS_SERVER)
     server_context.load_cert_chain(certfile=str(leaf), keyfile=str(key))
     listener = socket.create_server(("127.0.0.1", 0))
     received = _Seen()
