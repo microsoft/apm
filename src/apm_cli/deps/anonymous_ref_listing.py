@@ -483,6 +483,10 @@ def _fetch(
         **({"headers": headers} if headers else {}),
     ) as response:
         holder["response"] = response
+        from apm_cli.cache.inprocess_fetch import trip_if_rate_limited
+
+        if trip_if_rate_limited(response.status_code, response.headers):
+            raise _Fallback(f"rate limited (HTTP {response.status_code})")
         if response.headers.get("WWW-Authenticate") is not None:
             raise _Fallback("auth challenge")
         if response.status_code != 200:
@@ -574,7 +578,11 @@ def _list_refs(
     ``None`` means "run git": the caller's existing anonymous ``git ls-remote``
     then runs with *env* exactly as before.
     """
+    from apm_cli.cache.inprocess_fetch import _rate_limited
+
     try:
+        if _rate_limited():
+            raise _Fallback("rate limited earlier in this command")
         path = _repository_path(url)
         for name in _FALLBACK_ENV:
             if env.get(name):

@@ -837,19 +837,30 @@ def _rate_limited() -> bool:
     return bool(memo)
 
 
-def _admit(status: int, headers: Mapping[str, str]) -> None:
-    """Refuse a non-200 answer; a rate-limit answer also sends the rest of the command to git.
+def trip_if_rate_limited(status: int, headers: Mapping[str, str]) -> bool:
+    """Trip the command's breaker on a throttle (``deps/github_rate_limit``) or any 403.
 
-    A throttle (``deps/github_rate_limit``) or any 403 trips the breaker: no
-    retry, no sleep, and no further in-process request in this command.
+    Shared by the in-process fetch and ref listing: once tripped, neither
+    sends another in-process request in this command.
     """
     from ..core.invocation_memo import invocation_memo
     from ..deps.github_rate_limit import classify_github_throttle
 
-    if status == 403 or classify_github_throttle(status, headers) is not None:
-        memo = invocation_memo(_BREAKER_MEMO)
-        if memo is not None:
-            memo["tripped"] = True
+    if status != 403 and classify_github_throttle(status, headers) is None:
+        return False
+    memo = invocation_memo(_BREAKER_MEMO)
+    if memo is not None:
+        memo["tripped"] = True
+    return True
+
+
+def _admit(status: int, headers: Mapping[str, str]) -> None:
+    """Refuse a non-200 answer; a rate-limit answer also sends the rest of the command to git.
+
+    A throttle or any 403 trips the breaker: no retry, no sleep, and no
+    further in-process request in this command.
+    """
+    if trip_if_rate_limited(status, headers):
         raise _Refuse(f"rate limited (HTTP {status}); git serves the rest of this command")
     if headers.get("WWW-Authenticate") is not None:
         # W1: an auth challenge is git's to answer; nothing is retried in process.

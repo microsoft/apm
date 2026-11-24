@@ -153,3 +153,34 @@ def test_the_token_never_reaches_debug_logs(
     for token in (_TOKEN, _REVOKED):
         assert token not in caplog.text
         assert _basic(token).split(" ", 1)[1] not in caplog.text
+
+
+def test_a_rate_limited_listing_stops_every_later_in_process_request(tmp_path: Path) -> None:
+    """LA3 (W3d R1): the first listing 429 trips the command's breaker; git lists the rest."""
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.deps.anonymous_ref_listing import list_refs_anonymously
+
+    tree, url = _world(tmp_path)
+    other = f"https://github.com/{tree.slug(sorted(tree.packages)[1])}"
+    with serve_offline(tree, tmp_path / "world") as world:
+        throttled: list[object] = []
+
+        def first_listing(request) -> bool:
+            if throttled or not _listing(request):
+                return False
+            throttled.append(request)
+            return True
+
+        world.services.script(
+            "github.com", "/", 429, {"Retry-After": "60"}, b"", when=first_listing
+        )
+        world.services.proxy.clear()
+        anonymous = AuthResolver.build_public_github_anonymous_git_env(base_env=dict(world.env))
+        with invocation_scope():
+            first = list_refs_authenticated(url, include_heads=True, env=_attempt_env(world))
+            later = list_refs_authenticated(other, include_heads=True, env=_attempt_env(world))
+            unauthenticated = list_refs_anonymously(other, include_heads=True, env=anonymous)
+        in_process = [r for r in world.services.proxy.observations if _listing(r)]
+
+    assert (first, later, unauthenticated) == (None, None, None)
+    assert [r.status for r in in_process] == [429], "no in-process request after the 429"
