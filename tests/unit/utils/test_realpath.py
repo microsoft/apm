@@ -18,7 +18,7 @@ from apm_cli.utils import realpath
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.realpath import resolve_path
 
-pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-portability.byte_deterministic")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-portability.byte_deterministic")]
 
 _LINKS = pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 
@@ -129,9 +129,13 @@ def test_seeded_paths_match_posix_realpath(tree: Path) -> None:
 
 @_LINKS
 def test_without_proc_the_answer_is_pathlib(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(realpath, "_PROC_FD", str(tree / "no-proc") + "/")
-    candidate = tree / "link_dir" / "file.md"
-    assert resolve_path(candidate) == candidate.resolve()
+    def no_proc(*_args, **_kwargs):
+        raise FileNotFoundError("/proc is not mounted")
+
+    candidate = tree / "dir" / "sub" / "file.md"
+    expected = candidate.resolve()
+    monkeypatch.setattr(os, "readlink", no_proc)
+    assert resolve_path(candidate) == expected
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")
