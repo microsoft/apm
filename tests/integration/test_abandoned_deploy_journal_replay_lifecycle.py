@@ -927,13 +927,22 @@ def test_two_racing_installs_replay_an_abandoned_journal_once(
         for _ in range(2)
     ]
     outputs = []
-    for racer in racers:
-        stdout, stderr = racer.communicate(timeout=240)
-        outputs.append((racer.returncode, " ".join(f"{stdout} {stderr}".split())))
+    try:
+        for racer in racers:
+            stdout, stderr = racer.communicate(timeout=240)
+            outputs.append((racer.returncode, stdout + stderr))
+    finally:
+        # A hung racer must not keep the lifecycle lock or write after the test.
+        for racer in racers:
+            if racer.poll() is None:
+                racer.kill()
+                racer.communicate()
 
     evidence = repr(outputs)
     assert [code for code, _text in outputs] == [0, 0], evidence
-    assert sum("interrupted install" in text for _code, text in outputs) == 1, evidence
+    replayed = [" ".join(text.split()) for _code, text in outputs]
+    assert sum("interrupted install" in text for text in replayed) == 1, evidence
+    # The raw streams: normalizing whitespace first would hide non-ASCII spaces.
     assert all(text.isascii() for _code, text in outputs), evidence
     assert _stores(chain) == [], evidence
     assert _tree_state(chain.project) == before, evidence
