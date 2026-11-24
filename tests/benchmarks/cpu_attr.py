@@ -231,6 +231,8 @@ _samples = [0]
 _apm_owner = collections.Counter()
 _leaf_owner = collections.Counter()
 _realpath_calls = collections.Counter()
+_ops = collections.Counter()
+_op_totals = collections.Counter()
 _stop = threading.Event()
 
 
@@ -313,6 +315,8 @@ def _report(out: str, wall: float, exit_code) -> None:
         "leaf_by_apm_owner": top(_leaf_owner, 150),
         "realpath_calls_by_apm_owner": top(_realpath_calls, 60),
         "realpath_calls_total": sum(_realpath_calls.values()),
+        "op_totals": dict(_op_totals.most_common()),
+        "ops_by_apm_owner": top(_ops, 300),
     }
     with open(out, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=1)
@@ -340,8 +344,43 @@ def _count_realpath() -> None:
         pathlib.os.path.realpath = counted
 
 
+def _owner(start) -> str:
+    frame, depth = start, 0
+    while frame is not None and depth < 60:
+        where = _where(frame.f_code)
+        if where.startswith("apm_cli/"):
+            return f"{where}:{frame.f_code.co_name}"
+        frame, depth = frame.f_back, depth + 1
+    return "<no apm frame>"
+
+
+def _count_ops() -> None:
+    """Count file-system and hash operations by innermost apm_cli caller (counts, not CPU)."""
+    import builtins
+    import hashlib
+
+    def wrap(module, attr, op):
+        original = getattr(module, attr, None)
+        if original is None:
+            return
+
+        def counted(*args, **kwargs):
+            _op_totals[op] += 1
+            _ops[f"{op} <- {_owner(sys._getframe(1))}"] += 1
+            return original(*args, **kwargs)
+
+        setattr(module, attr, counted)
+
+    for attr in ("stat", "lstat", "scandir", "listdir", "open", "mkdir", "rename", "replace", "unlink"):
+        wrap(os, attr, f"os.{attr}")
+    wrap(builtins, "open", "open")
+    for attr in ("sha256", "sha1", "new"):
+        wrap(hashlib, attr, f"hashlib.{attr}")
+
+
 def main() -> int:
     _count_realpath()
+    _count_ops()
     args = sys.argv[1:]
     out = args[args.index("-o") + 1]
     del args[args.index("-o") : args.index("-o") + 2]
