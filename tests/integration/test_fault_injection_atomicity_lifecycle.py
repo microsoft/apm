@@ -180,3 +180,41 @@ def test_interrupted_fresh_install_rolls_back_manifest_lock_and_staging(
     assert not (modules / ".apm-resolution-staging").exists()
     assert not list(world.project.glob("apm-atomic-*"))
     world.assert_user_file_intact()
+
+
+def test_interrupted_install_into_existing_shared_roots_keeps_user_content(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Cut probe (#5204): existing shared deploy roots are not journaled, yet a
+    SIGKILL mid-deploy still leaves the user's own skill intact and a clean
+    install converges with ``audit --ci`` agreeing."""
+    packages = tuple(f"pkg{index:02d}" for index in range(12))
+    world = build_world(tmp_path, apm_binary_path, packages=packages, skills=8, installed=False)
+    skills_root = world.project / ".claude/skills"
+    user_skill = skills_root / "team-skill" / "SKILL.md"
+    user_skill.parent.mkdir(parents=True)
+    user_skill.write_text("---\nname: team-skill\ndescription: team\n---\n# team\n", "ascii")
+    before = user_skill.read_bytes()
+    process = subprocess.Popen(
+        (str(apm_binary_path), "install", "--no-policy"),
+        cwd=world.project,
+        env=world.env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + 240
+    while process.poll() is None and not any(
+        path.parent.name != "team-skill" for path in skills_root.glob("*/SKILL.md")
+    ):
+        assert time.monotonic() < deadline, "install never deployed a skill"
+        time.sleep(0.01)
+    assert process.poll() is None, "install finished before the interrupt"
+    os.killpg(process.pid, signal.SIGKILL)
+    process.communicate(timeout=120)
+
+    assert user_skill.read_bytes() == before
+    world.assert_user_file_intact()
+    world.assert_converges()
+    assert user_skill.read_bytes() == before

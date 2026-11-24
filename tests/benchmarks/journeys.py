@@ -44,7 +44,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -77,6 +77,8 @@ NETWORK_JOURNEYS = (
     "install-frozen-warm",
     "install-global-cold",
     "install-global-warm",
+    "install-cold-auth",
+    "install-warm-auth",
     "update",
     "uninstall",
     "outdated",
@@ -676,10 +678,15 @@ class Journey:
     name: str
     setup: Callable[[Context], None]
     steps: Callable[[Context], list[Step]]
+    # Extra child environment for this journey only (setup, timed steps, profile).
+    env: tuple[tuple[str, str], ...] = ()
 
 
 def _noop(_ctx: Context) -> None:
     return None
+
+
+_AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
 
 
 JOURNEYS: dict[str, Journey] = {
@@ -689,6 +696,11 @@ JOURNEYS: dict[str, Journey] = {
         Journey("boot-help", _noop, lambda c: [(["--help"], c.elsewhere)]),
         Journey("install-cold", _setup_cold, lambda c: _per_root(c, ["install"])),
         Journey("install-warm", _setup_warm, lambda c: _per_root(c, ["install"])),
+        # Authenticated users (private repos, GHE, ADO, GitLab, or a token to
+        # avoid the anonymous rate limit) take the token-first git CLI path: a
+        # fixed placeholder token the offline mirror accepts, auth first.
+        Journey("install-cold-auth", _setup_cold, lambda c: _per_root(c, ["install"]), _AUTH),
+        Journey("install-warm-auth", _setup_warm, lambda c: _per_root(c, ["install"]), _AUTH),
         Journey("install-noop", Context.installed, lambda c: _per_root(c, ["install"])),
         Journey("install-frozen", _setup_frozen, lambda c: _per_root(c, ["install", "--frozen"])),
         Journey("install-locked-warm", _locked_project, lambda c: _per_root(c, ["install"])),
@@ -824,7 +836,49 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
     return str(prof)
 
 
+@contextlib.contextmanager
+def _journey_env(ctx: Context, journey: Journey):
+    """Overlay *journey*'s extra environment on the world's child env, then restore it."""
+    env = ctx.world.env
+    saved = {key: env.get(key) for key, _value in journey.env}
+    env.update(journey.env)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+
+
+def _refuse_real_auth(_ctx: Context) -> None:
+    raise RuntimeError(
+        "authenticated journeys on the real fixture need the caller's GITHUB_APM_PAT"
+    )
+
+
+def _for_world(ctx: Context, journey: Journey) -> Journey:
+    """*journey* as run against this world.
+
+    The placeholder token only works against the offline mirror. On real
+    github.com the caller's own token (copied by ``_RealWorld``) is used, and
+    without one the journey fails instead of measuring a rejected token.
+    """
+    if not ctx.fixture.real or all(key != "GITHUB_APM_PAT" for key, _ in journey.env):
+        return journey
+    env = tuple(pair for pair in journey.env if pair[0] != "GITHUB_APM_PAT")
+    setup = journey.setup if ctx.world.env.get("GITHUB_APM_PAT") else _refuse_real_auth
+    return replace(journey, env=env, setup=setup)
+
+
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
+    journey = _for_world(ctx, journey)
+    with _journey_env(ctx, journey):
+        return _measure(ctx, journey, args)
+
+
+def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
     samples: list[Sample] = []
     error = ""
     for _ in range(args.runs):
