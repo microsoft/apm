@@ -281,3 +281,43 @@ def test_an_unreadable_pins_file_refuses_a_marketplace_resolution(tmp_path):
     finally:
         stage.discard()
     assert path.read_text() == "{truncated"
+
+
+def test_a_github_enterprise_pin_identity_ignores_owner_and_repo_case(tmp_path):
+    """Re-registering a GitHub catalog with another case keeps its pins (#5169)."""
+    from apm_cli.marketplace.models import MarketplaceSource
+    from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+    upper = catalog_pin_identity(MarketplaceSource(name="a", url="https://acme.ghe.com/Org/Repo"))
+    lower = catalog_pin_identity(MarketplaceSource(name="a", url="https://acme.ghe.com/org/repo"))
+    other = catalog_pin_identity(
+        MarketplaceSource(name="a", url="https://gitlab.example.com/Org/Repo")
+    )
+    assert upper == lower
+    assert "Org/Repo" in other
+    (tmp_path / "version-pins.json").write_text(
+        json.dumps({"acme.ghe.com/Org/Repo:marketplace.json#tool/1.0.0": "v1"})
+    )
+    assert check_ref_pin("a", "tool", "v2", "1.0.0", str(tmp_path), catalog=lower) == "v1"
+
+
+def test_a_hosted_catalog_query_never_reaches_the_pins_file(tmp_path):
+    """A hosted catalog URL's query is hashed in its pin key, never persisted (#5169)."""
+    from apm_cli.marketplace.models import MarketplaceSource
+    from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+    def identity(query: str) -> str:
+        url = f"https://example.com/x/marketplace.json?{query}"
+        return catalog_pin_identity(MarketplaceSource(name="a", url=url, path=""))
+
+    catalog = identity("token=s3cret")
+    assert "s3cret" not in catalog
+    assert catalog != identity("token=other")
+    legacy = "url:example.com/x/marketplace.json?token=s3cret#tool/1.0.0"
+    (tmp_path / "version-pins.json").write_text(json.dumps({legacy: "v1"}))
+    assert check_ref_pin("a", "tool", "v2", "1.0.0", str(tmp_path), catalog=catalog) == "v1"
+
+    record_ref_pin("a", "tool", "v1", "1.0.0", str(tmp_path), catalog=catalog)
+
+    assert "s3cret" not in (tmp_path / "version-pins.json").read_text()
+    assert load_ref_pins(str(tmp_path)) == {f"{catalog}#tool/1.0.0": "v1"}
