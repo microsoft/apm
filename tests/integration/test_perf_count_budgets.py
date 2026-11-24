@@ -1,4 +1,4 @@
-"""Performance promise engine, layer 1: install count budgets (P-PERF-count-budgets).
+"""Performance promise engine, layer 1: count budgets (P-PERF-count-budgets).
 
 Counts, not time: git spawns by verb, HTTP requests and connects, files and
 bytes hashed, files written, realpath/stat/lstat calls and lockfile reads are
@@ -7,7 +7,9 @@ seeded ``tree-10`` fixture behind the offline mirror (rtt 0):
 
 - install-cold: an empty download cache and a fresh checkout;
 - install-noop: the same project again, everything installed;
-- install-warm: a fresh checkout with the cache the cold install filled.
+- install-warm: a fresh checkout with the cache the cold install filled;
+- outdated: that installed project asks which dependencies have newer refs;
+- update: ``update -y`` on that project, with nothing newer to take.
 
 Each journey's counters must stay within ``tests/perf/count_budgets.json``.
 Over budget, or a counter with no row, fails with the diff; a counter well under
@@ -51,7 +53,7 @@ class TightenNote(UserWarning):
 
 @pytest.fixture(scope="module")
 def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, int]]:
-    """Run install cold, no-op and warm once; each journey's flattened counters."""
+    """Run every journey once, in order; each journey's flattened counters."""
     work = tmp_path_factory.mktemp("perf-count-budgets")
     tree = build_tree(TREE_RECIPES[_TREE], work / "tree")
     apm = list(apm_engine_command)
@@ -64,10 +66,10 @@ def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, 
                 shutil.rmtree(project)
             shutil.copytree(tree.project, project)
 
-        def install(journey: str) -> None:
+        def run(journey: str, *args: str) -> None:
             world.reset_traffic()
             result, counts = run_counted(
-                [*apm, "install"], cwd=project, env=world.env, log=work / f"{journey}.jsonl"
+                [*apm, *args], cwd=project, env=world.env, log=work / f"{journey}.jsonl"
             )
             assert result.returncode == 0, (
                 f"{journey}: {result.stdout[-3000:]}\n{result.stderr[-3000:]}"
@@ -77,15 +79,17 @@ def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, 
 
         world.clear_cache()
         checkout()
-        install("install-cold")
-        install("install-noop")
+        run("install-cold", "install")
+        run("install-noop", "install")
         checkout()
-        install("install-warm")
+        run("install-warm", "install")
+        run("outdated", "outdated")
+        run("update", "update", "-y")
     return observed
 
 
 @pytest.mark.parametrize("journey", JOURNEYS)
-def test_install_stays_within_its_count_budget(journey: str, journey_counts) -> None:
+def test_journey_stays_within_its_count_budget(journey: str, journey_counts) -> None:
     observed = journey_counts[journey]
     # Every journey talks to git and deploys from the lockfile it wrote.
     assert observed.get("fs.lockfile_reads", 0) > 0, observed
