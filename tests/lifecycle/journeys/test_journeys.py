@@ -189,7 +189,7 @@ _APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
 # and an applied update refreshes the registered marketplace's metadata cache. A
 # --dry-run writes neither (#4484).
 _APM_HOME_WRITES_ON_SUCCESS: Mapping[str, tuple[str, ...]] = {
-    "install": ("cache/marketplace/version-pins.json",),
+    "install": ("cache/marketplace/version-pins.json", "cache/marketplace/version-pins.lock"),
     "update": ("cache/marketplace/lifecycle-market.meta.json",),
 }
 _UNTRACKED_ROOTS = frozenset({".git", ".apm-local"})

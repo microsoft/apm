@@ -154,6 +154,16 @@ class OrphanRemovalDecision:
     rescued_dev: Mapping[str, bool] = field(default_factory=lambda: MappingProxyType({}))
     reachability: ReachabilityResult | None = None
 
+    @staticmethod
+    def failed_removal_chains(
+        lockfile: LockFile, pruned_keys: Collection[str], failed_keys: Collection[str]
+    ) -> frozenset[str]:
+        """The lock rows prune keeps after removals failed: each failed row and its
+        pruned parent chain, so a retry can read the graph and finish (#5238)."""
+        return _pin_retained_ancestors(
+            lockfile, frozenset({*pruned_keys, *failed_keys}), frozenset(failed_keys)
+        )
+
     @property
     def reachability_complete(self) -> bool:
         """False when a reachability walk could not verify every manifest."""

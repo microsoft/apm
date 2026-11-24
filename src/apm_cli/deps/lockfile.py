@@ -1439,8 +1439,8 @@ class LockFile:
             dep.replacement is not None for dep in self.dependencies.values()
         )
 
-    def _validate_replacement_evidence(self) -> None:
-        """Keep per-entry source evidence bound to the complete root rule table."""
+    def validate_graph(self) -> None:
+        """Check the graph rule (#5185): evidence matches the root rules, parents exist."""
         try:
             index = build_replacement_index(parse_replace_block(self.replacements or []))
             for dep in self.dependencies.values():
@@ -1522,7 +1522,7 @@ class LockFile:
         """The plain document ``to_yaml`` dumps."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
 
-        self._validate_replacement_evidence()
+        self.validate_graph()
 
         if not self.deployment_ledger.records:
             self.deployment_ledger = DeploymentLedgerCodec.from_lockfile(self)
@@ -1703,7 +1703,7 @@ class LockFile:
             raise LockfileFormatError("Replacement evidence requires lockfile_version '3' or '4'")
         if lock.replacements is not None:
             lock._rekey_port_blind_parents()
-        lock._validate_replacement_evidence()
+        lock.validate_graph()
         if lock.replacements is None:
             lock._canonicalize_legacy_parents()
         # Synthesize a virtual self-entry representing the project's own
