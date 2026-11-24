@@ -1879,6 +1879,60 @@ def test_uninstall_bundle_refuses_a_hook_shape_the_grammar_does_not_recognize(
     assert (consumer / script).is_file()
 
 
+def test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281 control: a script path in an unrelated cwd runs another script; uninstall goes on.
+
+    A bare ``./x.sh`` stays in use under #5106's default-deny, so the control
+    names a directory that certainly resolves elsewhere.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, hook = _copilot_bundle_consumer(world, tmp_path, "cwd-elsewhere-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {
+                "preToolUse": [{"type": "command", "bash": "./scripts/x.sh", "cwd": "tools"}]
+            },
+        },
+    )
+
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    text = output(result)
+
+    assert result.returncode == 0, text
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / hook).exists(), text
+    assert not (consumer / script).exists(), text
+    assert hook not in _claims_of(consumer)
+    assert script not in _claims_of(consumer)
+    assert (consumer / ".github" / "hooks" / "user.json").is_file()
+
+
+def test_uninstall_bundle_refuses_a_user_hook_whose_cwd_escapes_the_project(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281: a cwd outside the project cannot be cleared; uninstall fails closed."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "cwd-escape-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {"preToolUse": [{"type": "command", "bash": "./x.sh", "cwd": "../elsewhere"}]},
+        },
+    )
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".github/hooks/user.json" in text, text
+    assert "Traceback" not in text, text
+    assert (consumer / script).is_file()
+    assert script in _claims_of(consumer)
+
+
 @pytest.mark.parametrize("preview", [(), ("--dry-run",)], ids=["run", "dry-run"])
 def test_a_refused_bundle_uninstall_leaves_the_pending_record_untouched(
     tmp_path: Path, apm_binary_path: Path, preview: tuple[str, ...]

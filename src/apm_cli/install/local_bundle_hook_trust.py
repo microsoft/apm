@@ -24,6 +24,7 @@ from typing import Any
 
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
 from apm_cli.install.hook_script_refs import hook_commands, runs_script, script_refs
+from apm_cli.install.local_bundle_hook_cwd import runs_through_cwd
 
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
@@ -577,8 +578,13 @@ def _per_file_configs_running(
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
             texts = list(hook_commands(document))
-            if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
-                runs_script(text, refs, (project_root, target_root), project_root) for text in texts
+            if (
+                any(tail in text.replace("\\", "/") for text in texts for tail in tails)
+                or any(
+                    runs_script(text, refs, (project_root, target_root), project_root)
+                    for text in texts
+                )
+                or runs_through_cwd(document, project_root, scripts)
             ):
                 found.add(value)
     return found
