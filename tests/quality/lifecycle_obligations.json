@@ -7665,25 +7665,37 @@
    "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=canvas": {
+   "credited_by": [
+    "SK|audit|pkg-registry|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "SK|audit|pkg-registry|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=lsp": {
+   "credited_by": [
+    "SK|audit|pkg-registry|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -8056,11 +8068,15 @@
    "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=canvas": {
+   "credited_by": [
+    "SK|compile|pkg-registry|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=other-file": {
    "credited_by": [
@@ -8956,25 +8972,37 @@
    "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=canvas": {
+   "credited_by": [
+    "SK|lock|pkg-registry|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "SK|lock|pkg-registry|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=lsp": {
+   "credited_by": [
+    "SK|lock|pkg-registry|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -9596,25 +9624,38 @@
    "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=canvas": {
+   "credited_by": [
+    "SK|prune|pkg-registry|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "SK|prune|pkg-registry|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=lsp": {
+   "credited_by": [
+    "SK|prune|pkg-registry|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#5250",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -10003,25 +10044,37 @@
    "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=canvas": {
+   "credited_by": [
+    "SK|uninstall|pkg-registry|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "SK|uninstall|pkg-registry|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=lsp": {
+   "credited_by": [
+    "SK|uninstall|pkg-registry|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
@@ -10429,25 +10482,37 @@
    "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=canvas": {
+   "credited_by": [
+    "SK|update|pkg-registry|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "SK|update|pkg-registry|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=lsp": {
+   "credited_by": [
+    "SK|update|pkg-registry|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_kit_spine_credits_registry_executable_cells"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [

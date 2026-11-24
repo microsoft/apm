@@ -10,8 +10,14 @@ from pathlib import Path
 import pytest
 
 from tests.lifecycle.machines._gate_plugin_bin import ROOT, PluginBinBench
-from tests.lifecycle.machines._kit import WorldPool, earned_cells
+from tests.lifecycle.machines._kit import Bench, WorldPool, earned_cells
 from tests.lifecycle.machines._source_bin import SourceBin, replay_source_bin, source_bin_cells
+from tests.lifecycle.machines._source_kit import (
+    KNOWN_IDS,
+    SourceKit,
+    replay_source_kit,
+    source_kit_cells,
+)
 from tests.lifecycle.receipts import current_node
 
 pytestmark = [
@@ -31,3 +37,16 @@ def test_source_bin_spine_credits_op_src_bin_cells(lifecycle_template, tmp_path:
     assert not missing, f"source bin ids without an oracle receipt: {sorted(missing)}"
     # Each form ends with an orphan prune: the plugin root is gone.
     assert not (machine.bench.deploy_root / ROOT).exists()
+
+
+def test_source_kit_spine_credits_registry_executable_cells(
+    lifecycle_template, tmp_path: Path
+) -> None:
+    """A registry package's hook, LSP and canvas keep I1-I9 through every command."""
+    world = WorldPool(lifecycle_template, tmp_path).fresh()
+    machine = SourceKit(Bench(world, "project"))
+    replay_source_kit(machine)
+    missing = source_kit_cells() - set(KNOWN_IDS) - earned_cells(current_node(), "SK|")
+    assert not missing, f"source kit ids without an oracle receipt: {sorted(missing)}"
+    strict = {cell.label for cell in machine.known}
+    assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
