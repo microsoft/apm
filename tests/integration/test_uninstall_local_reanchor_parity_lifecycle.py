@@ -796,6 +796,37 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     assert not [key for key in modules if ".apm-reanchor-" in key], sorted(modules)
 
 
+def test_an_absolute_compile_output_outside_the_project_is_scanned(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5235: an --output outside the project is recorded by its absolute path, so a
+    link from it into the moving copy refuses the re-anchor before any write."""
+    from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    def instruction(project: Path) -> None:
+        rules = project / ".apm/instructions/proj.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text(
+            '---\napplyTo: "**"\ndescription: Project rules\n---\nProject body.\n',
+            encoding="utf-8",
+        )
+
+    world = _docs_world(tmp_path, apm_binary_path, instruction)
+    output = tmp_path / "outside" / "CONTEXT.md"
+    output.parent.mkdir()
+    world.apm("compile", "--single-agents", "--output", str(output))
+    link = os.path.relpath(world.project / _LINK, output.parent).replace(os.sep, "/")
+    output.write_text(_marked(AGENTS_MD_GENERATED_MARKER, link), "utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    flat = " ".join((refused.stdout + refused.stderr).split())
+    assert "CONTEXT.md links into its apm_modules copy" in flat, flat
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
 _COPY_LOG_ENTRY = """\
 import json
 import sys
