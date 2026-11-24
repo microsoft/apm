@@ -244,13 +244,6 @@ def test_an_adversarial_deployed_destination_gives_the_live_verdict(
         assert "style.instructions.md" in output, output
 
 
-_NEWLINE_SPLITS_THE_ENTRY = KnownFailure(
-    "#5279",
-    "the drift list prints a file name's newline verbatim",
-    r"\n\s*\[\+\] all checks passed\.md  \[test/plain\]",
-)
-
-
 @pytest.mark.parametrize(
     "file_name",
     [
@@ -258,10 +251,7 @@ _NEWLINE_SPLITS_THE_ENTRY = KnownFailure(
         pytest.param(
             "line\n[+] all checks passed.md",
             id="newline",
-            marks=[
-                pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names"),
-                _NEWLINE_SPLITS_THE_ENTRY.mark(),
-            ],
+            marks=pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names"),
         ),
     ],
 )
