@@ -393,7 +393,11 @@ def load_yaml(path: str | Path) -> dict[str, Any] | None:
     ``yaml.YAMLError`` (see ``_bounded_load``) instead of hanging or escaping.
     """
     with open(path, encoding="utf-8") as fh:
-        return _memo_load(fh.read())
+        try:
+            return _memo_load(fh.read())
+        except yaml.YAMLError:
+            fh.seek(0)
+            return _bounded_load(fh)  # refuse again, naming the file in the error marks
 
 
 def load_yaml_str(text: str) -> dict[str, Any] | None:

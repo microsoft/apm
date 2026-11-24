@@ -59,10 +59,10 @@ class TestLoadYaml:
             load_yaml("/nonexistent/path.yml")
 
     def test_load_invalid_yaml(self, tmp_path):
-        """Malformed YAML raises yaml.YAMLError."""
+        """Malformed YAML raises yaml.YAMLError naming the file."""
         p = tmp_path / "bad.yml"
         p.write_text(":\n  - :\n  bad: [unmatched", encoding="utf-8")
-        with pytest.raises(yaml.YAMLError):
+        with pytest.raises(yaml.YAMLError, match=r"bad\.yml"):
             load_yaml(p)
 
     @pytest.mark.parametrize("glob", ["", "*.md"], ids=["plain-copy", "deep-copy"])
@@ -85,10 +85,12 @@ class TestLoadYaml:
 
         parses = _count_calls(yaml_io._bounded_load.__code__, owners)
         loads[0]["includes"].append("mutated")
+        loads[0]["name"] = "poisoned"
+        after_mutation = load_yaml(p)
         p.write_text(text.replace("pkg-", "other-"), encoding="utf-8")
 
         assert parses == 1
-        assert loads[1] == loads[2] == yaml.safe_load(text)
+        assert loads[1] == loads[2] == after_mutation == yaml.safe_load(text)
         assert load_yaml(p) == yaml.safe_load(p.read_text(encoding="utf-8"))
         assert load_yaml(p)["name"].startswith("other-")
 
