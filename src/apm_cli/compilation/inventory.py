@@ -52,8 +52,23 @@ def _seeded_walk(root: Path, listing: dict[str, list[str]]):
         stack.extend(f"{rel}/{name}" if rel else name for name in reversed(dirnames))
 
 
+def _substituting_walk(root: Path):
+    """PERF B3 PROTOTYPE: ``os.walk`` that swaps in the seeded listing below any proven
+    seeded package root it reaches (pre-order and pruning preserved)."""
+    from ..utils.content_hash import is_seed_root, seeded_listing
+
+    walker = os.walk(root, followlinks=False)
+    for directory, child_dirs, file_names in walker:
+        listing = seeded_listing(directory) if is_seed_root(directory) else None
+        if listing is None:
+            yield directory, child_dirs, file_names
+            continue
+        child_dirs[:] = []  # os.walk does not descend; the seeded subtree replaces it
+        yield from _seeded_walk(Path(directory), listing)
+
+
 # PERF B3 PROTOTYPE: compute the walk too and fail loudly on any difference.
-_B3_DIFFERENTIAL = False
+_B3_DIFFERENTIAL = True
 
 
 @dataclass(frozen=True)
@@ -88,7 +103,9 @@ class CompileInventory:
 
         listing = None if _force_walk else _seeded_listing(root)
         walk = (
-            _seeded_walk(root, listing) if listing is not None else os.walk(root, followlinks=False)
+            _seeded_walk(root, listing)
+            if listing is not None
+            else (os.walk(root, followlinks=False) if _force_walk else _substituting_walk(root))
         )
         for directory, child_dirs, file_names in walk:
             path = Path(directory)
@@ -124,7 +141,7 @@ class CompileInventory:
             nested_repository_roots=frozenset(nested_repository_roots),
             _directory_positions={entry.path: index for index, entry in enumerate(directories)},
         )
-        if listing is not None and _B3_DIFFERENTIAL:
+        if not _force_walk and _B3_DIFFERENTIAL:
             walked = cls.collect(root, exclude_patterns=exclude_patterns, _force_walk=True)
             if (
                 walked.directories != inventory.directories

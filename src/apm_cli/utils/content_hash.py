@@ -87,6 +87,44 @@ def seed_package_tree(root: str, payload, files: dict, dirs: dict) -> None:
         _SEEDS[os.path.realpath(root)] = (payload, files, dirs)
 
 
+_SEED_EXTRAS: dict[str, set[str]] = {}
+
+
+def is_seed_root(path) -> bool:
+    """PERF B3 PROTOTYPE: cheap membership test (no syscall)."""
+    return os.path.abspath(path) in _SEEDS
+
+
+def proven_seed_roots_under(base) -> tuple[str, ...]:
+    """PERF B3 PROTOTYPE: ``root + sep`` of every seeded tree below *base* whose proof holds."""
+    prefix = os.path.abspath(base) + os.sep
+    with _SEED_LOCK:
+        roots = [r for r in _SEEDS if r.startswith(prefix)]
+    return tuple(r + os.sep for r in roots if seeded_listing(r) is not None)
+
+
+def seed_holds(root) -> bool:
+    """PERF B3 PROTOTYPE: whether *root* is seeded and its directory proof still holds."""
+    return seeded_listing(root) is not None
+
+
+def reseal_root(root, name: str) -> None:
+    """PERF B3 PROTOTYPE: APM itself just wrote root file *name* (the cache-pin marker)
+    into a seeded tree whose proof held right before; refresh the root proof and list it."""
+    key = os.path.abspath(root)
+    with _SEED_LOCK:
+        seed = _SEEDS.get(key)
+        if seed is None:
+            return
+        dirs = seed[2]
+        info = os.lstat(key)
+        for directory in list(dirs):
+            if os.path.abspath(directory) in (key, os.path.realpath(key)):
+                dirs[directory] = (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns)
+        for alias in (key, os.path.realpath(key)):
+            _SEED_EXTRAS.setdefault(alias, set()).add(name)
+
+
 def seeded_listing(root) -> dict[str, list[str]] | None:
     """PERF B3 PROTOTYPE: ``{relative dir ('' = root): file names}`` of a tree APM wrote
     from verified blobs this command, or ``None``.
@@ -108,6 +146,8 @@ def seeded_listing(root) -> dict[str, list[str]] | None:
     except OSError:
         return None
     listing: dict[str, list[str]] = {"": []}
+    with _SEED_LOCK:
+        listing[""].extend(sorted(_SEED_EXTRAS.get(os.path.abspath(root), ())))
     for rel, _data, _executable in payload:
         parts = rel.split("/")
         for depth in range(1, len(parts)):

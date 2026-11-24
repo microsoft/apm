@@ -91,8 +91,14 @@ def write_marker(install_path: Path, resolved_commit: str) -> None:
         current = None  # unreadable: treat as a miss and still repair it
     if current == data:
         return
+    from ..utils.content_hash import reseal_root, seed_holds
+
+    sealed = seed_holds(install_path)
     try:
         _replace_marker(install_path, marker, data)
+        if sealed:
+            # PERF B3 PROTOTYPE: our own marker write keeps the verified-tree proof.
+            reseal_root(install_path, MARKER_FILENAME)
     except OSError:
         # Read-only mount, permission denied, a directory in the way, etc.
         # Drift will surface this on the next audit; install must not fail.

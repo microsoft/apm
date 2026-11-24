@@ -642,6 +642,9 @@ def _find_primitive_inventory_files(
 
     # PERF B3 PROTOTYPE: a proven seeded tree holds only regular files APM wrote.
     proven = seeded_listing(base_path) is not None
+    from ..utils.content_hash import proven_seed_roots_under
+
+    proven_roots = () if proven else proven_seed_roots_under(base_path)
     valid_files: list[Path] = []
     for file_path in candidates:
         relative_path = file_path.relative_to(base_path)
@@ -652,7 +655,11 @@ def _find_primitive_inventory_files(
             continue
         if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
             continue
-        if proven or (file_path.is_file() and not file_path.is_symlink()):
+        if (
+            proven
+            or (proven_roots and str(file_path).startswith(proven_roots))
+            or (file_path.is_file() and not file_path.is_symlink())
+        ):
             valid_files.append(file_path)
 
     perf_stats.record_walk(
