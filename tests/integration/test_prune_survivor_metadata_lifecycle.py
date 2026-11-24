@@ -11,6 +11,8 @@ GRAPH=multi-path (prod and dev chains share a survivor).
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -178,3 +180,45 @@ def test_prune_keeps_the_chain_when_the_new_parent_identity_is_ambiguous(
     after = lock_bytes(world.project)
     world.apm("install", "--frozen")
     assert lock_bytes(world.project) == after
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_keeps_a_survivors_parent_while_it_keeps_an_alias_chain(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An alias chain is kept fail-closed while u is removed: s keeps its record whole.
+
+    s lost its production edge from p and is now reached only through dev
+    q -> r -> s. Re-parenting it without its dev status would leave a row no
+    install records, so while prune keeps the chain it repairs nothing.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for path, deps in (
+        ("f", ()),
+        ("e", ("../f",)),
+        ("d", ("../e",)),
+        ("z", ("../f-link",)),
+        ("a", ("../z",)),
+        ("u", ()),
+        ("s", ()),
+        ("p", ("../s",)),
+        ("r", ("../s",)),
+        ("q", ("../r",)),
+    ):
+        _skill_package(vendor / path, path, deps)
+    os.symlink("f", vendor / "f-link", target_is_directory=True)
+    _manifest(world, ["./vendor/d", "./vendor/a", "./vendor/u", "./vendor/p"], ["./vendor/q"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    before = _row(world, "s")
+    assert before["resolved_by"] == "_local/p", before
+    _skill_package(vendor / "p", "p")
+    _manifest(world, ["./vendor/a", "./vendor/p"], ["./vendor/q"])
+
+    pruned = " ".join(world.apm("prune").stdout.split())
+
+    assert "Retained _local/e:" in pruned, pruned
+    assert "_local/u" in pruned, pruned
+    assert _row(world, "s") == before
+    assert (world.project / ".claude/skills/s-skill/SKILL.md").is_file()
