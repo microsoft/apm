@@ -886,7 +886,10 @@ def u_bin_pinned() -> bool:
 # The approved digest of the bundle deploy routing (generator/bin_pin.py). While the
 # live digest equals it, every PRIM=bin cell of a local bundle is removed; when it
 # differs they are must-cover and --check fails until a reviewed change updates it.
-U_BIN_BUNDLE_PIN = "2117545382f7ccf12caeb9fa9a5dcee3a150497681314b37885a251f60301597"
+# Re-pinned after main's bundle frontmatter-hooks fixes (2dfb0a11..37df5b73): they add one
+# more skip (_declares_unapproved_hooks) to bundle_deploy_relative_path and leave
+# _lower_to_target and _is_primitive_deploy_path unchanged, so routing only narrowed.
+U_BIN_BUNDLE_PIN = "ac646bba9e4d24d9af15b0bb1dd15d142e9f95c45ca0afd2a5966a8d2e6aec28"
 
 
 def u_bin_bundle_applies(cell: Mapping[str, str]) -> bool:
