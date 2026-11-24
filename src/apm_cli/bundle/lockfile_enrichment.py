@@ -293,6 +293,9 @@ def enrich_lockfile_for_pack(
                     dep["deployed_file_hashes"] = _project_hashes(
                         dep["deployed_file_hashes"], mappings
                     )
+            # A bundle never carries a native plugin root, so its lock names none (#5253).
+            dep.pop("native_plugin", None)
+            dep.pop("native_declared", None)
 
     # Issue #887: strip packaging-time local-content fields from the bundle
     # lockfile. ``local_deployed_files`` / ``local_deployed_file_hashes``

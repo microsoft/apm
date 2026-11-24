@@ -9,6 +9,7 @@ rerun is a byte-for-byte no-op.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -104,3 +105,72 @@ def test_concurrent_install_and_uninstall_converge(tmp_path: Path, apm_binary_pa
     assert rerun.returncode == 0, rerun.stdout + rerun.stderr
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
     assert (project / "apm.yml").read_bytes() == manifest_bytes
+
+
+_USER_SETTINGS = {"permissions": {"allow": ["Bash(ls)"]}}
+
+
+def _hook_package(root: Path, name: str) -> None:
+    hooks = root / ".apm" / "hooks"
+    hooks.mkdir(parents=True)
+    dump_yaml({"name": name, "version": "1.0.0"}, root / "apm.yml")
+    handler = {"type": "command", "command": f"echo {name}"}
+    document = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [handler]}]}}
+    (hooks / f"{name}.json").write_text(json.dumps(document), encoding="ascii")
+
+
+def _hook_project(tmp_path: Path, apm_binary_path: Path, target: str = "claude"):
+    """A *target* project with alpha installed; beta and gamma ready to add."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    for name in _PACKAGES:
+        _hook_package(project / "pkgs" / name, name)
+    settings = project / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps(_USER_SETTINGS), encoding="ascii")
+    allow = {f"./pkgs/{name}": {"hooks": True} for name in _PACKAGES}
+    dump_yaml(
+        {
+            "name": "consumer",
+            "version": "0.1.0",
+            "targets": [target],
+            "dependencies": {"apm": ["./pkgs/alpha"]},
+            "executables": {"allow": allow},
+        },
+        project / "apm.yml",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=240)
+    first = runner.run(("install", "--no-policy"), cwd=project, env=env)
+    assert first.returncode == 0, first.stdout + first.stderr
+    return runner, env, project, settings
+
+
+def _project_bytes(project: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*"))
+        if path.is_file() and not {"apm_modules", "pkgs"} & set(path.relative_to(project).parts)
+    }
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["copilot", "claude", "cursor", "codex", "gemini"],
+)
+def test_incremental_hook_installs_in_any_order_pass_audit(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    """#5285: ``apm install <pkg>`` additions out of name order leave a converged
+    project: ``audit --ci`` agrees and a plain install changes no byte (I2, I3)."""
+    runner, env, project, _settings = _hook_project(tmp_path, apm_binary_path, target)
+    for name in ("gamma", "beta"):
+        added = runner.run(("install", "--no-policy", f"./pkgs/{name}"), cwd=project, env=env)
+        assert added.returncode == 0, added.stdout + added.stderr
+    before = _project_bytes(project)
+    audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
+    rerun = runner.run(("install", "--no-policy"), cwd=project, env=env)
+    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+    after = _project_bytes(project)
+    changed = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
+    assert (changed, audit.returncode) == ([], 0), audit.stdout[-1200:]

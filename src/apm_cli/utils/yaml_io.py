@@ -619,6 +619,29 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+# Keyword arguments of ``frontmatter.Post(content, handler, **metadata)``.
+_RESERVED_FRONTMATTER_KEYS = ("content", "handler")
+
+
+def _reserved_keys(text: str) -> str:
+    """Name the frontmatter keys that collide with Post's arguments, or ``""``."""
+    metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+    data = _BOUNDED_FRONTMATTER_HANDLER.load(metadata)
+    present = data if isinstance(data, dict) else {}
+    return ", ".join(repr(key) for key in _RESERVED_FRONTMATTER_KEYS if key in present)
+
+
+def _located_problem(exc: yaml.MarkedYAMLError) -> str:
+    """One line naming where the frontmatter breaks and why (#5216)."""
+    # The context mark is where the broken construct starts; the problem mark
+    # may only be where the parser gave up (often the end of the block).
+    mark = exc.context_mark or exc.problem_mark
+    problem = ", ".join(part for part in (exc.context, exc.problem) if part) or "malformed YAML"
+    if mark is None:
+        return f"malformed frontmatter: {problem}"
+    return f"frontmatter line {mark.line + 1}, column {mark.column + 1}: {problem}"
+
+
 def _non_string_keys(text: str) -> str:
     """Name the non-string keys of *text*'s frontmatter, or ``""`` when it has none."""
     metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
@@ -646,11 +669,14 @@ def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
     Only a *prefix_bytes* prefix is read, unless the fence is still open at
     its end; then the whole file is. Bytes after the closing fence are never
     decoded strictly. A file without frontmatter yields ``""``. Raises
-    ``OSError`` when the file cannot be read and ``UnicodeError`` when the
-    block is not UTF-8.
+    ``OSError`` when the file cannot be read or is not a regular file (a FIFO
+    or a link is never read) and ``UnicodeError`` when the block is not UTF-8.
     """
+    from .path_security import open_regular_file
+
     boundary = _BOUNDED_FRONTMATTER_HANDLER.FM_BOUNDARY
-    with Path(path).open("rb") as handle:
+    # Never a FIFO, device or final link: a packed name cannot block or redirect the read.
+    with open_regular_file(Path(path)) as handle:
         data = handle.read(prefix_bytes)
         complete = len(data) < prefix_bytes
         while True:
@@ -685,15 +711,21 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     try:
         _BOUNDED_FRONTMATTER_HANDLER.split(text)
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    except yaml.MarkedYAMLError as exc:
+        raise yaml.YAMLError(_located_problem(exc)) from exc
     except yaml.YAMLError:
         raise
     except TypeError as exc:
-        # Post(**metadata) refuses a non-string key such as ``1:`` (#4922, #5028);
-        # any other TypeError is not a frontmatter fault and surfaces unchanged.
+        # Post(content, handler, **metadata) refuses a non-string key such as ``1:``
+        # (#4922, #5028) and a key named content or handler (#5224); any other
+        # TypeError is not a frontmatter fault and surfaces unchanged.
         keys = _non_string_keys(text)
+        if keys:
+            raise yaml.YAMLError(f"non-string frontmatter key(s): {keys}") from exc
+        keys = _reserved_keys(text)
         if not keys:
             raise
-        raise yaml.YAMLError(f"non-string frontmatter key(s): {keys}") from exc
+        raise yaml.YAMLError(f"reserved frontmatter key(s): {keys}") from exc
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:

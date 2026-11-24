@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from tests.lifecycle.machines._gate_plugin_bin import (
     BIN_PATH,
@@ -41,11 +43,23 @@ from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.world import registry
+from tests.lifecycle.world.services import MARKETPLACE_NAME
 
 # Forms of the plugin this spine drives -> the world package key of their spec.
 FORMS = {"native": PLUGIN, "shorthand": f"{PLUGIN}:git"}
+# Marketplace forms -> the catalog that lists the plugin: the world's git catalog,
+# and local catalogs (a directory and a direct marketplace.json) this spine authors.
+CATALOGS = {
+    "plugin-at-mkt": MARKETPLACE_NAME,
+    "local-mkt": "lifecycle-bin-local",
+    "file-mkt": "lifecycle-bin-file",
+}
+# The package registry form: the plugin published as an archive and declared by id.
+REGISTRY = "pkg-registry"
+REGISTRY_ID = f"lifecycle/{PLUGIN}"
 # Commands that resolve the graph but must leave a deployed, trusted root alone.
-_KEEPING = ("lock", "compile", "audit", "update", "approve-deny")
+_KEEPING = ("lock", "compile", "audit", "update", "approve-deny", "marketplace")
 _REMOVING = ("uninstall", "prune")
 # Commands that, right after a converged install, must change no byte at all (I2).
 _CONVERGED = ("lock", "audit", "update")
@@ -85,6 +99,20 @@ class SourceBin(StepRunner):
             fields: dict[str, object] = {"mutating": op not in ("audit",)}
             if op == "audit":
                 fields["read_only"] = True
+            if form in CATALOGS:
+                # A marketplace resolution refreshes that catalog's cache and version pins.
+                cache = ".apm/cache/marketplace"
+                name = CATALOGS[form]
+                home = (
+                    f"{cache}/{name}.json",
+                    f"{cache}/{name}.meta.json",
+                    f"{cache}/version-pins.json",
+                )
+                fields["allowed"] = {"home": (*self.bench.allowed().get("home", ()), *home)}
+            if op == "marketplace":
+                # Keep the bench's roots (HOME outside the catalog allowances) and add
+                # the project: a catalog command writes no project byte.
+                fields["forbidden"] = {**self.bench.forbidden(), "project": ("*",)}
             step = self.step(
                 words,
                 exits=frozenset({0}),
@@ -140,7 +168,8 @@ class SourceBin(StepRunner):
             present["project"] = [BIN_PATH]
             if op in _KEEPING:
                 # The root and its harness registration survive together.
-                unchanged["project"] = (ROOT, *SETTINGS)
+                keep = ("*",) if op == "marketplace" else (ROOT, *SETTINGS)
+                unchanged["project"] = keep
         check_obligation(
             cell,
             strength="e2e-evidence",
@@ -202,23 +231,98 @@ class SourceBin(StepRunner):
         self._edit_manifest("undeclare-" + PLUGIN, lambda data: data["dependencies"].update(apm=[]))
         self.state = replace(self.state, declared=False)
 
+    def install_words(self, form: str) -> tuple[str, ...]:
+        """``apm install --trust-bin`` for *form*: by spec, or (registry) by manifest entry."""
+        if form != REGISTRY:
+            return ("install", "--trust-bin", self.spec(form))
+        if not self.dry:
+            self.edit("declare-registry-" + PLUGIN, self._declare_registry)
+        return ("install", "--trust-bin")
+
+    def _declare_registry(self) -> None:
+        data = self.bench.manifest()
+        entry = {"registry": registry.NAME, "id": REGISTRY_ID, "version": "1.0.0"}
+        data.setdefault("dependencies", {})["apm"] = [entry]
+        self.bench.write_manifest(data)
+
+    def publish_registry(self) -> None:
+        """Publish the plugin to the world's package registry as ``lifecycle/<plugin>``."""
+        if self.dry:
+            return
+        root = self.bench.world.packages[PLUGIN].spec
+        archive = registry.zip_tree(Path(root))
+        self.bench.world.services.package_registry.publish(REGISTRY_ID, "1.0.0", archive)
+
     def spec(self, form: str) -> str:
+        if form == REGISTRY:
+            return REGISTRY_ID
+        if form in CATALOGS:
+            return f"{PLUGIN}@{CATALOGS[form]}"
         return "" if self.dry else self.bench.world.packages[FORMS[form]].spec
+
+    def register(self, form: str) -> None:
+        """``apm marketplace add`` for *form*'s catalog: no project byte changes."""
+        source = self.catalog_source(form)
+        if not self.dry:
+            self.step(
+                ("marketplace", "add", source),
+                exits=frozenset({0}),
+                mutating=True,
+                # The bench's roots stay forbidden (HOME included); registration may
+                # write only the catalog registry and the catalog cache there.
+                forbidden={**self.bench.forbidden(), "project": ("*",)},
+                allowed={
+                    "home": (
+                        ".apm/marketplaces.json",
+                        ".apm/marketplaces.lock",
+                        ".apm/cache/marketplace",
+                    )
+                },
+            )
+
+    def catalog_source(self, form: str) -> str:
+        """Register the catalog of *form* once: the world's, or a local one listing the plugin."""
+        if self.dry:
+            return ""
+        if form == "plugin-at-mkt":
+            return self.bench.world.services.marketplace_url
+        name = CATALOGS[form]
+        root = self.bench.world.root / "catalogs" / name
+        plugin = root / "plugins" / PLUGIN
+        shutil.copytree(self.bench.world.packages[PLUGIN].spec, plugin)
+        document = {
+            "name": name,
+            "owner": {"name": "APM Lifecycle"},
+            "plugins": [{"name": PLUGIN, "source": f"./plugins/{PLUGIN}"}],
+        }
+        as_file = form == "file-mkt"
+        catalog = (
+            root / "marketplace.json" if as_file else root / ".claude-plugin" / "marketplace.json"
+        )
+        catalog.parent.mkdir(parents=True, exist_ok=True)
+        catalog.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
+        return str(catalog if as_file else root)
 
 
 def replay_source_bin(machine: SourceBin) -> None:
     """Each form: deploy the root, run every command that keeps it, then remove it twice."""
-    for form in FORMS:
+    for form in (*FORMS, *CATALOGS, REGISTRY):
         machine.setup()
         spec = machine.spec(form)
-        machine.run("install", form, "install", "--trust-bin", spec)
+        if form in CATALOGS:
+            machine.register(form)
+        if form == REGISTRY:
+            machine.publish_registry()
+        machine.run("install", form, *machine.install_words(form))
+        if form in CATALOGS:
+            machine.run("marketplace", form, "marketplace", "update", CATALOGS[form])
         machine.run("lock", form, "lock")
         machine.run("compile", form, "compile")
         machine.run("audit", form, "audit", "--ci")
         machine.run("update", form, "update", "--yes")
         machine.run("approve-deny", form, "approve", PLUGIN)
         machine.run("uninstall", form, "uninstall", spec)
-        machine.run("install", form, "install", "--trust-bin", spec)
+        machine.run("install", form, *machine.install_words(form))
         machine.undeclare()
         machine.run("prune", form, "prune")
 

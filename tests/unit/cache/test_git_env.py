@@ -1114,7 +1114,9 @@ class TestGitSubprocessEnv:
         assert child.commands == []
 
     def test_http_urlmatch_failure_reports_status_without_raw_config(self) -> None:
-        headers = (GitConfigEntry("command", "http.extraheader", "Authorization: Basic sentinel"),)
+        # A wildcard key defers to Git (utils/git_config_once answers only plain keys).
+        key = "http.https://*.example.com.extraheader"
+        headers = (GitConfigEntry("command", key, "Authorization: Basic sentinel"),)
         child = _FakeGitConfigChild(128, stderr=b"private config detail")
         with (
             patch("subprocess.Popen", child),

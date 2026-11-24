@@ -136,6 +136,8 @@ jobs:
         run: |
           export COPILOT_GITHUB_TOKEN="$COPILOT_TOKEN"
           python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
+          python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh" \
+            --env collision-distinct --env collision-same
           if [ "$HARNESS" = claude ]; then
             python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
               --scope project --env tui-untrusted --env headless-rerun --env headless-abspath \
