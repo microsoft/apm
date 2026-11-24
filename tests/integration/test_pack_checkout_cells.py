@@ -109,8 +109,11 @@ def test_the_pack_checkout_answers_every_git_reader_like_git_checkout(world: Pat
     _bare, reference = _staged(world, src, "reference")
     _git(reference, "checkout", "-q", sha)
 
-    manifest = _materialize(staged, sha)
+    _assert_like_git_checkout(_materialize(staged, sha), staged, reference, sha)
 
+
+def _assert_like_git_checkout(manifest, staged: Path, reference: Path, sha: str) -> None:
+    """C6: every git reader answers on the pack checkout as on ``git checkout``."""
     assert manifest is not None
     assert sorted(manifest) == sorted(_FILES)
     assert _worktree(staged) == _worktree(reference) == _FILES
@@ -124,8 +127,11 @@ def test_the_pack_checkout_answers_every_git_reader_like_git_checkout(world: Pat
         assert not os.access(staged / "a.txt", os.X_OK)
 
 
-def _only_git(staged: Path) -> bool:
-    return sorted(os.listdir(staged)) == [".git"] and not (staged / ".git" / "index").exists()
+def _assert_left_to_git(staged: Path, sha: str) -> None:
+    """C8: a refusal writes nothing; only ``.git`` (no index) is left for git checkout."""
+    assert _materialize(staged, sha) is None
+    assert sorted(os.listdir(staged)) == [".git"]
+    assert not (staged / ".git" / "index").exists()
 
 
 def test_a_planted_link_is_left_to_git(world: Path) -> None:
@@ -145,8 +151,7 @@ def test_a_planted_link_is_left_to_git(world: Path) -> None:
 
     src, sha = _source(world, link)
     _bare, staged = _staged(world, src)
-    assert _materialize(staged, sha) is None
-    assert _only_git(staged)
+    _assert_left_to_git(staged, sha)
 
 
 def test_a_commit_gitattributes_is_left_to_git(world: Path) -> None:
@@ -156,41 +161,36 @@ def test_a_commit_gitattributes_is_left_to_git(world: Path) -> None:
 
     src, sha = _source(world, attributes)
     _bare, staged = _staged(world, src)
-    assert _materialize(staged, sha) is None
-    assert _only_git(staged)
+    _assert_left_to_git(staged, sha)
 
 
 def test_a_replace_ref_is_left_to_git(world: Path) -> None:
     src, sha = _source(world)
     bare, staged = _staged(world, src)
-    blob = _git(bare, "rev-parse", f"{sha}:a.txt").strip()
-    other = _git(bare, "rev-parse", f"{sha}:dir/b.md").strip()
-    _git(bare, "replace", blob, other)
-    assert _materialize(staged, sha) is None
-    assert _only_git(staged)
+    git_dir = f"--git-dir={bare}"  # no bare discovery: safe.bareRepository may be explicit
+    blob = _git(world, git_dir, "rev-parse", f"{sha}:a.txt").strip()
+    other = _git(world, git_dir, "rev-parse", f"{sha}:dir/b.md").strip()
+    _git(world, git_dir, "replace", blob, other)
+    _assert_left_to_git(staged, sha)
 
 
 def test_a_flipped_pack_byte_writes_nothing(world: Path) -> None:
     src, sha = _source(world)
     bare, staged = _staged(world, src)
-    packs = sorted((bare / "objects" / "pack").glob("*.pack"))
-    assert packs
-    pack = packs[0]
+    (pack,) = sorted((bare / "objects" / "pack").glob("*.pack"))
     os.chmod(pack, 0o644)
     data = bytearray(pack.read_bytes())
     for offset in range(12, len(data) - 20, 7):
         data[offset] ^= 0x5A
     pack.write_bytes(bytes(data))
-    assert _materialize(staged, sha) is None
-    assert _only_git(staged)
+    _assert_left_to_git(staged, sha)
 
 
 def test_a_swapped_parent_refuses_and_leaves_only_git(world: Path) -> None:
     src, sha = _source(world)
     _bare, staged = _staged(world, src)
     (staged / "dir").write_bytes(b"planted, not a directory\n")
-    assert _materialize(staged, sha) is None
-    assert _only_git(staged)
+    _assert_left_to_git(staged, sha)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
@@ -200,6 +200,9 @@ def test_a_parent_swapped_for_a_link_is_never_followed(world: Path) -> None:
     outside = world / "outside"
     outside.mkdir()
     os.symlink(outside, staged / "z")
-    assert _materialize(staged, sha) is None
-    assert _only_git(staged)
-    assert list(outside.iterdir()) == []
+    _assert_left_to_git(staged, sha)
+    _assert_empty(outside)
+
+
+def _assert_empty(directory: Path) -> None:
+    assert list(directory.iterdir()) == []
