@@ -123,11 +123,12 @@ def portable_relpath(path: Path, base: Path) -> str:
 def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
     """:func:`portable_relpath` of each path against one *base*, resolving it once.
 
-    Each path is still resolved at use; only the shared base is not
-    resolved again per path within this call.
+    Each path is still resolved at use, through :func:`resolve_path` as
+    :func:`portable_relpath` does; only the shared base is not resolved again
+    per path within this call.
     """
     try:
-        resolved_base: Path | None = base.resolve()
+        resolved_base: Path | None = resolve_path(base)
     except (OSError, RuntimeError):
         resolved_base = None
     results: list[str] = []
@@ -135,12 +136,12 @@ def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
         relative = None
         if resolved_base is not None:
             try:
-                relative = relative_posix(path.resolve(), resolved_base)
+                relative = relative_posix(resolve_path(path), resolved_base)
             except (ValueError, OSError, RuntimeError):
                 relative = None
         if relative is None:
             try:
-                relative = path.resolve().as_posix()
+                relative = resolve_path(path).as_posix()
             except (OSError, RuntimeError):
                 relative = path.as_posix()
         results.append(relative)
