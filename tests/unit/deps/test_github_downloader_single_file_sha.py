@@ -57,7 +57,9 @@ def _isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     anonymous listing would ask the real github.com first.
     """
     monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setattr("apm_cli.cache.commit_reachability._active_stage", None)
+    from apm_cli.cache.commit_reachability import open_verdict_stage
+
+    open_verdict_stage().discard()  # closes any attempt another test left open
     monkeypatch.setattr(
         "apm_cli.deps.anonymous_ref_listing.list_refs_anonymously", lambda *a, **k: None
     )
