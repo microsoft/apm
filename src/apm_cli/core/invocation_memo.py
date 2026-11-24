@@ -22,6 +22,7 @@ _memos: dict[str, dict[Any, Any]] | None = None
 _depth = 0
 _overlapped = False
 _generation = 0  # bumped whenever memos are invalidated; a stale read never publishes
+_forgotten = 0  # bumped only when user code ran mid-command (forget_invocation_memos)
 _KEY_LOCK = object()  # memo key prefix for the per-key lock of a memoized call
 
 
@@ -67,13 +68,24 @@ def forget_invocation_memos() -> None:
     may have refreshed credentials or changed the git remote, so nothing
     learned before it may answer a later lookup.
     """
-    global _generation
+    global _generation, _forgotten
     with _lock:
         _generation += 1
+        _forgotten += 1
         if _memos is not None:
             for memo in _memos.values():
                 memo.clear()  # a reference captured before the script sees nothing
             _memos.clear()
+
+
+def forget_epoch() -> int:
+    """How many times user code invalidated what this process learned.
+
+    A reader that keeps an answer past its invocation (policy/_remote.py's
+    record-render reuse) stamps it with this and drops it when it changes.
+    """
+    with _lock:
+        return _forgotten
 
 
 def memoized_per_invocation(

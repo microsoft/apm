@@ -12,8 +12,9 @@ from __future__ import annotations
 import os
 
 
-def _nothing_to_do() -> bool:
-    """True only when ``_check_and_notify_updates`` would print nothing and fetch nothing."""
+def _gate() -> bool | None:
+    """Every gate but the daily schedule: True when the notice has nothing to do,
+    False when the helper has work whatever the schedule, None when the schedule decides."""
     from apm_cli.update_policy import is_self_update_enabled
 
     if os.environ.get("APM_INSTALL_FAST_PATH", "").strip().lower() == "decide":
@@ -26,6 +27,19 @@ def _nothing_to_do() -> bool:
 
     if is_refused(EgressSurface.VERSION_CHECK):
         return False  # the helper prints a verbose note
+    return None
+
+
+def schedule_decides() -> bool:
+    """Whether the daily check schedule alone decides this run's notice."""
+    return _gate() is None
+
+
+def _nothing_to_do() -> bool:
+    """True only when ``_check_and_notify_updates`` would print nothing and fetch nothing."""
+    gate = _gate()
+    if gate is not None:
+        return gate
     from apm_cli.utils.version_checker import should_check_for_updates
 
     # check_for_updates returns None without a fetch while the daily check is fresh.
