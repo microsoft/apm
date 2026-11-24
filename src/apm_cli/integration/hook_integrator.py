@@ -67,6 +67,7 @@ from apm_cli.integration.hook_native_formats import (
 )
 from apm_cli.integration.hook_ownership import (
     LocalBundleMarkers,
+    canonical_hook_order,
     dependency_hook_source_marker,
     dependency_hook_sources,
     drop_dependency_owned_entries,
@@ -1500,6 +1501,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_adopted += copy_result.files_adopted
 
         drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)
+        canonical_hook_order(json_config[container])
         # Shared configs are cleaned by ownership, never file-level deletion.
         write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)
 

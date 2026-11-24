@@ -276,3 +276,25 @@ def test_incremental_merged_config_installs_in_any_order_pass_audit(
     rerun = runner.run(("install", *trust), cwd=project, env=env)
     assert rerun.returncode == 0, rerun.stdout + rerun.stderr
     assert _project_bytes(project) == before
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["copilot", "claude", "cursor", "codex", "gemini"],
+)
+def test_incremental_hook_installs_in_any_order_pass_audit(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    """#5285: ``apm install <pkg>`` additions out of name order leave a converged
+    project: ``audit --ci`` agrees and a plain install changes no byte (I2, I3)."""
+    runner, env, project, _settings = _hook_project(tmp_path, apm_binary_path, target)
+    for name in ("gamma", "beta"):
+        added = runner.run(("install", "--no-policy", f"./pkgs/{name}"), cwd=project, env=env)
+        assert added.returncode == 0, added.stdout + added.stderr
+    before = _project_bytes(project)
+    audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
+    rerun = runner.run(("install", "--no-policy"), cwd=project, env=env)
+    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+    after = _project_bytes(project)
+    changed = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
+    assert (changed, audit.returncode) == ([], 0), audit.stdout[-1200:]

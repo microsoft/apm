@@ -50,7 +50,7 @@ def test_install_refuses_linked_primitive_directory(
     result = kit.run("install", "--no-policy")
 
     assert result.returncode != 0, output(result)
-    assert "symlinked target directory" in output(result)
+    assert "Refusing deployment through a symlinked path component" in output(result)
     assert snapshot(kit.outside) == {}
     assert link.is_symlink()
 
