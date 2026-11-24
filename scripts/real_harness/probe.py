@@ -465,7 +465,8 @@ class Cell:
             self.evidence["blocked"] = "no COPILOT_GITHUB_TOKEN for a Copilot session"
         tmux = ["tmux", "-L", self.id]
         start = [*tmux, "new-session", "-d", "-x", "200", "-y", "50", self.harness]
-        self.run("tmux-start", start, cwd, extra_env=self.session_env(), timeout=30)
+        launched = self.run("tmux-start", start, cwd, extra_env=self.session_env(), timeout=30)
+        self.evidence["tui_launched"] = launched.returncode == 0
 
         def pane() -> str:
             return self.run("tmux-capture", [*tmux, "capture-pane", "-p"], cwd, timeout=30).stdout
@@ -477,8 +478,9 @@ class Cell:
 
         self.evidence["startup_ready"] = self.wait_for(started, SESSION_SECONDS)
         if self.harness == "claude" and self.env.endswith("untrusted"):
-            # Keystrokes could answer the folder-trust dialog; observe it untouched.
-            pass
+            # Keystrokes could answer the folder-trust dialog; observe it untouched,
+            # and record that it is actually on screen.
+            self.evidence["trust_prompt_shown"] = "trust this folder" in pane().lower()
         elif self.harness == "claude":
             self.run("tmux-slash", [*tmux, "send-keys", "-l", f"/{SKILL}"], cwd, timeout=30)
             self.wait_for(lambda: pane().count(SKILL) > 1, 10)
@@ -612,7 +614,7 @@ class Cell:
             "mcp_tools_listed": "tools/list" in mcp,
             "mcp_tool_called": "tools/call" in mcp,
             "plugin_listed": PLUGIN in lists.get("plugin_list", ""),
-            "list_mcp_spawned": "initialize" in self.evidence.get("list_mcp_marker", "").split(),
+            "list_mcp_spawned": "spawned" in self.evidence.get("list_mcp_marker", "").split(),
         }
         if self.harness == "claude":
             sig["details_listed"] = SKILL in lists.get("plugin_details", "")
@@ -639,6 +641,13 @@ class Cell:
     def verdict(self, sig: dict) -> tuple[str, str]:
         if self.evidence.get("apm_error"):
             return "ERROR", "apm install: " + self.evidence["apm_error"].splitlines()[0][:160]
+        if self.env == "tui-untrusted" and not (
+            self.evidence.get("tui_launched") and self.evidence.get("trust_prompt_shown")
+        ):
+            # A crashed or absent TUI must not pass as proof of the trust gate.
+            return "ERROR", "the TUI did not launch or did not show the folder-trust prompt"
+        if self.env == "headless-untrusted" and "init" not in self.evidence:
+            return "ERROR", "claude -p emitted no init event, so the session never started"
         runtime = [sig["mcp_initialized"], sig["mcp_tools_listed"]]
         if not self.agent_plugin:
             runtime.append(sig["hook_fired"])
