@@ -2915,8 +2915,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-local-bundle-hook-trust",
         rule_id="install-deployment-local-bundle-hook-trust",
         path="src/apm_cli/install/local_bundle_hook_trust.py",
-        old="        if None in keys:\n",
-        new="        if not keys:\n",
+        old="        elif None in keys:\n",
+        new="        elif not keys:\n",
         intent="A local-bundle hook with no recorded approval key is admitted instead of retired.",
     ),
     MutationCase(
