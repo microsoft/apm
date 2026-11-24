@@ -141,6 +141,11 @@ if _LOG:
                 _bump(_fs, key)
                 return real(*a, **k)
 
+            # Keep platform capability checks (``f in os.supports_dir_fd``) true.
+            for name in ("supports_dir_fd", "supports_fd", "supports_follow_symlinks"):
+                capabilities = getattr(os, name, None)
+                if capabilities is not None and real in capabilities:
+                    capabilities.add(wrapper)
             setattr(module, attr, wrapper)
 
         _counted(os.path, "realpath", "realpath_calls")
