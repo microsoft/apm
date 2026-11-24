@@ -8,9 +8,26 @@ removed outside APM are found by content match against the sidecar record.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+@dataclass
+class _BundleHookState:
+    """One per-file local bundle's recorded keys and deployed hook files."""
+
+    keys: set[str | None] = field(default_factory=set)
+    hook_files: set[str] = field(default_factory=set)
+    # Sidecars whose approval records could not be read (#5144).
+    unreadable: set[str] = field(default_factory=set)
+
+    def unreadable_reason(self) -> str:
+        """Name the unreadable sidecars; a corrupt record proves no approval."""
+        from apm_cli.utils.diagnostics import printable_ascii_text
+
+        where = printable_ascii_text(", ".join(sorted(self.unreadable)))
+        return f"approval record in {where} is unreadable"
 
 
 @dataclass
