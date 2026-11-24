@@ -9,16 +9,16 @@
         "pr": "#5338"
       },
       "fs.hash_objects": {
-        "budget": 1608,
-        "measured": 1531,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 2030,
+        "measured": 1933,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 2852339,
-        "measured": 2716513,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 3389555,
+        "measured": 3228147,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "pr": "#5345"
       },
       "fs.lockfile_reads": {
         "budget": 11,
@@ -113,16 +113,16 @@
         "pr": "#5338"
       },
       "fs.hash_objects": {
-        "budget": 1529,
-        "measured": 1456,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1955,
+        "measured": 1861,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 2955248,
-        "measured": 2814521,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 3493509,
+        "measured": 3327151,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "pr": "#5345"
       },
       "fs.lockfile_reads": {
         "budget": 11,
@@ -201,14 +201,14 @@
       "fs.hash_objects": {
         "budget": 335,
         "measured": 319,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "pr": "#5345"
       },
       "fs.hashed_bytes": {
         "budget": 533224,
         "measured": 507832,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
+        "pr": "#5345"
       },
       "fs.lockfile_reads": {
         "budget": 18,
@@ -263,13 +263,13 @@
       "fs.hash_objects": {
         "budget": 14,
         "measured": 13,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
         "budget": 429,
         "measured": 408,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -329,15 +329,15 @@
         "pr": "#5345"
       },
       "fs.hash_objects": {
-        "budget": 489,
-        "measured": 465,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 911,
+        "measured": 867,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 557496,
-        "measured": 530948,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 1094586,
+        "measured": 1042462,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -421,15 +421,15 @@
         "pr": "#5345"
       },
       "fs.hash_objects": {
-        "budget": 1629,
-        "measured": 1551,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 2054,
+        "measured": 1956,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 2964044,
-        "measured": 2822899,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 3502306,
+        "measured": 3335529,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
@@ -531,15 +531,15 @@
         "pr": "#5345"
       },
       "fs.hash_objects": {
-        "budget": 1556,
-        "measured": 1481,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 1981,
+        "measured": 1886,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.hashed_bytes": {
-        "budget": 2956558,
-        "measured": 2815769,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
+        "budget": 3494819,
+        "measured": 3328399,
+        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
         "pr": "#5345"
       },
       "fs.lockfile_reads": {
