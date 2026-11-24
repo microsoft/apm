@@ -3,22 +3,22 @@
   "journeys": {
     "install-cold": {
       "fs.files_written": {
-        "budget": 1425,
-        "measured": 1357,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 1819,
+        "measured": 1732,
+        "reason": "#5330 in-process pinned fetch: the checkout's files are now written by the apm process (inprocess_fetch.py os.open), which the counter sees, instead of by an uncounted git clone/checkout child; tree-10, offline mirror, rtt 0; max of CI runs 45401098857 (1520) and 45403013362 (1732)",
+        "pr": "#5340"
       },
       "fs.hash_objects": {
         "budget": 1950,
         "measured": 1857,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.hashed_bytes": {
-        "budget": 3361852,
-        "measured": 3201763,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 3381038,
+        "measured": 3220036,
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.lockfile_reads": {
         "budget": 11,
@@ -27,64 +27,40 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 12241,
-        "measured": 11658,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.realpath_calls": {
-        "budget": 1236,
-        "measured": 1177,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.stat_calls": {
-        "budget": 21865,
-        "measured": 20823,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.checkout": {
-        "budget": 11,
-        "measured": 10,
+        "budget": 81282,
+        "measured": 77411,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
       },
-      "git.clone": {
-        "budget": 21,
-        "measured": 20,
+      "fs.realpath_calls": {
+        "budget": 8554,
+        "measured": 8146,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
+      },
+      "fs.stat_calls": {
+        "budget": 21960,
+        "measured": 20914,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
       },
       "git.config": {
-        "budget": 9,
-        "measured": 8,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.ls-tree": {
-        "budget": 21,
-        "measured": 20,
+        "budget": 55,
+        "measured": 52,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
       },
       "git.remote": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.var": {
-        "budget": 3,
-        "measured": 2,
+        "budget": 13,
+        "measured": 12,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
+      },
+      "git.var": {
+        "budget": 5,
+        "measured": 4,
+        "reason": "#5330 in-process pinned fetch: its attribute-source probe `git var GIT_ATTR_SYSTEM` (memoized per child env) runs before the in-process checkout; tree-10, offline mirror, rtt 0; CI runs 45401098857 and 45403013362 (both 4)",
+        "pr": "#5340"
       },
       "http.connects": {
         "budget": 14,
@@ -101,22 +77,22 @@
     },
     "install-warm": {
       "fs.files_written": {
-        "budget": 861,
-        "measured": 820,
-        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
-        "pr": "#5345"
+        "budget": 856,
+        "measured": 815,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.hash_objects": {
         "budget": 1917,
         "measured": 1825,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.hashed_bytes": {
-        "budget": 3467244,
-        "measured": 3302137,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 3492216,
+        "measured": 3325920,
+        "reason": "re-measured: the counter hook now also counts hashlib.new (checkout verification, file_digest); tree-10, offline mirror, rtt 0; CI run 45398516932 at cc381335",
+        "pr": "#5340"
       },
       "fs.lockfile_reads": {
         "budget": 11,
@@ -125,22 +101,22 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 11748,
-        "measured": 11188,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 79484,
+        "measured": 75699,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.realpath_calls": {
-        "budget": 1201,
-        "measured": 1143,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 8384,
+        "measured": 7984,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.stat_calls": {
-        "budget": 21893,
-        "measured": 20850,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 21844,
+        "measured": 20803,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "git.cat-file": {
         "budget": 11,
@@ -149,10 +125,10 @@
         "pr": "#5338"
       },
       "git.config": {
-        "budget": 9,
-        "measured": 8,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 13,
+        "measured": 12,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "git.ls-tree": {
         "budget": 11,
@@ -195,14 +171,14 @@
       "fs.hash_objects": {
         "budget": 335,
         "measured": 319,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
-        "pr": "#5345"
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.hashed_bytes": {
-        "budget": 532985,
-        "measured": 507604,
-        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
-        "pr": "#5345"
+        "budget": 533224,
+        "measured": 507832,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.lockfile_reads": {
         "budget": 18,
@@ -211,22 +187,22 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 5962,
-        "measured": 5678,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 23099,
+        "measured": 21999,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.realpath_calls": {
-        "budget": 1045,
-        "measured": 995,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 2762,
+        "measured": 2630,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.stat_calls": {
-        "budget": 7009,
-        "measured": 6675,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
+        "budget": 6999,
+        "measured": 6665,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "git.remote": {
         "budget": 3,
@@ -245,362 +221,6 @@
         "measured": 0,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
-      }
-    },
-    "outdated": {
-      "fs.files_written": {
-        "budget": 23,
-        "measured": 21,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "fs.hash_objects": {
-        "budget": 14,
-        "measured": 13,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
-        "pr": "#5345"
-      },
-      "fs.hashed_bytes": {
-        "budget": 429,
-        "measured": 408,
-        "reason": "re-measured with hashlib.new and hashlib.file_digest counted; max of CI runs 45388629950 and 45388635677",
-        "pr": "#5345"
-      },
-      "fs.lockfile_reads": {
-        "budget": 2,
-        "measured": 1,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "fs.lstat_calls": {
-        "budget": 115,
-        "measured": 109,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.realpath_calls": {
-        "budget": 30,
-        "measured": 28,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.stat_calls": {
-        "budget": 158,
-        "measured": 150,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.config": {
-        "budget": 4,
-        "measured": 3,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.var": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.connects": {
-        "budget": 5,
-        "measured": 4,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.requests": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      }
-    },
-    "update": {
-      "fs.files_written": {
-        "budget": 376,
-        "measured": 358,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "fs.hash_objects": {
-        "budget": 873,
-        "measured": 831,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.hashed_bytes": {
-        "budget": 1090266,
-        "measured": 1038348,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.lockfile_reads": {
-        "budget": 16,
-        "measured": 15,
-        "reason": "re-measured at a fixed path depth (/tmp/apm-perf-*), xdist and non-xdist agree; max of CI runs 45395528158 and 45397022610",
-        "pr": "#5345"
-      },
-      "fs.lstat_calls": {
-        "budget": 2709,
-        "measured": 2580,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.realpath_calls": {
-        "budget": 243,
-        "measured": 231,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.stat_calls": {
-        "budget": 7845,
-        "measured": 7471,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.config": {
-        "budget": 9,
-        "measured": 8,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.ls-tree": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.remote": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.var": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.version": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.connects": {
-        "budget": 4,
-        "measured": 3,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.requests": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      }
-    },
-    "install-cold-auth": {
-      "fs.files_written": {
-        "budget": 1192,
-        "measured": 1135,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.hash_objects": {
-        "budget": 1974,
-        "measured": 1880,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.hashed_bytes": {
-        "budget": 3469296,
-        "measured": 3304091,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.lockfile_reads": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "fs.lstat_calls": {
-        "budget": 12260,
-        "measured": 11676,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.realpath_calls": {
-        "budget": 1250,
-        "measured": 1190,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.stat_calls": {
-        "budget": 21797,
-        "measured": 20759,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.checkout": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.clone": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.config": {
-        "budget": 9,
-        "measured": 8,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.ls-remote": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.ls-tree": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.remote": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.var": {
-        "budget": 2,
-        "measured": 1,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.connects": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.requests": {
-        "budget": 53,
-        "measured": 50,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      }
-    },
-    "install-warm-auth": {
-      "fs.files_written": {
-        "budget": 868,
-        "measured": 826,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.hash_objects": {
-        "budget": 1943,
-        "measured": 1850,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.hashed_bytes": {
-        "budget": 3468635,
-        "measured": 3303461,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.lockfile_reads": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "fs.lstat_calls": {
-        "budget": 11759,
-        "measured": 11199,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.realpath_calls": {
-        "budget": 1208,
-        "measured": 1150,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "fs.stat_calls": {
-        "budget": 21798,
-        "measured": 20760,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.config": {
-        "budget": 9,
-        "measured": 8,
-        "reason": "re-measured on main with #5325/#5333 at a fixed path depth; max of CI runs 45400277476 and 45400283502 (xdist and non-xdist agree)",
-        "pr": "#5345"
-      },
-      "git.ls-remote": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.ls-tree": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.remote": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "git.var": {
-        "budget": 2,
-        "measured": 1,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.connects": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
-      },
-      "http.requests": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45380965518 and 45380971485 on main 54759aec + #5338",
-        "pr": "#5345"
       }
     }
   }

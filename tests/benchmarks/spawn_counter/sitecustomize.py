@@ -28,6 +28,23 @@ if _LOG:
     def _bump(table, key, by=1):
         table[key] = table.get(key, 0) + by
 
+    def _split_command_line(text):
+        """Split a ``list2cmdline`` string (Windows) on spaces outside double quotes."""
+        parts, current, quoted, any_char = [], [], False, False
+        for char in text:
+            if char == '"':
+                quoted, any_char = not quoted, True
+            elif char in " \t" and not quoted:
+                if current or any_char:
+                    parts.append("".join(current))
+                current, any_char = [], False
+            else:
+                current.append(char)
+                any_char = True
+        if current or any_char:
+            parts.append("".join(current))
+        return parts
+
     def _git_verb(argv):
         rest = iter(argv[1:])
         for item in rest:
@@ -85,7 +102,7 @@ if _LOG:
                 _bump(_git_verbs, _git_verb(list(argv)))
             elif isinstance(argv, (str, bytes)):
                 text = argv.decode(errors="replace") if isinstance(argv, bytes) else argv
-                _bump(_git_verbs, _git_verb(text.split()))
+                _bump(_git_verbs, _git_verb(_split_command_line(text)))
 
     def _flush():
         record = {"pid": os.getpid(), "spawns": _counts, "modules": len(sys.modules)}
@@ -124,6 +141,11 @@ if _LOG:
                 _bump(_fs, key)
                 return real(*a, **k)
 
+            # Keep platform capability checks (``f in os.supports_dir_fd``) true.
+            for name in ("supports_dir_fd", "supports_fd", "supports_follow_symlinks"):
+                capabilities = getattr(os, name, None)
+                if capabilities is not None and real in capabilities:
+                    capabilities.add(wrapper)
             setattr(module, attr, wrapper)
 
         _counted(os.path, "realpath", "realpath_calls")
@@ -162,8 +184,7 @@ if _LOG:
         _real_new = hashlib.new
 
         def _new(name, *a, **k):
-            # hashlib.new(name, data): git object ids; hashlib.file_digest(f, "sha256")
-            # also builds its digest through the module's ``new``, then feeds it chunks.
+            # ``hashlib.file_digest`` also builds through the module's ``new``.
             _bump(_fs, "hash_objects")
             data = a[0] if a else k.get("data", k.get("string", b""))
             if data:
@@ -171,3 +192,30 @@ if _LOG:
             return _Hash(_real_new(name, *a, **k))
 
         hashlib.new = _new
+
+
+def _chain_next_sitecustomize():
+    """Run the next ``sitecustomize`` on ``sys.path`` (e.g. a test network guard).
+
+    Prepending this directory shadows it, and the counters must never drop
+    the isolation the measured environment installs.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    found_self = False
+    for entry in sys.path:
+        directory = os.path.abspath(entry or os.curdir)
+        if directory == here:
+            found_self = True
+            continue
+        candidate = os.path.join(directory, "sitecustomize.py")
+        if found_self and os.path.isfile(candidate):
+            import importlib.util
+
+            spec = importlib.util.spec_from_file_location("_chained_sitecustomize", candidate)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            return
+
+
+_chain_next_sitecustomize()

@@ -147,12 +147,28 @@ def test_the_hash_counters_see_hashlib_new_and_file_digest(tmp_path: Path) -> No
     assert counts["fs"]["hashed_bytes"] == 3 + 1000, counts["fs"]
 
 
-def test_cold_install_clones_and_fetches_while_noop_spawns_no_git_fetch(journey_runs) -> None:
-    """The counters see the work: a cold install clones over HTTP, a no-op does not."""
+def test_cold_install_fetches_while_noop_fetches_nothing(journey_runs) -> None:
+    """The counters see the work: a cold install fetches over HTTP, a no-op does not.
+
+    A cold install fetches in process (#5330): no ``git clone`` spawn, the work
+    shows as HTTP requests; a no-op spawns no clone and sends no request.
+    """
     (cold_run, _, cold), (noop_run, _, noop) = (
         journey_runs["install-cold"],
         journey_runs["install-noop"],
     )
     assert (cold_run.returncode, noop_run.returncode) == (0, 0), (cold_run.stderr, noop_run.stderr)
-    assert cold.get("git.clone", 0) > 0 and cold["http.requests"] > 0, cold
+    # Engagement oracle: if the in-process fetch stops engaging, clones come back.
+    assert cold.get("git.clone", 0) == 0 and cold["http.requests"] > 0, cold
     assert noop.get("git.clone", 0) == 0 and noop["http.requests"] == 0, noop
+
+
+def test_authenticated_cold_install_clones_with_git(journey_runs) -> None:
+    """The fallback half of the engagement oracle: a token never takes the in-process fetch.
+
+    ``inprocess_fetch._gate`` only admits a provably anonymous request, so an
+    authenticated cold install clones every package with git over HTTP.
+    """
+    cold_run, _, cold = journey_runs["install-cold-auth"]
+    assert cold_run.returncode == 0, cold_run.stderr
+    assert cold.get("git.clone", 0) > 0 and cold["http.requests"] > 0, cold
