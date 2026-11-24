@@ -232,3 +232,82 @@ def test_a_deeper_override_is_evaluated_by_state(tmp_path: Path) -> None:
     }
     _src, sha, objects, files = _plan_with(tmp_path, extra)
     assert _attributes_inert(objects, files, sha)
+
+
+def _commit_tree(src: Path, entries: list[tuple[str, str, bytes]]) -> str:
+    """A commit whose tree holds *entries* (mode, path, bytes), built with ``git mktree``.
+
+    ``git update-index`` refuses names such as ``.git``; ``mktree`` writes any name,
+    as a hostile server could.
+    """
+    tree: dict = {}
+    for mode, path, data in entries:
+        *dirs, leaf = path.split("/")
+        node = tree
+        for part in dirs:
+            node = node.setdefault(part, {})
+        blob = _git(src, "hash-object", "-w", "--stdin", stdin=data).decode().strip()
+        node[leaf] = (mode, blob)
+
+    def write(node: dict) -> str:
+        lines = []
+        for name, value in node.items():
+            if isinstance(value, dict):
+                lines.append(f"040000 tree {write(value)}\t{name}")
+            else:
+                lines.append(f"{value[0]} blob {value[1]}\t{name}")
+        listing = "\n".join(lines).encode("utf-8") + b"\n"
+        return _git(src, "mktree", stdin=listing).decode().strip()
+
+    return _git(src, "commit-tree", write(tree), "-m", "planted", stdin=b"").decode().strip()
+
+
+@pytest.mark.parametrize("nested", [".git", ".GIT", "git~1", ".git.", ".git\u200c"])
+def test_a_nested_git_directory_in_the_cone_sends_the_dep_to_git(
+    tmp_path: Path, nested: str
+) -> None:
+    """R1: directory names in the cone pass the same refusals as every written file."""
+    src, _sha = _repo(tmp_path)
+    sha = _commit_tree(
+        src,
+        [
+            ("100644", "packages/guide/apm.yml", b"name: guide\n"),
+            ("100644", f"packages/guide/{nested}/config", b"[core]\n\thooksPath = /tmp\n"),
+        ],
+    )
+    with pytest.raises(fetch._Refuse):
+        fetch._sparse_plan(_objects(src, sha), sha, ("packages/guide",))
+
+
+def test_a_cone_ancestor_with_an_unsafe_name_sends_the_dep_to_git(tmp_path: Path) -> None:
+    src, _sha = _repo(tmp_path)
+    sha = _commit_tree(src, [("100644", ".git/guide/apm.yml", b"name: guide\n")])
+    with pytest.raises(fetch._Refuse):
+        fetch._sparse_plan(_objects(src, sha), sha, (".git/guide",))
+
+
+def test_a_case_variant_of_the_cone_path_sends_the_dep_to_git(tmp_path: Path) -> None:
+    """R2: git folds case in cone matching under core.ignorecase, so PKG/ would be written."""
+    src, _sha = _repo(tmp_path)
+    sha = _commit_tree(
+        src,
+        [
+            ("100644", "packages/guide/apm.yml", b"name: guide\n"),
+            ("100644", "Packages/guide/extra.md", b"case variant\n"),
+        ],
+    )
+    with pytest.raises(fetch._Refuse):
+        fetch._sparse_plan(_objects(src, sha), sha, ("packages/guide",))
+
+
+def test_an_unsafe_name_outside_the_cone_does_not_matter(tmp_path: Path) -> None:
+    src, _sha = _repo(tmp_path)
+    sha = _commit_tree(
+        src,
+        [
+            ("100644", "packages/guide/apm.yml", b"name: guide\n"),
+            ("100644", "elsewhere/.GIT/config", b"x\n"),
+        ],
+    )
+    files, _ = fetch._sparse_plan(_objects(src, sha), sha, ("packages/guide",))
+    assert [rel for rel, _, _ in files] == ["packages/guide/apm.yml"]
