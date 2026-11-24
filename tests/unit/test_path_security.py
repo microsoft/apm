@@ -420,3 +420,36 @@ def test_a_junctioned_base_itself_is_not_flagged(tmp_path) -> None:
     _winapi.CreateJunction(str(real), str(base))
 
     assert has_symlink_component(base, base / "agents" / "a.md") is False
+
+
+def _reparse_stat(tag: int):
+    """A directory lstat result carrying a reparse point with *tag* (Windows fields)."""
+    import stat
+    from types import SimpleNamespace
+
+    return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400, st_reparse_tag=tag)
+
+
+@pytest.mark.parametrize(
+    ("tag", "linked"),
+    [(0xA000001D, True), (0xA0000003, True), (0x9000001A, False)],
+    ids=["lx-symlink", "junction", "data-only-cloud-file"],
+)
+def test_a_name_surrogate_reparse_point_below_the_base_counts_as_a_link(
+    tmp_path, monkeypatch, tag: int, linked: bool
+) -> None:
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(tag) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / "a.md") is linked
