@@ -49,6 +49,18 @@ def test_schannel_spelled_otherwise_falls_back(on_windows) -> None:
         arl._verify({}, {"http.sslbackend": "Schannel", "http.sslcainfo": "/ca.pem"})
 
 
+@pytest.mark.parametrize("version", ["0.10.4", "0.9.2", "dev", ""])
+def test_a_truststore_without_the_handshake_lock_falls_back(
+    on_windows, monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
+    """W3d TS2: a stale environment's truststore (< 0.10.5 or unknown) is git's."""
+    import truststore
+
+    monkeypatch.setattr(truststore, "__version__", version)
+    with pytest.raises(arl._Fallback, match="truststore"):
+        arl._verify({}, {"http.sslbackend": "schannel"})
+
+
 def test_schannel_off_windows_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("os.name", "posix")
     with pytest.raises(arl._Fallback, match="outside Windows"):
@@ -81,7 +93,7 @@ def test_truststore_is_new_enough() -> None:
     import truststore
 
     version = tuple(int(part) for part in truststore.__version__.split(".")[:3])
-    assert version >= (0, 10, 4)  # SC3
+    assert version >= (0, 10, 5)  # SC3; 0.10.5 locks handshake + verify per context
 
 
 def test_one_os_trust_session_per_command_dropped_after_user_code() -> None:

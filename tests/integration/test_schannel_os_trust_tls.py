@@ -178,23 +178,28 @@ def _tls_peer(leaf: Path, key: Path) -> Iterator[tuple[int, list[bytes]]]:
     listener = socket.create_server(("127.0.0.1", 0))
     received = _Seen()
 
+    def answer(conn: socket.socket) -> None:
+        try:
+            with conn:
+                conn.settimeout(30)
+                with server_context.wrap_socket(conn, server_side=True) as tls:
+                    if chunk := tls.recv(4096):
+                        received.append(chunk)
+                        tls.sendall(b"HTTP/1.1 204 No Content\r\n\r\n")
+                    else:
+                        received.faults.append("eof before any request byte")
+        except OSError as exc:
+            received.faults.append(repr(exc))
+
     def serve() -> None:
+        # One thread per connection: clients that queue on a handshake lock
+        # must not hold up the one the server is answering.
         while True:
             try:
                 conn, _ = listener.accept()
             except OSError:
                 return
-            try:
-                with conn:
-                    conn.settimeout(30)
-                    with server_context.wrap_socket(conn, server_side=True) as tls:
-                        if chunk := tls.recv(4096):
-                            received.append(chunk)
-                            tls.sendall(b"HTTP/1.1 204 No Content\r\n\r\n")
-                        else:
-                            received.faults.append("eof before any request byte")
-            except OSError as exc:
-                received.faults.append(repr(exc))
+            threading.Thread(target=answer, args=(conn,), daemon=True).start()
 
     threading.Thread(target=serve, daemon=True).start()
     try:
@@ -278,3 +283,49 @@ def test_a_slow_crl_distribution_point_is_waited_for(tmp_path: Path) -> None:
 
     assert fetched, "the revocation check fetched the CRL"
     assert fetched[0] - started >= _SLOW_CRL_SECONDS, "the slow answer was waited for"
+
+
+def test_concurrent_handshakes_on_one_context_never_accept_an_untrusted_peer(
+    tmp_path: Path,
+) -> None:
+    """One shared context, trusted and untrusted handshakes racing: every untrusted one refuses.
+
+    truststore relaxes the shared inner context while a handshake runs; a
+    verification racing that window must still see the strict context.
+    """
+    root, leaf, key = _mint(tmp_path / "trusted", "github.com")
+    _rogue_root, rogue_leaf, rogue_key = _mint(tmp_path / "rogue", "github.com")
+    context = _anchored(root, revocation=False)
+    outcomes: list[tuple[str, str]] = []
+    lock = threading.Lock()
+
+    with (
+        _tls_peer(leaf, key) as (port, _received),
+        _tls_peer(rogue_leaf, rogue_key) as (rogue_port, rogue_received),
+    ):
+
+        def attempt(kind: str, target: int) -> None:
+            try:
+                _handshake(context, target)
+                outcome = "accepted"
+            except ssl.SSLError:
+                outcome = "refused"
+            except OSError as exc:
+                outcome = repr(exc)
+            with lock:
+                outcomes.append((kind, outcome))
+
+        threads = [
+            threading.Thread(target=attempt, args=("trusted", port))
+            if i % 2
+            else threading.Thread(target=attempt, args=("rogue", rogue_port))
+            for i in range(16)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(60)
+        _assert_peer_saw(rogue_received, request=False)
+
+    assert sorted(set(outcomes)) == [("rogue", "refused"), ("trusted", "accepted")], outcomes
+    assert len(outcomes) == 16

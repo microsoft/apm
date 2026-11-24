@@ -275,7 +275,24 @@ def _schannel_trust() -> str:
     """
     if os.name != "nt":
         raise _Fallback("schannel outside Windows")
+    _require_locked_truststore()
     return OS_TRUST
+
+
+_TRUSTSTORE_FLOOR = (0, 10, 5)
+
+
+def _require_locked_truststore() -> None:
+    """W3d TS2: truststore < 0.10.5 can verify while a concurrent handshake has
+    relaxed the shared context, so an older or unknown version is git's."""
+    import truststore
+
+    try:
+        version = tuple(int(part) for part in str(truststore.__version__).split(".")[:3])
+    except (AttributeError, ValueError):
+        raise _Fallback("truststore version is unknown") from None
+    if version < _TRUSTSTORE_FLOOR:
+        raise _Fallback(f"truststore {truststore.__version__} predates the 0.10.5 lock")
 
 
 def requests_verify(ca: str) -> str | bool:

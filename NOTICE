@@ -372,7 +372,7 @@ Copyright 2019 Kenneth Reitz
 
 ## Component. truststore
 
-- Version requirement: `>=0.10.4`
+- Version requirement: `>=0.10.5`
 - Upstream: https://github.com/sethmlarson/truststore
 - SPDX: `MIT`
 - Notes: Verifies HTTPS against the operating-system trust store by default so `apm` works behind a corporate CA / TLS-inspecting proxy.
