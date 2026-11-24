@@ -29,7 +29,7 @@ from apm_cli.install.hook_script_refs import (
     script_refs,
     script_tails,
 )
-from apm_cli.install.local_bundle_hook_cwd import runs_through_cwd
+from apm_cli.install.local_bundle_hook_cwd import commands_without_cwd, runs_through_cwd
 from apm_cli.install.local_bundle_hook_states import (
     _merged_hook_documents,
     _merged_hook_states,
@@ -596,7 +596,7 @@ def _per_file_configs_running(
                 any(tail in text.replace("\\", "/") for text in texts for tail in tails)
                 or any(
                     runs_script(text, refs, (project_root, target_root), project_root)
-                    for text in texts
+                    for text in commands_without_cwd(document, texts)
                 )
                 or runs_through_cwd(document, project_root, scripts)
             ):
