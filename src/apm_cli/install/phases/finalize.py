@@ -247,7 +247,22 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
         return
 
     if ctx.logger:
+        if routed_to_agents_md:
+            ctx.logger.warning(uncompiled_instructions_warning(sorted(routed)))
         ctx.logger.info(_project_compile_hint(target_names, families, "installed"), symbol="info")
+
+
+def uncompiled_instructions_warning(names: list[str]) -> str:
+    """Name routed instructions Claude Code has no copy of yet (#5344)."""
+    from apm_cli.core.remediation import CLAUDE_INSTRUCTIONS_UNCOMPILED
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    shown = ", ".join(printable_ascii_text(name) for name in names)
+    return (
+        f"Claude Code does not load {shown} yet: they route to AGENTS.md and no "
+        f"compiled file carries them. {CLAUDE_INSTRUCTIONS_UNCOMPILED.sentence()} "
+        "Or narrow their applyTo to keep them in .claude/rules/."
+    )
 
 
 @dataclass(frozen=True)

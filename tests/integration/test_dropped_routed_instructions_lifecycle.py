@@ -1,4 +1,4 @@
-"""APMLifecycle: an instruction routed to AGENTS.md is never dropped silently (#5343).
+"""APMLifecycle: an instruction routed to AGENTS.md is never dropped silently (#5344).
 
 PROMISE: P-INV-I7 -- with targets [claude, copilot] and no ``apm compile``,
 an always-on or single-directory instruction routes to the compiled

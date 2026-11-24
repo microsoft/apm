@@ -23,6 +23,7 @@ from ..core import remediation
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from ..core.remediation import DEPLOYED_FILES_MISSING, LOCKFILE_MISSING, ORPHANED_PACKAGES
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
+from .claude_instructions_check import check_claude_instructions_compiled
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
@@ -2054,6 +2055,19 @@ def run_baseline_checks(
                     else project_root / APM_MODULES_DIR
                 ),
                 policy_provider=policy_provider,
+            )
+        )
+        # 8e: an instruction routed to AGENTS.md has a compiled copy Claude loads (#5344)
+        or _run(
+            check_claude_instructions_compiled(
+                project_root,
+                resolved_targets,
+                user_scope=user_scope,
+                modules_root=(
+                    prepared_replay.modules_root
+                    if prepared_replay is not None
+                    else project_root / APM_MODULES_DIR
+                ),
             )
         )
     ):
