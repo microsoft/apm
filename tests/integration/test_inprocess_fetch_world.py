@@ -2,7 +2,7 @@
 
 F12: a cold ``apm install`` of the tree-10 offline mirror (TLS through the
 world's proxy) with the in-process fetch engaged, and again with git forced
-by an inert global attributes file, must produce identical lockfiles,
+(APM_NO_INPROCESS_FETCH=1), must produce identical lockfiles,
 deployed bytes and deploy-store receipts. The hit-rate cell installs under a
 realistic user git config and reports how many packages were fetched in
 process. The rate-limit cells prove the fetch never moves a user to another
@@ -12,7 +12,6 @@ sends the rest of the command to git with the same lockfile.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -28,6 +27,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.windows_compat,
     pytest.mark.promise("P-OWN-git-transport-selection"),
 ]
 
@@ -82,13 +82,6 @@ def _receipts(cache_dir: Path) -> list[dict]:
     return sorted((load_yaml(path)["files"] for path in records), key=repr)
 
 
-def _global_attributes(env: dict[str, str]) -> Path:
-    xdg = env.get("XDG_CONFIG_HOME")
-    home = env.get("HOME") or env.get("USERPROFILE")
-    assert xdg or home, "the world names a config home"
-    return Path(xdg) / "git" / "attributes" if xdg else Path(home) / ".config/git/attributes"
-
-
 def test_in_process_and_git_installs_are_byte_identical(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -100,17 +93,10 @@ def test_in_process_and_git_installs_are_byte_identical(
         engaged = _install(apm_binary_path, fast, env)
         fast_receipts = _receipts(world.cache_dir)
 
-        # An empty global attributes file changes no bytes but makes the fetch refuse.
-        attributes = _global_attributes(env)
-        attributes.parent.mkdir(parents=True, exist_ok=True)
-        attributes.write_bytes(b"")
-        try:
-            world.clear_cache()
-            slow = tmp_path / "git"
-            shutil.copytree(tree.project, slow)
-            forced = _install(apm_binary_path, slow, env)
-        finally:
-            os.unlink(attributes)
+        world.clear_cache()
+        slow = tmp_path / "git"
+        shutil.copytree(tree.project, slow)
+        forced = _install(apm_binary_path, slow, {**env, "APM_NO_INPROCESS_FETCH": "1"})
         git_receipts = _receipts(world.cache_dir)
 
         assert engaged == len(tree.packages) == 10
