@@ -349,3 +349,42 @@ def test_differently_cased_root_aliases_are_resolved_separately(tmp_path: Path):
 
     assert list(linked.iterdir()) == []
     assert list((outside / "elsewhere").iterdir()) == []
+
+
+@pytest.mark.windows_compat
+def test_root_alias_ancestor_is_resolved_afresh_for_each_output(tmp_path: Path, monkeypatch):
+    """A resolution reused across outputs could skip the check for a distinct alias.
+
+    On Windows, ``alias`` and ``ALIAS`` are equal Path keys while able to name
+    different links. The same reuse is simulated here hermetically: one alias
+    spelling resolves outside the project first, then into it.
+    """
+    import apm_cli.compilation.output_writer as ow
+
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    alias = tmp_path / "alias"
+    answers = iter((outside, project.resolve()))
+    real_resolve = Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if self == alias:
+            return next(answers)
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    checked: list[Path] = []
+
+    def linked(base: Path, path: Path, **kwargs):
+        checked.append(path)
+        return True
+
+    monkeypatch.setattr(ow, "has_symlink_component", linked)
+    outputs = {alias / "elsewhere" / "x.md": "# x\n", alias / ".github" / "y.md": "# y\n"}
+
+    with pytest.raises(OSError, match=r"symlinked path component: \.github/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert checked == [alias / ".github"]
+    assert not alias.exists()
