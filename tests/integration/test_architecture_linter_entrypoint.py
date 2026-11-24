@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 from typing import NamedTuple
@@ -55,7 +56,7 @@ pytestmark = [
 
 ROOT = Path(__file__).resolve().parents[2]
 SHELL_SCRIPT = ROOT / "scripts" / "lint-architecture-boundaries.sh"
-# One full lint of the real repository, per subprocess. On a busy integration shard
+# One full lint of the real repository (the clean fixture runs its two side by side). On a busy integration shard
 # the clean fixture's two back-to-back runs took 207-359 s together (median ~259 s)
 # across 10 green Integration runs on 2026-11-23 (e.g. 45277522250: 206.97 s,
 # 45277769531: 359.11 s), so one run reaches ~180 s at p95: about 2x that (#5179).
@@ -93,6 +94,29 @@ class CleanShellRun(NamedTuple):
     inventory_after: tuple[str, ...]
 
 
+def _run_concurrently(*commands: list[str]) -> list[subprocess.CompletedProcess[str]]:
+    """Run *commands* at once from the repo root; each must finish within the cap."""
+    deadline = time.monotonic() + _FULL_RUN_TIMEOUT
+    processes = [
+        subprocess.Popen(
+            command, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        for command in commands
+    ]
+    results: list[subprocess.CompletedProcess[str]] = []
+    try:
+        for command, process in zip(commands, processes, strict=True):
+            remaining = max(deadline - time.monotonic(), 0.0)
+            stdout, stderr = process.communicate(timeout=remaining)
+            results.append(subprocess.CompletedProcess(command, process.returncode, stdout, stderr))
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+    return results
+
+
 @pytest.fixture(scope="module")
 def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
     """Run the stable wrapper and the direct metrics CLI against the real repo.
@@ -102,15 +126,11 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
     """
     metrics_path = tmp_path_factory.mktemp("clean-shell-metrics") / "metrics.json"
     inventory_before = build_inventory(ROOT).files
-    result = subprocess.run(
+    # Both full lints run side by side: on a busy shard, back to back they took
+    # 300-330 s together against the per-run cap (#5179); each keeps its own
+    # process, temp spill directory and output, and every assertion is unchanged.
+    result, metrics_result = _run_concurrently(
         ["bash", str(SHELL_SCRIPT)],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=_FULL_RUN_TIMEOUT,
-    )
-    metrics_result = subprocess.run(
         [
             sys.executable,
             str(ROOT / "scripts" / "lint_architecture_boundaries.py"),
@@ -119,11 +139,6 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
             "--metrics-json",
             str(metrics_path),
         ],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=_FULL_RUN_TIMEOUT,
     )
     # Snapshot the tree right after the run: tests on other xdist workers keep
     # creating files, so a re-walk minutes later can drift from the linted tree.
