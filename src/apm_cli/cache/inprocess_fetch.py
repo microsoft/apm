@@ -457,23 +457,21 @@ _PROBE_URL = "https://github.com/apm/probe"
 
 
 def _config_stamp(paths: tuple[str, ...]) -> tuple | None:
-    """SHA-256 identity of every config file git reads; ``None`` when an include could add more."""
-    import hashlib
+    """The #5283 content identity of *paths* (absent files stamp as absent); ``None`` on an include (G2/G3)."""
+    from ..utils import git_config_memo
 
-    stamp = []
-    for path in paths:
-        try:
-            with open(path, "rb") as handle:
-                data = handle.read()
-        except FileNotFoundError:
-            stamp.append((path, None))
-            continue
-        except OSError:
-            return None
-        if b"include" in data.lower():
-            return None
-        stamp.append((path, hashlib.sha256(data).hexdigest()))
-    return tuple(stamp)
+    stamp = git_config_memo.fingerprint(paths)
+    if stamp is None:
+        return None
+    for path, exists, _size, _digest in stamp:
+        if exists:
+            try:
+                with open(path, "rb") as handle:
+                    if b"include" in handle.read().lower():
+                        return None
+            except OSError:
+                return None
+    return stamp
 
 
 def _config_paths(env: Mapping[str, str]) -> tuple[str, ...] | None:
@@ -500,26 +498,52 @@ def _config_paths(env: Mapping[str, str]) -> tuple[str, ...] | None:
     return paths
 
 
-def _network_env(env: Mapping[str, str]) -> dict[str, str]:
-    """``git_network_env`` for the probe URL, kept for one command while its config files are unchanged.
+def _binary_identity(git: str) -> tuple | None:
+    try:
+        info = os.stat(git)
+    except OSError:
+        return None
+    return (git, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
 
-    Same rule as the #5283 config memo: the key is the exact input env, every
-    config file git reads (child and parent env) is re-hashed on each lookup,
-    and any include disables keeping. Only the frozen env is kept; the caller
-    classifies it on every call. Single-flight, so racing workers probe once.
+
+def _config_env(*envs: Mapping[str, str]) -> bool:
+    """Whether config carried in GIT_CONFIG_* env names an include (G3: then nothing is kept)."""
+    for env in envs:
+        if "include" in (env.get("GIT_CONFIG_PARAMETERS") or "").lower():
+            return True
+        for name, value in env.items():
+            if name.startswith("GIT_CONFIG_KEY_") and value.lower().startswith(
+                ("include.", "includeif.")
+            ):
+                return True
+    return False
+
+
+def _network_env(env: Mapping[str, str]) -> dict[str, str]:
+    """``git_network_env`` for the probe URL, kept for one command while nothing it read changed.
+
+    W3d G1-G4: the key is the URL, the input env, the process env (the parent
+    config read) and the git binary's identity; every config file git reads
+    (child and parent env) is re-stamped on each lookup with the #5283
+    fingerprint; an include, or config carried in GIT_CONFIG_* env, disables
+    keeping. Only the frozen env is kept: the caller classifies it, checks
+    rewrites, fallback env, allowed protocols and trust on every call.
+    Single-flight, so racing workers probe once.
     """
     from ..core.invocation_memo import invocation_memo
-    from ..utils.git_env import git_network_env, git_subprocess_env
+    from ..utils.git_env import get_git_executable, git_network_env, git_subprocess_env
 
     memo = invocation_memo(_NETWORK_ENV_MEMO)
-    if memo is None:
+    parent_env = git_subprocess_env()
+    binary = _binary_identity(get_git_executable())
+    if memo is None or binary is None or _config_env(env, os.environ):
         return git_network_env(_PROBE_URL, dict(env))
-    key = tuple(sorted(env.items()))
+    key = (_PROBE_URL, tuple(sorted(env.items())), tuple(sorted(os.environ.items())), binary)
     with _network_env_lock:
         paths = memo.get(("paths", key))
         if paths is None:
             child = _config_paths(env)
-            parent = _config_paths(git_subprocess_env())
+            parent = _config_paths(parent_env)
             if child is None or parent is None:
                 return git_network_env(_PROBE_URL, dict(env))
             paths = tuple(sorted({*child, *parent}))
@@ -615,10 +639,6 @@ def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str,
     return f"https://github.com{path}/git-upload-pack", proxy, trust
 
 
-_ATTR_MEMO = "inprocess-fetch-attribute-sources"
-_attr_lock = threading.Lock()
-
-
 def _inert_attributes(path: str) -> bool:
     """W4: whether an attributes file holds only tokens that never change checkout bytes.
 
@@ -673,21 +693,32 @@ def _attribute_files(child_env: Mapping[str, str], entries) -> list[tuple[str, s
     return files
 
 
-_system_paths: dict[str, str] = {}
+_system_paths: dict[tuple, str] = {}
 _system_paths_lock = threading.Lock()
 
 
 def _system_attributes_path(child_env: Mapping[str, str]) -> str:
-    """Where this git build reads system attributes: a property of the binary, kept per binary."""
+    """Where this git build reads system attributes (W3d G5: the path string only).
+
+    Kept per (git binary identity, attribute env); a failed probe is never
+    kept; the file's content is checked by the caller on every call.
+    """
     from ..utils.git_env import get_git_executable
 
     git = get_git_executable()
-    # Single-flight: one probe per git binary per process, also on the fallback path.
-    with _system_paths_lock:
-        known = _system_paths.get(git)
-        if known is None:
-            known = _probe_system_attributes(git, child_env)
-            _system_paths[git] = known
+    key = (
+        _binary_identity(git),
+        child_env.get("GIT_ATTR_NOSYSTEM"),
+        child_env.get("PREFIX"),
+    )
+    known = _system_paths.get(key)
+    if known is None:
+        with _system_paths_lock:
+            known = _system_paths.get(key)
+            if known is None:
+                known = _probe_system_attributes(git, child_env)
+                if known and key[0] is not None:
+                    _system_paths[key] = known
     if not known:
         raise _Refuse("system attributes path unknown (git var GIT_ATTR_SYSTEM)")
     if os.name == "nt" and known.startswith("/"):
@@ -713,34 +744,10 @@ def _probe_system_attributes(git: str, child_env: Mapping[str, str]) -> str:
 
 
 def _require_inert_attributes(child_env: Mapping[str, str], entries) -> None:
-    from ..core.invocation_memo import invocation_memo
-
-    # Kept for one command only (dropped after lifecycle scripts); no memo outside one.
-    memo = invocation_memo(_ATTR_MEMO)
-    fingerprint = tuple(sorted(child_env.items()))
-    verdict = ""
-    if memo is not None:
-        with _attr_lock:
-            verdict = memo.get(fingerprint, "")
-    if verdict == "":
-        try:
-            verdict = next(
-                (
-                    f"{source} {path} has a checkout-affecting attribute"
-                    for source, path in _attribute_files(child_env, entries)
-                    if os.path.lexists(path) and not _inert_attributes(path)
-                ),
-                None,
-            )
-        except _Refuse as reason:
-            verdict = str(reason)
-        except Exception as exc:
-            verdict = f"attributes probe failed: {type(exc).__name__}"
-        if memo is not None:
-            with _attr_lock:
-                memo[fingerprint] = verdict
-    if verdict is not None:
-        raise _Refuse(verdict)
+    """Every attributes file outside the commit is re-read and checked on every call (G5)."""
+    for source, path in _attribute_files(child_env, entries):
+        if os.path.lexists(path) and not _inert_attributes(path):
+            raise _Refuse(f"{source} {path} has a checkout-affecting attribute")
 
 
 _BREAKER_MEMO = "inprocess-fetch-rate-limited"
