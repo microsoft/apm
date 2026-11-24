@@ -69,7 +69,9 @@ _UNGATED_EXECUTABLE_WRITES = {
         "HookIntegrator._clean_apm_source_from_json": frozenset(
             {("atomic_write_text", "json_path")}
         ),
-        # Same cleanup; the JSON replaces the config through the seam with its hash (#4863).
+        # Exactly this one call (#5181): the cleaned JSON replaces the config through
+        # write_seam.atomic_write_text inside provenance.recorded_config_write, whose
+        # record (#5009) and the seam's journal hash (#4863) are the overwrite evidence.
         "HookIntegrator._clean_apm_entries_from_json": frozenset(
             {("atomic_write_text", "json_path")}
         ),
