@@ -1288,7 +1288,7 @@ def _check_unmanaged_files(
                     cap_hit = True
                     break
                 rel = file_path.relative_to(project_root).as_posix()
-                if rel in deployed or (dir_prefix_tuple and rel.startswith(dir_prefix_tuple)):
+                if (rel in deployed or rel.startswith(dir_prefix_tuple)) and file_path.is_file():
                     continue
                 if first_matching_pattern(rel, exclude) is not None:
                     continue
