@@ -42,31 +42,36 @@ def render_bundle_rule(
     rule format applies or it is already a native rule (a Claude rule named
     ``py.instructions.md`` keeps its ``paths:``). Decoded frontmatter passes
     the instruction owner's hidden-character preflight first, so a rule it
-    rejects is skipped (``force`` allows it, as for source installs).
+    rejects is skipped (``force`` allows it, as for source installs). A
+    file that is not UTF-8 text is skipped, never copied as packed.
     """
-    if text is None or rule_format is None:
+    if rule_format is None:
         return text, False
     import yaml
 
     from ..integration.instruction_integrator import InstructionIntegrator
 
-    try:
-        metadata, _body = InstructionIntegrator._parse_frontmatter(text)
-        if InstructionIntegrator.decoded_frontmatter_blocked(
-            metadata,
-            record,
-            record.rsplit("/", 1)[-1],
-            force=force,
-            diagnostics=diagnostics,
-            package_name=package_name,
-        ):
-            reason = "its decoded frontmatter contains critical hidden Unicode characters"
-        elif InstructionIntegrator.is_native_rule(text):
-            return text, False
-        else:
-            return InstructionIntegrator.convert_rule_content(text, rule_format), False
-    except yaml.YAMLError:
-        reason = "its instruction frontmatter is not valid YAML"
+    if text is None:
+        # A converted file is never copied as packed, so undecodable text is skipped.
+        reason = "it is not valid UTF-8 text"
+    else:
+        try:
+            metadata, _body = InstructionIntegrator._parse_frontmatter(text)
+            if InstructionIntegrator.decoded_frontmatter_blocked(
+                metadata,
+                record,
+                record.rsplit("/", 1)[-1],
+                force=force,
+                diagnostics=diagnostics,
+                package_name=package_name,
+            ):
+                reason = "its decoded frontmatter contains critical hidden Unicode characters"
+            elif InstructionIntegrator.is_native_rule(text):
+                return text, False
+            else:
+                return InstructionIntegrator.convert_rule_content(text, rule_format), False
+        except yaml.YAMLError:
+            reason = "its instruction frontmatter is not valid YAML"
     message = (
         f"Skipped {record}: {reason}. Fix the frontmatter in the source package and pack again."
     )

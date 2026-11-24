@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from tests.lifecycle.machines._kit import Bench, KnownCell, Step, StepRunner
+from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
@@ -46,9 +46,9 @@ _KEEPING = ("lock", "compile", "audit", "update")
 _REMOVING = ("uninstall", "prune")
 # Commands that, right after a converged install, must change no byte at all (I2).
 _CONVERGED = ("lock", "audit", "update")
-# Strict known cells found on main: (op, prim) -> owning issue. An orphan prune keeps
-# the pruned package's LSP server registration until the next install (#5250).
-KNOWN: dict[tuple[str, str], str] = {("prune", "lsp"): "#5250"}
+# Strict known cells found on main: (op, prim) -> owning issue. None today: the orphan
+# prune that kept the LSP server registration (#5250) is fixed, so the cell is required.
+KNOWN: dict[tuple[str, str], str] = {}
 _KNOWN_LEFT = f"{PACKAGE}/lsp/copilot"
 KNOWN_IDS: dict[str, str] = {f"SK|{op}|{FORM}|{prim}": issue for (op, prim), issue in KNOWN.items()}
 
@@ -74,15 +74,7 @@ class SourceKit(StepRunner):
         self.state = KitState()
         self.credited: set[str] = set()
         self._op = ""
-        self.known = (
-            KnownCell(
-                f"SK|prune|{FORM}|lsp",
-                "I4",
-                "#5250",
-                f"{_KNOWN_LEFT} still deployed but not allowed",
-                lambda *_args: self._op == "prune",
-            ),
-        )
+        self.known = ()
 
     def run(self, op: str, *words: str) -> None:
         """Run one command, check I1-I9 and its outcome, credit its id, then advance."""
@@ -116,7 +108,7 @@ class SourceKit(StepRunner):
         after = set(step.after.deployed)
         wanted = {"/".join(c) for c in expected_deployed(requested.model(), KINDS)}
         if (op, "lsp") in KNOWN:
-            # Strict: the moment #5250 is fixed this fails; flip the cell to required.
+            # Strict: the moment the tracked issue is fixed this fails; flip the cell.
             assert _KNOWN_LEFT in after, f"{op} now removes the LSP server: drop KNOWN"
             after.discard(_KNOWN_LEFT)
         assert after == wanted, f"{op}: deployed {sorted(after)}, model {sorted(wanted)}"
