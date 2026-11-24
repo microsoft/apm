@@ -258,11 +258,14 @@ def test_attributes_are_read_from_the_checkout_env(world: Path) -> None:
     _assert_left_to_git(staged, sha, env=env)
 
 
+@pytest.mark.parametrize("swap", ["dir", "link"])
 def test_a_parent_swapped_during_the_writes_is_discarded(
-    world: Path, monkeypatch: pytest.MonkeyPatch
+    world: Path, monkeypatch: pytest.MonkeyPatch, swap: str
 ) -> None:
-    """W3d R3 (C8 seal): a directory replaced after mkdir, while files are written,
-    leaves only .git, so git checks out instead."""
+    """W3d R3 (C8 seal): a directory replaced after mkdir, by a new directory or by a
+    link out of the staged root, while files are written, leaves only .git."""
+    if swap == "link" and os.name == "nt":
+        pytest.skip("symlink creation needs privileges on Windows")
     src, sha = _source(world)
     _bare, staged = _staged(world, src)
     real_open = os.open
@@ -271,7 +274,10 @@ def test_a_parent_swapped_during_the_writes_is_discarded(
     def racing_open(path, flags, mode=0o777, **kwargs):
         if not swapped and os.path.dirname(os.fspath(path)) == str(staged / "dir"):
             os.rename(staged / "dir", world / "moved")
-            (staged / "dir" / "sub").mkdir(parents=True)
+            if swap == "link":
+                os.symlink(world / "moved", staged / "dir")
+            else:
+                (staged / "dir" / "sub").mkdir(parents=True)
             swapped.append(os.fspath(path))
         return real_open(path, flags, mode, **kwargs)
 
