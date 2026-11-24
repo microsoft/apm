@@ -232,6 +232,7 @@ _apm_owner = collections.Counter()
 _leaf_owner = collections.Counter()
 _realpath_calls = collections.Counter()
 _realpath_where = collections.Counter()
+_stat_calls = collections.Counter()
 _leaf_kind = collections.Counter()
 
 # Native-core gate categories, by the innermost Python frame (C calls such as
@@ -443,6 +444,8 @@ def _report(out: str, wall: float, exit_code) -> None:
         "realpath_calls_by_apm_owner": top(_realpath_calls, 60),
         "realpath_calls_total": sum(_realpath_calls.values()),
         "realpath_calls_by_where_owner": top(_realpath_where, 120),
+        "stat_calls_total": sum(_stat_calls.values()),
+        "stat_calls_by_kind_where_owner": top(_stat_calls, 150),
     }
     with open(out, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=1)
@@ -490,6 +493,32 @@ def _count_realpath() -> None:
         _realpath_calls[owner] += 1
         _realpath_where[f"{where_class(path)} <- {owner}"] += 1
         return original(path, *args, **kwargs)
+
+    def make_stat_counter(name, fn):
+        def counted_stat(path, *args, **kwargs):
+            frame, owner, depth = sys._getframe(1), "<no apm frame>", 0
+            while frame is not None and depth < 60:
+                where = _where(frame.f_code)
+                if where.startswith("apm_cli/"):
+                    owner = f"{where}:{frame.f_code.co_name}"
+                    break
+                frame, depth = frame.f_back, depth + 1
+            _stat_calls[f"{name} | {where_class(path)} <- {owner}"] += 1
+            return fn(path, *args, **kwargs)
+
+        return counted_stat
+
+    import genericpath
+    import ntpath
+    import posixpath
+
+    os.stat = make_stat_counter("stat", os.stat)
+    os.lstat = make_stat_counter("lstat", os.lstat)
+    for module in (ntpath, posixpath, genericpath):
+        for fname in ("exists", "lexists", "isdir", "isfile", "islink"):
+            fn = getattr(module, fname, None)
+            if fn is not None:
+                setattr(module, fname, make_stat_counter(fname, fn))
 
     os.path.realpath = counted
     import pathlib
