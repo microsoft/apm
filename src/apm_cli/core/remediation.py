@@ -1012,9 +1012,8 @@ PROTOCOL_FALLBACK_DISALLOWED = _entry(
 CLAUDE_AGENTS_MD_BLOCKED = _entry(
     "claude-agents-md-blocked",
     "apm install",
-    "move always-on and directory instructions from .claude/rules/ into AGENTS.md",
+    "retire the .claude/rules/ copies a compiled AGENTS.md already carries",
     before="{fix}",
-    then="run 'apm compile'",
 )
 CLAUDE_DIRECTORY_INSTRUCTION_SINGLE_FILE = _entry(
     "claude-directory-instruction-single-file",
@@ -1577,11 +1576,6 @@ CODEX_NATIVE_LOOSE_FILES = _entry(
     before="preserve or relocate your edits and resolve the cleanup conflicts",
 )
 ROOT_CONTEXT_COMPILE = _entry("root-context-compile", "apm compile", "update {outputs}")
-CLAUDE_INSTRUCTIONS_UNCOMPILED = _entry(
-    "claude-instructions-uncompiled",
-    "apm compile",
-    "write the AGENTS.md Claude Code loads them from",
-)
 USER_ROOT_CONTEXT_COMPILE = _entry(
     "user-root-context-compile", "apm compile -g", "update root context files for {targets}"
 )

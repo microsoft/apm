@@ -284,6 +284,7 @@ def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tall
     "vacuous", never "converged".
     """
     settled = _graph_rows(project)
+    tally["lock_before"] = load_yaml(project / "apm.lock.yaml")
     if exempt.unchanged:
         # Prune removed nothing and wrote no lock: the rows are the last
         # install's, not prune's to repair (#5126 repairs after a removal).
@@ -292,6 +293,7 @@ def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tall
     clear_apm_yml_cache()
     resolved = _run(project, "install", "--no-frozen")
     after = _graph_rows(project)
+    tally["lock_after"] = load_yaml(project / "apm.lock.yaml")
     if resolved.exit_code != 0:
         return f"seed {seed}: install --no-frozen after prune failed: {resolved.output[:500]}"
     if rekeyed:
@@ -338,14 +340,17 @@ def _check_seed(
     graph.roots.remove(dropped)
     _write_project(project, graph)
     # One manifest loses an edge: the planted top its chain edge, else any.
+    edited_manifest = None
     if graph.motif:
         top, child = graph.motif
         graph.edges[top] = [edge for edge in graph.edges[top] if edge[0] != child]
         _write_package(vendor, graph, top)
+        edited_manifest = top
     elif edited := [name for name in graph.names if graph.edges[name]]:
         parent = rng.choice(edited)
         graph.edges[parent].pop(rng.randrange(len(graph.edges[parent])))
         _write_package(vendor, graph, parent)
+        edited_manifest = parent
     # Sometimes apm.yml now declares a transitive survivor directly.
     promotable = sorted(_needed(graph) - set(graph.roots))
     promoted = rng.choice(promotable) if promotable and rng.random() < 0.3 else None
@@ -383,6 +388,7 @@ def _check_seed(
         unchanged=lock_before == (project / "apm.lock.yaml").read_bytes(),
     )
     tally = {} if tally is None else tally
+    tally["edited"] = edited_manifest
     return _converges(seed, project, exempt, rekeyed=rekeyed, tally=tally), removed
 
 
@@ -468,3 +474,135 @@ def test_prune_converges_on_graphs_install_rekeys(
 
     assert not other, "\n".join(other)
     assert not rekeyed, "\n".join(rekeyed)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_then_install_keeps_the_diamond_parent_of_seed_398718870(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5386: p4 is declared by p2 and p3 at one depth; the dropped root p0 met p2 first.
+
+    After prune, install met p3 first (p1 declares it first) and recorded p3 as
+    p4's declaring_parent while resolved_by stayed p2.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+    tally: dict = {}
+    verdict, _ = _check_seed(398718870, tmp_path, tally=tally)
+    monkeypatch.chdir(tmp_path)
+
+    assert verdict == "converged", verdict
+    # The whole lockfile, not only the graph fields: only the content hash of the
+    # package whose manifest the scenario edited may change on the final install.
+    before, after = tally["lock_before"], tally["lock_after"]
+    for lock in (before, after):
+        for row in lock["dependencies"]:
+            if row.get("name") == tally["edited"]:
+                row.pop("content_hash", None)
+    assert after == before
+
+
+def _diamond(project: Path, order: tuple[str, str]) -> None:
+    """Root declares a; a declares both *order* parents; each declares d."""
+    vendor = project / "vendor"
+    graph = _Graph(
+        names=["a", "b", "c", "d"],
+        edges={"a": [(name, f"../{name}") for name in order], "b": [], "c": [], "d": []},
+        roots=["a"],
+    )
+    graph.edges["b"] = [("d", "../d")]
+    graph.edges["c"] = [("d", "../../vendor/d")]
+    for name in graph.names:
+        _write_package(vendor, graph, name)
+    _write_project(project, graph)
+
+
+@pytest.mark.parametrize("order", [("b", "c"), ("c", "b")], ids=["b-first", "c-first"])
+def test_a_diamond_records_one_parent_whatever_the_manifest_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
+) -> None:
+    """#5386: d is declared by b and c at one depth: its row names b for both fields.
+
+    resolved_by, declaring_parent and local_path come from one edge, the
+    nearest declaring parent with the lowest key, so no lock row depends on
+    which parent a's manifest lists first, and a re-install keeps every row.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    project = tmp_path / "proj"
+    (project / ".claude").mkdir(parents=True)
+    _diamond(project, order)
+
+    installed = _run(project, "install")
+    first = _rows(project)
+    _diamond(project, tuple(reversed(order)))
+    clear_apm_yml_cache()
+    reinstalled = _run(project, "install", "--no-frozen")
+    second = _rows(project)
+    monkeypatch.chdir(tmp_path)
+    # a's manifest was rewritten: its content hash is the one row field to change.
+    for rows in (first, second):
+        next(row for row in rows if row.get("name") == "a").pop("content_hash")
+
+    assert installed.exit_code == 0, installed.output
+    assert reinstalled.exit_code == 0, reinstalled.output
+    d = _graph_rows(project)["d"]
+    assert (d["resolved_by"], d["declaring_parent"], d["local_path"]) == (
+        "_local/b",
+        "local:vendor/b",
+        "../d",
+    ), d
+    assert second == first
+
+
+@pytest.mark.parametrize("alias", [None, "d-copy"], ids=["plain", "alias-on-c"])
+def test_prune_reparents_a_three_parent_survivor_as_install_records_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, alias: str | None
+) -> None:
+    """#5386: a, c and b each declare d; dropping a leaves c (met first) and b (lowest key).
+
+    Plain: prune re-parents d under the parent install records, so install
+    leaves the lockfile unchanged. alias-on-c: c's edge carries an alias the
+    locked row does not, so the next install would record c's alias; prune
+    keeps a's chain fail-closed and names it, writing no lock change.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    project = tmp_path / "proj"
+    (project / ".claude").mkdir(parents=True)
+    c_edge = "../d" if alias is None else {"path": "../d", "alias": alias}
+    graph = _Graph(
+        names=["a", "c", "b", "d"],
+        edges={"a": [("d", "../d")], "c": [("d", c_edge)], "b": [("d", "../d")], "d": []},
+        roots=["a", "c", "b"],
+    )
+    for name in graph.names:
+        _write_package(project / "vendor", graph, name)
+    _write_project(project, graph)
+    installed = _run(project, "install")
+    before = (project / "apm.lock.yaml").read_bytes()
+    graph.roots.remove("a")
+    _write_project(project, graph)
+
+    pruned = _run(project, "prune")
+    lock = (project / "apm.lock.yaml").read_bytes()
+    output = " ".join(pruned.output.split())
+    if alias is not None:
+        monkeypatch.chdir(tmp_path)
+        assert installed.exit_code == 0, installed.output
+        assert pruned.exit_code == 0, pruned.output
+        assert "Retained _local/a:" in output, output
+        assert lock == before
+        return
+    clear_apm_yml_cache()
+    reinstalled = _run(project, "install", "--no-frozen")
+    monkeypatch.chdir(tmp_path)
+
+    assert installed.exit_code == 0, installed.output
+    assert pruned.exit_code == 0, pruned.output
+    assert reinstalled.exit_code == 0, reinstalled.output
+    d = _graph_rows(project)["d"]
+    assert d["resolved_by"] == "_local/b", d
+    assert d["declaring_parent"] == "./vendor/b", d
+    assert (project / "apm.lock.yaml").read_bytes() == lock

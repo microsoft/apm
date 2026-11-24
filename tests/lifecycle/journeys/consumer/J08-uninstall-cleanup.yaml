@@ -44,11 +44,12 @@ steps:
       - apm_modules/
       - apm.lock.yaml
       - .agents/skills/live/SKILL.md
+      - .claude/rules/live.md
       - .claude/skills/live/SKILL.md
       - .github/instructions/live.instructions.md
     key_lines:
       - "[i] Removed acme/live-kit"
-      - "[i] Cleaned 3 stale deployed paths for acme/live-kit:"
+      - "[i] Cleaned 4 stale deployed paths for acme/live-kit:"
       - "[i] Instructions removed for claude. Run 'apm compile' to update AGENTS.md / CLAUDE.md."
       - "[*] Pruned 1 orphaned package(s)"
     forbidden_lines: [Reconciled merged hook ownership]

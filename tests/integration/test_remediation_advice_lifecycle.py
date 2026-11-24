@@ -754,9 +754,10 @@ def _import_agents_md(world: _World) -> None:
         handle.write("@AGENTS.md\n")
 
 
-def _rule_moved_to_agents_md(world: _World, result) -> None:
+def _rule_kept_until_compiled(world: _World, result) -> None:
     _expect_ok(world, result)
-    assert not (world.consumer.root / ".claude/rules/advice.md").exists()
+    # No compiled AGENTS.md carries it yet, so the rule stays (#5343).
+    assert (world.consumer.root / ".claude/rules/advice.md").is_file()
 
 
 def _claude_directory_world(tmp_path: Path, apm_binary_path: Path) -> _World:
@@ -772,7 +773,8 @@ def _claude_directory_world(tmp_path: Path, apm_binary_path: Path) -> _World:
 
 
 def _route_directory_instruction(world: _World) -> None:
-    _expect_ok(world, _run(world, _INSTALL_ARGS, "route-directory-instruction"))
+    # A compile-only project: install keeps a directory rule, and compile then
+    # omits it from AGENTS.md (#5343), so the state needs no install yet.
     assert not (world.consumer.root / ".claude/rules/srcdir.md").exists()
 
 
@@ -794,7 +796,7 @@ W3_DEPS_COMPILATION_PROOFS: tuple[_TextProof, ...] = (
         _hand_author_claude_md,
         lambda _world: _INSTALL_ARGS,
         0,
-        _rule_moved_to_agents_md,
+        _rule_kept_until_compiled,
         before=_import_agents_md,
     ),
     _TextProof(

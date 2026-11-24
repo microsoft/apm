@@ -1409,7 +1409,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "record.active_owner not in self._valid_owners",
             "self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]",
             "value = deployed_path_entry(path, self.root, targets)",
-            "deployed_path_entry(path, self.root, targets),",
+            "deployed_path_entry(path, self.root, targets, candidate, roots(self.root)),",
             "self._written[key] = value",
             "for key, value in self._written.items():",
             "record.active_owner == owner",

@@ -1,0 +1,15 @@
+{
+  "issue": 5386,
+  "fixed_in": "Unreleased",
+  "summary": "A local package two parents declared at one depth (a diamond) was recorded with resolved_by from the lowest-key parent but declaring_parent and local_path from whichever edge the resolver met first, so prune followed by install --no-frozen rewrote its lock row although nothing changed. The row now takes all three from the one recorded parent's edge, so the lock no longer depends on manifest order.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_prune_generated_local_graphs.py::test_prune_then_install_keeps_the_diamond_parent_of_seed_398718870",
+    "tests/integration/test_prune_generated_local_graphs.py::test_a_diamond_records_one_parent_whatever_the_manifest_order"
+  ]
+}

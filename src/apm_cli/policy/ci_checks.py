@@ -23,7 +23,6 @@ from ..core import remediation
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from ..core.remediation import DEPLOYED_FILES_MISSING, LOCKFILE_MISSING, ORPHANED_PACKAGES
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
-from .claude_instructions_check import claude_instructions_result
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
@@ -1609,6 +1608,7 @@ def _check_local_bundle_hooks(
     from ..install.local_bundle_hook_trust import (
         bundle_hook_ownership,
         bundle_hook_recheck_targets,
+        read_bundle_hook_states,
         unadmitted_bundle_hooks,
     )
     from ..security.executables import resolve_project_exec_allow_map
@@ -1626,9 +1626,15 @@ def _check_local_bundle_hooks(
         DeploymentLedgerCodec.from_lockfile(lock)
     )
     try:
-        problems = bundle_hook_ownership(deployment_root, targets, bundle_paths)
-        unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
-        canvas = unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)
+        # Each hook config, sidecar and bundle record is read once per audit (#5211).
+        states = read_bundle_hook_states(deployment_root, targets)
+        problems = bundle_hook_ownership(deployment_root, targets, bundle_paths, states)
+        unadmitted = unadmitted_bundle_hooks(
+            deployment_root, targets, allow_provider, bundle_paths, states
+        )
+        canvas = unadmitted_bundle_canvas(
+            deployment_root, targets, allow_provider, bundle_paths, states.read
+        )
     except PolicyViolationError as exc:
         return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
     if problems:
@@ -2073,13 +2079,6 @@ def run_baseline_checks(
                     else project_root / APM_MODULES_DIR
                 ),
                 policy_provider=policy_provider,
-            )
-        )
-        # 8e: routed Claude instructions are compiled (#5344); project scope only.
-        or (
-            not user_scope
-            and _run(
-                claude_instructions_result(project_root, resolved_targets, prepared_replay, lock)
             )
         )
     ):

@@ -209,6 +209,27 @@ def _project_compile_hint(target_names: list[str], families: frozenset[str], ver
     return f"Instructions {verb} for {targets}. {advice}"
 
 
+def _report_rules_moved_to_agents_md(ctx: InstallContext) -> None:
+    """Name each Claude rule this install retired because AGENTS.md now carries it (#5343)."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+    from apm_cli.utils.paths import portable_relpath
+
+    integrator = (getattr(ctx, "integrators", None) or {}).get("instruction")
+    carried = getattr(integrator, "agents_md_carried", None)
+    if not isinstance(carried, dict) or ctx.dry_run or not ctx.logger:
+        return
+    root = Path(ctx.project_root)
+    for rule, agents_md in sorted(carried.items()):
+        if rule.exists():
+            continue  # kept (edited by hand or not owned): nothing moved
+        ctx.logger.info(
+            f"Retired {printable_ascii_text(portable_relpath(rule, root))}: "
+            f"{printable_ascii_text(portable_relpath(agents_md, root))} now carries it "
+            "for Claude Code.",
+            symbol="info",
+        )
+
+
 def _hint_project_compile_needed(ctx: InstallContext) -> None:
     """Hint to run ``apm compile`` after installing packages with compile-only instructions.
 
@@ -247,42 +268,7 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
         return
 
     if ctx.logger:
-        if routed_to_agents_md:
-            _warn_uncompiled_instructions(ctx.logger, sorted(routed))
         ctx.logger.info(_project_compile_hint(target_names, families, "installed"), symbol="info")
-
-
-_UPGRADE_GUIDE = (
-    "https://microsoft.github.io/apm/consumer/update-and-refresh/"
-    "#claude-plus-copilot-projects-that-never-compile"
-)
-
-
-def _warn_uncompiled_instructions(logger, names: list[str]) -> None:
-    """One [!] summary line with the count; ``--verbose`` lists the files (#5344)."""
-    from apm_cli.core.remediation import CLAUDE_INSTRUCTIONS_UNCOMPILED
-    from apm_cli.utils.diagnostics import printable_ascii_text
-
-    listing = "" if getattr(logger, "verbose", False) else " Use --verbose to list them."
-    logger.warning(
-        f"Claude Code does not load {len(names)} instruction(s) routed to AGENTS.md yet. "
-        f"{CLAUDE_INSTRUCTIONS_UNCOMPILED.sentence()} See {_UPGRADE_GUIDE}.{listing}"
-    )
-    for name in names:
-        logger.verbose_detail(f"    Not compiled for Claude Code: {printable_ascii_text(name)}")
-
-
-def uncompiled_instructions_warning(names: list[str]) -> str:
-    """Name routed instructions Claude Code has no copy of yet (audit detail, #5344)."""
-    from apm_cli.core.remediation import CLAUDE_INSTRUCTIONS_UNCOMPILED
-    from apm_cli.utils.diagnostics import printable_ascii_text
-
-    shown = ", ".join(printable_ascii_text(name) for name in names)
-    return (
-        f"Claude Code does not load {shown} yet: they route to AGENTS.md and no "
-        f"compiled file carries them. {CLAUDE_INSTRUCTIONS_UNCOMPILED.sentence()} "
-        f"Or narrow their applyTo to keep them in .claude/rules/. See {_UPGRADE_GUIDE}"
-    )
 
 
 @dataclass(frozen=True)
@@ -420,6 +406,7 @@ def run(ctx: InstallContext) -> InstallResult:
     if ctx.scope is InstallScope.USER:
         _hint_global_root_context(ctx)
     elif ctx.scope is InstallScope.PROJECT:
+        _report_rules_moved_to_agents_md(ctx)
         _hint_project_compile_needed(ctx)
 
     _report_kept_overwrites(ctx)

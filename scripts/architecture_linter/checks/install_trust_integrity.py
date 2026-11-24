@@ -400,8 +400,12 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/prune.py": ("reconcile_scope_bundle_hooks(",),
     _CI_CHECKS: (
-        "unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)",
-        "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
+        # One read of every hook config, sidecar and bundle record serves both checks (#5211).
+        "states = read_bundle_hook_states(deployment_root, targets)",
+        "problems = bundle_hook_ownership(deployment_root, targets, bundle_paths, states)",
+        "unadmitted = unadmitted_bundle_hooks(",
+        "canvas = unadmitted_bundle_canvas(",
+        "deployment_root, targets, allow_provider, bundle_paths, states.read",
     ),
     "src/apm_cli/install/local_bundle_hooks.py": (
         "package_info.local_bundle_approval = approval_key",
