@@ -243,21 +243,26 @@ def test_a_hooked_row_no_record_names_fails_closed(tmp_path: Path) -> None:
 
 def test_a_file_without_an_exact_lock_hash_is_kept(tmp_path: Path) -> None:
     from apm_cli.install.local_bundle_markdown_hooks import _remove_exact
+    from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.content_hash import compute_file_hash
 
-    exact, unhashed, edited = "exact.md", "unhashed.md", "edited.md"
+    base = ".claude/commands/"
+    exact, unhashed, edited = (f"{base}{n}.md" for n in ("exact", "unhashed", "edited"))
+    (tmp_path / base).mkdir(parents=True)
     for name in (exact, unhashed, edited):
         (tmp_path / name).write_bytes(b"---\nhooks: {}\n---\n")
     recorded = {exact: compute_file_hash(tmp_path / exact), edited: "sha256:" + "0" * 64}
 
-    removed, kept = _remove_exact(tmp_path, [exact, unhashed, edited], recorded)
+    removed, kept = _remove_exact(
+        tmp_path, [exact, unhashed, edited], recorded, [KNOWN_TARGETS["claude"]]
+    )
 
-    _assert_partition(tmp_path, removed, kept, {exact}, {unhashed, edited})
+    _assert_partition(tmp_path / base, removed, kept, {exact}, {unhashed, edited})
 
 
 def _assert_partition(root: Path, removed, kept, want_removed, want_kept) -> None:
     assert (set(removed), set(kept)) == (want_removed, want_kept)
-    assert {p.name for p in root.iterdir()} == want_kept
+    assert {p.name for p in root.iterdir()} == {Path(k).name for k in want_kept}
 
 
 def test_a_record_borrowing_another_bundles_granted_key_grants_nothing(tmp_path: Path) -> None:

@@ -249,20 +249,28 @@ def _frames(project_root: Path, targets: Any) -> dict[Path, tuple[str, ...]]:
     return {base: tuple(dict.fromkeys(found)) for base, found in frames.items() if found}
 
 
+def _contained(frames: dict[Path, tuple[str, ...]], value: str) -> Path | None:
+    """The in-root path *value* names in its target's frame, or ``None`` (no link crossed)."""
+    from .local_bundle_hook_trust import contained_bundle_path
+
+    for base, prefixes in frames.items():
+        path = contained_bundle_path(base, value, prefixes)
+        if path is not None:
+            return path
+    return None
+
+
 def _hooked_rows(project_root: Path, targets: Any, lock_paths: Collection[str]) -> set[str]:
     """Return the local-bundle lock rows, inside a target root, that declare hooks."""
-    from .local_bundle_hook_trust import _relative_value, contained_bundle_path
+    from .local_bundle_hook_trust import _relative_value
     from .local_bundle_paths import markdown_declares_hooks
 
     frames = _frames(Path(project_root), targets)
     rows: set[str] = set()
     for value in lock_paths:
-        for base, prefixes in frames.items():
-            path = contained_bundle_path(base, value, prefixes)
-            if path is not None:
-                if path.is_file() and markdown_declares_hooks(path):
-                    rows.add(_relative_value(value, Path(project_root)))
-                break
+        path = _contained(frames, value)
+        if path is not None and path.is_file() and markdown_declares_hooks(path):
+            rows.add(_relative_value(value, Path(project_root)))
     return rows
 
 
@@ -333,19 +341,25 @@ def _unadmitted(
     return list(holdings.values())
 
 
-def _remove_exact(project_root: Path, files: Collection[str], recorded: dict[str, str]):
+def _remove_exact(
+    project_root: Path, files: Collection[str], recorded: dict[str, str], targets: Any = ()
+):
     """Remove each file whose bytes match its lock hash exactly; return ``(removed, kept)``.
 
-    A file with no lock hash, edited outside APM, or unreadable is kept.
+    A file with no lock hash, edited outside APM, or unreadable is kept. Each
+    path is re-checked against its target's frame right before it is hashed
+    and removed, so an ancestor swapped for a link after the scan keeps the
+    file (and its lock row); with no *targets*, nothing is removed.
     """
     from ..integration import write_seam
 
+    frames = _frames(Path(project_root), targets)
     removed: set[str] = set()
     kept: set[str] = set()
     for value in files:
-        path = Path(project_root) / value
+        path = _contained(frames, value)
         digest = recorded.get(value)
-        if digest is None or digest != _hash_or_none(path):
+        if path is None or digest is None or digest != _hash_or_none(path):
             kept.add(value)
             continue
         try:
@@ -455,7 +469,7 @@ def retire_unadmitted_bundle_markdown(
                     f"hooks from {label} ({holding.reason})."
                 )
             continue
-        removed, kept = _remove_exact(root, holding.files, recorded)
+        removed, kept = _remove_exact(root, holding.files, recorded, scanned)
         if removed:
             _drop_lock_rows(
                 lock_dir, {v for v in lock_paths if _relative_value(v, root) in removed}
