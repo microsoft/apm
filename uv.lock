@@ -289,7 +289,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11.0" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "tomlkit", specifier = ">=0.13" },
-    { name = "truststore", specifier = ">=0.10.0" },
+    { name = "truststore", specifier = ">=0.10.4" },
     { name = "watchdog", specifier = ">=3.0.0" },
     { name = "websockets", specifier = ">=12,<17" },
 ]

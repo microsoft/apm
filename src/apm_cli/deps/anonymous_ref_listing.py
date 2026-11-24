@@ -64,6 +64,11 @@ _FALLBACK_ENV = (
     "SSL_CERT_DIR",
 )
 
+# The trust source "git's schannel" (Windows certificate store, revocation checked),
+# in place of a CA file; never a path.
+OS_TRUST = "<os-trust:schannel>"
+_OS_SESSION_MEMO = "anonymous-listing-os-trust-session"
+
 _session_lock = threading.Lock()
 _sessions: dict[str, object] = {}
 _config_cache: dict[tuple, tuple[dict[str, str], dict[str, str], tuple[str, ...]] | None] = {}
@@ -242,6 +247,8 @@ def _proxy(env: Mapping[str, str]) -> str | None:
 def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
     """The CA file git would trust (GIT_SSL_CAINFO > http.sslCAInfo > SSL_CERT_FILE)."""
     backend = config.get(_BACKEND_KEY, "").lower()
+    if backend == "schannel":
+        return _schannel_trust(env, config)
     if backend not in ("", "openssl"):
         raise _Fallback("non-default TLS backend")
     for path in (env.get("GIT_SSL_CAINFO"), config.get(_CA_KEY), env.get("SSL_CERT_FILE")):
@@ -250,6 +257,66 @@ def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
                 raise _Fallback("CA file is not a regular file")
             return path
     return _system_ca()
+
+
+def _schannel_trust(env: Mapping[str, str], config: Mapping[str, str]) -> str:
+    """:data:`OS_TRUST` when git's schannel would trust exactly the Windows store (W3d SC2).
+
+    Every other ``http.*`` key (``schannelCheckRevoke``, ``schannelUseSSLCAInfo``,
+    ``sslCAPath``, ...) already falls back in ``_classify``; a CA file or env
+    makes the trust source ambiguous, so git decides.
+    """
+    if os.name != "nt":
+        raise _Fallback("schannel outside Windows")
+    if env.get("GIT_SSL_CAINFO") or config.get(_CA_KEY) or env.get("SSL_CERT_FILE"):
+        raise _Fallback("a CA file with schannel")
+    return OS_TRUST
+
+
+def requests_verify(ca: str) -> str | bool:
+    """The ``verify=`` for *ca*: the file, or ``True`` for the OS store context."""
+    return True if ca == OS_TRUST else ca
+
+
+def os_trust_context() -> ssl.SSLContext:
+    """git schannel's trust: the Windows store only, hostname and revocation checked.
+
+    W3d SC1/SC5: no extra anchors (urllib3's CA bundle load is a no-op), host
+    name and certificate required, and revocation checked for the whole chain:
+    curl's schannel default checks the chain except the root, so this rejects
+    a superset of what git rejects, and any failure falls back to git.
+    """
+    import truststore
+
+    class _WindowsStoreOnly(truststore.SSLContext):
+        def load_verify_locations(self, *args, **kwargs) -> None:
+            return None
+
+        def load_default_certs(self, *args, **kwargs) -> None:
+            return None
+
+        def set_default_verify_paths(self) -> None:
+            return None
+
+    context = _WindowsStoreOnly(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.verify_flags |= ssl.VERIFY_CRL_CHECK_CHAIN
+    return context
+
+
+def _os_trust_session():
+    """One keep-alive OS-trust session per command (SC8), dropped with its memos."""
+    from apm_cli.core.invocation_memo import invocation_memo
+
+    memo = invocation_memo(_OS_SESSION_MEMO)
+    if memo is None:
+        return _session_with_context(os_trust_context())
+    with _session_lock:
+        session = memo.get("session")
+        if session is None:
+            session = memo["session"] = _session_with_context(os_trust_context())
+        return session
 
 
 def _system_ca() -> str:
@@ -343,6 +410,8 @@ def _session_with_context(context):
 
 def _session_for_refs(ca: str):
     """One pooled session per CA, whose direct and proxied TLS use only *ca*."""
+    if ca == OS_TRUST:
+        return _os_trust_session()
     with _session_lock:
         session = _sessions.get(ca)
         if session is None:
@@ -477,7 +546,7 @@ def _fetch(refs_url: str, proxy: str | None, ca: str, holder: dict) -> bytes:
         max_hops=0,
         ambient_credentials=False,
         proxies={"https": proxy} if proxy else {},
-        verify=ca,
+        verify=requests_verify(ca),
         timeout=_TIMEOUT,
         stream=True,
     ) as response:
