@@ -1756,39 +1756,27 @@ class LockFile:
         from ..core.deployment_ledger import DeploymentLedgerCodec
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
-        from ..utils.yaml_io import load_yaml_str, yaml_to_str
-        from .lockfile_container import remember_lockfile_text
-        from .lockfile_document import document_snapshot, same_document
-        from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
+        from ..utils.yaml_io import yaml_to_str
+        from .lockfile_container import plain_lockfile_document, remember_lockfile_text
+        from .lockfile_document import holds_document, read_destination, same_document
+        from .lockfile_write_authority import stage_document, stage_lockfile
 
-        existing: LockFile | None
-        existing_document: dict[str, Any] | None = None
         legacy_timestamp_present = False
-        existing_text = staged_lockfile_text(path)
-        if isinstance(existing_lockfile, _ExistingLockfileUnset) and existing_text is not None:
+        unset = isinstance(existing_lockfile, _ExistingLockfileUnset)
+        existing_text, existing_data, existing_document = read_destination(path, parse=unset)
+        existing = None if unset else existing_lockfile
+        if unset and isinstance(existing_data, dict):
+            legacy_timestamp_present = existing_data.get("generated_at") is not None
             try:
-                existing_data = load_yaml_str(existing_text)
-            except (yaml.YAMLError, ValueError):
-                existing_data = None
-            existing = None
-            if isinstance(existing_data, dict):
-                legacy_timestamp_present = existing_data.get("generated_at") is not None
-                # Construction shares nested objects; snapshot for the no-op check.
-                existing_document = document_snapshot(existing_data)
-                try:
-                    existing = type(self)._from_validated_data(
-                        _validate_lockfile_container(existing_data)
-                    )
-                except UnsupportedLockfileVersionError as exc:
-                    if legacy_timestamp_present:
-                        raise with_version_remedy(exc, path) from exc
-                    existing = None
-                except LockfileFormatError:
-                    existing = None
-        elif isinstance(existing_lockfile, _ExistingLockfileUnset):
-            existing = None
-        else:
-            existing = existing_lockfile
+                existing = type(self)._from_validated_data(
+                    _validate_lockfile_container(existing_data)
+                )
+            except UnsupportedLockfileVersionError as exc:
+                if legacy_timestamp_present:
+                    raise with_version_remedy(exc, path) from exc
+                existing = None
+            except LockfileFormatError:
+                existing = None
         if existing is not None:
             carry_vendor_extensions(self, existing)
         if existing is not None and existing.lockfile_version != "1":
@@ -1822,6 +1810,13 @@ class LockFile:
             # The generator gate's only signal: whoever changes it owns it (#3962).
             self.apm_version = installed_apm_version()
         document = self._document(user_scope=user_scope)
+        if (plain := plain_lockfile_document(document)) is not None:
+            # Staged as data, emitted once at commit (#4939); the text holds these strings.
+            assert_no_staging_paths(plain, path.name)
+            if unchanged and holds_document(existing_text, plain, existing_document):
+                return True  # a proven no-op keeps the file's own bytes
+            if stage_document(path, plain):
+                return True
         serialized = yaml_to_str(document)
         assert_no_staging_paths(serialized, path.name)
         if unchanged and same_document(existing_text, serialized, existing_document):
@@ -1837,9 +1832,13 @@ class LockFile:
         """Read lock file from disk. Returns None when the file does not exist."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
         from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
+        from .lockfile_write_authority import staged_document_copy as staged_data
 
         if (staged := has_staged_lockfile(path)) is not None:  # staged (or removed) by a writer
-            lock = cls.from_yaml(staged_lockfile_text(path)) if staged else None
+            if (data := staged_data(path)) is not None:  # read without emitting it (#4939)
+                lock = cls._from_validated_data(_validate_lockfile_container(data))
+            else:
+                lock = cls.from_yaml(staged_lockfile_text(path)) if staged else None
             return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
         if not path.exists() and not path.is_symlink():
             return None

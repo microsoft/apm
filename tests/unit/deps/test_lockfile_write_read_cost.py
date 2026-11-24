@@ -74,3 +74,33 @@ def test_a_non_ascii_lockfile_needs_no_parse_and_reads_back_equal(tmp_path):
     assert parses == 0
     assert read is not None
     assert read.to_yaml() == path.read_text(encoding="utf-8")
+
+
+def _write_twice_and_noop(path) -> None:
+    _rich_lock("emit-once").write(path)
+    changed = LockFile.read(path)
+    changed.mcp_servers = ["kb", "other"]
+    changed.write(path)
+    LockFile.read(path).write(path)
+
+
+def test_a_command_emits_its_lockfile_once_however_often_it_writes(tmp_path, monkeypatch):
+    """Staged writes stay data; only the commit emits text, byte-identical to eager (#4939)."""
+    from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_write_scope
+
+    eager = tmp_path / "eager" / "apm.lock.yaml"
+    eager.parent.mkdir()
+    _write_twice_and_noop(eager)
+    emits: list[int] = []
+    real = yaml_io.yaml_to_str
+    monkeypatch.setattr(yaml_io, "yaml_to_str", lambda *a, **k: emits.append(1) or real(*a, **k))
+    path = tmp_path / "staged" / "apm.lock.yaml"
+    path.parent.mkdir()
+
+    with lockfile_write_scope(LockfileWriter.INSTALL):
+        _write_twice_and_noop(path)
+        assert emits == []
+        assert not path.exists()
+
+    assert len(emits) == 1
+    assert path.read_bytes() == eager.read_bytes()
