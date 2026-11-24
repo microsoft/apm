@@ -590,9 +590,13 @@ def _policy_identity(root: Path) -> Any:
 
 
 def _build_identity() -> bytes:
-    """The running APM implementation (W3d A3), so changed code never reuses a record:
-    a frozen binary's own stat; an installed package's dist-info RECORD (the hash of
-    every file it installed); a source or editable tree's per-file stat."""
+    """The running APM implementation (W3d A3): changes with any APM code change.
+
+    A frozen binary's own stat; an installed (non-editable) distribution's RECORD,
+    which holds every installed file's hash; otherwise (an editable install or a
+    source tree) the content of every file of the package. Never the version alone:
+    when none can be read, this raises and neither a record nor a replay proceeds.
+    """
     if getattr(sys, "frozen", False):
         path = os.path.realpath(sys.executable)
         info = os.stat(path)
@@ -602,14 +606,19 @@ def _build_identity() -> bytes:
     if record is not None:
         return b"installed|" + hashlib.sha256(record).hexdigest().encode()
     digest = hashlib.sha256()
-    for here, dirs, files in os.walk(package):
+
+    def refuse(error: OSError) -> None:
+        raise error
+
+    for here, dirs, files in os.walk(package, onerror=refuse):
         dirs[:] = sorted(name for name in dirs if name != "__pycache__")
         for name in sorted(files):
-            info = os.lstat(os.path.join(here, name))
+            data = _read_nofollow(os.path.join(here, name))
+            if data is None:
+                raise ValueError("the APM source tree cannot be read")
             rel = os.path.relpath(os.path.join(here, name), package)
-            digest.update(
-                f"{rel}|{info.st_size}|{info.st_mtime_ns}\n".encode("utf-8", "surrogateescape")
-            )
+            digest.update(f"{rel}\x00{len(data)}\x00".encode("utf-8", "surrogateescape"))
+            digest.update(data)
     return f"source|{package}|{digest.hexdigest()}".encode("utf-8", "surrogateescape")
 
 

@@ -1356,7 +1356,8 @@ def test_changed_apm_code_at_the_same_version_misses(
 def test_an_editable_install_keys_its_source_files(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An editable install's RECORD does not cover its source, so the source is keyed."""
+    """An editable install's RECORD does not cover its source, so the source content is
+    keyed: an edit that keeps the size and the timestamps still misses."""
     import apm_cli
 
     site = project.parent / "site"
@@ -1368,9 +1369,33 @@ def test_an_editable_install_keys_its_source_files(
     monkeypatch.setattr(apm_cli, "__file__", str(package / "__init__.py"))
     _record()
     _assert_replays(True)
-    (package / "__init__.py").write_text("VERSION = 2\n", encoding="utf-8")
+    # The same size, and the old timestamps restored: only the content changed.
+    source = package / "__init__.py"
+    before = os.stat(source)
+    source.write_text("VERSION = 2\n", encoding="utf-8")
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
 
     _assert_replays(False)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_an_unreadable_apm_source_tree_never_records(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W3d A3: with no readable implementation fingerprint, nothing is recorded (never
+    a version-only key)."""
+    import apm_cli
+
+    package = _fake_package(project.parent / "site", "VERSION = 1\n")
+    (package / "hidden.py").write_text("x = 1\n", encoding="utf-8")
+    os.chmod(package / "hidden.py", 0)
+    monkeypatch.setattr(apm_cli, "__file__", str(package / "__init__.py"))
+    try:
+        _record()
+    finally:
+        os.chmod(package / "hidden.py", 0o644)
+
+    assert not (_home(project) / "verdicts").exists()
 
 
 @pytest.mark.parametrize(
