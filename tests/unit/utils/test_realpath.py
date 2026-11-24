@@ -230,6 +230,29 @@ def test_outside_a_command_nothing_is_proven(tree: Path) -> None:
     assert not realpath.proven_link_free(tree / "dir")
 
 
+def test_windows_keeps_no_proofs_and_takes_the_stock_forms(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K is not applied on win32: every resolve takes the platform form, nothing is proven."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    monkeypatch.setattr(realpath, "_WINDOWS", True)
+    calls: list[str] = []
+    stock = realpath._platform_resolve
+
+    def counted(path: Path, text: str) -> Path:
+        calls.append(text)
+        return stock(path, text)
+
+    monkeypatch.setattr(realpath, "_platform_resolve", counted)
+    leaf = tree / "dir" / "file.md"
+    with invocation_scope():
+        for _ in range(3):
+            assert resolve_path(leaf) == leaf.resolve()
+        assert not realpath.proven_link_free(tree / "dir")
+    assert calls == [str(leaf)] * 3
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows reports the on-disk case")
 def test_a_case_variant_leaf_resolves_to_the_disk_case_on_windows(tree: Path) -> None:
     from apm_cli.core.invocation_memo import invocation_scope

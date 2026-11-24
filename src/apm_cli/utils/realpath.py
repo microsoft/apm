@@ -14,10 +14,10 @@ kept in the command's invocation memo, which user code (a lifecycle script)
 clears, and lets a path directly under a proven directory resolve with one
 ``lstat`` of its leaf instead of a walk. A leaf that is a link or a reparse
 point, a ``..`` anywhere, a volatile component (``.git``, staging, ``.inc.``,
-``.tmp``, backups), a case-variant name on Windows, or any doubt takes the full
-resolution. APM drops the proofs under a path before it renames or deletes there
-(:func:`forget_proofs`, called by ``realpath_win.release_held``). On Windows the
-exact forms live in :mod:`apm_cli.utils.realpath_win`.
+``.tmp``, backups), or any doubt takes the full resolution. APM drops the proofs
+under a path before it renames or deletes there (:func:`forget_proofs`, called by
+``realpath_win.release_held``). Windows keeps no proofs: every resolve takes the exact
+forms in :mod:`apm_cli.utils.realpath_win` (measured faster there without them).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import errno
 import os
 import stat
 import sys
-from pathlib import Path, PosixPath, WindowsPath
+from pathlib import Path, PosixPath
 
 _O_PATH = getattr(os, "O_PATH", 0)
 _FAST = sys.platform.startswith("linux") and bool(_O_PATH)
@@ -57,26 +57,6 @@ def _leaf_is_link(info: os.stat_result) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
-def _windows_leaf(absolute: str, name: str) -> tuple[bool, bool] | None:
-    """Windows: ``(exists, is_directory)`` of the exact leaf name, ``None`` to resolve fully.
-
-    One ``FindFirstFileExW`` (E1 F2): the on-disk long name must equal *name*
-    exactly (``resolve()`` reports the disk case) and carry no reparse point.
-    Nothing is cached, so APM's own case-only renames are always seen.
-    """
-    from apm_cli.utils import realpath_win
-
-    entry = realpath_win._entry(absolute)
-    if entry is realpath_win._MISSING:
-        return False, False
-    if entry is None:
-        return None
-    attributes, disk_name = entry
-    if disk_name != name or attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
-        return None
-    return True, bool(attributes & 0x10)
-
-
 _VOLATILE_MARKERS = ("staging", ".inc.", ".tmp", "backup", "migration", "refresh")
 
 
@@ -97,39 +77,20 @@ def _proven_answer(text: str, proofs: dict) -> str | None:
     if ".." in _components(text):
         return None
     absolute = os.path.abspath(text)
-    if _WINDOWS and not _plain_windows(text, absolute):
-        return None
     head, name = os.path.split(absolute)
     if not name or head not in proofs or _volatile(name):
         return None
-    if _WINDOWS:
-        leaf = _windows_leaf(absolute, name)
-        if leaf is None:
-            return None
-        exists, is_dir = leaf
-    else:
-        try:
-            info = os.lstat(absolute)
-        except FileNotFoundError:
-            return absolute
-        except OSError:
-            return None
-        if _leaf_is_link(info):
-            return None
-        exists, is_dir = True, stat.S_ISDIR(info.st_mode)
-    if exists and is_dir:
+    try:
+        info = os.lstat(absolute)
+    except FileNotFoundError:
+        return absolute
+    except OSError:
+        return None
+    if _leaf_is_link(info):
+        return None
+    if stat.S_ISDIR(info.st_mode):
         proofs[absolute] = True  # an existing, non-link directory under a proven one
     return absolute
-
-
-def _plain_windows(text: str, absolute: str) -> bool:
-    """E1 F1: GetFullPathNameW must not have rewritten *text* (trailing dots or
-    spaces, device names, short names): absolute, plain Win32, normpath-equal."""
-    import ntpath
-
-    from apm_cli.utils.realpath_win import plain_win32
-
-    return plain_win32(absolute) and absolute == ntpath.normpath(text)
 
 
 def proven_link_free(directory: Path) -> bool:
@@ -188,6 +149,11 @@ def _missing_realpath(text: str, depth: int) -> str | None:
     return f"{resolved_parent.rstrip('/')}/{name}"
 
 
+def kernel_resolves() -> bool:
+    """Whether :func:`resolve_path` can take the kernel form in this process."""
+    return _FAST
+
+
 def resolve_path(path: Path) -> Path:
     """Return ``path.resolve()``, through an exact fast form when one applies.
 
@@ -195,8 +161,8 @@ def resolve_path(path: Path) -> Path:
     (which may override ``resolve`` or ``__fspath__``) keeps its own behavior,
     and any failure of a fast form leaves the answer (or the error) to it.
     """
-    stock = type(path) in (PosixPath, WindowsPath) and type(path).resolve is _STOCK_RESOLVE
-    proofs = _memo(_PROOFS) if stock else None
+    stock = type(path) is PosixPath and PosixPath.resolve is _STOCK_RESOLVE
+    proofs = None if _WINDOWS or not stock else _memo(_PROOFS)
     text = str(path)
     if proofs is not None:
         answer = _proven_answer(text, proofs)
@@ -260,8 +226,8 @@ def _platform_resolve(path: Path, text: str) -> Path:
 
 
 if _WINDOWS:
-    # Bound once at import (E1 F3): other platforms never load the Windows forms,
-    # and the proofs above run first on every platform.
+    # Bound once at import (E1 F3): other platforms never load the Windows forms.
+    # Windows keeps no proofs (resolve_path), so every resolve lands here.
     from apm_cli.utils.realpath_win import resolve_windows as _resolve_windows
 
     def _platform_resolve(path: Path, text: str) -> Path:

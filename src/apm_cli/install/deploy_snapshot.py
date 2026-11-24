@@ -154,7 +154,7 @@ class DeployJournal:
     def _append_line(self, line: dict[str, Any]) -> None:
         if self.store is None:
             raise RuntimeError("no store to write the journal manifest to")
-        _modes.append_private(self.store / _MANIFEST, json.dumps(line, sort_keys=True) + "\n")
+        _modes.append_held(self, self.store / _MANIFEST, json.dumps(line, sort_keys=True) + "\n")
 
     def _relative(self, path: Path) -> tuple[str, str]:
         """``(base, path)``: *path* as POSIX under APM home or the deploy root.
@@ -346,6 +346,7 @@ class DeployJournal:
 
     def discard(self) -> None:
         """Delete the stored copies and the empty store parent."""
+        _modes.close_held(self)
         store, self.store = self.store, None
         if store is None:
             return
