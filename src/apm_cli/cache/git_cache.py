@@ -709,6 +709,70 @@ class GitCache:
                 # SHA-keyed and never resolves via tags.
                 clone_args += ["--filter=blob:none"]
             clone_args += [url, str(staged)]
+            if not os.environ.get("APM_PERF_FULL_CLONE"):
+                # PERF PROBE (fetch shape): the cache needs only the pinned commit's
+                # tree, so fetch exactly that commit at depth 1 instead of every
+                # branch's history. Same origin config a clone writes.
+                from ..utils.git_env import git_network_env
+
+                net_env = cached_repo_env(git_network_env(url, env, git_dir=staged))
+                steps = [
+                    [
+                        git_exe,
+                        *_safe_git_args(),
+                        "init",
+                        *git_no_templates_args(),
+                        "--bare",
+                        "-q",
+                        str(staged),
+                    ],
+                    [git_exe, "--git-dir", str(staged), "config", "remote.origin.url", url],
+                ]
+                if partial:
+                    steps += [
+                        [
+                            git_exe,
+                            "--git-dir",
+                            str(staged),
+                            "config",
+                            "remote.origin.promisor",
+                            "true",
+                        ],
+                        [
+                            git_exe,
+                            "--git-dir",
+                            str(staged),
+                            "config",
+                            "remote.origin.partialclonefilter",
+                            "blob:none",
+                        ],
+                    ]
+                fetch = [
+                    git_exe,
+                    *_safe_git_args(),
+                    "--git-dir",
+                    str(staged),
+                    "fetch",
+                    "-q",
+                    "--depth=1",
+                    "--no-tags",
+                ]
+                if partial:
+                    fetch += ["--filter=blob:none"]
+                steps.append([*fetch, "origin", sha])
+                for argv in steps:
+                    run_git_text(
+                        argv,
+                        capture_output=True,
+                        timeout=300,
+                        env=net_env,
+                        stdin=subprocess.DEVNULL,
+                        check=True,
+                    )
+                if not atomic_land(staged, bare_dir, lock):
+                    if not self._bare_has_sha(bare_dir, sha, env=env, url=url):
+                        self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
+                return bare_dir
             try:
                 # Full bare clone (or partial when requested above). The
                 # full path extracts file contents at checkout time, so
