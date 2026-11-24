@@ -69,6 +69,7 @@ _ORG_BLOCK_NAMED = r"(?i)org policy"
 # pack refuses a project whose native plugin it cannot verify, and its "run apm install"
 # remedy does not change that (#5253): pack must exit 0 and carry the plugin.
 _PACK_REFUSED = r"records no deployed files for it"
+_PACK_BLOCKED = r"Pack blocked by org policy: \S*p-native-claude-bin\. Nothing was packed"
 KNOWN_PLUGIN: dict[str, str] = {
     "G1|approve|bin|denied-dependency|project": "#5236",
     "G1|pack|bin|allowed|project": "#5253",
@@ -84,11 +85,12 @@ KNOWN_CELLS = (
     ),
     KnownCell("G1|pack|bin|allowed|project", "I8", "#5253", _PACK_REFUSED, lambda *_args: False),
 )
-# The project gate matrix already labels its p-exec steps under the org deny with these
-# ops (its bin/ never deploys, so it credits no bin cell, #4981); this spine's steps carry
-# a ``plugin`` suffix there so each machine id keeps one witness.
+# The project gate matrix (and the pack spine, for pack) already label their steps under
+# the org deny with these ops (their bin/ never deploys, so they credit no bin cell,
+# #4981); this spine's steps carry a ``plugin`` suffix there so each machine id keeps one
+# witness.
 _MATRIX_DENIED_OPS = frozenset(
-    {"audit-ci", "compile", "install", "install-frozen", "lock", "mcp-install", "update"}
+    {"audit-ci", "compile", "install", "install-frozen", "lock", "mcp-install", "pack", "update"}
 )
 
 
@@ -417,6 +419,7 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("approve", "approve", PLUGIN)
     machine.run("compile", "compile", exits=COMPILE_DENIED, says=(_COMPILE_BLOCKED,))
     machine.run("lock", "lock", exits=LOCK_DENIED, says=(_RESOLVE_BLOCKED,))
+    machine.run("pack", "pack", "--dry-run", exits=(1,), says=(_PACK_BLOCKED,))
     machine.run("mcp-install", "install", "--mcp", REGISTRY_SERVER)
     machine.run("prune", "prune", retires=True)
     machine.run("uninstall", "uninstall", machine.spec())

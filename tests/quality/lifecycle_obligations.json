@@ -5375,11 +5375,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=pack|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|pack|bin|denied-dependency|project|plugin"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=allowed": {
    "credited_by": [
@@ -19789,6 +19793,7 @@
     "G1|lock|bin|denied-dependency|project|plugin",
     "G1|marketplace|bin|denied-dependency|project",
     "G1|mcp-install|bin|denied-dependency|project|plugin",
+    "G1|pack|bin|denied-dependency|project|plugin",
     "G1|prune|bin|denied-dependency|project",
     "G1|uninstall|bin|denied-dependency|project"
    ],
