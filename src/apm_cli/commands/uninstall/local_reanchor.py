@@ -869,9 +869,6 @@ def _recorded_claims(lockfile, ledger=None) -> set[str]:
 
 
 # Compiled outputs are not recorded claims; APM marks each one in its header.
-_COMPILED_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
-
-
 class _UnreadableDir(OSError):
     """A directory the compiled-output walk cannot list: refuse, never skip it."""
 
@@ -885,23 +882,16 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
     opened; a file's header is read, and its full content only when it carries
     APM's generated marker. An unreadable directory or marked output refuses.
     """
-    from ...compilation.constants import (
-        AGENTS_MD_GENERATED_MARKER,
-        DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
-        GEMINI_MD_GENERATED_MARKER,
-    )
     from ...compilation.context_optimizer import (
         PLACEMENT_HIDDEN_TOOL_TREES,
         hidden_tool_root,
         placement_prunes_dir,
     )
+    from ...compilation.root_context_protection import catalog_root_context_markers
     from ...utils.paths import portable_relpath
 
-    markers = (
-        AGENTS_MD_GENERATED_MARKER,
-        DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
-        GEMINI_MD_GENERATED_MARKER,
-    )
+    # Compile's own catalog: each file name with the headers it accepts.
+    markers_by_name = catalog_root_context_markers()
 
     root = Path(project_root)
     section = _managed_section_start(root)
@@ -922,10 +912,10 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
                     ),
                 )
             )
-            for name in sorted(_COMPILED_NAMES.intersection(files)):
+            for name in sorted(markers_by_name.keys() & set(files)):
                 path = here / name
                 try:
-                    data = _marked_regular_file(path, markers, section)
+                    data = _marked_regular_file(path, markers_by_name[name], section)
                     if data is not None and names(path, data):
                         return portable_relpath(path, root)
                 except (OSError, UnicodeDecodeError):
