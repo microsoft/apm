@@ -262,8 +262,18 @@ def _unquote(line: str) -> tuple[str, str] | None:
 _GIT_DIR_ALIAS = re.compile(r"(?:\.git|git~[0-9]+)[. ]*", re.IGNORECASE | re.ASCII)
 
 
+# Codepoints HFS+ ignores when comparing names (git's is_hfs_dotgit).
+_HFS_IGNORABLE = dict.fromkeys(
+    [0x200C, 0x200D, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF]
+)
+
+
 def _names_git_dir(name: str) -> bool:
-    return _GIT_DIR_ALIAS.fullmatch(name) is not None
+    """Whether *name* is ``.git`` on any host: NTFS short names and trailing dots/spaces, HFS+ ignorables."""
+    if _GIT_DIR_ALIAS.fullmatch(name) is not None:
+        return True
+    folded = name.translate(_HFS_IGNORABLE)
+    return folded != name and _GIT_DIR_ALIAS.fullmatch(folded) is not None
 
 
 class _Attributes:
@@ -647,25 +657,37 @@ def require_verified_bytes(
         raise CheckoutVerificationError(f"{rel} does not hold the verified bytes of its commit")
 
 
-_INPROCESS: set[tuple[str, str]] = set()
+_INPROCESS: dict[tuple[str, str], tuple[int, int]] = {}
 
 
 def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str, bool]]) -> None:
-    """PERF PROTOTYPE: record the verdict an in-process fetch reached while writing *repo*."""
+    """PERF PROTOTYPE: record the verdict an in-process fetch reached while writing *repo*.
+
+    Bound to the landed directory's (dev, ino): a swapped directory misses and is verified.
+    """
     key = _key(repo, sha)
+    info = os.lstat(repo)
     with _MANIFEST_LOCK:
         _MANIFESTS[key] = _Manifest(object_format(sha), dict(files))
-        _INPROCESS.add(key)
+        _INPROCESS[key] = (info.st_dev, info.st_ino)
 
 
 def inprocess_verified(repo: Path, sha: str | None = None) -> bool:
-    """PERF PROTOTYPE: whether this process wrote and verified *repo* in-process."""
+    """PERF PROTOTYPE: whether this process wrote and verified this very *repo* in-process."""
     key = _key(repo, sha or Path(repo).parent.name)
     with _MANIFEST_LOCK:
-        return key in _INPROCESS and key in _MANIFESTS
+        identity = _INPROCESS.get(key)
+        if identity is None or key not in _MANIFESTS:
+            return False
+    try:
+        info = os.lstat(repo)
+    except OSError:
+        return False
+    return stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == identity
 
 
 def forget_verdicts() -> None:
     """Drop every record (an evicted or rebuilt checkout, or a new run)."""
     with _MANIFEST_LOCK:
         _MANIFESTS.clear()
+        _INPROCESS.clear()

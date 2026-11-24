@@ -20,24 +20,37 @@ import hashlib
 import logging
 import os
 import stat
+import subprocess
+import threading
+import time
 import zlib
 from collections.abc import Mapping
 from pathlib import Path
 
 _log = logging.getLogger(__name__)
 
-_MAX_BODY = 256 * 1024 * 1024
-_TIMEOUT = (10.0, 60.0)
+# W3d F3/F4/F5: bounded response, inflate, objects, delta chains and wall time.
+_MAX_BODY = 64 * 1024 * 1024
+_MAX_INFLATED = 1024 * 1024 * 1024
+_MAX_OBJECT = 256 * 1024 * 1024
+_MAX_DELTA_DEPTH = 50
+_TIMEOUT = (10.0, 30.0)
+_DEADLINE_SECONDS = 120.0
+_CONFIG_UNSAFE = frozenset('\r\n"[\\')
 _TYPES = {1: "commit", 2: "tree", 3: "blob", 4: "tag"}
 _WRITE_FLAGS = (
     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
 )
-_BAD_NAMES = {"", ".", "..", ".git", "git~1", ".gitattributes", ".gitmodules"}
+_BAD_NAMES = {"", ".", "..", ".gitattributes", ".gitmodules"}
 _RESERVED = {"con", "prn", "aux", "nul"} | {f"{p}{i}" for p in ("com", "lpt") for i in range(10)}
 
 
 class _Refuse(Exception):
     """Not provably equal to git's checkout: run git."""
+
+
+class _Pending(Exception):
+    """A ref-delta whose base is not resolved yet."""
 
 
 def _pkt(text: str) -> bytes:
@@ -96,24 +109,34 @@ def _pack_from_response(body: bytes) -> bytes:
     return bytes(pack)
 
 
-def _inflate(buf: memoryview, pos: int, size: int) -> tuple[bytes, int]:
+def _inflate(buf: memoryview, pos: int, size: int, budget: list[int]) -> tuple[bytes, int]:
+    """Inflate one object of declared *size*: never more output than declared (F3)."""
+    if size > _MAX_OBJECT:
+        raise _Refuse("object exceeds the size cap")
+    budget[0] -= size
+    if budget[0] < 0:
+        raise _Refuse("pack inflates past the total cap")
     inflater = zlib.decompressobj()
     parts = []
+    produced = 0
     step = max(size + 64, 512)
     while not inflater.eof:
         if pos >= len(buf):
             raise _Refuse("truncated object")
         chunk = buf[pos : pos + step]
-        parts.append(inflater.decompress(chunk))
+        data = inflater.decompress(chunk, size + 1 - produced)
+        produced += len(data)
+        parts.append(data)
+        if produced > size:
+            raise _Refuse("object inflates past its declared size")
         if inflater.eof:
             pos += len(chunk) - len(inflater.unused_data)
         else:
-            pos += len(chunk)
-        step *= 2
-    data = b"".join(parts)
-    if len(data) != size:
+            pos += len(chunk) - len(inflater.unconsumed_tail)
+            step *= 2
+    if produced != size:
         raise _Refuse("object size mismatch")
-    return data, pos
+    return b"".join(parts), pos
 
 
 def _varint(delta: bytes, pos: int) -> tuple[int, int]:
@@ -127,11 +150,16 @@ def _varint(delta: bytes, pos: int) -> tuple[int, int]:
             return value, pos
 
 
-def _apply_delta(base: bytes, delta: bytes) -> bytes:
+def _apply_delta(base: bytes, delta: bytes, budget: list[int]) -> bytes:
     src_size, pos = _varint(delta, 0)
     dst_size, pos = _varint(delta, pos)
     if src_size != len(base):
         raise _Refuse("delta base size mismatch")
+    if dst_size > _MAX_OBJECT:
+        raise _Refuse("delta result exceeds the size cap")
+    budget[0] -= dst_size
+    if budget[0] < 0:
+        raise _Refuse("pack inflates past the total cap")
     out = bytearray()
     end = len(delta)
     while pos < end:
@@ -179,6 +207,7 @@ def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
     if version not in (2, 3):
         raise _Refuse("pack version")
     buf = memoryview(pack)[:-20]
+    budget = [_MAX_INFLATED]
     pos = 12
     raw: dict[int, tuple[int, bytes, object]] = {}
     order: list[int] = []
@@ -209,7 +238,7 @@ def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
             pos += 20
         elif kind not in _TYPES:
             raise _Refuse("unknown object type")
-        data, pos = _inflate(buf, pos, size)
+        data, pos = _inflate(buf, pos, size, budget)
         raw[start] = (kind, data, base)
         order.append(start)
     if pos != len(buf):
@@ -218,49 +247,56 @@ def parse_pack(pack: bytes) -> dict[str, tuple[str, bytes]]:
     by_id: dict[str, tuple[str, bytes]] = {}
     offset_of_id: dict[str, int] = {}
 
-    def resolve(start: int, depth: int = 0) -> tuple[str, bytes]:
-        done = resolved.get(start)
-        if done is not None:
-            return done
-        if depth > 4096:
-            raise _Refuse("delta chain too deep")
-        kind, data, base = raw[start]
-        if kind in _TYPES:
-            result = (_TYPES[kind], data)
-        else:
+    def resolve(start: int) -> tuple[str, bytes]:
+        """Iterative, depth-capped (F4): follow bases, then apply deltas outward."""
+        chain: list[int] = []
+        current = start
+        while current not in resolved:
+            kind, data, base = raw[current]
+            if kind in _TYPES:
+                resolved[current] = (_TYPES[kind], data)
+                break
+            chain.append(current)
+            if len(chain) > _MAX_DELTA_DEPTH:
+                raise _Refuse("delta chain exceeds the depth cap")
             if kind == 6:
                 if base not in raw:
                     raise _Refuse("ofs-delta base missing")
-                base_kind, base_data = resolve(base, depth + 1)
+                current = base
             else:
                 if base not in offset_of_id:
-                    raise _Refuse("ref-delta base missing (thin pack)")
-                base_kind, base_data = resolve(offset_of_id[base], depth + 1)
-            result = (base_kind, _apply_delta(base_data, data))
-        resolved[start] = result
-        return result
+                    raise _Pending
+                current = offset_of_id[base]
+        base_kind, content = resolved[current]
+        for link in reversed(chain):
+            content = _apply_delta(content, raw[link][1], budget)
+            resolved[link] = (base_kind, content)
+        return resolved[start]
 
+    pending: list[int] = []
     for start in order:
-        kind, data, _base = raw[start]
-        if kind in _TYPES:
-            oid = _object_id(_TYPES[kind], data)
-            offset_of_id[oid] = start
-            by_id[oid] = (_TYPES[kind], data)
-    pending = [s for s in order if raw[s][0] not in _TYPES]
+        kind = raw[start][0]
+        if kind not in _TYPES:
+            pending.append(start)
+            continue
+        obj_kind, content = resolve(start)
+        oid = _object_id(obj_kind, content)
+        offset_of_id[oid] = start
+        by_id[oid] = (obj_kind, content)
     while pending:
-        progress = []
+        progress: set[int] = set()
         for start in pending:
-            kind, _data, base = raw[start]
-            if kind == 7 and base not in offset_of_id:
+            try:
+                obj_kind, content = resolve(start)
+            except _Pending:
                 continue
-            obj_kind, content = resolve(start)
             oid = _object_id(obj_kind, content)
             offset_of_id[oid] = start
             by_id[oid] = (obj_kind, content)
-            progress.append(start)
+            progress.add(start)
         if not progress:
-            raise _Refuse("unresolvable deltas")
-        pending = [s for s in pending if s not in set(progress)]
+            raise _Refuse("unresolvable deltas (thin pack)")
+        pending = [start for start in pending if start not in progress]
     return by_id
 
 
@@ -282,9 +318,12 @@ def _safe_name(raw: bytes) -> str:
         name = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise _Refuse("non-utf8 name") from None
+    from .checkout_verify import _names_git_dir
+
     lowered = name.lower()
     if (
-        lowered in _BAD_NAMES
+        _names_git_dir(name)
+        or lowered in _BAD_NAMES
         or any(c in name for c in '/\\:\x00*?"<>|')
         or any(ord(c) < 0x20 for c in name)
         or name.endswith((".", " "))
@@ -295,8 +334,10 @@ def _safe_name(raw: bytes) -> str:
     return name
 
 
-def _plan(objects: dict[str, tuple[str, bytes]], sha: str) -> list[tuple[str, str, bool]]:
-    """``[(posix path, blob id, executable)]`` of the commit's full worktree."""
+def _plan(
+    objects: dict[str, tuple[str, bytes]], sha: str
+) -> tuple[list[tuple[str, str, bool]], set[str]]:
+    """``([(posix path, blob id, executable)], reached ids)`` of the commit's full worktree."""
     commit = objects.get(sha)
     if commit is None or commit[0] != "commit":
         raise _Refuse("pinned commit not in pack")
@@ -304,9 +345,11 @@ def _plan(objects: dict[str, tuple[str, bytes]], sha: str) -> list[tuple[str, st
     if not first.startswith(b"tree "):
         raise _Refuse("commit names no tree")
     files: list[tuple[str, str, bool]] = []
+    reached = {sha}
     stack = [("", first[5:].decode("ascii"))]
     while stack:
         prefix, tree_id = stack.pop()
+        reached.add(tree_id)
         tree = objects.get(tree_id)
         if tree is None or tree[0] != "tree":
             raise _Refuse("tree missing")
@@ -320,9 +363,10 @@ def _plan(objects: dict[str, tuple[str, bytes]], sha: str) -> list[tuple[str, st
                 if blob is None or blob[0] != "blob":
                     raise _Refuse("blob missing")
                 files.append((path, oid, mode == "100755"))
+                reached.add(oid)
             else:
                 raise _Refuse(f"mode {mode} needs git's handling")
-    return files
+    return files, reached
 
 
 def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, str]:
@@ -344,7 +388,68 @@ def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, str]:
         ca = anon._verify(child_env, config)
     except anon._Fallback as reason:
         raise _Refuse(str(reason)) from None
+    if url != f"https://github.com{path}":
+        raise _Refuse("url is not the validated github.com form")
+    _require_no_attribute_sources(child_env)
     return f"https://github.com{path}/git-upload-pack", proxy, ca
+
+
+_attr_cache: dict[tuple, bool] = {}
+_attr_lock = threading.Lock()
+
+
+def _attribute_sources(child_env: Mapping[str, str]) -> bool:
+    """Whether any attributes source outside the commit could change git's checkout bytes (F7).
+
+    APM's git checkout always runs with ``-c core.autocrlf=false -c core.eol=lf
+    -c core.symlinks=false`` (``_safe_git_args``), which outrank system and
+    global config, so git writes raw blob bytes unless an attribute says
+    ``text``/``eol``/``filter``. The commit's own ``.gitattributes`` refuses
+    in the plan and a fresh staged clone has no ``info/attributes``; what is
+    left is the global attributes file (``core.attributesFile`` or its XDG
+    default) and the system one.
+    """
+    from ..utils.git_env import _read_effective_git_config, get_git_executable
+
+    entries = _read_effective_git_config(dict(child_env)).entries
+    for entry in entries:
+        if entry.key.lower() == "core.attributesfile" and entry.value:
+            return True
+    xdg = child_env.get("XDG_CONFIG_HOME")
+    home = child_env.get("HOME") or child_env.get("USERPROFILE")
+    base = xdg if xdg else (os.path.join(home, ".config") if home else None)
+    if base and os.path.lexists(os.path.join(base, "git", "attributes")):
+        return True
+    if (child_env.get("GIT_ATTR_NOSYSTEM") or "").lower() in ("1", "true", "yes", "on"):
+        return False
+    probe = subprocess.run(
+        [get_git_executable(), "var", "GIT_ATTR_SYSTEM"],
+        env=dict(child_env),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+        stdin=subprocess.DEVNULL,
+    )
+    system = probe.stdout.strip()
+    if probe.returncode != 0 or not system:
+        return True
+    return os.path.lexists(system)
+
+
+def _require_no_attribute_sources(child_env: Mapping[str, str]) -> None:
+    fingerprint = tuple(sorted(child_env.items()))
+    with _attr_lock:
+        cached = _attr_cache.get(fingerprint)
+    if cached is None:
+        try:
+            cached = _attribute_sources(child_env)
+        except Exception:
+            cached = True
+        with _attr_lock:
+            _attr_cache[fingerprint] = cached
+    if cached:
+        raise _Refuse("an attributes source outside the commit may change checkout bytes")
 
 
 def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
@@ -376,7 +481,10 @@ def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
             raise _Refuse("not an upload-pack result")
         chunks = []
         total = 0
+        deadline = time.monotonic() + _DEADLINE_SECONDS
         for chunk in response.iter_content(65536):
+            if time.monotonic() > deadline:
+                raise _Refuse("fetch exceeds the wall deadline")
             total += len(chunk)
             if total > _MAX_BODY:
                 raise _Refuse("pack exceeds the size cap")
@@ -400,14 +508,19 @@ def _write_git_dir(
     url: str,
     sha: str,
     objects: dict[str, tuple[str, bytes]],
+    reached: set[str],
     pins: tuple[tuple[str, str], ...],
 ) -> None:
+    for value in (url, *(part for pin in pins for part in pin)):
+        if any(c in _CONFIG_UNSAFE for c in value):
+            raise _Refuse("config value needs quoting")
     git_dir = os.path.join(str(staged), ".git")
     objects_dir = os.path.join(git_dir, "objects")
     for sub in ("refs/heads", "refs/tags", "objects/info", "objects/pack"):
         os.makedirs(os.path.join(git_dir, *sub.split("/")), exist_ok=True)
     made: set[str] = set()
-    for oid, (kind, data) in objects.items():
+    for oid in reached:
+        kind, data = objects[oid]
         fan = os.path.join(objects_dir, oid[:2])
         if fan not in made:
             os.makedirs(fan, exist_ok=True)
@@ -443,7 +556,7 @@ def fetch_worktree(
         upload_url, proxy, ca = _gate(url, env if env is not None else os.environ)
         body = _post(upload_url, proxy, ca, _request_body(sha))
         objects = parse_pack(_pack_from_response(body))
-        files = _plan(objects, sha)
+        files, reached = _plan(objects, sha)
         root = str(staged)
         made = {root}
         manifest: dict[str, tuple[str, bool]] = {}
@@ -457,7 +570,7 @@ def fetch_worktree(
                     made.add(directory)
             _write_file(os.path.join(directory, parts[-1]), objects[oid][1], executable)
             manifest[rel] = (oid, executable)
-        _write_git_dir(staged, url, sha, objects, pins)
+        _write_git_dir(staged, url, sha, objects, reached, pins)
         if os.name != "nt":
             info = os.lstat(root)
             if not stat.S_ISDIR(info.st_mode):
