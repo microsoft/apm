@@ -384,3 +384,30 @@ def test_a_shared_hooked_file_follows_the_other_grant_unless_denied(
     assert ("Retired 1 Markdown file(s) with frontmatter hooks" in text) is (
         withdrawal == "denied"
     ), text
+
+
+def test_an_unreadable_record_in_another_target_refuses_before_any_change(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5254 R4: every record is read before anything is retired."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    consumer = world.consumer("two-target-consumer", targets=("claude", "copilot"))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    broken = consumer / ".github" / "apm-bundle-markdown-hooks.json"
+    broken.write_text("{not json\n", encoding="utf-8")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    before = {root: tree_bytes(consumer / root) for root in (".claude", ".github")}
+    lock_before = (consumer / "apm.lock.yaml").read_bytes()
+
+    result = world.apm(consumer, "install", "--no-policy", expect=1)
+
+    text = output(result)
+    assert "Traceback" not in result.stdout + result.stderr, text
+    assert ".github/apm-bundle-markdown-hooks.json" in text, text
+    assert {root: tree_bytes(consumer / root) for root in (".claude", ".github")} == before
+    assert (consumer / "apm.lock.yaml").read_bytes() == lock_before
