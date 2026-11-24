@@ -1,0 +1,14 @@
+{
+  "issue": 5236,
+  "fixed_in": "Unreleased",
+  "summary": "apm approve on a package the org dependency denylist blocks exited 0, recorded the approval and pointed at an apm install that refused it; approve now names the org block, exits 1 and writes nothing.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
+  ]
+}
