@@ -7,6 +7,7 @@ was then deleted, unmerged.
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import stat
@@ -973,3 +974,34 @@ def test_the_ref_listing_goes_where_a_remote_activated_mirror_sends_the_clone(
     assert admit_fetch_ref(downloader, _ref("main"), "main") == origin.m2
     [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
     assert marker.name == origin.m2
+
+
+def test_two_listings_of_one_origin_probe_its_clone_config_once(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: the clone-config probe of a listing (two git spawns) runs once per origin."""
+    from apm_cli.cache.commit_reachability import admit_fetch_ref
+
+    git_env = importlib.import_module("apm_cli.utils.git_env")
+    spawned: list[list[str]] = []
+    real_init_run = git_env._git_init_run
+
+    def _count(args, *rest, **kwargs):
+        spawned.append([str(arg) for arg in args])
+        return real_init_run(args, *rest, **kwargs)
+
+    monkeypatch.setattr("apm_cli.utils.git_env._git_init_run", _count)
+    first = _CloneFailsDownloader(tmp_path / "one", [origin.url], predicted=origin.url)
+    second = _CloneFailsDownloader(tmp_path / "two", [origin.url], predicted=origin.url)
+
+    assert admit_fetch_ref(first, _ref("main"), "main") == origin.m2
+    assert admit_fetch_ref(second, _ref("main"), "main") == origin.m2
+
+    # One probe: its ``git init`` and ``git remote add``.
+    assert [("init" in args, "remote" in args) for args in spawned] == [
+        (True, False),
+        (False, True),
+    ]
+    for cache in ("one", "two"):
+        [marker] = (tmp_path / cache / "reachability").rglob("verified-v2/*")
+        assert marker.name == origin.m2

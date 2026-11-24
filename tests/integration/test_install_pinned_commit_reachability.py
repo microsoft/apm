@@ -720,6 +720,7 @@ def dumb_http(origin: _Origin, tmp_path: Path):
     handler.log_message = lambda *_args: None
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=leaf, keyfile=key)
     server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -758,3 +759,53 @@ def test_a_subdir_named_ref_installs_from_a_dumb_http_host(
     assert origin.m2 in (project / "apm.lock.yaml").read_text(encoding="utf-8")
     [deployed] = (project / "apm_modules").rglob("tool.instructions.md")
     assert deployed.read_text(encoding="utf-8") == "m2"
+
+
+@pytest.mark.parametrize("no_cache", [False, True], ids=["cached", "no-cache"])
+def test_a_locked_subdir_ref_on_a_dumb_http_host_replays_its_locked_commit(
+    tmp_path: Path, origin: _Origin, dumb_http: str, monkeypatch: pytest.MonkeyPatch, no_cache
+) -> None:
+    """#5138: a lockfile pins the commit after the branch moves; no ref listing runs.
+
+    The locked fetch goes to the host by commit: no ls-remote, no clone by name.
+    """
+    url = dumb_http
+    project = _project(tmp_path, "main", "skills/tool")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"][0]["git"] = url
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    config = tmp_path / "global.gitconfig"
+    base = url.rsplit("/acme/", 1)[0] + "/"
+    config.write_text(f'[http "{base}"]\n\tsslVerify = false\n', encoding="ascii")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache")}
+    assert _install(project, origin, monkeypatch, **env).exit_code == 0
+    work = tmp_path / "remote" / "work"
+    _package(work / "skills" / "tool", "tool", "m3")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "m3", cwd=work)
+    moved = _git("rev-parse", "HEAD", cwd=work)
+    _git("push", "-q", str(origin.path), "main", cwd=work)
+    _git("--git-dir", str(origin.path), "update-server-info", cwd=origin.path.parent)
+    shutil.rmtree(project / "apm_modules")
+    calls_log = tmp_path / "git-calls"
+    _wrapped_git(
+        tmp_path,
+        monkeypatch,
+        f"""
+with open({str(calls_log)!r}, "a") as log:
+    log.write(" ".join(args) + "\\n")
+""",
+    )
+
+    result = _install(project, origin, monkeypatch, **env)
+
+    assert result.exit_code == 0, result.output
+    lock = (project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert origin.m2 in lock and moved not in lock
+    [deployed] = (project / "apm_modules").rglob("tool.instructions.md")
+    assert deployed.read_text(encoding="utf-8") == "m2"
+    calls = calls_log.read_text(encoding="utf-8").splitlines()
+    # Fetched by the locked commit; the ref is neither listed nor cloned by name.
+    assert [call for call in calls if " fetch " in call and call.endswith(origin.m2)]
+    assert not [call for call in calls if "ls-remote" in call or "--branch" in call], calls

@@ -706,21 +706,43 @@ def _sanitize_origin(url: str) -> str:
     return _sanitize_url(url)
 
 
-def _branch_and_tag_records(url: str, env) -> list[tuple[str, str]]:
-    """The origin's ``(commit, name)`` branch and tag records, from ``git ls-remote``."""
+_LISTING_ENVS: dict[tuple, dict[str, str]] = {}
+
+
+def _listing_env(url: str, env) -> dict[str, str]:
+    """The env a clone of *url* gets, so config its remote URL activates applies.
+
+    A remote-activated mirror rewrite then sends the listing where the fetch
+    would go. Probing costs a scratch repository, so it is memoized per run
+    by the URL, the whole environment and the state of the config files.
+    """
     import tempfile
 
-    from ..utils.git_env import git_clone_env, git_remote_refs
+    from ..utils.git_env import git_clone_env
+
+    merged = {**os.environ, **(env or {})}
+    key = (url, tuple(sorted((str(k), str(v)) for k, v in merged.items())))
+    key += (_config_files_state(merged),)
+    if key not in _LISTING_ENVS:
+        with tempfile.TemporaryDirectory(prefix="apm-ls-remote-") as probe:
+            _LISTING_ENVS[key] = git_clone_env(url, env, Path(probe) / "origin")
+    return dict(_LISTING_ENVS[key])
+
+
+def _branch_and_tag_records(url: str, env) -> list[tuple[str, str]]:
+    """The origin's ``(commit, name)`` branch and tag records, from ``git ls-remote``."""
+    from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args
 
     where = _sanitize_origin(url)
     try:
-        # The env a clone of *url* gets, so config its remote URL activates
-        # (a mirror rewrite) sends the listing where the fetch would go.
-        with tempfile.TemporaryDirectory(prefix="apm-ls-remote-") as probe:
-            env = git_clone_env(url, env, Path(probe) / "origin")
         listing = git_remote_refs(
-            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
+            url,
+            "refs/heads/*",
+            "refs/tags/*",
+            env=_listing_env(url, env),
+            timeout=60,
+            git_args=_safe_git_args(),
         )
     except (subprocess.SubprocessError, OSError, ValueError) as exc:
         raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
