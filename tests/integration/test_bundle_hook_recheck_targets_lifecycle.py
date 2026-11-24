@@ -105,15 +105,48 @@ def test_hook_recheck_after_withdrawal_covers_targets_outside_the_manifest(
         world.apm(cwd, "deny", *flags, key)
     else:
         _set_executables(manifest_path, {})
-    if scope == "project-target-flag":
-        audit = world.apm(cwd, "audit", "--ci", "--no-policy", expect=1)
-        assert audit.returncode == 1
-        assert "hookpkg" in audit.stdout + audit.stderr, output(audit)
+    # Audit runs in the scope's metadata workspace: the project, or $HOME/.apm.
+    audit = world.apm(
+        manifest_path.parent, "audit", "--ci", "--no-policy", "--no-fail-fast", expect=None
+    )
+    assert audit.returncode == 1
+    assert "Local bundle hooks are approved" not in output(audit)
+    assert "hookpkg:" in audit.stdout + audit.stderr, output(audit)
     installed = world.apm(cwd, "install", *flags, "--no-policy")
 
     assert installed.returncode == 0, output(installed)
     assert "Retired hooks from local bundle 'hookpkg'" in installed.stdout + installed.stderr
     _assert_no_bundle_hook(claude_root)
-    if scope == "project-target-flag":
-        audit = world.apm(cwd, "audit", "--ci", "--no-policy")
+    audit = world.apm(
+        manifest_path.parent, "audit", "--ci", "--no-policy", "--no-fail-fast", expect=None
+    )
+    assert "Local bundle hooks are approved" in output(audit), output(audit)
+    if scope != "user-claude-config-dir":
+        # Under a redirected CLAUDE_CONFIG_DIR, deployed-files-present fails on its own.
         assert audit.returncode == 0, output(audit)
+
+
+def test_hook_recheck_leaves_a_linked_outside_target_untouched(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A target root the manifest does not name and that links outside is not re-checked."""
+    import os
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _packed_bundle(world, tmp_path)
+    other = world.consumer("other-project", targets=("claude",))
+    _set_executables(other / "apm.yml", {"allow": {key: {"hooks": True}}})
+    world.apm(other, "install", str(bundle), "--no-policy")
+    assert _matchers(other / ".claude") == ["Bash"]
+    consumer = world.consumer("consumer", targets=("copilot",))
+    os.symlink(other / ".claude", consumer / ".claude", target_is_directory=True)
+    before = {p.name: p.read_bytes() for p in (other / ".claude").iterdir() if p.is_file()}
+
+    installed = world.apm(consumer, "install", "--no-policy")
+    audit = world.apm(consumer, "audit", "--ci", "--no-policy", expect=None)
+
+    assert installed.returncode == 0, output(installed)
+    assert "Retired hooks" not in installed.stdout + installed.stderr
+    assert "hookpkg" not in audit.stdout + audit.stderr, output(audit)
+    after = {p.name: p.read_bytes() for p in (other / ".claude").iterdir() if p.is_file()}
+    assert after == before
