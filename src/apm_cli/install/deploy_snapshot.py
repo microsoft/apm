@@ -364,10 +364,12 @@ def lockfile_identity(text: str) -> str:
     """
     import yaml
 
-    from apm_cli.utils.yaml_io import load_yaml_str
+    from apm_cli.deps.lockfile_container import parse_lockfile_text
 
     try:
-        canonical = json.dumps(load_yaml_str(text), sort_keys=True, default=str)
+        # The lockfile owner's memoized parse: the same text is identified at the
+        # commit mark and again at settle, and was usually just read or written.
+        canonical = json.dumps(parse_lockfile_text(text), sort_keys=True, default=str)
     except (yaml.YAMLError, ValueError, TypeError, RecursionError):
         canonical = text.replace("\r\n", "\n")
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

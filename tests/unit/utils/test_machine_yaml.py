@@ -141,3 +141,36 @@ def test_only_the_lockfile_parse_uses_the_machine_loader() -> None:
         "src/apm_cli/deps/lockfile_container.py",
         "src/apm_cli/utils/yaml_io.py",
     ]
+
+
+@pytest.mark.parametrize("path", _LOCKFILES, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_lockfile_identity_is_unchanged_by_the_owner_parse(path: Path) -> None:
+    """Journals an older APM wrote compare equal: the identity formula's value is the same."""
+    import hashlib
+    import json
+
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    text = path.read_text(encoding="utf-8")
+    try:
+        canonical = json.dumps(yaml_io.load_yaml_str(text), sort_keys=True, default=str)
+    except (yaml.YAMLError, ValueError, TypeError, RecursionError):
+        canonical = text.replace("\r\n", "\n")
+    assert lockfile_identity(text) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def test_identifying_one_lockfile_twice_parses_it_once(monkeypatch) -> None:
+    """The commit mark and the settle identify the same text: one memoized parse."""
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    parses: list[str] = []
+    load = yaml_io.load_machine_yaml_str
+
+    def counted(text: str):
+        parses.append(text)
+        return load(text)
+
+    monkeypatch.setattr(yaml_io, "load_machine_yaml_str", counted)
+    text = "lockfile_version: '1'\ndependencies:\n- repo_url: o/identity-memo\n"
+    assert lockfile_identity(text) == lockfile_identity(text)
+    assert parses == [text]
