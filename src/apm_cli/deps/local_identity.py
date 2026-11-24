@@ -78,3 +78,35 @@ def transitive_local_identity(
         declaring_parent=declaring_parent,
         anchored_local_path=portable_anchor_identity(anchored, root),
     )
+
+
+def with_declaring_edge(
+    node_ref: DependencyReference, edge_ref: DependencyReference
+) -> DependencyReference:
+    """*node_ref* carrying the local declaration of *edge_ref*, its recorded parent's edge.
+
+    A diamond's node keeps the first edge the walk met; once the resolver picks
+    the recorded parent by a stable rule (#5386), ``declaring_parent`` and the
+    ``local_path`` spelled relative to it must come from that parent's edge too,
+    so ``resolved_by`` and ``declaring_parent`` name one parent. The anchored
+    directory, and so the node identity, is the same for every such edge.
+
+    The package was already copied to the slot the first edge names (its
+    anchored identity and ``local_path`` directory name); an edge naming
+    another directory (an alias spelling) leaves *node_ref* as it is.
+    """
+    if (
+        not (node_ref.is_local and node_ref.local_path and edge_ref.local_path)
+        or not edge_ref.declaring_parent
+        or node_ref.anchored_local_path != edge_ref.anchored_local_path
+        or Path(node_ref.local_path).name != Path(edge_ref.local_path).name
+    ):
+        return node_ref
+    reparented = replace(
+        node_ref, declaring_parent=edge_ref.declaring_parent, local_path=edge_ref.local_path
+    )
+    # Keep the non-field state download callbacks annotate (``resolved_reference``).
+    for name, value in vars(node_ref).items():
+        if name not in vars(reparented):
+            setattr(reparented, name, value)
+    return reparented
