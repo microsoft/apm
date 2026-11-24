@@ -254,54 +254,9 @@ def _report(out: str, wall: float, exit_code) -> None:
         "module_inclusive": top(_module_incl, 40),
         "function_inclusive": top(_incl, 60),
         "function_self": top(_self, 60),
-        "resolve_total": sum(_resolve_calls.values()),
-        "resolve_calls": top(_resolve_calls, 80),
     }
     with open(out, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=1)
-
-
-_resolve_calls: collections.Counter = collections.Counter()
-_HELPERS = ("utils/realpath.py", "utils/path_security.py", "utils/paths.py", "pathlib.py", "posixpath")
-
-
-def _caller_key(depth: int = 2) -> str:
-    frame = sys._getframe(depth)
-    helper = None
-    while frame is not None:
-        name = frame.f_code.co_filename.replace("\\", "/")
-        if any(h in name for h in _HELPERS):
-            if helper is None or "pathlib" not in name:
-                helper = f"{name.rsplit('/', 1)[-1]}:{frame.f_code.co_name}"
-            frame = frame.f_back
-            continue
-        short = name.split("apm_cli/", 1)[-1]
-        return f"{short}:{frame.f_code.co_name}:{frame.f_lineno} via {helper}"
-    return "?"
-
-
-def _install_resolve_counter() -> None:
-    import os.path as _osp
-
-    orig_realpath = _osp.realpath
-
-    def counted_realpath(*a, **k):
-        _resolve_calls["PY " + _caller_key()] += 1
-        return orig_realpath(*a, **k)
-
-    _osp.realpath = counted_realpath
-    try:
-        from apm_cli.utils import realpath as _rp
-    except Exception:
-        return
-    orig = _rp._kernel_realpath
-
-    def counted_kernel(text, depth=0):
-        if depth == 0:
-            _resolve_calls["K " + _caller_key()] += 1
-        return orig(text, depth)
-
-    _rp._kernel_realpath = counted_kernel
 
 
 def main() -> int:
@@ -314,8 +269,6 @@ def main() -> int:
         sys.argv = ["apm", *args]
     else:
         sys.argv = list(args)
-    if os.environ.get("APM_RESOLVE_COUNT", "1") == "1":
-        _install_resolve_counter()
     sampler = threading.Thread(target=_sample, name="cpu-attr", daemon=True)
     started = time.perf_counter()
     sampler.start()
