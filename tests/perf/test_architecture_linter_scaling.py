@@ -434,11 +434,15 @@ def _build_real_catalog_repo(root: Path, count: int) -> Path:
     for index in range(count):
         (directory / f"test_module_{index}.py").write_text(
             "import pytest\n\n"
-            "pytestmark = pytest.mark.integration\n\n\n"
-            f"def helper_{index}(value):\n"
+            "pytestmark = pytest.mark.integration\n\n"
+            # Tokens that open every binary-selection gate (#5196) without forming a
+            # violation, so each detector still does its work at N and 10N.
+            '_GATE_TOKENS = ("apm/.venv", "APM_BINARY_PATH", "-m", "uv")\n\n\n'
+            f"def helper_{index}(value, apm_binary_path=None):\n"
+            "    which = executable = ApmLifecycleRunner = subprocess = None\n"
             "    if value:\n"
             "        return value\n"
-            "    return None\n",
+            "    return (which, executable, ApmLifecycleRunner, subprocess, apm_binary_path)\n",
             encoding="ascii",
         )
     return root
@@ -489,6 +493,19 @@ def test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtractio
     samples = {label: _catalog_sample(root, work_units) for label, root in roots.items()}
     for sample in samples.values():
         _assert_catalog_sample(sample)
+        assert sample.report.violations == ()
+    # Every corpus file opens every binary-selection gate, so the ratio below still
+    # bounds the detectors' own work, not only the pre-filter's (#5196).
+    from dataclasses import asdict
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_needs,
+    )
+
+    corpus_file = "tests/integration/perf_catalog/test_module_0.py"
+    provider = FactsProvider(roots["n"], (corpus_file,), registry=None)
+    needs = asdict(_binary_needs(provider.tree_index(corpus_file)))
+    assert all(needs.values()), needs
 
     fixed = samples["zero"].walk_work_units
     incremental_n = samples["n"].walk_work_units - fixed

@@ -1977,7 +1977,7 @@ def test_every_binary_selection_detector_is_gated_or_always_runs() -> None:
 
 
 def test_a_token_free_file_skips_every_binary_selection_detector(tmp_path: Path) -> None:
-    """The scaling corpus's shape needs no detector; a file with the tokens needs its own."""
+    """A synthetic token-free file needs no detector; a file with the tokens needs its own."""
     from dataclasses import asdict
 
     from scripts.architecture_linter.checks.contracts_structural_authorities import (
