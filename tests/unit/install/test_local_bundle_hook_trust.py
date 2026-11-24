@@ -176,3 +176,14 @@ def test_a_handler_whose_cwd_links_outside_the_project_is_in_use(tmp_path: Path)
 def test_a_handler_whose_cwd_holds_a_nul_is_in_use(tmp_path: Path) -> None:
     """#5296 review: an embedded NUL is no path; it refuses instead of crashing."""
     assert _user_hook_with_cwd(tmp_path, "./x.sh", "tools\x00bad") == {".github/hooks/user.json"}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_handler_whose_cwd_climbs_out_of_a_link_is_in_use(tmp_path: Path) -> None:
+    """#5296 review: ``lk/..`` follows the link before ``..``, landing in the script directory."""
+
+    def link(project: Path) -> None:
+        (project / _SCRIPT_DIR / "child").mkdir()
+        (project / "lk").symlink_to(project / _SCRIPT_DIR / "child", target_is_directory=True)
+
+    assert _user_hook_with_cwd(tmp_path, "./x.sh", "lk/..", link) == {".github/hooks/user.json"}
