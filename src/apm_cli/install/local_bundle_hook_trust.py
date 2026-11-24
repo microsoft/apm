@@ -636,10 +636,10 @@ def _runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str
     for command, cwd in _handler_cwds(document):
         if not isinstance(cwd, str) or not cwd.strip() or cwd.startswith("~"):
             return True
-        if "$" in cwd or "%" in cwd:
+        if "$" in cwd or "%" in cwd or "\x00" in cwd:
             return True
         base = Path(os.path.normpath(root / cwd.replace("\\", "/")))
-        if not base.is_relative_to(root):
+        if not base.is_relative_to(root) or _escapes_through_a_link(base, root):
             return True
         text = command.replace("\\", "/")
         if any(
@@ -658,6 +658,15 @@ def _runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str
         if any(rel in text for rel in index.get((identity.st_dev, identity.st_ino), ())):
             return True
     return False
+
+
+def _escapes_through_a_link(base: Path, root: Path) -> bool:
+    """Whether *base* resolves outside the resolved *root*, or cannot be resolved."""
+    try:
+        resolved = Path(os.path.realpath(base, strict=False))
+        return not resolved.is_relative_to(Path(os.path.realpath(root)))
+    except (OSError, ValueError):
+        return True
 
 
 def _script_directories(root: Path, scripts: Collection[Path]) -> dict[tuple[int, int], set[str]]:
