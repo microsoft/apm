@@ -9,6 +9,7 @@ APM_HOME state, policy cache, allowlisted environment) misses when it changes.
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import os
 import re
@@ -1001,4 +1002,143 @@ def test_a_linked_worktree_is_never_recorded(project: Path) -> None:
     (project / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
     _record()
 
+    assert not (_home(project) / "verdicts").exists()
+
+
+_HOSTED_REMOTES = {
+    "gitlab": "https://gitlab.com/acme/app.git",
+    "ado": "https://dev.azure.com/acme/proj/_git/app",
+}
+
+
+def _hosted_project(project: Path, host: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    subprocess.run(
+        ["git", "-C", str(project), "remote", "add", "origin", _HOSTED_REMOTES[host]], check=True
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize("host", sorted(_HOSTED_REMOTES))
+def test_a_gitlab_or_ado_run_whose_policy_came_from_the_cache_records_and_hits(
+    project: Path, capsys, host: str
+) -> None:
+    """#5075: discovery fetched nothing, so its result rests only on keyed cache state."""
+    _hosted_project(project, host)
+    _record()
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is True
+    assert "up to date in " in capsys.readouterr().out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize("host", sorted(_HOSTED_REMOTES))
+def test_a_gitlab_or_ado_run_that_attempted_a_policy_fetch_never_records(
+    project: Path, host: str
+) -> None:
+    """A fetch (or its credential lookup) this run means the next run fetches too."""
+    from apm_cli.core.policy_fetch_ledger import note_fetch_attempt
+
+    _hosted_project(project, host)
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        note_fetch_attempt(host)
+        verdict_record.note_verified_noop()
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_a_pinned_gitlab_project_never_records_even_with_a_fresh_cache(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A policy.hash pin makes GitLab discovery read the source, never the cache (W3d R1)."""
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+
+    def _offline(*_args, **_kwargs):
+        raise OSError("offline")
+
+    _hosted_project(project, "gitlab")
+    (project / "apm.yml").write_text(
+        f"name: demo\nversion: 1.0.0\npolicy:\n  hash: sha256:{'a' * 64}\n", encoding="utf-8"
+    )
+    policy, _warnings = load_policy("enforcement: warn\ncache:\n  ttl: 3600\n")
+    discovery._write_cache("gitlab.com/acme/apm-policy", policy, project)
+    monkeypatch.setattr("apm_cli.core.auth.AuthResolver.try_with_fallback", _offline)
+    with verdict_record.recording(["install"]):
+        with contextlib.suppress(OSError):  # the stubbed transport fails; the run goes on
+            discovery.discover_policy(project, expected_hash=f"sha256:{'a' * 64}")
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_a_policy_cache_changed_after_discovery_is_never_recorded(project: Path) -> None:
+    """The cache discovery read must still be the one the record keys (Copilot, #5331)."""
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+
+    _hosted_project(project, "ado")
+    policy, _warnings = load_policy("enforcement: warn\ncache:\n  ttl: 3600\n")
+    discovery._write_cache("dev.azure.com/acme/apm/apm-policy", policy, project)
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+        shutil.rmtree(project.parent / "cache" / "policy_v1")
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def _cached_ado_project(project: Path) -> Path:
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+
+    _hosted_project(project, "ado")
+    policy, _warnings = load_policy("enforcement: warn\ncache:\n  ttl: 3600\n")
+    discovery._write_cache("dev.azure.com/acme/apm/apm-policy", policy, project)
+    (cached,) = (p for p in (project.parent / "cache" / "policy_v1").rglob("*.yml"))
+    return cached
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_a_policy_cache_rewritten_in_place_after_discovery_is_never_recorded(
+    project: Path,
+) -> None:
+    """Same size and mtime, other bytes: the cache's content is bound too."""
+    cached = _cached_ado_project(project)
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+        info = cached.stat()
+        data = cached.read_bytes()
+        cached.write_bytes(data.replace(b"warn", b"bloc"))
+        os.utime(cached, ns=(info.st_atime_ns, info.st_mtime_ns))
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None or os.name == "nt" or os.geteuid() == 0,
+    reason="needs git and a POSIX non-root user",
+)
+def test_an_unreadable_policy_cache_at_entry_records_nothing_and_runs_on(
+    project: Path, capsys
+) -> None:
+    """W3d R3: a cache the snapshot cannot read never aborts the install."""
+    cached = _cached_ado_project(project)
+    cached.chmod(0)
+    try:
+        with verdict_record.recording(["install"]):
+            sys.stdout.write(_OUTPUT)
+            verdict_record.note_verified_noop()
+    finally:
+        cached.chmod(0o600)
+
+    assert capsys.readouterr().out == _OUTPUT
     assert not (_home(project) / "verdicts").exists()

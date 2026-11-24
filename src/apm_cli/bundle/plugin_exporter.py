@@ -924,7 +924,8 @@ def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency
     partial install -- packing its cache would leak unattested content, so we
     refuse rather than silently pack it.
     """
-    if not install_path.is_dir():
+    if not install_path.is_dir() or _whole_native_plugin_root(dep):
+        # A plugin deployed whole is attested by its native_plugin record (#5253).
         return False
     probe = _collect_apm_components(install_path / ".apm")
     probe.extend(_collect_root_plugin_components(install_path))
@@ -934,6 +935,12 @@ def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency
     if _gate_parked_types(install_path, dep):
         probe = [item for item in probe if not item[1].startswith("extensions/")]
     return bool(probe)
+
+
+def _whole_native_plugin_root(dep: LockedDependency) -> str | None:
+    """The recorded root of a dependency deployed only as a whole native plugin (#5253)."""
+    record = getattr(dep, "native_plugin", None)
+    return record.root if record is not None and not dep.deployed_files else None
 
 
 def _gate_parked_types(install_path: Path, dep: LockedDependency) -> tuple[str, ...]:
@@ -1045,8 +1052,19 @@ def _warn_unpacked_dependency_config(
     A hooks file the lockfile attests (``deployed_files`` plus its hash) packs
     with the dependency's components, so only hook config that reaches no
     packed hooks file is named, and MCP config, which install merges into
-    shared settings and never attests.
+    shared settings and never attests. A plugin deployed whole is named once
+    instead: pack leaves its recorded root out (#5253).
     """
+    root = _whole_native_plugin_root(dep)
+    if root:
+        # Its hooks and MCP config load from the plugin root, never from shared settings.
+        _emit_pack_warning(
+            f"dependency {dep.get_unique_key()}: the native plugin deployed whole under "
+            f"{root} is not packed; a bundle carries only files the lockfile records in "
+            "deployed_files. A consumer that needs it declares it as its own dependency.",
+            logger,
+        )
+        return
     kinds = [
         kind
         for kind in _cache_config_kinds(install_path)
