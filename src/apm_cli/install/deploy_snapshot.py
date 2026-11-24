@@ -1,28 +1,24 @@
 """Lazy pre-write journal of the paths one install touches (#4282).
 
-:class:`~apm_cli.install.transaction.InstallTransaction` listens at the
-integrator write seam (``integration/write_seam.py``). The first time a path
-is about to be created, replaced or removed, :meth:`DeployJournal.record`
-keeps its prior bytes (or notes that it was absent) in a store under the APM
-home ``install-snapshots`` directory. Paths the install never touches are not
-copied. :meth:`DeployJournal.restore` puts every recorded path back, newest
-first, and removes the directories the install created;
-:meth:`DeployJournal.discard` deletes the store once the install committed.
+:class:`~apm_cli.install.transaction.InstallTransaction` listens at the integrator write seam
+(``integration/write_seam.py``). The first time a path is about to be created, replaced or removed,
+:meth:`DeployJournal.record` keeps its prior bytes (or notes that it was absent) in a store under
+the APM home ``install-snapshots`` directory. Paths the install never touches are not copied.
+:meth:`DeployJournal.restore` puts every recorded path back, newest first, and removes the
+directories the install created; :meth:`DeployJournal.discard` deletes the store once the install
+committed.
 
-A journal bound to a deploy root also writes each unit, as it records it,
-to ``journal.jsonl`` in its store. A store a killed process left behind
-(``deploy-*``) is replayed by :func:`replay_abandoned_journals` when the next
-install for the same deploy root starts under the lifecycle lock (#4863).
-The journal is data on disk and is trusted no further than the deployment
-ledger: replay first checks every unit (well-formed, inside the deploy root,
-copy bytes that re-hash to the recorded hash and to the ledger's hash for the
-path), applies nothing when any check fails, and keeps the store for recovery
-then or when a path cannot be restored. A store kept after a failed restore is
-marked retained (a ``RETAINED`` file inside it) and then renamed
-``retained-*``; replay never touches a marked store, so the copies survive
-even a failed rename.
-:func:`remove_empty_directories` also lets the transaction remove target roots
-a failed install created and left empty (#4159).
+A journal bound to a deploy root also writes each unit, as it records it, to ``journal.jsonl`` in
+its store. A store a killed process left behind (``deploy-*``) is replayed by
+:func:`replay_abandoned_journals` when the next install for the same deploy root starts under the
+lifecycle lock (#4863). The journal is data on disk and is trusted no further than the deployment
+ledger: replay first checks every unit (well-formed, inside the deploy root, copy bytes that re-hash
+to the recorded hash and to the ledger's hash for the path), applies nothing when any check fails,
+and keeps the store for recovery then or when a path cannot be restored. A store kept after a failed
+restore is marked retained (a ``RETAINED`` file inside it) and then renamed ``retained-*``; replay
+never touches a marked store, so the copies survive even a failed rename.
+:func:`remove_empty_directories` also lets the transaction remove target roots a failed install
+created and left empty (#4159).
 """
 
 from __future__ import annotations
@@ -205,11 +201,10 @@ class DeployJournal:
     def record(self, path: Path, *, contents: bool = True, expected: str | None = None) -> None:
         """Keep the prior state of *path* the first time it is touched.
 
-        With ``contents=False`` (a directory about to be created) only an
-        absent path is recorded: creating an existing directory changes nothing.
-        *expected* is the content hash the write will leave (``"absent"``,
-        ``"dir"``, or ``None`` when the writer cannot know it); a write killed
-        before its seal is restored only over those bytes.
+        With ``contents=False`` (a directory about to be created) only an absent path is recorded:
+        creating an existing directory changes nothing. *expected* is the content hash the write
+        will leave (``"absent"``, ``"dir"``, or ``None`` when the writer cannot know it); a write
+        killed before its seal is restored only over those bytes.
         """
         path = Path(os.path.abspath(path))
         with self._lock:
@@ -545,15 +540,13 @@ def _validate_unit(
 ) -> _Replay:
     """Check one manifest line against the store and the ledger, without applying it.
 
-    A path under the deploy root (``base: root``) is restored only when the
-    deployment ledger vouches for it, a directory only when the ledger
-    records exactly its files. APM's own metadata under APM home
-    (``base: apm_home``) is limited to deployment receipts, which have
-    journal-only integrity: confined to the receipts directory and restored
-    only when they re-hash as journaled. A shared config file the ledger never
-    claims (hook settings, the hook sidecar, an MCP config) is restored when
-    the config file records vouch for it (:func:`_shared_config_vouched`).
-    Raise ``_Unproven`` otherwise.
+    A path under the deploy root (``base: root``) is restored only when the deployment ledger
+    vouches for it, a directory only when the ledger records exactly its files. APM's own metadata
+    under APM home (``base: apm_home``) is limited to deployment receipts, which have journal-only
+    integrity: confined to the receipts directory and restored only when they re-hash as journaled.
+    A shared config file the ledger never claims (hook settings, the hook sidecar, an MCP config) is
+    restored when the config file records vouch for it (:func:`_shared_config_vouched`). Raise
+    ``_Unproven`` otherwise.
     """
     if not isinstance(line, dict) or line.get("kind") not in _KINDS:
         raise _Unproven(store, "journal manifest holds a malformed unit")
@@ -761,12 +754,11 @@ _KEEP_ACL = "it carries a POSIX ACL"
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
     """Split *units* into those to restore and those holding data a user wrote.
 
-    A unit is restored only while what is there now is APM's: nothing, its
-    prior state, the bytes APM's last write sealed, or a write APM began and
-    never sealed (a kill mid-write; the unit line itself opens the first
-    write). A directory a removal APM began left partial holds only entries
-    APM journaled: it is rolled back whole. Anything else, such as a file a
-    user edited after the kill, is kept.
+    A unit is restored only while what is there now is APM's: nothing, its prior state, the bytes
+    APM's last write sealed, or a write APM began and never sealed (a kill mid-write; the unit line
+    itself opens the first write). A directory a removal APM began left partial holds only entries
+    APM journaled: it is rolled back whole. Anything else, such as a file a user edited after the
+    kill, is kept.
     """
     apply: list[_Replay] = []
     kept: list[tuple[str, str]] = []
@@ -968,19 +960,16 @@ def replay_abandoned_journals(
 ) -> ReplayOutcome:
     """Replay the journals a killed install left for *root*.
 
-    Call only while holding the lifecycle lock, before the install changes
-    anything: every install that could own a live journal is then this
-    process. *ledger* returns each deployed path the lockfile claims (POSIX,
-    relative to *root*) mapped to its recorded content hash, or ``None``; it
-    raises ``LedgerUnavailable`` when the lockfile exists but cannot be read.
-    *committed* returns the :func:`lockfile_identity` of the lockfile on disk.
-    *receipts* is the deployment receipts directory, the only APM-home
-    location a journal may restore. A journal for another deploy root, or for
-    another metadata *workspace* (lockfile directory, default *root*) sharing
-    it, is left for that workspace's next install. A path holding data the killed install did
-    not write is kept and listed in the outcome, never removed or replaced.
-    Raise ``JournalReplayError`` on the first journal that cannot be
-    replayed, after keeping it.
+    Call only while holding the lifecycle lock, before the install changes anything: every install
+    that could own a live journal is then this process. *ledger* returns each deployed path the
+    lockfile claims (POSIX, relative to *root*) mapped to its recorded content hash, or ``None``; it
+    raises ``LedgerUnavailable`` when the lockfile exists but cannot be read. *committed* returns
+    the :func:`lockfile_identity` of the lockfile on disk. *receipts* is the deployment receipts
+    directory, the only APM-home location a journal may restore. A journal for another deploy root,
+    or for another metadata *workspace* (lockfile directory, default *root*) sharing it, is left for
+    that workspace's next install. A path holding data the killed install did not write is kept and
+    listed in the outcome, never removed or replaced. Raise ``JournalReplayError`` on the first
+    journal that cannot be replayed, after keeping it.
     """
     root = Path(os.path.abspath(root))
     bases = _Bases(root, Path(os.path.abspath(receipts)))
