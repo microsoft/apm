@@ -5,7 +5,7 @@ Real public github.com monorepos at pinned commits: ``microsoft/apm`` (root
 ``* text=auto eol=lf`` plus ``*.bat``/``*.cmd`` ``eol=crlf`` that no installed cone
 matches). Installed once with the sparse in-process fetch and once with git forced
 (APM_NO_INPROCESS_SPARSE=1): identical lockfiles, deployed bytes and deploy-store
-receipts. On Linux and macOS every subdirectory dependency is fetched in process.
+receipts. On Linux and macOS every directory dependency is fetched in process.
 
 Requires network access. Run: uv run pytest tests/integration/test_inprocess_sparse_live.py -m live
 """
@@ -89,7 +89,8 @@ def test_sparse_in_process_and_git_install_identically(
     assert forced == 0
     if sys.platform != "win32":
         # Windows engages only with Git for Windows' OpenSSL backend and a named CA.
-        assert engaged == len(_SUBDIR_DEPS)
+        # Single-file dependencies take the file download path, not a sparse checkout.
+        assert engaged == sum(1 for dep in _SUBDIR_DEPS if not dep.split("#")[0].endswith(".md"))
     assert (fast / "apm.lock.yaml").read_bytes() == (slow / "apm.lock.yaml").read_bytes()
     assert _tree(fast) == _tree(slow)
     fast_receipts = _receipts(tmp_path / "cache-fast")
