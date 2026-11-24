@@ -151,3 +151,116 @@ def test_a_fifo_leaf_resolves_without_blocking(tree: Path) -> None:
     fifo = tree / "dir" / "pipe"
     os.mkfifo(fifo)
     assert resolve_path(fifo) == fifo.resolve()
+
+
+@pytest.fixture
+def fresh_proof():
+    realpath._reset_proof()
+    yield
+    realpath._reset_proof()
+
+
+@pytest.mark.skipif(not realpath._FAST, reason="kernel form is Linux-only")
+def test_a_failed_proc_proof_leaves_every_later_call_to_pathlib(
+    tree: Path, fresh_proof: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A path through a link takes the /proc form (openat2 refuses links).
+    candidate = tree / "link_dir" / "file.md"
+    expected = candidate.resolve()
+
+    def diverged(*_args, **_kwargs):
+        raise OSError("not reachable from this root")
+
+    monkeypatch.setattr(os, "stat", diverged)
+    assert resolve_path(candidate) == expected
+    monkeypatch.undo()
+    assert realpath._proc_state["refused"] is True
+
+    def no_kernel(*_args, **_kwargs):
+        raise AssertionError("the kernel form must stay off")
+
+    monkeypatch.setattr(os, "open", no_kernel)
+    assert [resolve_path(candidate), resolve_path(tree / "dir")] == [
+        expected,
+        (tree / "dir").resolve(),
+    ]
+
+
+@_LINKS
+def test_a_skill_linked_out_of_the_bundle_is_still_refused(tmp_path: Path) -> None:
+    from apm_cli.models.validation import validate_apm_package
+
+    outside = tmp_path / "outside" / "evil"
+    outside.mkdir(parents=True)
+    (outside / "SKILL.md").write_text(
+        "---\nname: evil\ndescription: x\n---\n# x\n", encoding="utf-8"
+    )
+    skills = tmp_path / "pkg" / "skills"
+    (skills / "good").mkdir(parents=True)
+    (skills / "good" / "SKILL.md").write_text(
+        "---\nname: good\ndescription: x\n---\n# x\n", encoding="utf-8"
+    )
+    (skills / "evil").symlink_to(outside, target_is_directory=True)
+    result = validate_apm_package(tmp_path / "pkg")
+    assert [e for e in result.errors if "evil" in e and "outside" in e]
+
+
+@pytest.mark.skipif(not realpath._openat2_state["usable"], reason="openat2 is Linux 5.6+")
+def test_a_link_free_path_resolves_without_the_proc_name(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plain, linked = tree / "dir" / "sub", tree / "link_dir" / "sub"
+    missing = tree / "dir" / "missing" / "x.md"
+    expected = [plain.resolve(), missing.resolve(), linked.resolve()]
+    if realpath._link_free(os.fspath(plain)) is not True:
+        pytest.skip("openat2 cannot prove a link-free path here (seccomp or kernel)")
+    readlinks: list[str] = []
+    readlink = os.readlink
+
+    def counted(value, *args, **kwargs):
+        readlinks.append(os.fspath(value))
+        return readlink(value, *args, **kwargs)
+
+    monkeypatch.setattr(os, "readlink", counted)
+    assert [resolve_path(plain), resolve_path(missing), resolve_path(linked)] == expected
+    assert len(readlinks) == 1  # only the path through a link needs the /proc name
+
+
+@pytest.mark.skipif(not realpath._openat2_state["usable"], reason="openat2 is Linux 5.6+")
+def test_openat2_shapes_match_pathlib(tree: Path) -> None:
+    (tree / "dir" / "final_link").symlink_to(tree / "dir" / "file.md")
+    os.mkdir(tree / "locked")
+    os.chmod(tree / "locked", 0)
+    raw = os.fsdecode(b"/tmp/\xff-not-utf8")
+    candidates = [
+        tree / "link_dir" / "sub",
+        tree / "dir" / "final_link",
+        tree / "dangling",
+        Path("/proc/self/cwd"),
+        tree / "dir" / "missing" / "deeper",
+        tree / "dir" / "file.md" / "under-file",
+        tree / "locked" / "x",
+        Path(raw),
+    ]
+    try:
+        for candidate in candidates:
+            assert resolve_path(candidate) == candidate.resolve(), candidate
+        assert realpath._link_free("//" + str(tree)) is None
+        assert realpath._link_free(str(tree) + "\0x") is None
+    finally:
+        os.chmod(tree / "locked", 0o700)
+
+
+@pytest.mark.skipif(not realpath._openat2_state["usable"], reason="openat2 is Linux 5.6+")
+def test_an_unsupported_openat2_turns_itself_off(tree: Path) -> None:
+    import errno
+
+    saved = list(realpath._openat2_call)
+    realpath._openat2_call[:] = [lambda _raw: (-1, errno.ENOSYS)]
+    try:
+        candidate = tree / "dir" / "file.md"
+        assert resolve_path(candidate) == candidate.resolve()
+        assert realpath._openat2_state["usable"] is False
+    finally:
+        realpath._openat2_call[:] = saved
+        realpath._openat2_state["usable"] = True

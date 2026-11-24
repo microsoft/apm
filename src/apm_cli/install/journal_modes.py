@@ -275,18 +275,38 @@ def _close_quietly(fd: int) -> None:
         os.close(fd)
 
 
-def require_private_store(store: Path) -> None:
+class HomeGroupWritable(ValueError):
+    """Only APM_HOME's group write fails the privacy check (#5385).
+
+    The store itself is private; once the user removes that group write
+    (``chmod g-w``), the same store replays, so it is never retained.
+    """
+
+    def __init__(self, home: Path) -> None:
+        super().__init__(HOME_GROUP_WRITABLE)
+        self.home = home
+
+
+HOME_GROUP_WRITABLE = (
+    "APM_HOME is group writable and its group cannot be shown private to this user"
+)
+
+
+def require_private_store(store: Path, *, allow_group_home: bool = False) -> None:
     """Raise ``ValueError`` unless the store chain is private to this user.
 
     The install-snapshots directory and the store must each be a real directory and the
     journal a regular file (never a link), on POSIX owned by this user with no group or
     other write. APM_HOME may be a link (a dotfiles home): its target must be a directory
     this user owns, never other writable, and group writable only when its group is
-    private to this user (:func:`_user_private_group`, #5313).
+    private to this user (:func:`_user_private_group`, #5313). When that group write is
+    the only failure, :class:`HomeGroupWritable` is raised instead (#5385), unless
+    *allow_group_home* (reading a store's paths to report them, never to restore).
     """
     home = (store.parent.parent, os.stat, stat.S_ISDIR, 0o002)
     dirs = [(path, os.lstat, stat.S_ISDIR, 0o022) for path in (store.parent, store)]
     journal = (store / _MANIFEST, os.lstat, stat.S_ISREG, 0o022)
+    group_writable_home: Path | None = None
     for path, read, is_kind, forbidden in (home, *dirs, journal):
         try:
             st = read(path)
@@ -297,33 +317,67 @@ def require_private_store(store: Path) -> None:
         if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & forbidden):
             raise ValueError(NOT_PRIVATE)
         if os.name != "nt" and st.st_mode & 0o020 and not _user_private_group(st.st_gid):
-            raise ValueError(NOT_PRIVATE)  # only APM_HOME may get here group writable
+            group_writable_home = path  # only APM_HOME may get here group writable
+    if group_writable_home is not None and not allow_group_home:
+        raise HomeGroupWritable(group_writable_home)
 
 
 def _user_private_group(gid: int) -> bool:
-    """Whether group *gid* is verifiably private to this user (#5313).
+    """Whether group *gid* is verifiably private to this user (#5313, #5371).
 
     It is this user's primary group, lists no other member, and is no other
-    account's primary group. Any lookup that fails or is unavailable answers
-    ``False`` (fail closed). Cost, paid only for a group-writable APM_HOME on
-    replay: one group lookup and one enumeration of the account database, which
-    under NSS (LDAP, SSSD) may be slow; an account NSS does not enumerate is not
-    seen.
+    account's primary group. Membership evidence must be complete: an account
+    enumeration counts only when :func:`_local_account_databases` holds and it
+    lists this user, since NSS may return an incomplete or empty list without an
+    error. Any lookup that fails or is unavailable answers ``False`` (fail
+    closed). Cost, paid only for a group-writable APM_HOME on replay: one small
+    file read, one group lookup and one enumeration of local account files.
     """
     try:
         import grp
         import pwd
 
         me = pwd.getpwuid(os.geteuid())
-        if me.pw_gid != gid:
+        if me.pw_gid != gid or not _local_account_databases():
             return False
         if set(grp.getgrgid(gid).gr_mem) - {me.pw_name}:
             return False
+        accounts = pwd.getpwall()
+        if not any(account.pw_uid == me.pw_uid for account in accounts):
+            return False  # the enumeration does not even list this user
         return not any(
-            account.pw_gid == gid and account.pw_uid != me.pw_uid for account in pwd.getpwall()
+            account.pw_gid == gid and account.pw_uid != me.pw_uid for account in accounts
         )
-    except (ImportError, KeyError, OSError):
+    except (ImportError, KeyError, OSError, UnicodeError):
         return False
+
+
+# The one name service source whose account enumeration is complete: local files.
+# systemd's iterator may end early on an error after returning entries (#5371).
+_COMPLETE_SOURCES = frozenset({"files"})
+
+
+def _local_account_databases() -> bool:
+    """Whether account and group membership come only from local files.
+
+    The passwd and group databases, and initgroups (supplementary memberships;
+    glibc falls back to group when it is not named), must list only ``files``.
+    A missing or unreadable name service switch configuration (macOS reads its
+    directory service instead), a database it does not name, any other source
+    (``systemd``, ``sss``, ``ldap``, ``nis``, ``compat``) or an action such as
+    ``[NOTFOUND=return]`` answers ``False``.
+    """
+    from apm_cli.utils.name_service import database_sources
+
+    sources = database_sources()
+    if sources is None:
+        return False
+    databases = {
+        "passwd": sources.get("passwd"),
+        "group": sources.get("group"),
+        "initgroups": sources.get("initgroups", sources.get("group")),
+    }
+    return all(listed and set(listed) <= _COMPLETE_SOURCES for listed in databases.values())
 
 
 def read_private_journal(path: Path, *, first_line: bool = False) -> str:

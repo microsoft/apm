@@ -13,6 +13,7 @@ from apm_cli.utils.path_security import (
     resolve_for_containment,
 )
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.realpath import resolve_path
 
 
 def format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
@@ -63,13 +64,19 @@ def deployed_path_entry(
     target_path: Path,
     project_root: Path,
     targets: Any,
+    resolved_candidate: Path | None = None,
+    resolved_root: Path | None = None,
 ) -> str:
-    """Return the compatibility path view produced by the canonical codec."""
+    """Return the compatibility path view produced by the canonical codec.
+
+    A caller that resolved *target_path* and *project_root* within its own
+    call passes them so they are not resolved again.
+    """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
-    resolved: list[Path] = []
+    resolved: list[Path] = [] if resolved_candidate is None else [resolved_candidate]
 
     def _resolved_candidate() -> Path:
         # Resolved lazily, once per call (external-root targets never need it).
@@ -110,6 +117,7 @@ def deployed_path_entry(
                     target=_t,
                     scope=InstallScope.PROJECT,
                     candidate_resolved=True,
+                    resolved_root=resolved_root,
                 )
             except RuntimeError:
                 continue
@@ -171,7 +179,7 @@ def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) 
         origin = scoped_profile_or_none(static, user_scope=True)
     if origin is None or not origin.supports("skills"):
         return ()
-    skills_root = origin.skills_deploy_path(root).resolve()
+    skills_root = resolve_path(origin.skills_deploy_path(root))
     try:
         parts = physical.relative_to(skills_root).parts
     except ValueError:
@@ -180,7 +188,7 @@ def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) 
         return ()
     for target in targets:
         destination = target.skills_deploy_path(root) if target.supports("skills") else None
-        if destination is not None and destination.resolve() == skills_root:
+        if destination is not None and resolve_path(destination) == skills_root:
             return (deployed_path_entry(destination / parts[0], root, [target]),)
     return ()
 
