@@ -160,7 +160,7 @@
         "src/apm_cli/integration/write_seam.py",
         "src/apm_cli/policy/depth_check.py"
       ],
-      "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
+      "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight", "install-deployment-uninstall-preflight-consent-kept-link-route", "install-deployment-uninstall-preflight-hook-sync-consent-route", "install-deployment-uninstall-preflight-hook-sync-route"]
     },
     {
       "id": "authorized-deployable-source-paths",
