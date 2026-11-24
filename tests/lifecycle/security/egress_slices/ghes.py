@@ -16,6 +16,7 @@ SLICE = HostSlice(
     spec=f"https://{_GHES}/lifecycle/p-skill#v1.0.0",
     pat_env="GITHUB_APM_PAT",
     env={"GITHUB_HOST": _GHES},
+    api_abbreviated=True,
     rows=(
         EgressRow("EP|CRED=PAT|HOST=GHES", "PAT", "clone"),
         EgressRow("EP|CRED=gh|HOST=GHES", "gh", "clone"),

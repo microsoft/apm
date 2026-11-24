@@ -1,6 +1,7 @@
 """APM prune command."""
 
 import contextlib
+import copy
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from apm_cli.core.remediation import (
     PRUNE_INCOMPLETE,
     PRUNE_NATIVE_GATE_UNCHECKED,
     PRUNE_PARTIAL,
+    PRUNE_REPLACED_PARENT,
 )
 
 from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
@@ -48,6 +50,73 @@ from ..native_plugins.uninstall import (
 from ..utils.path_security import safe_rmtree
 from ._helpers import _scan_installed_packages
 from .uninstall.lockfile_state import lockfile_has_persisted_state
+
+
+def _orphan_decision(lockfile, apm_modules_dir: Path, declared_deps, project_root: Path):
+    """The orphan owner's prune decision for *lockfile* and what is installed now."""
+    installed = _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
+    return decide_orphan_removal(
+        operation=OrphanOperation.PRUNE,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=InstalledPaths(root=apm_modules_dir, packages=frozenset(installed)),
+        resolved_keys=None,
+        intended=declared_deps,
+        materialized=None,
+        reachability=ReachabilityProbe(
+            project_root=project_root,
+            apm_modules_dir=apm_modules_dir,
+            direct_refs=tuple(declared_deps),
+            dev_refs=(),
+        ),
+        deployment_claims=None,
+    )
+
+
+def _refuse_lock_graph(lockfile: LockFile | None, removed: set[str], logger, note: str) -> None:
+    """Exit 1 if the lock owner rejects *lockfile* without *removed* (#5140).
+
+    Removing a replaced package's only parent leaves its row pointing at an
+    absent parent. The check runs the owner's graph rule on a shallow copy
+    (#5185 makes it public).
+    """
+    if lockfile is None or not removed:
+        return
+    remaining = copy.copy(lockfile)
+    remaining.dependencies = {
+        key: dep for key, dep in lockfile.dependencies.items() if key not in removed
+    }
+    try:
+        remaining._validate_replacement_evidence()
+    except LockfileFormatError as exc:
+        logger.error(f"Cannot prune {', '.join(sorted(removed))}: {exc}. {note}")
+        logger.error_detail(PRUNE_REPLACED_PARENT.sentence())
+        sys.exit(1)
+
+
+def _decide_before_any_change(apm_package, apm_modules_dir: Path, logger):
+    """Read-only pre-pass: decide, and refuse a broken lock graph, before prune changes anything.
+
+    Returns ``(lockfile bytes, decision)`` for the main pass to reuse while the
+    lockfile is unchanged. Anything that stops the check refuses (fail closed).
+    """
+    project_root = Path.cwd()
+    lockfile_path = get_lockfile_path(project_root)
+    try:
+        before = lockfile_path.read_bytes() if lockfile_path.is_file() else None
+        lockfile = LockFile.read(lockfile_path)
+        declared = apm_package.get_all_apm_dependencies()
+        decision = _orphan_decision(lockfile, apm_modules_dir, declared, project_root)
+    except (LockfileFormatError, MaterializationPathCollisionError) as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+    except Exception as exc:
+        logger.error(f"Cannot prune: the dependency graph could not be checked ({exc}).")
+        logger.error_detail("Nothing was changed.")
+        sys.exit(1)
+    removed = set(decision.removed_keys) | set(decision.stale_keys)
+    _refuse_lock_graph(lockfile, removed, logger, "Nothing was changed.")
+    return before, decision
 
 
 def _preflight_prune_survivors(
@@ -128,6 +197,8 @@ def prune(ctx, dry_run):
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
+        early = _decide_before_any_change(apm_package, apm_modules_dir, logger)
+
         # Runs before the lockfile is read: retiring a revoked bundle's hooks
         # rewrites apm.lock.yaml, and prune must not write a stale copy back.
         # A re-check that cannot resolve targets writes nothing; package
@@ -182,27 +253,15 @@ def prune(ctx, dry_run):
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
-        installed_packages = (
-            _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
-        )
         try:
-            decision = decide_orphan_removal(
-                operation=OrphanOperation.PRUNE,
-                roots=(),
-                candidate_universe=lockfile,
-                installed_paths=InstalledPaths(
-                    root=apm_modules_dir, packages=frozenset(installed_packages)
-                ),
-                resolved_keys=None,
-                intended=declared_deps,
-                materialized=None,
-                reachability=ReachabilityProbe(
-                    project_root=project_root,
-                    apm_modules_dir=apm_modules_dir,
-                    direct_refs=tuple(declared_deps),
-                    dev_refs=(),
-                ),
-                deployment_claims=None,
+            # Reconciliation that left the lockfile as it was cannot change the decision.
+            unchanged = not native_retired and early[0] == (
+                lockfile_path.read_bytes() if lockfile_path.is_file() else None
+            )
+            decision = (
+                early[1]
+                if unchanged
+                else _orphan_decision(lockfile, apm_modules_dir, declared_deps, project_root)
             )
         except MaterializationPathCollisionError as e:
             logger.error(str(e))
@@ -213,6 +272,7 @@ def prune(ctx, dry_run):
         orphaned_packages = list(decision.removed_paths)
         for package in decision.retained_paths:
             logger.progress(f"Retained {package}: required package content.")
+        _warn_retained_rows(decision, lockfile, logger)
         missing_orphaned_keys = list(decision.stale_keys)
         deployment_ledger = (
             DeploymentLedgerCodec.from_lockfile(lockfile) if lockfile is not None else None
@@ -325,6 +385,14 @@ def prune(ctx, dry_run):
             logger.success("Dry run complete - no changes made")
             return
 
+        # Again on the lockfile reconciliation left, right before the first removal.
+        _refuse_lock_graph(
+            lockfile,
+            planned_pruned_keys | set(missing_orphaned_keys),
+            logger,
+            "No package directory was removed.",
+        )
+
         # Deletion evidence (#3701): receipts, or the locked render, which is
         # materialized now while the orphaned package sources still exist.
         deletion_evidence = DeploymentEvidence.collect(
@@ -431,6 +499,7 @@ def prune(ctx, dry_run):
 
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
+            _reparent_survivors(lockfile, decision)
             lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
             if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
@@ -536,6 +605,43 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _warn_retained_rows(decision, lockfile, logger) -> None:
+    """Name every row prune keeps because it cannot prove removal safe (#4989)."""
+
+    def name(dep_key: str) -> str:
+        locked = lockfile.dependencies.get(dep_key) if lockfile is not None else None
+        return locked.repo_url if locked is not None else dep_key
+
+    for dep_key, reason in decision.anchored_keys.items():
+        logger.warning(f"Retained {name(dep_key)}: {reason}.")
+    for dep_key, reason in decision.unverified_keys.items():
+        logger.warning(
+            f"Retained {name(dep_key)}: the dependency graph could not be read completely, "
+            f"so prune cannot prove no package still needs it ({reason}). Restore the "
+            "unreadable package, then prune again."
+        )
+
+
+def _reparent_survivors(lockfile, decision) -> None:
+    """Record each survivor whose parent was pruned under the parent install records (#4989)."""
+    if not decision.rescued_parents or decision.reachability is None:
+        return
+    from .uninstall.local_reanchor import LocalReanchorPlan, apply_local_reanchor, reparent_rows
+
+    declaring, resolved = reparent_rows(
+        lockfile, decision.reachability, decision.rescued_parents, locked_identity=True
+    )
+    apply_local_reanchor(
+        lockfile, LocalReanchorPlan(declaring_parents=declaring, resolved_by=resolved)
+    )
+    for key, parent in resolved.items():
+        if key in lockfile.dependencies and parent is not None:
+            lockfile.dependencies[key].resolved_by = parent
+    for key, depth in decision.rescued_depths.items():
+        if key in lockfile.dependencies:
+            lockfile.dependencies[key].depth = depth
 
 
 def _native_ownership(lockfile, lockfile_path):

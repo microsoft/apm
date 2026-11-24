@@ -494,9 +494,14 @@ the same hook merge a source install uses, once the exact bundle key printed by
 `apm install` is approved in `executables.allow`; until then they are skipped
 with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
-policy and retires the hooks when it no longer holds; `apm audit --ci` reports
-them first. Canvas extensions a bundle deploys (with the `canvas` experimental
-flag) follow the same approval, re-check and retirement; a reinstall retires
+policy and retires those `hooks.json` entries and `hooks/` scripts when it no
+longer holds; `apm audit --ci` reports them first. A bundle Markdown file, such
+as a command `.md` or a `SKILL.md`, whose frontmatter declares `hooks` (or cannot
+be read) waits for the same approval: it is skipped and named until the key is
+approved. Revoking the approval later does not yet retire such a file once it
+is deployed, and audit does not report it; remove it by hand
+([#5254](https://github.com/microsoft/apm/issues/5254)). Canvas extensions a
+bundle deploys (with the `canvas` experimental flag) follow the same approval, re-check and retirement; a reinstall retires
 the extensions the new bundle content no longer ships. Retiring one bundle's
 extensions never removes another bundle's or anything outside the target's
 extensions directory, and an extension you edited is kept.
