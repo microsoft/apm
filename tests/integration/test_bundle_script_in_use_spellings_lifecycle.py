@@ -50,9 +50,12 @@ SPELLINGS = {
     "cwd-field": lambda s, root: _handler("./x.sh", cwd=_script_dir(s)),
     "dot-segment": lambda s, root: _handler(s.replace("/scripts/", "/scripts/./")),
     "dot-slash": lambda s, root: _handler(f"./{s}"),
+    # A mention that runs nothing is judged by runs_script, which fails closed.
+    "echo-mention": lambda s, root: _handler(f"echo {s}"),
     "double-slash": lambda s, root: _handler(s.replace("/scripts/", "/scripts//")),
     "quoted": lambda s, root: _handler(f'"{s}" --flag'),
     "sh-invocation": lambda s, root: _handler(f"sh {s}"),
+    "sh-options": lambda s, root: _handler(f"sh -eu {s}"),
 }
 PENDING = "apm_modules/.local-bundle-pending.json"
 
@@ -151,3 +154,24 @@ def test_a_refused_bundle_uninstall_writes_nothing(tmp_path: Path, apm_binary_pa
     after = tree_bytes(consumer)
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     assert changed == [], f"refused uninstall wrote {changed}: {text}"
+
+
+def test_uninstall_bundle_is_not_blocked_by_a_shell_option_hook_running_another_script(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5210: ``bash -e "<other dir> <script path>"`` runs another file, so uninstall proceeds."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "shell-options-unrelated")
+    (script,) = [c for c in _claims_of(consumer) if c.endswith("/x.sh")]
+    user_hook = consumer / ".github" / "hooks" / "user.json"
+    write(user_hook, json.dumps(_handler(f'bash -e "/opt/other {script}"')))
+    user_bytes = user_hook.read_bytes()
+
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    text = output(result)
+
+    assert result.returncode == 0, text
+    assert "Remove or repair those files, then retry" not in text, text
+    assert not (consumer / script).exists(), text
+    assert script not in _claims_of(consumer), text
+    assert user_hook.read_bytes() == user_bytes
