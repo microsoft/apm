@@ -1,0 +1,15 @@
+{
+  "issue": 5248,
+  "fixed_in": "Unreleased",
+  "summary": "A local bundle's command or skill Markdown whose frontmatter declares hooks deployed without the bundle hook approval; it is now skipped and named until the bundle key is approved.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_bundle_frontmatter_hooks_lifecycle.py::test_bundle_markdown_with_frontmatter_hooks_is_parked_until_approved",
+    "tests/integration/test_local_bundle_frontmatter_hooks_lifecycle.py::test_bundle_markdown_without_frontmatter_hooks_deploys_unapproved"
+  ]
+}
