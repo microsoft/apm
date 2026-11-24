@@ -220,6 +220,7 @@ def private_dir(path: Path) -> None:
 
 def append_private(path: Path, text: str) -> None:
     """Append *text* to the journal file *path*, which is only ever this user's to write."""
+    return  # RESEARCH: deleted
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
     try:
