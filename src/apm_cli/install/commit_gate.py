@@ -632,29 +632,43 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
 
 
 def _no_deploy_root_exists(ctx: InstallContext) -> bool:
-    """Whether none of the directories any target may write under exists (one lstat each)."""
+    """Whether every directory a gated primitive may write under is absent or empty.
+
+    One lstat (plus one scandir when present) per (target, primitive) dest dir.
+    The targets phase auto-creates the target roots, so the proof is per dest
+    dir, not per root: an absent or empty dest dir holds no file to keep.
+    """
     import os
 
     from apm_cli.core.scope import InstallScope
 
     if ctx.scope is InstallScope.USER or ctx.project_root is None or not ctx.targets:
         return False
-    roots: set[str] = set()
+    base = str(ctx.project_root)
+    dirs: set[str] = set()
     for target in ctx.targets:
-        roots.add(target.root_dir)
-        for mapping in (getattr(target, "primitives", None) or {}).values():
-            if getattr(mapping, "deploy_root", None):
-                roots.add(mapping.deploy_root)
-    for root in roots:
-        if not root or root in (".", "") or os.path.isabs(root):
+        root_dir = getattr(target, "root_dir", None)
+        primitives = getattr(target, "primitives", None)
+        if not root_dir or os.path.isabs(root_dir) or primitives is None:
             return False
+        for mapping in primitives.values():
+            root = getattr(mapping, "deploy_root", None) or root_dir
+            if os.path.isabs(root):
+                return False
+            dirs.add(
+                os.path.join(base, root, mapping.subdir)
+                if mapping.subdir
+                else os.path.join(base, root)
+            )
+    for path in dirs:
         try:
-            os.lstat(os.path.join(str(ctx.project_root), root))
+            with os.scandir(path) as entries:
+                if next(entries, None) is not None:
+                    return False
         except FileNotFoundError:
             continue
         except OSError:
             return False
-        return False
     return True
 
 
