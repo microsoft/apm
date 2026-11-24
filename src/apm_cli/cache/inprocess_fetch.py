@@ -596,17 +596,12 @@ def _effective(env: Mapping[str, str]) -> tuple:
 
 
 def _trust(child_env: Mapping[str, str], values: Mapping[str, str]) -> tuple[str, str]:
-    """W3: ``("file", CA path)`` for git's OpenSSL trust, ``("os", "")`` for schannel's."""
+    """W3: ``("file", CA path)`` for git's OpenSSL trust; schannel falls back to git."""
     from ..deps import anonymous_ref_listing as anon
 
     backend = values.get("http.sslbackend", "").lower()
-    if backend == "schannel" and os.name == "nt":
-        # schannel ignores http.sslCAInfo unless schannelUseSSLCAInfo (an http.*
-        # key, which forces git); a CA env var would make the choice ambiguous.
-        if child_env.get("GIT_SSL_CAINFO"):
-            raise _Refuse("GIT_SSL_CAINFO with schannel")
-        return "os", ""
     if backend not in ("", "openssl"):
+        # schannel checks certificate revocation the way only git does: git fetches.
         raise _Refuse(f"git config http.sslBackend={backend}")
     if os.name == "nt" and not (
         child_env.get("GIT_SSL_CAINFO")
@@ -637,7 +632,7 @@ def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str,
     for name in anon._FALLBACK_ENV:
         if env.get(name):
             raise _Refuse(f"{name} is set")
-    values, child_env, prefixes, entries = _effective(env)
+    values, child_env, prefixes, _entries = _effective(env)
     if any(url.lower().startswith(prefix.lower()) for prefix in prefixes):
         raise _Refuse("git config url.*.insteadOf rewrites this URL")
     allow = child_env.get("GIT_ALLOW_PROTOCOL")
@@ -653,7 +648,7 @@ def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str,
     trust = _trust(child_env, values)
     if url != f"https://github.com{path}":
         raise _Refuse("url is not the validated github.com form")
-    _require_inert_attributes(child_env, entries)
+    _require_inert_checkout_attributes(env)
     return f"https://github.com{path}/git-upload-pack", proxy, trust
 
 
@@ -665,12 +660,18 @@ def _inert_attributes(path: str) -> bool:
     any token outside the allowlist refuses, whatever path it names.
     """
     try:
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read()
-    except (OSError, UnicodeError):
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError:
         return False
-    for raw in text.splitlines():
-        line = raw.strip()
+    # git splits records on LF only and treats CR as attribute whitespace.
+    for record in data.split(b"\n"):
+        if b"\r" in record:
+            return False
+        try:
+            line = record.decode("utf-8").strip()
+        except UnicodeError:
+            return False
         if not line or line.startswith("#"):
             continue
         if line.startswith(("[attr]", '"')):
@@ -699,7 +700,10 @@ def _attribute_files(child_env: Mapping[str, str], entries) -> list[tuple[str, s
         if entry.key.lower() == "core.attributesfile":
             configured = entry.value
     if configured:
-        files.append(("core.attributesFile", os.path.expanduser(configured)))
+        if not os.path.isabs(configured) or "%(" in configured or "$" in configured:
+            # ~, %(prefix) or a relative path: git resolves it, so git checks it.
+            raise _Refuse(f"core.attributesFile {configured} needs git's path resolution")
+        files.append(("core.attributesFile", configured))
     else:
         xdg = child_env.get("XDG_CONFIG_HOME")
         home = child_env.get("HOME") or child_env.get("USERPROFILE")
@@ -761,6 +765,24 @@ def _probe_system_attributes(git: str, child_env: Mapping[str, str]) -> str:
     return probe.stdout.strip() if probe.returncode == 0 else ""
 
 
+def _require_inert_checkout_attributes(env: Mapping[str, str]) -> None:
+    """Check the attributes git's own checkout would read: the same env the fallback uses.
+
+    ``git_cache`` checks out under ``cached_repo_env(git_subprocess_env(env), staged)``,
+    which keeps the attempt env's isolated global config, so its config and XDG
+    home decide the attributes files, not the parent's.
+    """
+    from ..utils.git_env import _read_effective_git_config, git_subprocess_env
+    from .cached_repo import cached_repo_env
+
+    checkout_env = cached_repo_env(git_subprocess_env(dict(env)))
+    try:
+        entries = _read_effective_git_config(checkout_env).entries
+    except Exception as exc:
+        raise _Refuse(f"checkout git config unreadable: {type(exc).__name__}") from None
+    _require_inert_attributes(checkout_env, entries)
+
+
 def _require_inert_attributes(child_env: Mapping[str, str], entries) -> None:
     """Every attributes file outside the commit is re-read and checked on every call (G5)."""
     for source, path in _attribute_files(child_env, entries):
@@ -800,33 +822,11 @@ def _admit(status: int, headers: Mapping[str, str]) -> None:
         raise _Refuse(f"HTTP {status}")
 
 
-_os_session = None
-_os_session_lock = threading.Lock()
-
-
 def _session(trust: tuple[str, str]):
-    """ONE pooled keep-alive session (and SSL context) per trust source per process."""
-    global _os_session
-    if trust[0] == "file":
-        from ..deps.anonymous_ref_listing import _session_for_refs
+    """ONE pooled keep-alive session (and SSL context) per CA file per process."""
+    from ..deps.anonymous_ref_listing import _session_for_refs
 
-        return _session_for_refs(trust[1])
-    with _os_session_lock:
-        if _os_session is None:
-            import ssl
-
-            import truststore
-
-            from ..deps.anonymous_ref_listing import _session_with_context
-
-            class _OsTrustContext(truststore.SSLContext):
-                """The OS store only (schannel's trust): requests' CA bundle is not added."""
-
-                def load_verify_locations(self, *args, **kwargs) -> None:
-                    return None
-
-            _os_session = _session_with_context(_OsTrustContext(ssl.PROTOCOL_TLS_CLIENT))
-        return _os_session
+    return _session_for_refs(trust[1])
 
 
 def _post(upload_url: str, proxy: str | None, trust: tuple[str, str], body: bytes) -> bytes:
