@@ -114,6 +114,9 @@ class InstructionIntegrator(BaseIntegrator):
         # Rule path -> the compiled AGENTS.md that now carries it, for each rule
         # on disk this install stops writing (#5343); finalize names the moves.
         self.agents_md_carried: dict[Path, Path] = {}
+        # Claude rule path -> (package, content) the first package wrote this
+        # install; install order is declaration order, so it wins (#5343).
+        self._claude_rule_writers: dict[Path, tuple[str, str]] = {}
         # One compiled-coverage snapshot per project root for this install.
         self._compiled_coverage: dict[Path, Any] = {}
         # Routing verdicts per root and directory for this install (#4787).
@@ -584,6 +587,11 @@ class InstructionIntegrator(BaseIntegrator):
                 )
 
             rel_path = portable_relpath(target_path, project_root)
+            if target.compile_family == "claude" and self._claude_rule_taken(
+                target_path, rel_path, source_file, new_content, package_info, diagnostics
+            ):
+                files_skipped += 1
+                continue
 
             # Compare against the rendered output, not the source: rule-dir
             # formats transform content, so a source-based adopt never matches
@@ -600,6 +608,10 @@ class InstructionIntegrator(BaseIntegrator):
                 target_paths,
                 expected_content=new_content,
             )
+            if target.compile_family == "claude" and (adopted or not skip):
+                self._claude_rule_writers.setdefault(
+                    target_path, (_package_label(package_info), new_content)
+                )
             if skip:
                 if adopted:
                     files_adopted += 1
@@ -625,6 +637,38 @@ class InstructionIntegrator(BaseIntegrator):
             links_resolved=total_links_resolved,
             files_adopted=files_adopted,
         )
+
+    def _claude_rule_taken(
+        self,
+        target_path: Path,
+        rel_path: str,
+        source_file: Path,
+        content,
+        package_info,
+        diagnostics,
+    ) -> bool:
+        """Whether an earlier-declared package already wrote a different rule here (#5343).
+
+        Two packages can ship instructions that render to one ``.claude/rules/``
+        path. The first one integrated (declared first) keeps it, the later one
+        is skipped, and the user is told both names so no instruction is lost
+        silently.
+        """
+        from apm_cli.utils.diagnostics import printable_ascii_text
+
+        winner = self._claude_rule_writers.get(target_path)
+        package = _package_label(package_info)
+        if winner is None or winner[0] == package or winner[1] == content:
+            return False
+        if diagnostics is not None:
+            name = source_file.name.removesuffix(".instructions.md")
+            kept, skipped = printable_ascii_text(winner[0]), printable_ascii_text(package)
+            diagnostics.warn(
+                f"{printable_ascii_text(rel_path)}: {kept} and {skipped} both ship an "
+                f"instruction named '{printable_ascii_text(name)}'; kept {kept}'s (declared "
+                f"first), skipped {skipped}'s. Rename one of the instruction files."
+            )
+        return True
 
     def _claude_rule_sources(
         self,
@@ -1103,6 +1147,13 @@ class InstructionIntegrator(BaseIntegrator):
             project_root,
             managed_files=managed_files,
         )
+
+
+def _package_label(package_info) -> str:
+    """The name the user knows *package_info* by, for collision messages."""
+    package = getattr(package_info, "package", None)
+    name = getattr(package, "name", "") or ""
+    return name or Path(getattr(package_info, "install_path", "") or ".").name
 
 
 def routed_claude_rule_renders(
