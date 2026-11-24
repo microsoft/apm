@@ -421,6 +421,7 @@ def retire_unadmitted_bundle_markdown(
     from ..core.remediation import BUNDLE_HOOKS_RETIRED, kept_note
     from ..core.scope import is_user_scope
     from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..utils.diagnostics import printable_ascii_text
     from .local_bundle_hook_trust import _drop_lock_rows, _relative_value, local_bundle_paths
 
     root = Path(project_root)
@@ -441,7 +442,12 @@ def retire_unadmitted_bundle_markdown(
         return []
     retired: list[str] = []
     for holding in holdings:
-        label = f"local bundle '{holding.slug}'" if holding.slug else "a local bundle"
+        # The slug and file names come from committed records: never print control bytes.
+        label = (
+            f"local bundle '{printable_ascii_text(holding.slug)}'"
+            if holding.slug
+            else "a local bundle"
+        )
         if dry_run:
             if logger is not None:
                 logger.warning(
@@ -470,7 +476,8 @@ def retire_unadmitted_bundle_markdown(
                     f"{len(kept)} Markdown file(s) with frontmatter hooks from {label} "
                     f"({holding.reason})",
                     "they are edited, unreadable or have no recorded hash",
-                    f"Review and remove them by hand: {', '.join(sorted(kept))}.",
+                    "Review and remove them by hand: "
+                    f"{', '.join(printable_ascii_text(path) for path in sorted(kept))}.",
                 )
             )
     return retired
