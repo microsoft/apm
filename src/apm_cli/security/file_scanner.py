@@ -29,6 +29,7 @@ from ..integration.hook_integrator import native_hook_config
 from ..integration.hook_native_formats import HookContentEntry, inspect_native_hooks
 from ..integration.targets import TargetProfile
 from ..security.content_scanner import ContentScanner, ScanFinding, pointer_location
+from ..utils.path_security import open_regular_file
 from .primitive_discovery import (
     PrimitiveSurface,
     iter_surface_files,
@@ -168,6 +169,16 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
+def _regular_bytes(path: Path) -> bytes:
+    """The bytes of *path*; ``OSError`` unless it is a regular file that is not a link.
+
+    A FIFO or device at a deployed path reads as not a primitive and never
+    blocks (#5280).
+    """
+    with open_regular_file(path) as handle:
+        return handle.read()
+
+
 def _content_entries(
     path: Path, surface: PrimitiveSurface, recorded_hash: str | None = None
 ) -> tuple[HookContentEntry, ...]:
@@ -181,7 +192,7 @@ def _content_entries(
     if surface.kind == "hooks":
         config = native_hook_config(surface.target)
         # Untranslated newlines: the canonical deployed-file hash alone normalizes them.
-        text = path.read_bytes().decode("utf-8")
+        text = _regular_bytes(path).decode("utf-8")
         document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
         if is_deployed_hook_module_metadata(
             path, text, target_name=surface.target, recorded_hash=recorded_hash
@@ -196,7 +207,8 @@ def _content_entries(
             shared=surface.shared,
             nested_handlers=config.nested_handlers if config else None,
         )
-    text = path.read_text(encoding="utf-8")
+    # Universal newlines, as read_text gave.
+    text = _regular_bytes(path).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if surface.prompt_fields:
         document = tomllib.loads(text)
         return tuple(
