@@ -810,7 +810,6 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     leave them dangling until the next install rewrites them. Only paths the
     deploy-path gate accepts are read; any other claim refuses too.
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...utils.paths import portable_relpath
 
     spellings = set()
@@ -829,9 +828,65 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
         data = member.read_bytes()
         return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
 
-    for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
+    for deployed in sorted(_recorded_claims(lockfile)):
         if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
+    return _compiled_output_naming(project_root, names)
+
+
+def _recorded_claims(lockfile) -> set[str]:
+    """Every deployed path the lock records: the legacy view and canonical rows (#5097).
+
+    A canonical ``deployments`` row may have no legacy ``deployed_files`` entry;
+    its project-relative path is a deployed file all the same.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...core.deployment_state import LocatorKind
+
+    claims = set(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile))
+    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+        if record.locator.kind is LocatorKind.PROJECT_RELATIVE:
+            claims.add(record.locator.value)
+    return claims
+
+
+# Compiled outputs are not recorded claims; APM marks each one in its header.
+_COMPILED_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
+_SKIPPED_DIRS = frozenset({"apm_modules", ".git", "node_modules"})
+
+
+def _compiled_output_naming(project_root: Path, names) -> str | None:
+    """A compiled output (AGENTS.md and kin) that names the moving copy (#5097).
+
+    ``apm compile`` copies links verbatim into these files, so one that names
+    the copy keeps it in place like a deployed file. Only files carrying APM's
+    generated-marker header are read; an unreadable one refuses too.
+    """
+    from ...compilation.constants import (
+        AGENTS_MD_GENERATED_MARKER,
+        DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
+        GEMINI_MD_GENERATED_MARKER,
+        has_generated_marker_header,
+    )
+    from ...utils.paths import portable_relpath
+
+    markers = (
+        AGENTS_MD_GENERATED_MARKER,
+        DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
+        GEMINI_MD_GENERATED_MARKER,
+    )
+    for directory, subdirs, files in os.walk(project_root):
+        subdirs[:] = sorted(d for d in subdirs if d not in _SKIPPED_DIRS)
+        for name in sorted(_COMPILED_NAMES.intersection(files)):
+            path = Path(directory) / name
+            if path.is_symlink():
+                continue  # APM writes compiled outputs as regular files
+            try:
+                text = path.read_bytes().decode("utf-8", "replace")
+                if has_generated_marker_header(text, markers) and names(path):
+                    return portable_relpath(path, project_root)
+            except OSError:
+                return portable_relpath(path, project_root)
     return None
 
 

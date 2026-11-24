@@ -19,7 +19,6 @@ import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.integration._install_audit_replay_kit import ReplayWorld, lock_bytes
-from tests.lifecycle.known import KnownFailure
 
 pytestmark = [
     pytest.mark.integration,
@@ -662,9 +661,7 @@ def test_an_untracked_user_link_into_the_copy_is_never_read_or_written(
     _assert_no_frozen_rewrites_nothing(world)
 
 
-# -- Open follow-ups, pinned as strict known cells (#5097) -------------------------
-#
-# Each cell is red until its fix lands; the fix PR flips it to required.
+# -- Links from compiled outputs, ledger-only claims and stale copies (#5097, #5102)
 
 _LINK = "apm_modules/_local/e/docs/ref.md"
 _MANIFEST = {
@@ -674,16 +671,6 @@ _MANIFEST = {
     "dependencies": {"apm": ["./vendor/e"]},
     "devDependencies": {"apm": ["./vendor/d"]},
 }
-_COMPILED_LINK = KnownFailure(
-    "#5097",
-    "a compiled AGENTS.md is no recorded claim: its link into the moving copy dangles",
-    r"dangles after the re-anchor",
-)
-_LEDGER_ONLY_LINK = KnownFailure(
-    "#5097",
-    "a canonical ledger-only claim is outside the scanned view: its link dangles",
-    r"dangles after the re-anchor",
-)
 
 
 def _docs_world(tmp_path: Path, apm_binary_path: Path, extra=None) -> ReplayWorld:
@@ -720,7 +707,6 @@ def _assert_link_resolves(world: ReplayWorld, where: str) -> None:
     )
 
 
-@_COMPILED_LINK.mark()
 def test_a_compiled_agents_md_link_into_the_moving_copy_keeps_resolving(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -744,7 +730,6 @@ def test_a_compiled_agents_md_link_into_the_moving_copy_keeps_resolving(
     _assert_link_resolves(world, "AGENTS.md")
 
 
-@_LEDGER_ONLY_LINK.mark()
 def test_a_ledger_only_claim_linking_into_the_moving_copy_keeps_resolving(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
