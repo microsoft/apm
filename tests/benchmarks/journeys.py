@@ -44,7 +44,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -852,7 +852,28 @@ def _journey_env(ctx: Context, journey: Journey):
                 env[key] = value
 
 
+def _refuse_real_auth(_ctx: Context) -> None:
+    raise RuntimeError(
+        "authenticated journeys on the real fixture need the caller's GITHUB_APM_PAT"
+    )
+
+
+def _for_world(ctx: Context, journey: Journey) -> Journey:
+    """*journey* as run against this world.
+
+    The placeholder token only works against the offline mirror. On real
+    github.com the caller's own token (copied by ``_RealWorld``) is used, and
+    without one the journey fails instead of measuring a rejected token.
+    """
+    if not ctx.fixture.real or all(key != "GITHUB_APM_PAT" for key, _ in journey.env):
+        return journey
+    env = tuple(pair for pair in journey.env if pair[0] != "GITHUB_APM_PAT")
+    setup = journey.setup if ctx.world.env.get("GITHUB_APM_PAT") else _refuse_real_auth
+    return replace(journey, env=env, setup=setup)
+
+
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
+    journey = _for_world(ctx, journey)
     with _journey_env(ctx, journey):
         return _measure(ctx, journey, args)
 
