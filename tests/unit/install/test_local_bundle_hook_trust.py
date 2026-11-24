@@ -249,6 +249,8 @@ _DIR = ".claude/hooks/hookpkg/hooks/scripts"
         f"sh {_DIR}/[x].sh",
         f"sh {_DIR}/x.\\\nsh",
         f'a=x; b=.sh; eval "sh {_DIR}/$a$b"',
+        f"set RUN=x&& sh {_DIR}/%RUN%.sh",
+        f"set RUN=x&& sh {_DIR}/!RUN!.sh",
     ],
     ids=[
         "braced-variable",
@@ -261,6 +263,8 @@ _DIR = ".claude/hooks/hookpkg/hooks/scripts"
         "glob-class",
         "backslash-newline",
         "eval-variables",
+        "cmd-percent-variable",
+        "cmd-delayed-variable",
     ],
 )
 def test_a_spelling_that_hides_the_script_name_fails_closed(command: str) -> None:
@@ -281,11 +285,23 @@ def test_a_spelling_that_hides_the_script_name_fails_closed(command: str) -> Non
         'sh "$HOME/tools/lint.sh"',
         'sh "${HOME}/tools/lint.sh"',
         'pwsh -File "$env:HOME/tools/run.ps1"',
+        "date +%Y && sh tools/lint.sh",
+        "date +%Y-%m-%d && sh tools/lint.sh",
     ],
-    ids=["braced-project-dir", "project-dir", "env-project-dir", "home", "braced-home", "env-home"],
+    ids=[
+        "braced-project-dir",
+        "project-dir",
+        "env-project-dir",
+        "home",
+        "braced-home",
+        "env-home",
+        "date-format",
+        "date-format-fields",
+    ],
 )
 def test_a_lone_documented_anchor_never_refuses(command: str) -> None:
-    """#5106: anchors are substituted first, so a hook running another script never refuses."""
+    """#5106: anchors are substituted first and a date format names no variable, so a hook
+    running another script never refuses."""
     from apm_cli.install.hook_script_refs import runs_script, script_refs
 
     root = Path("/project")

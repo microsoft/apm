@@ -28,8 +28,9 @@ _NOT_PLAIN = re.compile(r"[$`*?\[\]{}~=;&|()<>'\"\\\n]")
 # Words that change the working directory relative paths resolve from.
 _DIRECTORY_CHANGES = frozenset({"cd", "pushd", "popd"})
 # Left after anchor substitution, these may spell a name the text never shows:
-# expansion, command substitution, globbing, brace lists or ranges, escapes.
-_HIDES_A_NAME = re.compile(r"[$`*?\[\\]|\{[^{}]*(?:,|\.\.)[^{}]*\}")
+# expansion, command substitution, globbing, brace lists or ranges, escapes,
+# and cmd.exe ``%NAME%`` or delayed ``!NAME!`` expansion (``+%Y`` is no name).
+_HIDES_A_NAME = re.compile(r"[$`*?\[\\]|\{[^{}]*(?:,|\.\.)[^{}]*\}|%[A-Za-z_]\w*%|![A-Za-z_]\w*!")
 _QUOTING = re.compile(r"[\"'\\]")
 _HANDS_TO_SHELL = re.compile(r"^(?:-.*|/[A-Za-z]|eval|exec|source|\.|<+)$")
 
