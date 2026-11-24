@@ -165,15 +165,15 @@ def test_cold_install_fetches_while_noop_fetches_nothing(journey_runs) -> None:
     assert noop.get("git.clone", 0) == 0 and noop["http.requests"] == 0, noop
 
 
-def test_authenticated_cold_install_clones_with_git(journey_runs) -> None:
-    """The fallback half of the engagement oracle: a token never takes the in-process fetch.
+def test_authenticated_cold_install_fetches_in_process(journey_runs) -> None:
+    """A token takes the in-process fetch too (#5353): no clone spawn, the work is HTTP.
 
-    ``inprocess_fetch._gate`` only admits a provably anonymous request, so an
-    authenticated cold install clones every package with git over HTTP.
+    ``inprocess_fetch._gate`` admits a managed credential for the exact origin,
+    so an authenticated cold install fetches every package without ``git clone``.
     """
     cold_run, _, cold = journey_runs["install-cold-auth"]
     assert cold_run.returncode == 0, cold_run.stderr
-    assert cold.get("git.clone", 0) > 0 and cold["http.requests"] > 0, cold
+    assert cold.get("git.clone", 0) == 0 and cold["http.requests"] > 0, cold
 
 
 def test_outdated_and_auth_journeys_took_the_path_they_budget(journey_runs) -> None:
@@ -187,5 +187,7 @@ def test_outdated_and_auth_journeys_took_the_path_they_budget(journey_runs) -> N
     assert "All dependencies are up-to-date" in outdated_run.stdout, outdated_run.stdout
     for journey in ("install-cold-auth", "install-warm-auth"):
         _, _, observed = journey_runs[journey]
-        # Token first: one ref probe per tree package before any fetch.
-        assert observed.get("git.ls-remote", 0) == 10, (journey, observed)
+        # Token first: one ref probe per tree package before any fetch, listed
+        # in process (#5353), so it shows as requests, not ls-remote spawns.
+        assert observed.get("git.ls-remote", 0) == 0, (journey, observed)
+        assert observed["http.requests"] >= 10, (journey, observed)

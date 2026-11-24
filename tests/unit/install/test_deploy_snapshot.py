@@ -2846,3 +2846,53 @@ def test_a_child_recreated_in_a_partly_removed_directory_honors_the_umask(
     assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
     assert (skill / "reference.md").stat().st_mode & 0o7777 == 0o644
     assert skill.stat().st_mode & 0o7777 == 0o755
+
+
+def test_a_store_opens_its_journal_once_and_still_retains(tmp_path: Path, apm_home: Path) -> None:
+    """One private fd per store on POSIX (#4939); retain renames the store on every OS."""
+    from apm_cli.install import journal_modes
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from tests.unit.deps.test_lockfile_read_cost import _count_calls
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=tmp_path)
+
+    def record_five() -> None:
+        for index in range(5):
+            target = tmp_path / f"{index}.md"
+            target.write_bytes(b"prior\n")
+            journal.record(target)
+
+    opens = _count_calls(journal_modes.open_private_append.__code__, record_five)
+    lines = (journal.store / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    retained = journal._retain()
+
+    assert len(lines) > 5
+    assert opens == (len(lines) if os.name == "nt" else 1)
+    assert retained.name.startswith("retained-")
+    assert (retained / "journal.jsonl").read_text(encoding="utf-8").splitlines() == lines
+    journal.discard()
+    assert not retained.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows opens the journal per line")
+def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_home: Path) -> None:
+    """The held journal fd closes with its journal, not at process exit (#4939)."""
+    import gc
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=tmp_path)
+    target = tmp_path / "a.md"
+    target.write_bytes(b"prior\n")
+    journal.record(target)
+    manifest = journal.store / "journal.jsonl"
+    fd = journal._held_journal[1]
+    del journal
+    gc.collect()
+
+    try:
+        still_open = os.fstat(fd).st_ino == manifest.stat().st_ino
+    except OSError:
+        still_open = False
+    assert not still_open
+    assert manifest.read_text(encoding="utf-8").count("\n") >= 2

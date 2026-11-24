@@ -91,6 +91,8 @@ def runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str]
         # spelled path; the lexical form only refuses an obvious escape.
         if not base.is_relative_to(root) or _escapes_through_a_link(spelled, root):
             return True
+        if _cwd_through_a_link(spelled, root):
+            return True  # a linked cwd may alias the script directory: not certain
         bases = {base}
         try:
             identity = os.stat(spelled)
@@ -131,3 +133,10 @@ def _script_directories(root: Path, scripts: Collection[Path]) -> dict[tuple[int
                 continue
             index.setdefault((found.st_dev, found.st_ino), set()).add(directory)
     return index
+
+
+def _cwd_through_a_link(spelled: Path, root: Path) -> bool:
+    """Whether the declared cwd goes through a link or junction (or cannot be proven not to)."""
+    from apm_cli.utils.path_security import has_symlink_component
+
+    return has_symlink_component(root, spelled)
