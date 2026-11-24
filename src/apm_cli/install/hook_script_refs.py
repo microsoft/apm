@@ -9,11 +9,12 @@ such word is a plain path that certainly resolves to another file.
 
 from __future__ import annotations
 
-import os
 import posixpath
 import re
 from collections.abc import Collection
 from pathlib import Path
+
+from ..utils.paths import caseless
 
 # Variables a deployed hook command anchors its paths at.
 _ANCHOR_VARIABLES = re.compile(
@@ -30,24 +31,24 @@ _HANDS_TO_SHELL = re.compile(r"^(?:-.*|/[A-Za-z]|eval|exec|source|\.|<+)$")
 
 
 def script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozenset, frozenset]:
-    """The file names and normalized absolute paths of a bundle's script rows (#5106)."""
+    """The caseless keys of a bundle's script names and absolute paths (#5106).
+
+    Every spelling compares by the one shared caseless key on every OS: a
+    case-insensitive volume (default macOS, Windows) runs ``Run.sh`` or its
+    NFD form as ``run.sh``. On a case-sensitive volume that over-refuses,
+    which fails closed.
+    """
     paths = {
         Path(value) if Path(value).is_absolute() else project_root / value for value in scripts
     }
     return (
-        frozenset(path.name for path in paths),
+        frozenset(caseless(path.name) for path in paths),
         frozenset(_normalized(path.as_posix()) for path in paths),
     )
 
 
-def _folds(path: str) -> bool:
-    """Whether *path* compares case-insensitively (Windows, or a drive path)."""
-    return os.name == "nt" or bool(_DRIVE.match(path))
-
-
 def _normalized(path: str) -> str:
-    normal = posixpath.normpath(path)
-    return normal.casefold() if _folds(normal) else normal
+    return caseless(posixpath.normpath(path))
 
 
 def _words(command: str) -> list[str] | None:
@@ -63,9 +64,9 @@ def _words(command: str) -> list[str] | None:
 
 
 def _name_pattern(names: Collection[str]) -> re.Pattern[str]:
-    """A file name standing alone, not inside a longer name (``max.sh`` is not ``x.sh``)."""
+    """A caseless file name standing alone, not inside a longer one (``max.sh`` is not ``x.sh``)."""
     alternatives = "|".join(re.escape(name) for name in sorted(names))
-    return re.compile(rf"(?<![\w.-])(?:{alternatives})(?![\w.-])", re.IGNORECASE)
+    return re.compile(rf"(?<![\w.-])(?:{alternatives})(?![\w.-])")
 
 
 def runs_script(
@@ -82,7 +83,7 @@ def runs_script(
     """
     names, paths = refs
     pattern = _name_pattern(names)
-    if not pattern.search(command):
+    if not pattern.search(caseless(command)):
         return False
     text = command
     if not _ASSIGNED_ANCHOR.search(command):
@@ -108,7 +109,7 @@ def _runs(
     # An option, ``eval`` or a redirection may hand a quoted word to a shell
     # (``sh -c``, ``cmd /c``, ``pwsh -Command``, ``bash <<<``): rescan it.
     nested = any(_HANDS_TO_SHELL.match(word) for word in words)
-    named = [word for word in words if pattern.search(word)]
+    named = [word for word in words if pattern.search(caseless(word))]
     if not named:
         return True  # the name sits in syntax the words lost: fail closed
     for word in named:

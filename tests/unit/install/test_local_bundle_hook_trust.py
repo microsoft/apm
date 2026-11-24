@@ -173,3 +173,53 @@ def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> 
     assert runs_script(
         "sh C:/project/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, (Path("/"),), Path("/")
     )
+
+
+@pytest.mark.parametrize(
+    ("script", "command"),
+    [
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/run.sh",
+            "sh .claude/hooks/hookpkg/hooks/scripts/Run.sh",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/run.sh",
+            "sh .claude/hooks/HookPkg/hooks/scripts/Run.sh",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/run.sh",
+            "sh /project/.CLAUDE/hooks/hookpkg/hooks/scripts/RUN.SH",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/caf\u00e9.sh",
+            "sh .claude/hooks/hookpkg/hooks/scripts/cafe\u0301.sh",
+        ),
+        (
+            ".claude/hooks/hookpkg/hooks/scripts/caf\u00e9.sh",
+            "sh .claude/hooks/hookpkg/hooks/scripts/CAFE\u0301.SH",
+        ),
+        (
+            ".claude/hooks/r\u00e9sum\u00e9/hooks/scripts/run.sh",
+            "sh .claude/hooks/re\u0301sume\u0301/hooks/scripts/run.sh",
+        ),
+    ],
+    ids=[
+        "case-name",
+        "case-directory-and-name",
+        "case-absolute",
+        "nfd-name",
+        "nfd-and-case-name",
+        "nfd-directory",
+    ],
+)
+def test_script_references_compare_by_the_shared_caseless_key(script: str, command: str) -> None:
+    """#5106: a case-insensitive volume runs any case or NFD spelling of the script.
+
+    Comparing by the one caseless key on every OS over-refuses on a
+    case-sensitive volume, which fails closed.
+    """
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
+
+    root = Path("/project")
+
+    assert runs_script(command, script_refs(root, [script]), (root, root / ".claude"), root)
