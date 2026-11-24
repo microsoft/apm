@@ -373,8 +373,8 @@ def _adopt(directory: str, proven: str) -> None:
         _close(held[1])
 
 
-def _held_realpath(text: str) -> str | None:
-    """Form A, or ``None`` when *text* is outside the held tree or unproven."""
+def _held_anchor(text: str) -> tuple[str, str] | None:
+    """``(deepest held prefix of text, its final path)``, or ``None`` outside the held tree."""
     if not _holds_allowed():
         return None
     root = _root_text()
@@ -383,30 +383,41 @@ def _held_realpath(text: str) -> str | None:
     if len(text) > len(root) and text[len(root)] != "\\":
         return None
     try:
-        anchor, resolved = _deepest_held(text, root)
+        return _deepest_held(text, root)
     except KeyError:
         return None  # the root was released meanwhile
+
+
+def _held_realpath(text: str) -> str | None:
+    """Form A, or ``None`` when *text* is outside the held tree or unproven."""
+    found = _held_anchor(text)
+    if found is None:
+        return None
+    anchor, resolved = found
     if anchor == text:
         return resolved
     parts = text[len(anchor) + 1 :].split("\\")
     inside_package = _registered_cover(text)
     if len(parts) > 1 and not inside_package:
         return None  # nothing below would be held: form B's one open is cheaper
+    return _walk_below(anchor, resolved, parts, adopt=inside_package)
+
+
+def _walk_below(anchor: str, resolved: str, parts: list[str], *, adopt: bool) -> str | None:
+    """Prove *parts* below the held *anchor* one component at a time."""
     current = anchor
     for position, part in enumerate(parts):
         candidate = f"{current}\\{part}"
         entry = _entry(candidate)
-        if entry is None:
-            return None
         if entry is _MISSING:
             joined = "\\".join([resolved.rstrip("\\"), *parts[position:]])
             return joined if plain_win32(joined) else None
+        if entry is None or entry[1] != part or entry[0] & _FILE_ATTRIBUTE_REPARSE_POINT:
+            return None  # unproven, case or long-name drift, or a reparse point
         attributes, name = entry
-        if name != part or attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
-            return None  # case or long-name drift, or a reparse point: Path.resolve decides
         resolved = f"{resolved.rstrip(chr(92))}\\{name}"
         current = candidate
-        if inside_package and attributes & _FILE_ATTRIBUTE_DIRECTORY:
+        if adopt and attributes & _FILE_ATTRIBUTE_DIRECTORY:
             _adopt(candidate, resolved)
     return resolved
 
