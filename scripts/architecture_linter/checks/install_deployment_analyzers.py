@@ -98,6 +98,10 @@ from scripts.architecture_linter.checks.install_lifecycle_serialization import (
     GUARD_LIFECYCLE_SERIALIZATION_CLOSED,
     check_lifecycle_serialization_closed_world,
 )
+from scripts.architecture_linter.checks.install_local_reparent_rule import (
+    GUARD_LOCAL_REPARENT_RULE,
+    check_local_reparent_rule,
+)
 from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
@@ -335,6 +339,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_REANCHOR_WRITER_PREDICTION,
         "A re-anchor predicts a shared path's writer only through install's owners.",
         check_reanchor_writer_prediction,
+    ),
+    _rule(
+        GUARD_LOCAL_REPARENT_RULE,
+        "Uninstall and prune rank a re-parented local row's parent through reparent_rows.",
+        check_local_reparent_rule,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,
