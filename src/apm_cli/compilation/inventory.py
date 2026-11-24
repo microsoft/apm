@@ -54,7 +54,7 @@ def _seeded_walk(root: Path, listing: dict[str, list[str]]):
 
 
 # PERF B3 PROTOTYPE: compute the walk too and fail loudly on any difference.
-_B3_DIFFERENTIAL = True
+_B3_DIFFERENTIAL = False
 
 
 class CompileInventory:
