@@ -889,7 +889,9 @@ def u_bin_pinned() -> bool:
 # Re-pinned after main's bundle frontmatter-hooks fixes (2dfb0a11..37df5b73): they add one
 # more skip (_declares_unapproved_hooks) to bundle_deploy_relative_path and leave
 # _lower_to_target and _is_primitive_deploy_path unchanged, so routing only narrowed.
-U_BIN_BUNDLE_PIN = "ac646bba9e4d24d9af15b0bb1dd15d142e9f95c45ca0afd2a5966a8d2e6aec28"
+# The pin also covers integrate_local_bundle's target= on its routing call
+# (bin_pin.BUNDLE_BIN_CALLER).
+U_BIN_BUNDLE_PIN = "b83d2577325ef5b20d7d43c0bc0f3e1c5baa8e7cf090d1a7a0defc10f5b301f7"
 
 
 def u_bin_bundle_applies(cell: Mapping[str, str]) -> bool:

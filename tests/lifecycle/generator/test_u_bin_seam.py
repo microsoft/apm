@@ -8,6 +8,9 @@ it and leaves ``rules.classify`` real.
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 import pytest
 
 from tests.lifecycle.generator import bin_pin
@@ -93,3 +96,21 @@ def test_the_model_expects_bin_only_for_a_claude_target() -> None:
     deployed = expected_deployed(model, {"p": frozenset({"bin", "skill"})})
     assert {target for _pkg, kind, target in deployed if kind == "bin"} == {"claude"}
     assert {target for _pkg, kind, target in deployed if kind == "skill"} == {"claude", "copilot"}
+
+
+def test_dropping_the_callers_target_changes_the_bundle_pin(tmp_path: Path) -> None:
+    """U-BIN-BUNDLE pins integrate_local_bundle's ``target=`` on its routing call too:
+    without it ``_lower_to_target(..., None)`` would pass a bundle's bin/ through."""
+    module, function, callee, _keyword = bin_pin.BUNDLE_BIN_CALLER
+    for relative in {module, *(m for m, _name in bin_pin.BUNDLE_BIN)}:
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(bin_pin.SRC_ROOT / relative, tmp_path / relative)
+    assert bin_pin.bundle_bin_digest.__wrapped__(tmp_path) == bin_pin.bundle_bin_digest()
+    caller = tmp_path / module
+    text = caller.read_text(encoding="utf-8")
+    call = text.index(f"= {callee}(")
+    keyword = text.index("target=target,", call)
+    assert keyword < text.index(")", call), "the routing call passes no target"
+    caller.write_text(text[:keyword] + text[keyword + len("target=target,") :], encoding="utf-8")
+    assert "<missing>" in bin_pin.call_keyword_tokens(caller, function, callee, "target")
+    assert bin_pin.bundle_bin_digest.__wrapped__(tmp_path) != bin_pin.bundle_bin_digest()
