@@ -804,3 +804,26 @@ def test_prune_keeps_the_parent_chain_when_equally_near_parents_disagree(
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
     assert lock_bytes(world.project) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+@pytest.mark.skipif(
+    sys.platform != "win32" and os.geteuid() == 0,
+    reason="root bypasses directory permissions, so the ancestor stays readable",
+)
+def test_prune_with_an_inaccessible_source_ancestor_keeps_candidates_and_reports(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """chmod 000 vendor while ./vendor/a stays declared: prune reports, nothing is deleted."""
+    world = _world(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    vendor.chmod(0)
+    try:
+        pruned = _output(world.apm("prune"))
+    finally:
+        vendor.chmod(0o755)
+
+    assert "Retained _local/e:" in pruned, pruned
+    assert "Traceback" not in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(_rows(world))
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
