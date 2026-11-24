@@ -23,6 +23,7 @@ from tests.integration.test_uninstall_local_reanchor_lifecycle import (
     _assert_refused_before_any_write,
     _local_world,
     _manifest,
+    _receipts,
     _rows,
     _skill_package,
 )
@@ -33,6 +34,21 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-INV-I3", "P-INV-I7"),
 ]
+
+
+def _installed(world: ReplayWorld) -> dict[str, bytes]:
+    """apm_modules/ bytes, which tree_digest leaves out."""
+    root = world.project / "apm_modules"
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+def _state(world: ReplayWorld) -> tuple:
+    """Everything a refused uninstall must leave alone: project, apm_modules/, HOME receipts."""
+    return tree_digest(world.project), _installed(world), _receipts(world)
 
 
 def _replace_only_in_apm_yml(world: ReplayWorld) -> None:
@@ -57,13 +73,13 @@ def test_offline_dry_run_previews_the_keep_an_apm_yml_replace_rule_forces(
     world.apm("install")
     _replace_only_in_apm_yml(world)
     shutil.rmtree(world.project / "apm_modules")
-    before = tree_digest(world.project)
+    before = (tree_digest(world.project), _receipts(world))
 
     preview = world.apm("uninstall", "./vendor/e", "--dry-run")
     text = " ".join((preview.stdout + preview.stderr).split())
 
     assert "Would keep" in text and "apm_modules/ is missing" in text, text
-    assert tree_digest(world.project) == before
+    assert (tree_digest(world.project), _receipts(world)) == before
     _assert_refused_before_any_write(world, "apm_modules/ is missing")
 
 
@@ -82,7 +98,7 @@ def test_a_still_needed_local_row_survives_an_incomplete_apm_modules(
         shutil.rmtree(
             installed / "_local" / {"survivor-missing": "d", "removed-missing": "e"}[modules]
         )
-    before = tree_digest(world.project)
+    before = _state(world)
 
     result = world.apm("uninstall", "./vendor/e", expect=None)
     text = " ".join((result.stdout + result.stderr).split())
@@ -92,11 +108,17 @@ def test_a_still_needed_local_row_survives_an_incomplete_apm_modules(
         # The lock still records d -> e, so e's declaration goes and its row stays.
         assert result.returncode == 0, text
         assert "./vendor/e stays installed because _local/d still depends on it" in text, text
-        assert "_local/e" in _rows(world)
+        assert "./vendor/e" not in str(load_yaml(world.project / "apm.yml")["dependencies"])
+        row = _rows(world)["_local/e"]
+        assert (row["local_path"], row["declaring_parent"], row["anchored_local_path"]) == (
+            "../e",
+            "./vendor/d",
+            "vendor/e",
+        )
         shutil.rmtree(installed)
         world.apm("install", "--frozen")
         return
     assert result.returncode == 1, text
     assert "its apm_modules copy _local/e is missing" in text, text
     assert "apm.yml and apm.lock.yaml were not changed" in text, text
-    assert tree_digest(world.project) == before
+    assert _state(world) == before
