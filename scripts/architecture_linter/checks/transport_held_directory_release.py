@@ -34,6 +34,10 @@ Two closed-world rules guard that decision:
 The inventory is frozen: a NEW module that renames or deletes a directory under
 ``apm_modules`` is out of scope of static detection and joins ``_INVENTORY`` by
 review. An allowlist entry that no longer mutates a directory is stale and fails.
+
+No APM subprocess renames or deletes inside a registered package: git and other
+children APM spawns work in the cache, staging or temp trees, which are never
+held. User code (lifecycle scripts) runs only after every hold is released.
 """
 
 from __future__ import annotations

@@ -343,3 +343,31 @@ def test_volatile_component_takes_stock_resolve(project: Path) -> None:
         for path in (volatile, volatile / "x.txt"):
             assert resolve_windows(path) is None
             assert str(resolve_path(path)) == str(path.resolve())
+
+
+@_WINDOWS
+def test_portable_relpaths_takes_the_fast_form(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ntpath
+
+    from apm_cli.utils.paths import portable_relpaths
+
+    calls: list[str] = []
+    stock = ntpath.realpath
+
+    def counted(path, *args, **kwargs):
+        calls.append(str(path))
+        return stock(path, *args, **kwargs)
+
+    monkeypatch.setattr(ntpath, "realpath", counted)
+    package = project / "apm_modules" / "o" / "r"
+    paths = [package / "f.txt", package / "sub" / "b.txt", package / "missing.md"]
+    with _held_scope(project):
+        relatives = portable_relpaths(paths, project)
+    assert relatives == [
+        "apm_modules/o/r/f.txt",
+        "apm_modules/o/r/sub/b.txt",
+        "apm_modules/o/r/missing.md",
+    ]
+    assert calls == []  # every resolve took a fast form, none fell back to ntpath.realpath
