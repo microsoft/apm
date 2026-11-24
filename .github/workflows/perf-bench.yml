@@ -162,23 +162,15 @@ jobs:
     - name: Install harness
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
-    - name: Interleaved runs
+    - name: Research cells (pytest on the harness branch)
       working-directory: harness
       env:
-        PAIRS: ${{ needs.request.outputs.pairs }}
-        FIXTURES: ${{ needs.request.outputs.fixtures }}
-        JOURNEYS: ${{ needs.request.outputs.journeys }}
-        RTT: ${{ needs.request.outputs.rtt }}
-        SHARD: ${{ matrix.shard }}
-        PROFILE: ${{ needs.request.outputs.profile }}
-      run: |
-        PROFILE_FLAG=()
-        if [ "$PROFILE" = 1 ] && [ "$SHARD" = 1 ]; then PROFILE_FLAG=(--profile); fi
-        uv run --frozen python -m tests.benchmarks.ci_bench abab "${PROFILE_FLAG[@]}" \
-          --base-apm "$GITHUB_WORKSPACE/base/$VENV_APM" \
-          --new-apm "$GITHUB_WORKSPACE/new/$VENV_APM" \
-          --pairs "$PAIRS" --fixtures "$FIXTURES" --journeys "$JOURNEYS" --rtt "$RTT" \
-          --out "$GITHUB_WORKSPACE/out/shard-$SHARD"
+        APM_E2E_TESTS: '1'
+        PYTHONUNBUFFERED: '1'
+      run: >-
+        uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q -rA
+        tests/integration/test_inprocess_fetch_world.py
+        tests/integration/test_inprocess_fetch_windows_world.py
     - if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
