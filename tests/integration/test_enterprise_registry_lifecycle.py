@@ -22,7 +22,12 @@ registry selector, then advertises v2 while v3 sits in the same registry.
 Locked restore stays on the recorded selection without reading the catalog,
 ``apm update`` follows the company selection (never v3), a catalog outage
 fails the refresh without changing a byte, and a manifest constraint outranks
-a later catalog move. Other stages of #3299 land with their owning issues and
+a later catalog move.
+
+Stage: protected company catalog over a registry entry. The catalog answers
+only its own Bearer credential; the catalog and registry credentials each reach
+only their own host; locked restore and cold CI need no catalog credential.
+Other stages of #3299 land with their owning issues and
 are deliberately not represented here.
 """
 
@@ -69,6 +74,7 @@ pytestmark = [
         "P-LAW-lockfile.frozen_preserves_bytes",
         "P-OWN-credential-origin-scope",
         "P-OWN-marketplace-locked-selection",
+        "P-OWN-marketplace-catalog-credentials",
     ),
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only fixture"),
@@ -137,6 +143,8 @@ class EnterpriseRegistryWorld:
         self.tls = tmp_path / "tls"
         self.producer_git: list[ScriptedRequest] = []
         self.catalog_outage = False
+        # When set, the company catalog answers only ``Bearer <catalog_token>``.
+        self.catalog_token: str | None = None
         self.partner_catalog: dict[str, object] = {"name": "partner-catalog", "plugins": []}
         self.catalog = {
             "name": "corp-catalog",
@@ -157,6 +165,12 @@ class EnterpriseRegistryWorld:
     def _catalog(self, request: ScriptedRequest) -> ScriptedResponse:
         if self.catalog_outage:
             return ScriptedResponse(503, {"Content-Type": "text/plain"}, b"catalog down")
+        if self.catalog_token is not None:
+            presented = request.header("Authorization")
+            if presented is None:
+                return ScriptedResponse(401, {"WWW-Authenticate": 'Bearer realm="corp"'})
+            if presented != f"Bearer {self.catalog_token}":
+                return ScriptedResponse(403)
         return _serve_catalog(request, self.catalog)
 
     def _partner(self, request: ScriptedRequest) -> ScriptedResponse:
@@ -772,3 +786,112 @@ def test_origin_restore_hint_runs_as_printed(tmp_path: Path, apm_binary_path: Pa
             raise _KnownRestoreRefusal(_evidence(result))
         rw.step(*UPDATE, name="update-kept")
         _assert_selected(rw.project, rw.widget, world.registry)
+
+
+CATALOG_TOKEN = "enterprise-catalog-sentinel-3299"
+CATALOG_TOKEN_VAR = "APM_MARKETPLACE_TOKEN_CORP_CATALOG"
+
+
+def test_protected_catalog_routes_registry_entry_with_isolated_credentials(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Protected company catalog over a registry entry (#3299 stage, #3300 twin).
+
+    The catalog answers only its own Bearer credential. A missing or wrong
+    credential refuses registration and names the variable to set. The catalog
+    credential reaches only the catalog host and the registry credential only
+    the registry host. Locked restore needs no catalog credential; a revoked or
+    missing one fails the refresh without changing a byte, and a plain install
+    still restores. Cold CI replays the lock with no catalog registered and no
+    catalog credential, reaching only the registry.
+    """
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    world.catalog_token = CATALOG_TOKEN
+    hosts = frozenset({CATALOG_HOST, REGISTRY_HOST})
+    update = ("update", "--yes", "--target", "copilot")
+    with world.serve() as proxy:
+        producer = world.env(world.producer, proxy)
+        world.provision(world.producer, producer, world.producer.work_root)
+        published = {v: world.publish(proxy, producer, "widget", v) for v in ("1.0.0", "2.0.0")}
+
+        employee = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        (project / SENTINEL).parent.mkdir(parents=True)
+        (project / SENTINEL).write_bytes(SENTINEL_BYTES)
+        consumer = world.manifest("consumer")
+        consumer["targets"] = ["copilot"]
+        consumer["registries"] = {REGISTRY_NAME: {"url": REGISTRY_URL}}
+        consumer["dependencies"] = {"apm": [CATALOG_DECLARATION]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, employee, project)
+        _advertise(world, "1.0.0")
+        good = {**employee, CATALOG_TOKEN_VAR: CATALOG_TOKEN}
+        registrations = world.employee.config_root / "marketplaces.json"
+
+        def step(env: dict[str, str], *args: str, name: str, fail: bool = False) -> str:
+            result = world.egress_step(
+                proxy, env, project, *args, step=name, allowed=hosts, expect_failure=fail
+            )
+            reached = proxy.hosts_receiving(CATALOG_TOKEN)
+            assert reached <= {CATALOG_HOST}, f"step={name} sent the catalog token to {reached}"
+            leaked = proxy.hosts_receiving(TOKEN)
+            assert leaked <= {REGISTRY_HOST}, f"step={name} sent the registry token to {leaked}"
+            return " ".join((result.stdout + result.stderr).split())
+
+        add = ("marketplace", "add", CATALOG_URL, "--name", CATALOG_NAME)
+        before = _state(project)
+        for name, env, status in (
+            ("add-missing", employee, "HTTP 401): no credential is set"),
+            ("add-wrong", {**employee, CATALOG_TOKEN_VAR: "wrong-0123456789"}, "HTTP 403"),
+        ):
+            refused = step(env, *add, name=name, fail=True)
+            assert status in refused and CATALOG_TOKEN_VAR in refused, refused
+            assert not registrations.exists() or CATALOG_NAME not in registrations.read_text()
+            assert _state(project) == before
+        step(good, *add, name="add")
+        assert proxy.hosts_receiving(CATALOG_TOKEN) == {CATALOG_HOST}
+
+        step(good, *INSTALL, name="install")
+        _assert_selected(project, published["1.0.0"], world.registry)
+        assert proxy.hosts_receiving(TOKEN) == {REGISTRY_HOST}
+
+        # Locked restore needs no catalog credential and reads no catalog.
+        locked = _state(project)
+        step(employee, *INSTALL, "--frozen", name="frozen-without-credential")
+        assert not proxy.observations, proxy.observations
+        assert _state(project) == locked
+
+        # A revoked or missing credential fails the refresh and changes nothing.
+        _advertise(world, "^2.0.0")
+        for name, env, status in (
+            ("update-revoked", {**employee, CATALOG_TOKEN_VAR: "revoked-0123456789"}, "HTTP 403"),
+            ("update-missing", employee, "HTTP 401): no credential is set"),
+        ):
+            refused = step(env, *update, name=name, fail=True)
+            assert status in refused and CATALOG_TOKEN_VAR in refused, refused
+            assert _state(project) == locked, name
+        step(employee, *INSTALL, name="install-without-credential")
+        assert not proxy.observations, proxy.observations
+        assert _state(project) == locked
+
+        step(good, *update, name="update")
+        _assert_selected(project, published["2.0.0"], world.registry)
+        assert proxy.hosts_receiving(CATALOG_TOKEN) == {CATALOG_HOST}
+
+        # Cold CI: committed files, no catalog registered, no catalog credential.
+        checkout = world.ci.work_root / "checkout"
+        for relative in ("apm.yml", "apm.lock.yaml", SENTINEL):
+            (checkout / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(project / relative, checkout / relative)
+        committed = (checkout / "apm.lock.yaml").read_bytes()
+        ci = world.env(world.ci, proxy)
+        world.provision(world.ci, ci, checkout)
+        world.egress_step(proxy, ci, checkout, *INSTALL, "--frozen", step="ci-frozen")
+        assert not proxy.requests_to(CATALOG_HOST)
+        assert (checkout / "apm.lock.yaml").read_bytes() == committed
+        _assert_selected(checkout, published["2.0.0"], world.registry)
+        audit = world.egress_step(
+            proxy, ci, checkout, "audit", "--ci", "-f", "json", step="ci-audit"
+        )
+        checks = {c["name"]: c["passed"] for c in json.loads(audit.stdout)["checks"]}
+        assert checks and all(checks.values()), _evidence(audit)
