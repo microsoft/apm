@@ -1835,6 +1835,32 @@ class LockFile:
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None when the file does not exist."""
+        import copy as _copy
+
+        from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
+
+        # RESEARCH ONLY: parse each (path, text) once per invocation.
+        staged = has_staged_lockfile(path)
+        if staged is not None:
+            text = staged_lockfile_text(path) if staged else None
+        elif not path.exists() and not path.is_symlink():
+            return None
+        else:
+            text = path.read_text(encoding="utf-8")
+        if text is None:
+            return cls._read_uncached(path)
+        key = (str(path), staged is not None, text)
+        cached = _RESEARCH_READS.get(key)
+        if cached is None:
+            cached = cls._read_uncached(path)
+            if cached is None:
+                return None
+            _RESEARCH_READS[key] = cached
+        return _copy.deepcopy(cached)
+
+    @classmethod
+    def _read_uncached(cls, path: Path) -> LockFile | None:
+        """Read lock file from disk. Returns None when the file does not exist."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
         from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
 
@@ -2098,3 +2124,6 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
 def get_lockfile_installed_paths(project_root: Path) -> list[str]:
     """Deprecated: use LockFile.installed_paths_for_project() instead."""
     return LockFile.installed_paths_for_project(project_root)
+
+
+_RESEARCH_READS: dict = {}
