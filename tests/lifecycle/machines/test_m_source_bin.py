@@ -12,6 +12,11 @@ import pytest
 from tests.lifecycle.machines._gate_plugin_bin import ROOT, PluginBinBench
 from tests.lifecycle.machines._kit import Bench, WorldPool, earned_cells
 from tests.lifecycle.machines._source_bin import SourceBin, replay_source_bin, source_bin_cells
+from tests.lifecycle.machines._source_bundle import (
+    SourceBundle,
+    replay_source_bundle,
+    source_bundle_cells,
+)
 from tests.lifecycle.machines._source_kit import (
     KNOWN_IDS,
     SourceKit,
@@ -50,3 +55,14 @@ def test_source_kit_spine_credits_registry_executable_cells(
     assert not missing, f"source kit ids without an oracle receipt: {sorted(missing)}"
     strict = {cell.label for cell in machine.known}
     assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
+
+
+def test_source_bundle_spine_credits_bundle_executable_cells(
+    lifecycle_template, tmp_path: Path
+) -> None:
+    """A local bundle's hook, LSP and canvas keep I1-I9 through lock, compile, audit and approve."""
+    world = WorldPool(lifecycle_template, tmp_path).fresh()
+    machine = SourceBundle(Bench(world, "project"))
+    replay_source_bundle(machine)
+    missing = source_bundle_cells() - earned_cells(current_node(), "SB2|")
+    assert not missing, f"source bundle ids without an oracle receipt: {sorted(missing)}"

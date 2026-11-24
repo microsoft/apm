@@ -6826,11 +6826,15 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "SB2|approve-deny|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
@@ -6844,11 +6848,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "SB2|approve-deny|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -7307,25 +7315,37 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "SB2|audit|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=hook": {
+   "credited_by": [
+    "SB2|audit|bundle|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "SB2|audit|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -7842,11 +7862,15 @@
    "strength": "e2e"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "SB2|compile|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=other-file": {
    "credited_by": [
@@ -8614,25 +8638,37 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "SB2|lock|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=hook": {
+   "credited_by": [
+    "SB2|lock|bundle|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "SB2|lock|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source_bin.py::test_source_bundle_spine_credits_bundle_executable_cells"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
