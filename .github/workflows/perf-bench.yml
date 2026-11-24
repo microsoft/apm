@@ -110,8 +110,6 @@ jobs:
           windows) RUNNER=windows-2025 ;;
           *) echo "::error::OS must be linux, macos or windows"; exit 1 ;;
         esac
-        # cProfile needs the Python console script; the Windows venv has a PE launcher.
-        if [ "$OS" = windows ] && [ "$PROFILE" = 1 ]; then echo "::error::PROFILE=1 is not supported on windows"; exit 1; fi
         # The venv console script, relative to a side's worktree.
         if [ "$OS" = windows ]; then VENV_APM=.venv/Scripts/apm.exe; else VENV_APM=.venv/bin/apm; fi
         {
