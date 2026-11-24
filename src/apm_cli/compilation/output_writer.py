@@ -83,7 +83,6 @@ class _LinkedParentCheck:
         resolved = base_dir.resolve()
         self._spellings = {base_dir.absolute(), resolved}
         self._resolved_root = resolved
-        self._resolved: dict[Path, Path] = {}
         self._verified: set[str] = {str(spelling) for spelling in self._spellings}
         self._roots: dict[Path, Path] = {}
 
@@ -97,10 +96,10 @@ class _LinkedParentCheck:
         for ancestor in target.parents:
             if ancestor in self._spellings:
                 return ancestor
+        # Not cached: Path keys compare case-insensitively on Windows, so a
+        # cached resolution could be reused for a distinct, differently cased link.
         for ancestor in target.parents:
-            if ancestor not in self._resolved:
-                self._resolved[ancestor] = ancestor.resolve()
-            if self._resolved[ancestor] == self._resolved_root:
+            if ancestor.resolve() == self._resolved_root:
                 return ancestor
         return None
 
