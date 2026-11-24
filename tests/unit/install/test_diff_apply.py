@@ -734,7 +734,7 @@ def test_a_fast_apply_config_write_is_sealed_at_the_write_seam(
     config = tmp_path / "project" / ".gitignore"
     config.parent.mkdir()
 
-    with journaled_apply() as journal:
+    with journaled_apply(config.parent) as journal:
         sealed_by = write_seam._after
         write_seam.write_text(config, "apm_modules/\n")
         recorded = [unit.path for unit in journal.units]
@@ -775,3 +775,11 @@ def test_a_fast_apply_rollback_keeps_a_config_below_a_linked_parent(
 
     assert (outside / "config.json").read_text(encoding="utf-8") == '{"keep": true}\n'
     assert config in [path for path, _reason in caught.value.issues]
+
+
+def test_a_fast_apply_journal_needs_its_containment_root() -> None:
+    """A fast apply cannot start without the root that bounds its rollback (#5207)."""
+    from apm_cli.install.transaction import journaled_apply
+
+    with pytest.raises(TypeError):
+        journaled_apply()

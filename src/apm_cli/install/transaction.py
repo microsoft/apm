@@ -37,7 +37,7 @@ class ApplyRestoreIncomplete(Exception):
 
 
 @contextlib.contextmanager
-def journaled_apply(contain: Path | None = None) -> Iterator[DeployJournal]:
+def journaled_apply(contain: Path) -> Iterator[DeployJournal]:
     """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
 
     The caller records each path it creates; every path written at the
@@ -55,7 +55,7 @@ def journaled_apply(contain: Path | None = None) -> Iterator[DeployJournal]:
     store_parent = get_apm_home() / "install-snapshots"
     journal = DeployJournal(store_parent)
     # *contain* (the project) bounds the rollback only; nothing is persisted for replay.
-    journal.contain = Path(os.path.abspath(contain)) if contain is not None else None
+    journal.contain = Path(os.path.abspath(contain))
 
     def seam(path: Path, contents: bool, expected: str | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
