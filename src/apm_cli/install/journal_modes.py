@@ -230,18 +230,38 @@ def append_private(path: Path, text: str) -> None:
         os.close(fd)
 
 
-def require_private_store(store: Path) -> None:
+class HomeGroupWritable(ValueError):
+    """Only APM_HOME's group write fails the privacy check (#5385).
+
+    The store itself is private; once the user removes that group write
+    (``chmod g-w``), the same store replays, so it is never retained.
+    """
+
+    def __init__(self, home: Path) -> None:
+        super().__init__(HOME_GROUP_WRITABLE)
+        self.home = home
+
+
+HOME_GROUP_WRITABLE = (
+    "APM_HOME is group writable and its group cannot be shown private to this user"
+)
+
+
+def require_private_store(store: Path, *, allow_group_home: bool = False) -> None:
     """Raise ``ValueError`` unless the store chain is private to this user.
 
     The install-snapshots directory and the store must each be a real directory and the
     journal a regular file (never a link), on POSIX owned by this user with no group or
     other write. APM_HOME may be a link (a dotfiles home): its target must be a directory
     this user owns, never other writable, and group writable only when its group is
-    private to this user (:func:`_user_private_group`, #5313).
+    private to this user (:func:`_user_private_group`, #5313). When that group write is
+    the only failure, :class:`HomeGroupWritable` is raised instead (#5385), unless
+    *allow_group_home* (reading a store's paths to report them, never to restore).
     """
     home = (store.parent.parent, os.stat, stat.S_ISDIR, 0o002)
     dirs = [(path, os.lstat, stat.S_ISDIR, 0o022) for path in (store.parent, store)]
     journal = (store / _MANIFEST, os.lstat, stat.S_ISREG, 0o022)
+    group_writable_home: Path | None = None
     for path, read, is_kind, forbidden in (home, *dirs, journal):
         try:
             st = read(path)
@@ -252,7 +272,9 @@ def require_private_store(store: Path) -> None:
         if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & forbidden):
             raise ValueError(NOT_PRIVATE)
         if os.name != "nt" and st.st_mode & 0o020 and not _user_private_group(st.st_gid):
-            raise ValueError(NOT_PRIVATE)  # only APM_HOME may get here group writable
+            group_writable_home = path  # only APM_HOME may get here group writable
+    if group_writable_home is not None and not allow_group_home:
+        raise HomeGroupWritable(group_writable_home)
 
 
 def _user_private_group(gid: int) -> bool:
