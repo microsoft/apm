@@ -343,7 +343,11 @@ def test_a_fifo_at_a_deployed_path_fails_the_audit_without_blocking(
 
     output = served.stdout + served.stderr
     evidence = f"served={output!r}\nlive={live.stdout + live.stderr!r}"
-    assert (served.returncode, served.stdout) == (live.returncode, live.stdout), evidence
+    assert (served.returncode, served.stdout, served.stderr) == (
+        live.returncode,
+        live.stdout,
+        live.stderr,
+    ), evidence
     assert served.returncode != 0, output
     assert "style.instructions.md" in output, output
     assert output.isascii(), output
