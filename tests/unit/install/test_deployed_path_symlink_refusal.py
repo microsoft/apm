@@ -77,7 +77,7 @@ def test_a_linked_directory_name_with_an_escape_byte_is_rendered_inert(tmp_path:
     except (OSError, NotImplementedError, ValueError):
         pytest.skip("symbolic links or control bytes in names are unavailable")
 
-    with pytest.raises(RuntimeError) as refused:
+    with pytest.raises(SymlinkedDeployError) as refused:
         deployed_path_entry(root / "sk\x1b[2Jills" / "demo" / "SKILL.md", root, [])
 
     message = str(refused.value)
