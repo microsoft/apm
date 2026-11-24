@@ -3091,11 +3091,16 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#5236",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -3416,25 +3421,37 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=bin|GATE=allowed": {
+   "credited_by": [
+    "G1|audit-ci|bin|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=audit|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|bin|denied-dependency|project|plugin"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=audit|PRIM=bin|GATE=denied-executable": {
+   "credited_by": [
+    "G1|audit-ci|bin|denied-executable|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=audit|PRIM=bin|GATE=none": {
    "credited_by": [
@@ -3448,18 +3465,26 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=audit|PRIM=bin|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|audit-ci|bin|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=audit|PRIM=bin|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|audit-ci|bin|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=audit|PRIM=canvas|GATE=allowed": {
    "family": "T1",
@@ -4080,11 +4105,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|bin|denied-dependency|project|plugin"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -4635,11 +4664,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|bin|denied-dependency|project|plugin"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -5025,6 +5058,9 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|bin|denied-dependency|project|plugin"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5032,8 +5068,9 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -5720,11 +5757,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=allowed": {
+   "credited_by": [
+    "G1|prune|bin|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
@@ -5738,11 +5779,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=denied-executable": {
+   "credited_by": [
+    "G1|prune|bin|denied-executable|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=none": {
    "credited_by": [
@@ -5756,11 +5801,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|prune|bin|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=unapproved-exec": {
    "credited_by": [
@@ -6051,11 +6100,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -20191,8 +20244,13 @@
   },
   "pair|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
+    "G1|audit-ci|bin|denied-dependency|project|plugin",
+    "G1|compile|bin|denied-dependency|project|plugin",
+    "G1|lock|bin|denied-dependency|project|plugin",
     "G1|marketplace|bin|denied-dependency|project",
-    "G1|prune|bin|denied-dependency|project"
+    "G1|mcp-install|bin|denied-dependency|project|plugin",
+    "G1|prune|bin|denied-dependency|project",
+    "G1|uninstall|bin|denied-dependency|project"
    ],
    "family": "pair",
    "issue": "#4095",

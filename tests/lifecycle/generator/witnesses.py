@@ -282,7 +282,11 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
     from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
-    from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
+    from tests.lifecycle.machines._gate_plugin_bin import (
+        KNOWN_PLUGIN,
+        deploys_bin,
+        plugin_bin_cells,
+    )
     from tests.lifecycle.machines._source_bin import source_bin_cells
     from tests.lifecycle.machines._source_bundle import source_bundle_cells
     from tests.lifecycle.machines._source_kit import KNOWN_IDS, source_kit_cells
@@ -325,7 +329,7 @@ def machine_cells() -> list[MachineCell]:
             assignment = _gate_assignment(key)
             if witness == GATE_BUNDLE_SPINE:
                 assignment = {**assignment, "SRC": "local-bundle"}
-            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
+            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key) or KNOWN_PLUGIN.get(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
             if assignment["GATE"] == "denied-dependency":
                 # A refusal proves its GATE level only, never a success cell.
