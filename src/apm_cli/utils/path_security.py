@@ -31,10 +31,32 @@ from typing import BinaryIO
 
 from .file_ops import robust_rmtree
 from .paths import is_within, relative_posix, relative_to
+from .realpath import resolve_path
 
 
 class PathTraversalError(ValueError):
     """Raised when a computed path escapes its expected base directory."""
+
+
+def symlinked_deploy_refusal(link: str) -> str:
+    """The one refusal for a deploy reached through a linked directory (#5174, #5287).
+
+    *link* is repository- or user-controlled: it is shown as printable ASCII (#5215).
+    """
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    return (
+        f"Refusing deployment through a symlinked path component: {printable_ascii_text(link)}. "
+        "Replace the symlink with a regular directory or remove it, then retry."
+    )
+
+
+class SymlinkedDeployError(PathTraversalError):
+    """A deploy path crosses a symlinked directory; *link* is relative to its root."""
+
+    def __init__(self, link: str) -> None:
+        super().__init__(symlinked_deploy_refusal(link))
+        self.link = link
 
 
 def decode_url_path_segments(
@@ -214,13 +236,13 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     """
     return ensure_path_within_resolved(
         path,
-        _strip_extended_prefix(base_dir.resolve()),
+        _strip_extended_prefix(resolve_path(base_dir)),
     )
 
 
 def resolve_for_containment(path: Path) -> Path:
     """Resolve *path* once (symlinks followed) for a containment check made now."""
-    return _strip_extended_prefix(path.resolve())
+    return _strip_extended_prefix(resolve_path(path))
 
 
 def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
@@ -246,7 +268,7 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
 
 def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     """Resolve *path* and assert containment against a pre-resolved base."""
-    resolved = _strip_extended_prefix(path.resolve())
+    resolved = _strip_extended_prefix(resolve_path(path))
     resolved_base = _strip_extended_prefix(resolved_base)
     try:
         if not is_within(resolved, resolved_base):

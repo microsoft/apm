@@ -1,0 +1,15 @@
+{
+  "issue": 5287,
+  "fixed_in": "Unreleased",
+  "summary": "A deploy refused through a symlinked directory printed a different message by scope and link kind: project scope named the link with no next step, and a user-scope link loop printed a double-wrapped resolution error with an absolute path.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_symlinked_deploy_destination_lifecycle.py::test_a_symlinked_deploy_refusal_names_the_link_and_next_step",
+    "tests/unit/install/test_deployed_path_symlink_refusal.py::test_a_symlinked_component_is_refused_with_the_standard_message"
+  ]
+}

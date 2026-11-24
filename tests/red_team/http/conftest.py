@@ -158,7 +158,10 @@ def blocking_post():
             with lock:
                 live["count"] += 1
             started.release()
-            release.wait(timeout=10)
+            # Longer than any dispatch deadline (30 s cap): the test releases explicitly.
+            release.wait(timeout=60)
+            with lock:
+                live["count"] -= 1
             return _fake_response(200)
 
         from apm_cli.core import script_executors

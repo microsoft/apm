@@ -1579,6 +1579,20 @@ def _check_drift(
 # -- Aggregate runner ----------------------------------------------
 
 
+def _bundle_hook_ownership_result(problems: Sequence[str]) -> CheckResult:
+    """Bundle hook entries APM can no longer attribute are named, never dropped (#5078)."""
+    return CheckResult(
+        name="local-bundle-hooks",
+        passed=False,
+        message=(
+            f"{len(problems)} local bundle hook ownership problem(s); restore each recorded "
+            "entry and ownership record first (uninstall refuses while an edited entry still "
+            "runs the bundle's script), and keep your own changes in a separate hook entry"
+        ),
+        details=list(problems),
+    )
+
+
 def _check_local_bundle_hooks(
     deployment_root: Path,
     lock: LockFile,
@@ -1593,6 +1607,7 @@ def _check_local_bundle_hooks(
     from ..install.errors import PolicyViolationError
     from ..install.local_bundle_canvas import unadmitted_bundle_canvas
     from ..install.local_bundle_hook_trust import (
+        bundle_hook_ownership,
         bundle_hook_recheck_targets,
         unadmitted_bundle_hooks,
     )
@@ -1611,10 +1626,13 @@ def _check_local_bundle_hooks(
         DeploymentLedgerCodec.from_lockfile(lock)
     )
     try:
+        problems = bundle_hook_ownership(deployment_root, targets, bundle_paths)
         unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
         canvas = unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)
     except PolicyViolationError as exc:
         return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
+    if problems:
+        return _bundle_hook_ownership_result(problems)
     if not unadmitted and not canvas:
         return CheckResult(
             name="local-bundle-hooks", passed=True, message="Local bundle hooks are approved"

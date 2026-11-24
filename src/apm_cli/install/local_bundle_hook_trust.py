@@ -23,7 +23,21 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
-from apm_cli.install.hook_script_refs import hook_commands, runs_script, script_refs
+from apm_cli.install.hook_script_refs import (
+    hook_commands,
+    runs_script,
+    script_refs,
+    script_tails,
+)
+from apm_cli.install.local_bundle_hook_cwd import runs_through_cwd
+from apm_cli.install.local_bundle_hook_states import (
+    _merged_hook_documents,
+    _merged_hook_states,
+    _MergedHookState,
+    _modified_slugs,
+    _recorded_slugs,
+    _sidecar_identities,
+)
 
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
@@ -42,28 +56,6 @@ class UnadmittedBundleHooks:
 class _BundleHookState:
     keys: set[str | None] = field(default_factory=set)
     hook_files: set[str] = field(default_factory=set)
-
-
-def _merged_hook_documents(project_root: Path, targets: Any):
-    """Yield ``(config, sidecar, container)`` for every merged hook target."""
-    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
-    from apm_cli.integration.hook_ownership import read_hook_object
-
-    for target in targets or ():
-        config = _MERGE_HOOK_TARGETS.get(getattr(target, "name", None))
-        if config is None:
-            continue
-        json_path = Path(project_root) / target.root_dir / config.config_filename
-        sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
-        try:
-            yield (
-                read_hook_object(json_path),
-                read_hook_object(sidecar_path),
-                config.event_container_key,
-            )
-        except (OSError, ValueError, TypeError):
-            # Unreadable ownership state cannot prove an approval.
-            yield None, None, config.event_container_key
 
 
 def _per_file_targets(targets: Any) -> list[Any]:
@@ -196,6 +188,53 @@ def unadmitted_bundle_hooks(
         elif not all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys):
             result.append(UnadmittedBundleHooks(slug, REASON_NOT_GRANTED, files))
     return result
+
+
+def _scripted_slugs(state: _MergedHookState, lock_paths: Collection[str], project_root: Path):
+    """Bundles the lock records hook scripts for under *state*'s target."""
+    from apm_cli.integration.hook_command_paths import hook_scripts_parent
+
+    base = Path(hook_scripts_parent(state.target.name, state.target.root_dir)).as_posix() + "/"
+    slugs: set[str] = set()
+    for value in lock_paths:
+        rest = _relative_value(value, project_root)
+        if rest.startswith(base) and "/" in rest[len(base) :]:
+            slugs.add(rest[len(base) :].split("/", 1)[0])
+    return slugs
+
+
+def bundle_hook_ownership(
+    project_root: Path, targets: Any, bundle_paths: Collection[str] = ()
+) -> list[str]:
+    """Every bundle hook ownership problem, reading each config and sidecar once (#5078).
+
+    A problem is a bundle entry edited or removed outside APM, an unreadable
+    ownership record (or config, while the lock records bundle hooks there),
+    or bundle hook scripts the lock records for a target whose ownership
+    record names no entry for that bundle (a missing or stripped sidecar).
+    Each would otherwise leave the bundle's entries silently unattributed.
+    """
+    states = list(_merged_hook_states(project_root, targets))
+    problems: list[str] = []
+    for state in states:
+        scripted = _scripted_slugs(state, bundle_paths, project_root)
+        if state.sidecar_unreadable or (
+            state.config_unreadable and (scripted or _recorded_slugs(state))
+        ):
+            problems.append(
+                f"{state.label}: the hook config or its ownership record cannot be read, "
+                "so bundle hooks there cannot be attributed"
+            )
+            continue
+        problems += [
+            f"{slug}: a deployed hook entry was changed outside APM"
+            for slug in sorted(_modified_slugs(state))
+        ]
+        problems += [
+            f"{slug}: {state.label} has no ownership record for the bundle's deployed hooks"
+            for slug in sorted(scripted - _recorded_slugs(state))
+        ]
+    return problems
 
 
 def contained_bundle_path(project_root: Path, value: str, prefixes: Collection[str]) -> Path | None:
@@ -497,20 +536,6 @@ def bundle_hook_leftovers(
     return found
 
 
-def _sidecar_identities(project_root: Path, targets: Any) -> set[tuple[str, str | None]]:
-    """Return ``(slug, approval_key)`` for every bundle marker the merged sidecars keep."""
-    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
-
-    found: set[tuple[str, str | None]] = set()
-    for _data, sidecar, _container in _merged_hook_documents(project_root, targets):
-        for entries in (sidecar or {}).values():
-            for entry in entries if isinstance(entries, list) else ():
-                marker = entry.get("_apm_source") if isinstance(entry, dict) else None
-                if (parsed := parse_local_bundle_hook_source(marker)) is not None:
-                    found.add(parsed)
-    return found
-
-
 def bundle_hook_identities(
     project_root: Path, targets: Any, lock_paths: Collection[str]
 ) -> dict[str, set[str | None]]:
@@ -536,16 +561,6 @@ def _relative_value(value: str, project_root: Path) -> str:
     return _record_value(path, project_root) if path.is_absolute() else value
 
 
-def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
-    """Return each script row under *target_root*, spelled relative to it."""
-    tails = []
-    for value in scripts:
-        spelled = Path(value) if Path(value).is_absolute() else project_root / value
-        if spelled.is_relative_to(target_root):
-            tails.append(spelled.relative_to(target_root).as_posix())
-    return tails
-
-
 def _per_file_configs_running(
     project_root: Path, targets: Any, owned: Collection[str], scripts: Collection[str]
 ) -> set[str]:
@@ -562,7 +577,7 @@ def _per_file_configs_running(
     refs = script_refs(project_root, scripts)
     for target in _per_file_targets(targets):
         target_root = project_root / target.root_dir
-        tails = _script_tails(project_root, target_root, scripts)
+        tails = script_tails(project_root, target_root, scripts)
         hooks_dir = target_root / "hooks"
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not hooks_dir.is_dir():
@@ -577,8 +592,13 @@ def _per_file_configs_running(
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
             texts = list(hook_commands(document))
-            if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
-                runs_script(text, refs, (project_root, target_root), project_root) for text in texts
+            if (
+                any(tail in text.replace("\\", "/") for text in texts for tail in tails)
+                or any(
+                    runs_script(text, refs, (project_root, target_root), project_root)
+                    for text in texts
+                )
+                or runs_through_cwd(document, project_root, scripts)
             ):
                 found.add(value)
     return found
@@ -624,7 +644,7 @@ def _configs_still_running(
         if config is None:
             continue
         target_root = project_root / target.root_dir
-        tails = _script_tails(project_root, target_root, scripts)
+        tails = script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
         # A hook in any target may run a script by any spelling (#5106).
         if not refs[0] or not json_path.is_file():

@@ -5,6 +5,7 @@
     "P-INV": "Cross-cutting lifecycle invariants I1..I9 (P-INV-I<n>).",
     "P-LAW": "Lifecycle laws: every property_catalog id in tests/fixtures/lifecycle_bug_ledger/, verbatim (P-LAW-<id>).",
     "P-OWN": "Registered architecture owners in .apm/architecture/owners/*.json (P-OWN-<owner id>).",
+    "P-PERF": "Performance promises: deterministic per-journey count budgets (git spawns, HTTP, hashing, files written, path calls, lockfile reads) in tests/perf/count_budgets.json (P-PERF-<id>).",
     "P-SEC": "Supply-chain promises of the shipped Python package: declared dependency floors exclude releases with published advisories (P-SEC-<id>).",
     "req": "OpenAPM spec requirement ids as written in CONFORMANCE.json (req-xx-NNN)."
   },
@@ -190,6 +191,7 @@
     "P-OWN-user-invocable-resolution": "architecture owner (core-runtime.json): Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
     "P-OWN-user-root-scoped-instruction-eligibility": "architecture owner (hooks-integrations.json): User-root target capabilities: scoped instruction eligibility and user-scope hook home reference",
     "P-OWN-windows-stable-executable-path": "architecture owner (transport-auth-platform.json): Windows stable executable path",
+    "P-PERF-count-budgets": "perf promise engine layer 1: each budgeted journey stays within its count budgets; a budget changes only in a PR row with a reason",
     "P-SEC-gitpython-advisory-floor": "installing apm-cli upgrades GitPython below 3.1.41 (published Windows advisories CVE-2023-40590, CVE-2024-22190)",
     "req-cf-001": "spec openapm-v0.1 12.5 (MUST, consumer)",
     "req-cf-002": "spec openapm-v0.1 12.3 (MUST, consumer)",

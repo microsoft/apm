@@ -335,6 +335,42 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/install/exec_gate.py", "plugin_bin_deployable", "InstallScope.USER"),
         ),
     ),
+    "U-BIN-BUNDLE": (
+        "a local bundle never deploys bin/, at any scope or gate level (#4095 lane T-1c, "
+        "QL ruling): integrate_local_bundle routes every packed file through "
+        "bundle_deploy_relative_path, which keeps only files under a primitive a target "
+        "deploys (_lower_to_target, _is_primitive_deploy_path); no target declares a bin "
+        "primitive, and the only bin/ deploy decision (exec_gate.plugin_bin_deployable) "
+        "belongs to the package pipeline, which the bundle side door never calls. So every "
+        "PRIM=bin cell of OP=bundle-install or SRC=local-bundle is vacuous for bin/, the "
+        "org-policy level included: the bundle spine still witnesses the deny's refusal "
+        "itself. Self-reinstating: bin_pin.bundle_bin_digest hashes the routing elements; "
+        "when it differs from U_BIN_BUNDLE_PIN the cells become must-cover, and the "
+        "tripwire test_no_target_routes_a_bundle_bin_file fails if any target ever routes "
+        "a bundle bin/ path",
+        (
+            Ev(
+                "src/apm_cli/install/services.py",
+                "integrate_local_bundle",
+                "_deploy_rel = _bundle_rel(",
+            ),
+            Ev(
+                "src/apm_cli/install/local_bundle_paths.py",
+                "bundle_deploy_relative_path",
+                "return _lower_to_target(deploy_rel, target, rendering_extension)",
+            ),
+            Ev(
+                "src/apm_cli/install/local_bundle_paths.py",
+                "_lower_to_target",
+                "if not _is_primitive_deploy_path(rel_path, target):",
+            ),
+            Ev(
+                "src/apm_cli/install/exec_gate.py",
+                "plugin_bin_deployable",
+                "PackageType.MARKETPLACE_PLUGIN",
+            ),
+        ),
+    ),
     "U-BIN-SRC": (
         "a local path whose package can deploy bin/ is a Claude plugin directory, which is "
         "the native-plugin source: bin/ deploys only for a MARKETPLACE_PLUGIN package, "
@@ -693,6 +729,8 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U8"
     if u_bin_ops_applies(cell) and u_bin_pinned():
         return "U-BIN-OPS"
+    if u_bin_bundle_applies(cell) and u_bin_bundle_pinned():
+        return "U-BIN-BUNDLE"
     if u_user_org_policy_applies(cell) and u_user_org_policy_pinned():
         return "U-USER-SCOPE-ORG-POLICY"
     if cell.get("SCOPE") == "user" and cell.get("MCPOWN") in RETIRED_MCP_OWNERS:
@@ -805,6 +843,8 @@ def must_cover_rules(cell: Mapping[str, str]) -> tuple[str, ...]:
         rules.append("U9")
     if u_bin_applies(cell) and not u_bin_pinned():
         rules.append("U-BIN")
+    if u_bin_bundle_applies(cell) and not u_bin_bundle_pinned():
+        rules.append("U-BIN-BUNDLE")
     if u_user_org_policy_applies(cell) and not u_user_org_policy_pinned():
         rules.append("U-USER-SCOPE-ORG-POLICY")
     return tuple(rules)
@@ -868,6 +908,40 @@ def u_bin_pinned() -> bool:
     from tests.lifecycle.generator.bin_pin import predicate_digest
 
     return predicate_digest() == U_BIN_PIN
+
+
+# -- U-BIN-BUNDLE: a local bundle never deploys bin/ (#4095 lane T-1c) ----------
+
+# The approved digest of the bundle deploy routing (generator/bin_pin.py). While the
+# live digest equals it, every PRIM=bin cell of a local bundle is removed; when it
+# differs they are must-cover and --check fails until a reviewed change updates it.
+# Re-pinned after main's bundle frontmatter-hooks fixes (2dfb0a11..37df5b73): they add one
+# more skip (_declares_unapproved_hooks) to bundle_deploy_relative_path and leave
+# _lower_to_target and _is_primitive_deploy_path unchanged, so routing only narrowed.
+# The pin also covers integrate_local_bundle's target= on its routing call
+# (bin_pin.BUNDLE_BIN_CALLER).
+U_BIN_BUNDLE_PIN = "b83d2577325ef5b20d7d43c0bc0f3e1c5baa8e7cf090d1a7a0defc10f5b301f7"
+
+
+def u_bin_bundle_applies(cell: Mapping[str, str]) -> bool:
+    """U-BIN-BUNDLE: a PRIM=bin cell whose package arrives as a local bundle.
+
+    A command U8 maps to a rule cell (one that refuses or ignores a local bundle)
+    keeps that mapping: the refusal is proven there, whatever the bundle ships.
+    install of a local bundle is bundle-install, so it is removed with it.
+    """
+    if cell.get("PRIM") != "bin" or not (
+        cell.get("OP") == "bundle-install" or cell.get("SRC") == "local-bundle"
+    ):
+        return False
+    mapped = mapped_cell(cell)
+    return mapped is None or not isinstance(mapped[0], str)
+
+
+def u_bin_bundle_pinned() -> bool:
+    from tests.lifecycle.generator.bin_pin import bundle_bin_digest
+
+    return bundle_bin_digest() == U_BIN_BUNDLE_PIN
 
 
 # -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
