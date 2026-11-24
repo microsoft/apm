@@ -47,12 +47,13 @@ ENVS = ("normal", "worktree", "headless")
 # Diagnostic variants: a second headless session in the same project, and the
 # project marketplace path rewritten to an absolute path.
 # Claude-only diagnostics at project scope: a second session in the same HOME, the
-# marketplace path made absolute, no folder trust, and the native oracle (Claude's
+# marketplace path made absolute, no folder trust (headless and TUI), and the native oracle (Claude's
 # own `plugin marketplace add` + `plugin install --scope project`, then the user
 # plugin state wiped to simulate a fresh clone). Worktree diagnostics: apm installs
 # only on the worktree's branch (main checkout has no .agents/plugins), or a
 # session runs in the main checkout before the first session in a worktree.
 DIAG_ENVS = (
+    "tui-untrusted",
     "headless-rerun",
     "headless-abspath",
     "headless-untrusted",
@@ -474,7 +475,10 @@ class Cell:
             return hook and "tools/list" in self.mcp_methods()
 
         self.evidence["startup_ready"] = self.wait_for(started, SESSION_SECONDS)
-        if self.harness == "claude":
+        if self.harness == "claude" and self.env.endswith("untrusted"):
+            # Keystrokes could answer the folder-trust dialog; observe it untouched.
+            pass
+        elif self.harness == "claude":
             self.run("tmux-slash", [*tmux, "send-keys", "-l", f"/{SKILL}"], cwd, timeout=30)
             self.wait_for(lambda: pane().count(SKILL) > 1, 10)
             self.evidence["slash_menu"] = _tail(pane(), 2000)
