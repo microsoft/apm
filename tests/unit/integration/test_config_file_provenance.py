@@ -923,6 +923,23 @@ def test_a_malformed_record_file_keeps_the_file_and_vouches_for_nothing(tmp_path
     assert config_file_origin(config) is None
 
 
+def test_a_lost_record_file_keeps_the_users_skeleton(tmp_path, apm_home) -> None:
+    """A listed directory record file that is gone fails closed: the user's empty
+    skeleton it vouched for is kept, never taken as unrecorded (#5037)."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)  # the index stays
+    _holding(apm_home, config).unlink()
+
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON
+    assert config_file_origin(config) is None
+
+
 @pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="needs non-UTF-8 file names")
 def test_a_users_config_under_a_non_utf8_directory_name_keeps_its_record(
     tmp_path, apm_home
