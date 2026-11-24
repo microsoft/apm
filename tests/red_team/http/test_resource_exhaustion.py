@@ -36,7 +36,10 @@ from apm_cli.core.lifecycle_scripts import LifecycleScriptRunner
 from .conftest import make_event, make_http_script
 
 # Time every dispatch worker of one fire() may take to start, whatever the runner load.
-_START_BUDGET_SECONDS = 60
+# It stays under the entries' 30 s HTTP deadline (the executor's cap), so a worker that
+# started first is still dispatching when the last one starts.
+_HTTP_TIMEOUT_SECONDS = 30
+_START_BUDGET_SECONDS = 25
 
 pytestmark = pytest.mark.component
 
@@ -115,7 +118,10 @@ class TestDispatchThreadCap:
         unambiguous: every entry yields its own live thread.
         """
         n_entries = 20
-        scripts = [make_http_script(_public_url(i)) for i in range(n_entries)]
+        scripts = [
+            make_http_script(_public_url(i), timeout_sec=_HTTP_TIMEOUT_SECONDS)
+            for i in range(n_entries)
+        ]
         runner = LifecycleScriptRunner(scripts=scripts)
 
         with blocking_post() as (release, started, live, lock):
@@ -131,8 +137,10 @@ class TestDispatchThreadCap:
                         f"{entered} of {n_entries} dispatch workers started "
                         f"within {_START_BUDGET_SECONDS} s"
                     )
+                # Every worker is still inside its post: the fan-out is simultaneous.
                 with lock:
                     assert live["count"] == n_entries
                 assert len(threads) == n_entries
+                assert all(thread.is_alive() for thread in threads)
             finally:
                 _release_and_drain(release, threads)
