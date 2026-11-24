@@ -1865,6 +1865,10 @@ class APMDependencyResolver:
             ) from exc
         if not live_path.exists():
             raise FileNotFoundError(f"Validated package was not published: {live_path}")
+        from apm_cli.utils.realpath_win import register_held_root
+
+        # Placed for good: path resolution may now hold it (Windows) for this command.
+        register_held_root(live_path, self._apm_modules_dir)
         package.package_path = self._remap_candidate_path(
             package.package_path,
             downloaded_candidate,

@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from ...utils.paths import spelling_key
+from ...utils.realpath_win import release_held
 from .engine import _dependency_public_label, _removed_lock_key
 
 
@@ -541,6 +542,7 @@ def move_materializations(
     for current, target, created in planned:
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
+            release_held(current)
             current.rename(target)
         except BaseException:
             _undo_failed_move(current, target, created, done, root)
@@ -583,6 +585,7 @@ def restore_materializations(
     unrestored: list[str] = []
     for current, target, created in reversed(moved):
         try:
+            release_held(target)
             target.rename(current)
             _remove_created(created)
         except OSError:
