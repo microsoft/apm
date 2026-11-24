@@ -661,16 +661,22 @@ def test_a_kill_after_two_writers_changed_one_shared_config_is_restored(
 # record. A later install's cleanup that rewrites them records them as legacy, so a
 # kill after that rewrite is restored on the next install like any recorded write.
 
-_USERS_SETTINGS = {"permissions": {"allow": ["Bash(ls)"]}}
+# Nested user settings, and scalar ones the cleaned file keeps (#5067).
+_USERS_SETTINGS = {
+    "nested": {"permissions": {"allow": ["Bash(ls)"]}},
+    "scalar": {"model": "sonnet"},
+}
 
 
+@pytest.mark.parametrize("kept", sorted(_USERS_SETTINGS))
 def test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, kept: str
 ) -> None:
+    users_settings = _USERS_SETTINGS[kept]
     chain = Chain(tmp_path / "cleanup", apm_binary_path, dirs=(".claude", ".github"))
     settings = chain.project / _SETTINGS
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(json.dumps(_USERS_SETTINGS, indent=2) + "\n", encoding="utf-8")
+    settings.write_text(json.dumps(users_settings, indent=2) + "\n", encoding="utf-8")
     _write_root_hook(chain, "v1")
     chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
     chain.ok("install")
@@ -686,7 +692,7 @@ def test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored(
     journal = _journal(_abandoned(chain))
     assert _unit(journal, _SETTINGS)["path"] == _SETTINGS, journal
     assert _SIDECAR not in {line.get("path") for line in journal}, journal
-    assert json.loads(settings.read_text(encoding="utf-8")) == _USERS_SETTINGS
+    assert json.loads(settings.read_text(encoding="utf-8")) == users_settings
     chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
 
     result = chain.run("install")
