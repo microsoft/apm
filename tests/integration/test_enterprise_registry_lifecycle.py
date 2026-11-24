@@ -24,10 +24,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
+import shlex
 import shutil
 import sys
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -115,6 +117,7 @@ class EnterpriseRegistryWorld:
         self.ci = IsolatedApmEnvironment.create(tmp_path / "cold-ci", base_env=base_env)
         self.tls = tmp_path / "tls"
         self.producer_git: list[ScriptedRequest] = []
+        self.extra_hosts: dict[str, Callable[[ScriptedRequest], ScriptedResponse]] = {}
         self.catalog = {
             "name": "corp-catalog",
             "owner": {"name": "Corp Platform"},
@@ -140,6 +143,7 @@ class EnterpriseRegistryWorld:
     @contextmanager
     def serve(self) -> Iterator[ScriptedHttpsProxy]:
         handlers = {REGISTRY_HOST: self.registry.handle, CATALOG_HOST: self._catalog}
+        handlers.update(self.extra_hosts)
         handlers.update(dict.fromkeys(PRODUCER_GIT_HOSTS, self._producer_git))
         with local_scripted_https_proxy(self.tls, handlers) as proxy:
             yield proxy
@@ -400,3 +404,51 @@ def test_employee_registers_and_browses_public_https_catalog(
     assert registered["marketplaces"] == [{"name": "corp-catalog", "url": CATALOG_URL, "path": ""}]
     assert not (project / "apm.yml").exists()
     assert not (project / "apm.lock.yaml").exists()
+
+
+def test_origin_restore_hint_runs_as_printed(tmp_path: Path, apm_binary_path: Path) -> None:
+    """After a consented alias rebind, the printed restore command runs as
+    printed and ``apm update`` then proceeds on the locked package (#5264)."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    world.catalog["plugins"][0].update(registry=REGISTRY_NAME, version=VERSION)
+    partner_host = "catalog.partner.example"
+    partner_url = f"https://{partner_host}/apm/marketplace.json"
+    world.extra_hosts[partner_host] = world._catalog
+    declaration = {"name": "widget", "marketplace": "corp-catalog"}
+    with world.serve() as proxy:
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer")
+        consumer["registries"] = {REGISTRY_NAME: {"url": REGISTRY_URL}}
+        consumer["targets"] = ["copilot"]
+        consumer["dependencies"] = {"apm": [declaration]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+        world.run(env, project, "marketplace", "add", CATALOG_URL, step="add")
+        world.run(env, project, *INSTALL, step="install")
+        locked = (project / "apm.lock.yaml").read_bytes()
+        rebind = ("marketplace", "add", partner_url, "--name", "corp-catalog", "--yes")
+        world.run(env, project, *rebind, step="rebind")
+
+        refused = world.run(env, project, "update", "--yes", step="update-refused", expect=1)
+        text = " ".join((refused.stdout + refused.stderr).split())
+        restore = re.search(r"Otherwise, (.*?) to keep the locked marketplace", text)
+        assert restore is not None, _evidence(refused)
+        commands = re.findall(r"run '(apm [^']+)'", restore.group(1))
+        assert commands and commands[-1].startswith("apm marketplace add "), commands
+        assert (project / "apm.lock.yaml").read_bytes() == locked
+
+        for number, command in enumerate(commands):
+            world.run(env, project, *shlex.split(command)[1:], step=f"restore-{number}")
+        world.run(env, project, "update", "--yes", step="update-after-restore")
+    registered = json.loads((world.employee.config_root / "marketplaces.json").read_text("utf-8"))
+    assert [(m["name"], m["url"]) for m in registered["marketplaces"]] == [
+        ("corp-catalog", CATALOG_URL)
+    ]
+    entry = _locked(project)["acme/widget"]
+    assert entry["source"] == "registry" and entry["version"] == VERSION, entry
+    assert (project / _deployed("widget")).read_bytes() == _member(
+        artifacts["widget"].data, "widget"
+    )
