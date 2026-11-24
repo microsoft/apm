@@ -23,12 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
-from apm_cli.install.hook_script_refs import (
-    _hook_commands,
-    _script_tails,
-    runs_script,
-    script_refs,
-)
+from apm_cli.install.hook_script_refs import hook_commands, runs_script, script_refs
 
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
@@ -541,6 +536,16 @@ def _relative_value(value: str, project_root: Path) -> str:
     return _record_value(path, project_root) if path.is_absolute() else value
 
 
+def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
+    """Return each script row under *target_root*, spelled relative to it."""
+    tails = []
+    for value in scripts:
+        spelled = Path(value) if Path(value).is_absolute() else project_root / value
+        if spelled.is_relative_to(target_root):
+            tails.append(spelled.relative_to(target_root).as_posix())
+    return tails
+
+
 def _per_file_configs_running(
     project_root: Path, targets: Any, owned: Collection[str], scripts: Collection[str]
 ) -> set[str]:
@@ -571,7 +576,7 @@ def _per_file_configs_running(
             except (OSError, ValueError, TypeError):
                 found.add(value)  # an unreadable hook file may still run the scripts
                 continue
-            texts = list(_hook_commands(document))
+            texts = list(hook_commands(document))
             if any(tail in text.replace("\\", "/") for text in texts for tail in tails) or any(
                 runs_script(text, refs, (project_root, target_root), project_root) for text in texts
             ):
