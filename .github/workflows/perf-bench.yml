@@ -169,8 +169,10 @@ jobs:
         APM_RUN_INTEGRATION_TESTS: '1'
         PYTHONUNBUFFERED: '1'
       run: >-
-        uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q -rA -m live
-        tests/integration/test_inprocess_sparse_live.py
+        uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q -rA
+        tests/unit/cache/test_inprocess_sparse.py tests/unit/cache/test_inprocess_sparse_attr_differential.py
+        tests/unit/cache/test_inprocess_fetch.py tests/integration/test_inprocess_fetch_world.py
+        tests/integration/test_inprocess_fetch_windows_world.py
     - if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:

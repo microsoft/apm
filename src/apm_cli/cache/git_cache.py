@@ -593,9 +593,7 @@ class GitCache:
             shard_key,
             sha,
             sparse_paths,
-            lambda staged: fetch_sparse_worktree(
-                url, sha, staged, env, _checkout_materialization_pins(), cones
-            ),
+            lambda staged, pins: fetch_sparse_worktree(url, sha, staged, env, pins, cones),
             f"In-process sparse fetch: {_sanitize_url(url)} @ {sha[:12]}",
         )
 
@@ -609,7 +607,7 @@ class GitCache:
             shard_key,
             sha,
             None,
-            lambda staged: fetch_worktree(url, sha, staged, env, _checkout_materialization_pins()),
+            lambda staged, pins: fetch_worktree(url, sha, staged, env, pins),
             f"In-process fetch: {_sanitize_url(url)} @ {sha[:12]}",
         )
 
@@ -618,7 +616,7 @@ class GitCache:
         shard_key: str,
         sha: str,
         sparse_paths: list[str] | None,
-        fetch: Callable[[Path], dict[str, tuple[str, bool]] | None],
+        fetch: Callable[[Path, tuple[tuple[str, str], ...]], dict[str, tuple[str, bool]] | None],
         note: str,
     ) -> Path | None:
         """Stage, fetch in process and land one checkout variant; ``None`` means run git."""
@@ -638,7 +636,7 @@ class GitCache:
             ensure_path_within(staged, self._checkouts_root)
             staged.mkdir(parents=True, exist_ok=True)
             os.chmod(str(staged), 0o700)
-            files = fetch(staged)
+            files = fetch(staged, _checkout_materialization_pins())
             if files is None or not atomic_land(staged, final_dir, lock):
                 robust_rmtree(staged, ignore_errors=True)
                 return None

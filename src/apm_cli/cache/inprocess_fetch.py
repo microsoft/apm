@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import stat
 import subprocess
 import threading
@@ -1034,14 +1035,13 @@ def _wants_body(oids: list[str], *, trees_only: bool) -> bytes:
     return _pkt("command=fetch\n") + b"0001" + b"".join(lines) + _pkt("done\n") + b"0000"
 
 
-def _fetch_caps(upload_url: str, proxy: str | None, trust: tuple[str, str]) -> frozenset[str]:
-    """S1: the protocol-v2 ``fetch=`` features the server advertises (one GET per origin per command)."""
-    from ..core.invocation_memo import invocation_memo
+_caps_lock = threading.Lock()
+
+
+def _caps_get(upload_url: str, proxy: str | None, trust: tuple[str, str], _body: bytes) -> bytes:
+    """GET the protocol-v2 capability advertisement for *upload_url*'s repository."""
     from ..utils.http_credentials import origin_bounded_request
 
-    memo = invocation_memo(_CAPS_MEMO)
-    if memo is not None and upload_url in memo:
-        return memo[upload_url]
     refs_url = upload_url.removesuffix("/git-upload-pack") + "/info/refs?service=git-upload-pack"
     with origin_bounded_request(
         _session(trust),
@@ -1056,14 +1056,32 @@ def _fetch_caps(upload_url: str, proxy: str | None, trust: tuple[str, str]) -> f
         timeout=_TIMEOUT,
     ) as response:
         _admit(response.status_code, response.headers)
-        body = response.content[:65536]
-    features: frozenset[str] = frozenset()
-    for line in body.split(b"\n"):
-        text = line[4:].decode("ascii", "replace").strip() if len(line) >= 4 else ""
-        if text.startswith("fetch="):
-            features = frozenset(text[len("fetch=") :].split())
-    if memo is not None:
-        memo[upload_url] = features
+        return response.content[:65536]
+
+
+def _fetch_caps(upload_url: str, proxy: str | None, trust: tuple[str, str]) -> frozenset[str]:
+    """S1: the ``fetch=`` features the server advertises, one GET per repository per command.
+
+    The GET goes through :func:`_admitted_post`'s first-answer gate and breaker, and
+    the memo is filled under a lock, so concurrent sparse dependencies of one cold
+    repository send one request, and a throttle sends the rest to git.
+    """
+    from ..core.invocation_memo import invocation_memo
+
+    memo = invocation_memo(_CAPS_MEMO)
+    with _caps_lock:
+        if memo is not None and upload_url in memo:
+            return memo[upload_url]
+        body = _admitted_post(upload_url, proxy, trust, b"", post=_caps_get)
+        features: frozenset[str] = frozenset()
+        for line in body.split(b"\n"):
+            text = line[4:].decode("ascii", "replace").strip() if len(line) >= 4 else ""
+            if text.startswith("fetch="):
+                features = frozenset(text[len("fetch=") :].split())
+        if memo is not None:
+            memo[upload_url] = features
+    if _rate_limited():
+        raise _Refuse("rate limited earlier in this command")
     return features
 
 
@@ -1098,6 +1116,12 @@ def sparse_checkout_file(cones: tuple[str, ...]) -> str:
 _KNOWN_ATTRIBUTES = frozenset(
     {"text", "eol", "crlf", "filter", "ident", "working-tree-encoding", *_INERT_ATTRIBUTES}
 )
+
+
+def _attribute_name(token: str) -> str:
+    """The attribute a ``.gitattributes`` token names: one ``-`` or ``!`` prefix, then ``name[=value]``."""
+    bare = token[1:] if token[:1] in ("-", "!") else token
+    return bare.split("=", 1)[0].lower()
 
 
 class _PlannedObjects:
@@ -1139,7 +1163,7 @@ def _cone_attributes_ok(
             if line.startswith(("[attr]", '"')):
                 return False
             for token in line.split()[1:]:
-                name = token.lstrip("-!").split("=", 1)[0].lower()
+                name = _attribute_name(token)
                 if name not in _KNOWN_ATTRIBUTES and not name.startswith("linguist-"):
                     return False
     root = objects[sha][1].split(b"\n", 1)[0][5:].decode("ascii")
@@ -1176,11 +1200,34 @@ def _aliases_gitattributes(raw: bytes) -> bool:
         name = raw.decode("utf-8")
     except UnicodeDecodeError:
         return False
-    folded = name.translate(_IGNORABLE).lower().rstrip(". ")
+    folded = re.sub(r"[. ]+$", "", name.translate(_IGNORABLE).lower())
     if folded == ".gitattributes":
         return True
     short = name.lower()
     return short.startswith("gitatt~") and short[7:8].isdigit()
+
+
+def _reaches_cone(directory: str, cones: tuple[str, ...]) -> bool:
+    """Whether *directory* is a cone, inside one, or an ancestor of one."""
+    return any(
+        cone == directory or cone.startswith(directory + "/") or directory.startswith(cone + "/")
+        for cone in cones
+    )
+
+
+def _check_cone_dir(prefix: str, raw_name: bytes, cones: tuple[str, ...]) -> None:
+    """R1/R2: a directory on the way to or inside a cone has a safe, case-exact name.
+
+    ``core.ignorecase`` folds case in cone matching, so a sibling that differs from
+    the cone's next component only in case would be written by git and not here.
+    """
+    name = _safe_name(raw_name)
+    for cone in cones:
+        if not (cone + "/").startswith(prefix):
+            continue
+        component = cone[len(prefix) :].split("/", 1)[0]
+        if name != component and name.casefold() == component.casefold():
+            raise _Refuse("a directory differs from the cone only in case")
 
 
 def _sparse_plan(
@@ -1211,6 +1258,9 @@ def _sparse_plan(
                 raise _Refuse("worktree path exceeds the length cap")
             path = prefix + raw_name.decode("utf-8", "replace")
             if mode == "40000":
+                if _reaches_cone(path, cones):
+                    # R1: every directory that can hold a written file passes B1's names.
+                    _check_cone_dir(prefix, raw_name, cones)
                 stack.append((path + "/", oid))
                 continue
             if not _in_cone(path, cones):
