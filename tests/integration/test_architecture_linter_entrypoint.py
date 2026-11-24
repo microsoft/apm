@@ -55,6 +55,11 @@ pytestmark = [
 
 ROOT = Path(__file__).resolve().parents[2]
 SHELL_SCRIPT = ROOT / "scripts" / "lint-architecture-boundaries.sh"
+# One full lint of the real repository, per subprocess. On a busy integration shard
+# the clean fixture's two back-to-back runs took 207-359 s together (median ~259 s)
+# across 10 green Integration runs on 2026-11-23 (e.g. 45277522250: 206.97 s,
+# 45277769531: 359.11 s), so one run reaches ~180 s at p95: about 2x that (#5179).
+_FULL_RUN_TIMEOUT = 360
 _DIAGNOSTIC_LINE = re.compile(r"^\S+:\d+:\d+: \S+ .+$")
 _METRICS_KEYS = (
     "ast_visits",
@@ -103,7 +108,7 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
         capture_output=True,
         text=True,
         check=False,
-        timeout=180,
+        timeout=_FULL_RUN_TIMEOUT,
     )
     metrics_result = subprocess.run(
         [
@@ -118,7 +123,7 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
         capture_output=True,
         text=True,
         check=False,
-        timeout=180,
+        timeout=_FULL_RUN_TIMEOUT,
     )
     # Snapshot the tree right after the run: tests on other xdist workers keep
     # creating files, so a re-walk minutes later can drift from the linted tree.

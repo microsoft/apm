@@ -118,3 +118,31 @@ def test_recording_the_canvas_classifies_an_unrecorded_hook_record_file(
     rows = json.loads(store.read_text(encoding="utf-8"))["files"]
     origins = {entry["path"]: entry["origin"] for entry in rows}
     assert origins.get(sidecar.resolve().as_posix()) == "preexisting"
+
+
+def test_recording_the_canvas_at_user_scope_classifies_against_the_user_installation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At user scope the hook record file is classified against ``$APM_HOME``'s lockfile."""
+    import json
+
+    home = tmp_path / "apm-home"
+    home.mkdir()
+    (home / "apm.lock.yaml").write_text(
+        "lockfile_version: '1'\ndependencies: []\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("APM_HOME", str(home))
+    project = tmp_path / "p"
+    sidecar = project / ".github" / "apm-hooks.json"
+    sidecar.parent.mkdir(parents=True)
+    sidecar.write_text(json.dumps({"hooks": {"Stop": [{"command": "x"}]}}) + "\n", encoding="utf-8")
+    row = f"{_ROOT}extension.mjs"
+    (project / row).parent.mkdir(parents=True)
+    (project / row).write_text("export default 'first';\n", encoding="utf-8")
+
+    record_bundle_canvas(project, _TARGETS, "first", None, [row], user_scope=True)
+
+    store = home / "deployment-receipts" / "config-files" / "records.json"
+    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    origins = {entry["path"]: entry["origin"] for entry in rows}
+    assert origins.get(sidecar.resolve().as_posix()) == "legacy"
