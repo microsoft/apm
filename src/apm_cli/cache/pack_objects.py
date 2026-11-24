@@ -16,6 +16,7 @@ import contextlib
 import mmap
 import os
 import struct
+import zlib
 from pathlib import Path
 
 from .inprocess_fetch import (
@@ -178,7 +179,7 @@ class PackObjects:
                 offset = pack.offset(raw)
                 if offset is not None:
                     return self._at(pack, offset, 0, [_MAX_INFLATED])
-        except (_Refuse, IndexError, ValueError, struct.error, OSError):
+        except (_Refuse, IndexError, ValueError, struct.error, OSError, zlib.error):
             return None
         return None
 
@@ -303,7 +304,7 @@ def materialize_tree(
                 else:
                     raise _Refuse("mode needs git")
         blobs = {oid: read(oid, "blob") for _, oid, _ in files}
-    except (_Refuse, ValueError, IndexError, OSError):
+    except (_Refuse, ValueError, IndexError, OSError, zlib.error):
         return None
     finally:
         objects.close()
