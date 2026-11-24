@@ -1,4 +1,4 @@
-"""In-process fetch of one pinned github.com commit for a cold checkout (#4939).
+"""In-process fetch of one pinned commit for a cold checkout (#4939).
 
 Cold fetch of one pinned commit without a git child process: one git
 smart-HTTP protocol v2 ``fetch`` (``want <sha>``, ``deepen 1``) over the
@@ -10,7 +10,9 @@ config) written into a staged directory APM created.
 Integrity: every byte written is the content of an object whose id was
 computed here, reached from a commit whose computed id equals the pin, so the
 result is the same verdict ``checkout_verify`` reaches with ``git cat-file``.
-Any doubt (non-github URL, auth, git config, attributes, links, submodules,
+Origins: github.com, GHE Cloud, GHES and GitLab (``inprocess_origins``);
+GHES and GitLab packs also pass git's own collision-detecting index-pack.
+Any doubt (other hosts, auth, git config, attributes, links, submodules,
 odd names, protocol surprise) returns ``None`` and the caller runs git.
 """
 
@@ -537,7 +539,7 @@ def _config_env(*envs: Mapping[str, str]) -> bool:
     return False
 
 
-def _network_env(env: Mapping[str, str]) -> dict[str, str]:
+def _network_env(env: Mapping[str, str], probe_url: str = _PROBE_URL) -> dict[str, str]:
     """``git_network_env`` for the probe URL, kept for one command while nothing it read changed.
 
     W3d G1-G4: the key is the URL, the input env, the process env (the parent
@@ -555,28 +557,28 @@ def _network_env(env: Mapping[str, str]) -> dict[str, str]:
     parent_env = git_subprocess_env()
     binary = _binary_identity(get_git_executable())
     if memo is None or binary is None or _config_env(env, os.environ):
-        return git_network_env(_PROBE_URL, dict(env))
-    key = (_PROBE_URL, tuple(sorted(env.items())), tuple(sorted(os.environ.items())), binary)
+        return git_network_env(probe_url, dict(env))
+    key = (probe_url, tuple(sorted(env.items())), tuple(sorted(os.environ.items())), binary)
     with _network_env_lock:
         paths = memo.get(("paths", key))
         if paths is None:
             child = _config_paths(env)
             parent = _config_paths(parent_env)
             if child is None or parent is None:
-                return git_network_env(_PROBE_URL, dict(env))
+                return git_network_env(probe_url, dict(env))
             paths = tuple(sorted({*child, *parent}))
             memo[("paths", key)] = paths
         before = _config_stamp(paths)
         kept = memo.get(key)
         if kept is not None and before is not None and kept[0] == before:
             return dict(kept[1])
-        child_env = git_network_env(_PROBE_URL, dict(env))
+        child_env = git_network_env(probe_url, dict(env))
         if before is not None and _config_stamp(paths) == before:
             memo[key] = (before, dict(child_env))
         return child_env
 
 
-def _effective(env: Mapping[str, str]) -> tuple:
+def _effective(env: Mapping[str, str], probe_url: str = _PROBE_URL) -> tuple:
     """``(trust values, child env, insteadOf prefixes, entries)`` for git's fetch under *env*.
 
     Classified on every call (W3d R1): the user's config is re-read through
@@ -585,7 +587,7 @@ def _effective(env: Mapping[str, str]) -> tuple:
     from ..utils.git_env import _read_effective_git_config
 
     try:
-        child_env = _network_env(env)
+        child_env = _network_env(env, probe_url)
         entries = _frozen_entries(child_env)
         if entries is None:
             entries = _read_effective_git_config(child_env).entries
@@ -620,7 +622,9 @@ _MANAGED_INTENT = "APM_GIT_MANAGED_AUTH_INTENT"
 _MANAGED_PREFIX = "Authorization: Basic "
 
 
-def _split_managed_auth(env: Mapping[str, str]) -> tuple[str | None, dict[str, str]]:
+def _split_managed_auth(
+    env: Mapping[str, str], user: bytes = b"x-access-token:"
+) -> tuple[str | None, dict[str, str]]:
     """``(APM's github-basic header, env without it)``; ``(None, env)`` when APM manages no auth.
 
     W3d A': only the one header AuthResolver writes for github-basic is
@@ -661,7 +665,8 @@ def _split_managed_auth(env: Mapping[str, str]) -> tuple[str | None, dict[str, s
         decoded = base64.b64decode(header[len(_MANAGED_PREFIX) :], validate=True)
     except (binascii.Error, ValueError):
         raise _Refuse("managed auth header is not github-basic") from None
-    if not decoded.startswith(b"x-access-token:") or len(decoded) <= len(b"x-access-token:"):
+    # EH3: the Basic user AuthResolver writes for this host kind, nothing else.
+    if not decoded.startswith(user) or len(decoded) <= len(user):
         raise _Refuse("managed auth header is not github-basic")
     # Only the managed entry goes; any other extraHeader stays and sends the fetch to git.
     kept = [entry for index, entry in enumerate(entries) if index != managed[0]]
@@ -675,8 +680,15 @@ def _split_managed_auth(env: Mapping[str, str]) -> tuple[str | None, dict[str, s
 
 
 def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str, str]]:
-    """``(upload-pack URL, proxy, trust)`` when git's request is provably anonymous and equal."""
+    """``(upload-pack URL, proxy, trust)`` when git's request is provably equal."""
+    upload_url, proxy, trust, _origin, _child_env, _entries = _origin_gate(url, env)
+    return upload_url, proxy, trust
+
+
+def _origin_gate(url: str, env: Mapping[str, str]) -> tuple:
+    """``_gate`` plus the origin and git's config for it (EH1 needs both)."""
     from ..deps import anonymous_ref_listing as anon
+    from .inprocess_origins import OriginRefused, origin_of
 
     if any(
         (source.get("APM_NO_INPROCESS_FETCH") or "").lower() in _TRUE
@@ -684,13 +696,13 @@ def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str,
     ):
         raise _Refuse("APM_NO_INPROCESS_FETCH is set")
     try:
-        path = anon._repository_path(url)
-    except anon._Fallback as reason:
+        origin = origin_of(url)
+    except OriginRefused as reason:
         raise _Refuse(str(reason)) from None
     for name in anon._FALLBACK_ENV:
         if env.get(name):
             raise _Refuse(f"{name} is set")
-    values, child_env, prefixes, _entries = _effective(env)
+    values, child_env, prefixes, entries = _effective(env, origin.probe_url)
     if any(url.lower().startswith(prefix.lower()) for prefix in prefixes):
         raise _Refuse("git config url.*.insteadOf rewrites this URL")
     allow = child_env.get("GIT_ALLOW_PROTOCOL")
@@ -700,14 +712,15 @@ def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str,
         if child_env.get(name):
             raise _Refuse(f"{name} is set for git")
     try:
-        proxy = anon._proxy(child_env)
+        proxy = anon._proxy(child_env, origin.host)
     except anon._Fallback as reason:
         raise _Refuse(str(reason)) from None
+    if origin.enterprise and values.get("http.sslbackend", "").lower() not in ("", "openssl"):
+        # EH4: an enterprise host's TLS is git's under any backend but OpenSSL.
+        raise _Refuse(f"git config http.sslBackend={values['http.sslbackend']} for {origin.kind}")
     trust = _trust(child_env, values)
-    if url != f"https://github.com{path}":
-        raise _Refuse("url is not the validated github.com form")
     _require_inert_checkout_attributes(env)
-    return f"https://github.com{path}/git-upload-pack", proxy, trust
+    return origin.upload_url, proxy, trust, origin, child_env, entries
 
 
 def _inert_attributes(path: str) -> bool:
@@ -850,38 +863,50 @@ def _require_inert_attributes(child_env: Mapping[str, str], entries) -> None:
 _BREAKER_MEMO = "inprocess-fetch-rate-limited"
 
 
-def _rate_limited() -> bool:
-    """Whether github.com rate-limited an in-process fetch earlier in this command."""
+def _rate_limited(host: str = "github.com") -> bool:
+    """Whether *host* rate-limited an in-process request earlier in this command."""
     from ..core.invocation_memo import invocation_memo
 
     memo = invocation_memo(_BREAKER_MEMO)
-    return bool(memo)
+    return bool(memo) and bool(memo.get(host))
 
 
-def trip_if_rate_limited(status: int, headers: Mapping[str, str]) -> bool:
-    """Trip the command's breaker on a throttle (``deps/github_rate_limit``) or any 403.
-
-    Shared by the in-process fetch and ref listing: once tripped, neither
-    sends another in-process request in this command.
-    """
+def _trip(host: str) -> None:
     from ..core.invocation_memo import invocation_memo
-    from ..deps.github_rate_limit import classify_github_throttle
 
-    if status != 403 and classify_github_throttle(status, headers) is None:
-        return False
     memo = invocation_memo(_BREAKER_MEMO)
     if memo is not None:
-        memo["tripped"] = True
+        memo[host] = True
+
+
+def trip_if_rate_limited(status: int, headers: Mapping[str, str], host: str = "github.com") -> bool:
+    """Trip *host*'s breaker on a throttle (``deps/github_rate_limit``), any 403 or a 407.
+
+    Shared by the in-process fetch and ref listing: once tripped, neither
+    sends another in-process request to that host in this command (EH6: one
+    breaker per origin).
+    """
+    from ..deps.github_rate_limit import classify_github_throttle
+
+    if status not in (403, 407) and classify_github_throttle(status, headers) is None:
+        return False
+    _trip(host)
     return True
 
 
-def _admit(status: int, headers: Mapping[str, str]) -> None:
+def _host_of(url: str) -> str:
+    import urllib.parse
+
+    return urllib.parse.urlsplit(url).hostname or ""
+
+
+def _admit(status: int, headers: Mapping[str, str], host: str = "github.com") -> None:
     """Refuse a non-200 answer; a rate-limit answer also sends the rest of the command to git.
 
     A throttle or any 403 trips the breaker: no retry, no sleep, and no
     further in-process request in this command.
     """
-    if trip_if_rate_limited(status, headers):
+    if trip_if_rate_limited(status, headers, host):
         raise _Refuse(f"rate limited (HTTP {status}); git serves the rest of this command")
     if headers.get("WWW-Authenticate") is not None:
         # W1: an auth challenge is git's to answer; nothing is retried in process.
@@ -903,6 +928,24 @@ def _post(
     trust: tuple[str, str],
     body: bytes,
     credential: str | None = None,
+) -> bytes:
+    import requests
+
+    try:
+        return _post_through(upload_url, proxy, trust, body, credential)
+    except requests.exceptions.ProxyError as exc:
+        if "407" in str(exc):
+            # W3d P3: a proxy asking for credentials is git's; it counts in the breaker.
+            _trip(_host_of(upload_url))
+        raise _Refuse("proxy refused the tunnel") from None
+
+
+def _post_through(
+    upload_url: str,
+    proxy: str | None,
+    trust: tuple[str, str],
+    body: bytes,
+    credential: str | None,
 ) -> bytes:
     from ..utils.http_credentials import origin_bounded_request
 
@@ -934,7 +977,7 @@ def _post(
         timeout=_TIMEOUT,
         stream=True,
     ) as response:
-        _admit(response.status_code, response.headers)
+        _admit(response.status_code, response.headers, _host_of(upload_url))
         kind = response.headers.get("Content-Type", "").split(";")[0].strip()
         if kind != "application/x-git-upload-pack-result":
             raise _Refuse("not an upload-pack result")
@@ -972,9 +1015,9 @@ def _admitted_post(
     *,
     post: Callable[..., bytes] | None = None,
 ) -> bytes:
-    """``_post`` behind the breaker, with the command's first answer awaited alone.
+    """``_post`` behind the host's breaker, with its first answer awaited alone.
 
-    Until one in-process fetch of this command has been answered 200, fetches
+    Per origin (EH6): until one in-process fetch to that host has been answered 200, fetches
     wait their turn and re-check the breaker, so a throttle on the first answer
     sends every other download to git without a second request. The lock is
     held only for that first answer: once it is 200, queued fetches leave the
@@ -984,16 +1027,17 @@ def _admitted_post(
     from ..core.invocation_memo import invocation_memo
 
     send = post or _post
+    host = _host_of(upload_url)
     settled = invocation_memo(_SETTLED_MEMO)
-    if settled is not None and not settled.get("ok"):
+    if settled is not None and not settled.get(host):
         with _first_fetch_lock:
-            if _rate_limited():
+            if _rate_limited(host):
                 raise _Refuse("rate limited earlier in this command")
-            if not settled.get("ok"):
+            if not settled.get(host):
                 answer = send(upload_url, proxy, trust, body, credential)
-                settled["ok"] = True
+                settled[host] = True
                 return answer
-    if _rate_limited():  # another download tripped it while this one was gated or queued
+    if _rate_limited(host):  # another download tripped it while this one was gated or queued
         raise _Refuse("rate limited earlier in this command")
     return send(upload_url, proxy, trust, body, credential)
 
@@ -1063,15 +1107,26 @@ def fetch_worktree(
     """Write commit *sha* of *url* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``."""
     if len(sha) != 40:
         return None
-    if _rate_limited():
+    if _rate_limited(_host_of(url)):
         _log.debug("in-process fetch skipped: rate limited earlier in this command")
         return None
+    from .inprocess_origins import OriginRefused, origin_of, require_collision_checked
+
     try:
-        credential, env = _split_managed_auth(env if env is not None else os.environ)
-        upload_url, proxy, trust = _gate(url, env)
+        try:
+            user = origin_of(url).managed_user
+        except OriginRefused as reason:
+            raise _Refuse(str(reason)) from None
+        credential, env = _split_managed_auth(env if env is not None else os.environ, user)
+        upload_url, proxy, trust, origin, child_env, entries = _origin_gate(url, env)
         body = _admitted_post(upload_url, proxy, trust, _request_body(sha), credential)
         del credential
-        objects = parse_pack(_pack_from_response(body))
+        pack = _pack_from_response(body)
+        objects = parse_pack(pack)
+        try:
+            require_collision_checked(origin, pack, child_env, entries)
+        except OriginRefused as reason:
+            raise _Refuse(str(reason)) from None
         files, reached = _plan(objects, sha)
         root = str(staged)
         made = {root}

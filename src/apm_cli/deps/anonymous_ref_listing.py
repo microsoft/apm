@@ -183,12 +183,13 @@ def _effective_config(
     return cached
 
 
-def _bypasses_proxy(no_proxy: str) -> bool:
-    """libcurl's NO_PROXY match for github.com.
+def _bypasses_proxy(no_proxy: str, host: str = _GITHUB_HOST) -> bool:
+    """libcurl's NO_PROXY match for *host* (github.com unless an enterprise origin).
 
     ``*`` bypasses only as the whole value. A ``*`` inside a list, whitespace
     within an entry, or a trailing dot falls back rather than guessing how
-    a given libcurl reads it.
+    a given libcurl reads it; for an enterprise host so does a port or CIDR
+    entry (W3d P2).
     """
     if no_proxy.strip() == "*":
         return True
@@ -196,8 +197,10 @@ def _bypasses_proxy(no_proxy: str) -> bool:
         entry = raw.strip().lower()
         if "*" in entry or any(c.isspace() for c in entry) or entry.endswith("."):
             raise _Fallback("no_proxy entry libcurl versions read differently")
+        if host != _GITHUB_HOST and (":" in entry or "/" in entry):
+            raise _Fallback("no_proxy port or CIDR entry")
         entry = entry.lstrip(".")
-        if entry and (entry == _GITHUB_HOST or _GITHUB_HOST.endswith("." + entry)):
+        if entry and (entry == host or host.endswith("." + entry)):
             return True
     return False
 
@@ -214,13 +217,13 @@ def _curl_env(env: Mapping[str, str], lower: str, upper: str) -> str:
     return low or up
 
 
-def _proxy(env: Mapping[str, str]) -> str | None:
-    """The proxy libcurl would use for an https github.com URL, or ``None``."""
+def _proxy(env: Mapping[str, str], host: str = _GITHUB_HOST) -> str | None:
+    """The proxy libcurl would use for an https URL on *host*, or ``None``."""
     proxy = _curl_env(env, "https_proxy", "HTTPS_PROXY")
     if not proxy:
         return None
     no_proxy = _curl_env(env, "no_proxy", "NO_PROXY")
-    if no_proxy and _bypasses_proxy(no_proxy):
+    if no_proxy and _bypasses_proxy(no_proxy, host):
         return None
     parsed = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
     if parsed.scheme != "http" or parsed.username or parsed.password:
