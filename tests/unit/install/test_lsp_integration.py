@@ -101,8 +101,9 @@ class TestOwnedLspIntegration:
         )
 
         assert count == 1
-        mock_integrator.remove_stale.assert_called_once()
-        assert mock_integrator.remove_stale.call_args.args[0] == {"old"}
+        mock_integrator.remove_stale_targets.assert_called_once()
+        stale = mock_integrator.remove_stale_targets.call_args.args[0]
+        assert {name for names in stale.values() for name in names} == {"old"}
         lockfile = LockFile.read(lock_path)
         assert lockfile is not None
         assert lockfile.lsp_servers == ["new", "project"]
@@ -156,7 +157,7 @@ class TestOwnedLspIntegration:
             logger=_mock_logger(),
         )
 
-        mock_integrator.remove_stale.assert_not_called()
+        mock_integrator.remove_stale_targets.assert_not_called()
 
     @patch(_PATCH_TARGET)
     def test_bundle_id_cannot_impersonate_project_owner(self, mock_integrator, tmp_path) -> None:
@@ -181,7 +182,7 @@ class TestOwnedLspIntegration:
         )
 
         assert count == 0
-        mock_integrator.remove_stale.assert_not_called()
+        mock_integrator.remove_stale_targets.assert_not_called()
         lockfile = LockFile.read(lock_path)
         assert lockfile is not None
         assert lockfile.lsp_servers == ["project"]
@@ -722,9 +723,8 @@ class TestStaleCleanup:
             logger=_mock_logger(),
         )
 
-        mock_integrator.remove_stale.assert_called_once()
-        stale_arg = mock_integrator.remove_stale.call_args
-        assert "old-server" in stale_arg.args[0] or "old-server" in stale_arg[0][0]
+        mock_integrator.remove_stale_targets.assert_called_once()
+        assert "old-server" in mock_integrator.remove_stale_targets.call_args.args[0]["claude"]
 
     @patch(_PATCH_TARGET)
     def test_removes_all_old_when_no_deps_remain(self, mock_integrator, tmp_path):
@@ -754,9 +754,9 @@ class TestStaleCleanup:
             logger=_mock_logger(),
         )
 
-        mock_integrator.remove_stale.assert_called_once()
-        stale_arg = mock_integrator.remove_stale.call_args[0][0]
-        assert stale_arg == {"old-a", "old-b"}
+        mock_integrator.remove_stale_targets.assert_called_once()
+        stale_arg = mock_integrator.remove_stale_targets.call_args.args[0]
+        assert stale_arg == {"claude": {"old-a", "old-b"}}
 
 
 # ===========================================================================
@@ -852,13 +852,13 @@ class TestSkipInstall:
             logger=_mock_logger(),
         )
 
-        mock_integrator.remove_stale.assert_called_once_with(
-            {"pyright"},
+        mock_integrator.remove_stale_targets.assert_called_once_with(
+            {"claude": {"pyright"}},
             project_root=tmp_path,
             user_scope=False,
             logger=mock_integrator.install.call_args.kwargs["logger"],
-            target_runtimes=["claude"],
             fail_on_write_error=False,
+            locked_configs={"pyright": {}},
         )
         assert mock_integrator.update_lockfile.call_args.kwargs["lsp_target_servers"] == {
             "claude": set(),

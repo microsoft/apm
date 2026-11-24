@@ -10,7 +10,7 @@ import builtins
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -206,6 +206,54 @@ class LspInstallRecord:
     kept_unowned: dict[str, builtins.set] = field(default_factory=dict)
     kept_edits: dict[str, str] = field(default_factory=dict)
     held_claims: dict[str, builtins.set] = field(default_factory=dict)
+
+
+@dataclass
+class _CleanupPlan:
+    """One target config read for stale cleanup, and the names it will drop or keep."""
+
+    config_path: Path
+    config: dict
+    servers_key: str | None
+    servers: dict
+    removed: list[str]
+    edited: list[str]
+
+
+def _written_by_apm(entry: object, expected: dict) -> bool:
+    """Whether an on-disk entry is still what APM rendered from its locked config."""
+    if entry == expected:
+        return True
+    from apm_cli.deps.plugin_root_render import contains_plugin_root, matches_at_some_root
+
+    return contains_plugin_root(expected) and matches_at_some_root(expected, entry)
+
+
+def _cleanup_failed(
+    runtime: str, spec: _LSPTargetSpec, user_scope: bool, exc: Exception, fail: bool
+) -> None:
+    """Log a failed target cleanup; raise the actionable refusal when it must not pass."""
+    label = spec.label(user_scope=user_scope)
+    _log.debug("Failed to clean stale LSP servers from %s", label, exc_info=True)
+    if fail:
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        raise RequiredIntegrationError(
+            f"LSP cleanup failed for target '{runtime}' at {label}: {exc}. "
+            "Review the path and permissions, then retry."
+        ) from exc
+
+
+def _report_removed(logger, runtime: str, label: str, removed: list[str], *, user_scope: bool):
+    """Report the stale servers removed from one target config."""
+    noun = "server" if len(removed) == 1 else "servers"
+    logger.progress(
+        f"Removed {len(removed)} stale LSP {noun} ({', '.join(sorted(removed))}) from {label}"
+    )
+    for name in removed:
+        logger.verbose_detail(f"Removed stale LSP server: {name}")
+    if runtime == "claude" and not user_scope:
+        logger.progress("  |-- run /reload-plugins or restart Claude Code to activate")
 
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
@@ -933,6 +981,26 @@ class LSPIntegrator:
         if locked_configs is None:
             return None
         names = {dep.name for dep in runtime_deps if hasattr(dep, "name")}
+        return LSPIntegrator._locked_entries(
+            locked_configs,
+            names,
+            runtime_deps,
+            spec,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
+
+    @staticmethod
+    def _locked_entries(
+        locked_configs: dict[str, dict],
+        names: builtins.set,
+        runtime_deps: list,
+        spec: _LSPTargetSpec,
+        *,
+        project_root: Path,
+        user_scope: bool,
+    ) -> dict[str, dict]:
+        """Render the locked configs of *names* for *spec*, as a fresh install would."""
         locked = [
             {**config, "name": name}
             for name, config in locked_configs.items()
@@ -1100,6 +1168,70 @@ class LSPIntegrator:
         return LSPIntegrator._write_prepared_target_config(prepared)
 
     @staticmethod
+    def _plan_target_cleanup(
+        spec: _LSPTargetSpec,
+        stale_names: builtins.set,
+        *,
+        project_root: Path,
+        user_scope: bool,
+        fail_on_write_error: bool,
+        locked_configs: dict[str, dict] | None,
+    ) -> _CleanupPlan | None:
+        """Read one target config and decide which stale names to remove, without writing.
+
+        An entry that no longer matches what APM recorded for it is the
+        user's edit: it is kept and reported, never deleted (#5263).
+        """
+        config_path = LSPIntegrator._target_config_path(
+            spec,
+            project_root,
+            user_scope=user_scope,
+        )
+        if not config_path.exists():
+            return None
+        config = LSPIntegrator._read_json_object(
+            config_path,
+            fail_on_error=fail_on_write_error,
+        )
+        for key, value in spec.config_defaults(user_scope=user_scope):
+            if config.get(key) != value:
+                if fail_on_write_error:
+                    raise ValueError(f"{spec.label(user_scope=user_scope)} is not owned by APM")
+                return None
+        servers_key = spec.servers_key(user_scope=user_scope)
+
+        servers = config if servers_key is None else config.get(servers_key, {})
+        if not isinstance(servers, dict):
+            return None
+
+        present = sorted(name for name in stale_names if name in servers)
+        expected = (
+            LSPIntegrator._locked_entries(
+                locked_configs,
+                set(present),
+                [],
+                spec,
+                project_root=project_root,
+                user_scope=user_scope,
+            )
+            if locked_configs is not None
+            else {}
+        )
+        edited = [
+            name
+            for name in present
+            if name in expected and not _written_by_apm(servers[name], expected[name])
+        ]
+        return _CleanupPlan(
+            config_path=config_path,
+            config=config,
+            servers_key=servers_key,
+            servers=servers,
+            removed=[name for name in present if name not in edited],
+            edited=edited,
+        )
+
+    @staticmethod
     def _clean_target_config(
         spec: _LSPTargetSpec,
         stale_names: builtins.set,
@@ -1109,55 +1241,51 @@ class LSPIntegrator:
         fail_on_write_error: bool = False,
     ) -> list[str]:
         """Remove stale names from one target config and return removed names."""
-        config_path = LSPIntegrator._target_config_path(
+        plan = LSPIntegrator._plan_target_cleanup(
             spec,
-            project_root,
+            stale_names,
+            project_root=project_root,
             user_scope=user_scope,
+            fail_on_write_error=fail_on_write_error,
+            locked_configs=None,
         )
-        if not config_path.exists():
+        if plan is None:
             return []
-        config = LSPIntegrator._read_json_object(
-            config_path,
-            fail_on_error=fail_on_write_error,
+        LSPIntegrator._apply_target_cleanup(
+            spec, plan, project_root=project_root, user_scope=user_scope
         )
-        for key, value in spec.config_defaults(user_scope=user_scope):
-            if config.get(key) != value:
-                if fail_on_write_error:
-                    raise ValueError(f"{spec.label(user_scope=user_scope)} is not owned by APM")
-                return []
-        servers_key = spec.servers_key(user_scope=user_scope)
+        return plan.removed
 
-        servers = config if servers_key is None else config.get(servers_key, {})
-        if not isinstance(servers, dict):
-            return []
-
-        removed = [name for name in stale_names if name in servers]
-        for name in removed:
+    @staticmethod
+    def _apply_target_cleanup(
+        spec: _LSPTargetSpec, plan: _CleanupPlan, *, project_root: Path, user_scope: bool
+    ) -> None:
+        """Remove the planned stale names from one target config."""
+        config, servers, servers_key = plan.config, plan.servers, plan.servers_key
+        for name in plan.removed:
             del servers[name]
-        if removed:
-            if servers_key is not None:
-                config[servers_key] = servers
-            owned_keys = {key for key, _value in spec.config_defaults(user_scope=user_scope)}
-            # A created default counts as APM-owned only while it still holds
-            # the value APM writes; a user-set value (for example a custom
-            # ``$schema``) is user content that keeps the file alive.
-            owned_keys.update(
-                key for key, value in spec.created_defaults if config.get(key) == value
+        if not plan.removed:
+            return
+        if servers_key is not None:
+            config[servers_key] = servers
+        owned_keys = {key for key, _value in spec.config_defaults(user_scope=user_scope)}
+        # A created default counts as APM-owned only while it still holds
+        # the value APM writes; a user-set value (for example a custom
+        # ``$schema``) is user content that keeps the file alive.
+        owned_keys.update(key for key, value in spec.created_defaults if config.get(key) == value)
+        if servers_key is not None:
+            owned_keys.add(servers_key)
+        if not servers and owned_keys and set(config) <= owned_keys:
+            write_seam.unlink(plan.config_path)
+            for directory in spec.cleanup_empty_dirs(project_root, user_scope=user_scope):
+                try:
+                    write_seam.rmdir(directory)
+                except OSError:
+                    break
+        else:
+            LSPIntegrator._atomic_write_config(
+                plan.config_path, json.dumps(config, indent=2) + "\n", owner_only=user_scope
             )
-            if servers_key is not None:
-                owned_keys.add(servers_key)
-            if not servers and owned_keys and set(config) <= owned_keys:
-                write_seam.unlink(config_path)
-                for directory in spec.cleanup_empty_dirs(project_root, user_scope=user_scope):
-                    try:
-                        write_seam.rmdir(directory)
-                    except OSError:
-                        break
-            else:
-                LSPIntegrator._atomic_write_config(
-                    config_path, json.dumps(config, indent=2) + "\n", owner_only=user_scope
-                )
-        return removed
 
     # ------------------------------------------------------------------
     # Stale server cleanup
@@ -1171,55 +1299,77 @@ class LSPIntegrator:
         logger=None,
         target_runtimes: list[str] | None = None,
         fail_on_write_error: bool = False,
+        locked_configs: dict[str, dict] | None = None,
     ) -> None:
         """Remove LSP server entries no longer required by any dependency."""
+        runtimes = target_runtimes if target_runtimes is not None else list(_LEGACY_DEFAULT_TARGETS)
+        LSPIntegrator.remove_stale_targets(
+            {runtime: stale_names for runtime in runtimes},
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            fail_on_write_error=fail_on_write_error,
+            locked_configs=locked_configs,
+        )
+
+    @staticmethod
+    def remove_stale_targets(
+        stale_by_runtime: Mapping[str, builtins.set],
+        *,
+        project_root=None,
+        user_scope: bool = False,
+        logger=None,
+        fail_on_write_error: bool = False,
+        locked_configs: dict[str, dict] | None = None,
+    ) -> None:
+        """Remove stale LSP entries per target after reading every config first.
+
+        Every config the cleanup touches is read and planned before the first
+        change, so one unreadable config changes none of them (#5263).
+        *locked_configs* are the server configs APM recorded; an entry that no
+        longer matches its recorded render is kept and reported.
+        """
         if logger is None:
             logger = NullCommandLogger()
-        if not stale_names:
-            return
-
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
-        runtimes = target_runtimes if target_runtimes is not None else list(_LEGACY_DEFAULT_TARGETS)
-
-        for runtime in runtimes:
+        plans: list[tuple[str, _LSPTargetSpec, _CleanupPlan]] = []
+        for runtime, stale_names in stale_by_runtime.items():
             spec = _LSP_TARGET_SPECS.get(runtime)
-            if spec is None:
+            if spec is None or not stale_names:
                 continue
             try:
-                removed = LSPIntegrator._clean_target_config(
+                plan = LSPIntegrator._plan_target_cleanup(
                     spec,
                     stale_names,
                     project_root=project_root_path,
                     user_scope=user_scope,
                     fail_on_write_error=fail_on_write_error,
+                    locked_configs=locked_configs,
                 )
-                if removed:
-                    noun = "server" if len(removed) == 1 else "servers"
-                    removed_names = ", ".join(sorted(removed))
-                    logger.progress(
-                        f"Removed {len(removed)} stale LSP {noun} ({removed_names}) from "
-                        f"{spec.label(user_scope=user_scope)}"
-                    )
-                    for name in removed:
-                        logger.verbose_detail(f"Removed stale LSP server: {name}")
-                    if runtime == "claude" and not user_scope:
-                        logger.progress(
-                            "  |-- run /reload-plugins or restart Claude Code to activate"
-                        )
             except Exception as exc:
-                _log.debug(
-                    "Failed to clean stale LSP servers from %s",
-                    spec.label(user_scope=user_scope),
-                    exc_info=True,
-                )
-                if fail_on_write_error:
-                    from apm_cli.install.errors import RequiredIntegrationError
+                _cleanup_failed(runtime, spec, user_scope, exc, fail_on_write_error)
+                continue
+            if plan is not None:
+                plans.append((runtime, spec, plan))
+        from apm_cli.utils.diagnostics import printable_ascii_text
 
-                    raise RequiredIntegrationError(
-                        f"LSP cleanup failed for target '{runtime}' at "
-                        f"{spec.label(user_scope=user_scope)}: {exc}. "
-                        "Review the path and permissions, then retry."
-                    ) from exc
+        for runtime, spec, plan in plans:
+            label = spec.label(user_scope=user_scope)
+            for name in plan.edited:
+                logger.warning(
+                    f"Kept LSP server {printable_ascii_text(name)} in "
+                    f"{printable_ascii_text(label)}: it was edited after install. "
+                    "Remove it by hand if it is no longer needed."
+                )
+            try:
+                LSPIntegrator._apply_target_cleanup(
+                    spec, plan, project_root=project_root_path, user_scope=user_scope
+                )
+            except Exception as exc:
+                _cleanup_failed(runtime, spec, user_scope, exc, fail_on_write_error)
+                continue
+            if plan.removed:
+                _report_removed(logger, runtime, label, plan.removed, user_scope=user_scope)
 
     # ------------------------------------------------------------------
     # Lockfile persistence

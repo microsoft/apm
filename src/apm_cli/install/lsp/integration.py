@@ -313,21 +313,30 @@ def _clean_target_differences(
     user_scope: bool,
     logger,
     fail_on_write_error: bool,
+    locked_configs: dict[str, dict] | None = None,
 ) -> None:
-    """Remove only target-scoped LSP entries whose recorded ownership was dropped."""
+    """Remove only target-scoped LSP entries whose recorded ownership was dropped.
+
+    Every target config is read before the first change, and an entry edited
+    since APM wrote it from *locked_configs* is kept (#5263).
+    """
     from apm_cli.integration.lsp_integrator import LSPIntegrator
 
-    for runtime, old_names in old_targets.items():
-        stale = old_names - new_targets.get(runtime, set())
-        if stale:
-            LSPIntegrator.remove_stale(
-                stale,
-                project_root=project_root,
-                user_scope=user_scope,
-                logger=logger,
-                target_runtimes=[runtime],
-                fail_on_write_error=fail_on_write_error,
-            )
+    stale = {
+        runtime: old_names - new_targets.get(runtime, set())
+        for runtime, old_names in old_targets.items()
+    }
+    stale = {runtime: names for runtime, names in stale.items() if names}
+    if not stale:
+        return
+    LSPIntegrator.remove_stale_targets(
+        stale,
+        project_root=project_root,
+        user_scope=user_scope,
+        logger=logger,
+        fail_on_write_error=fail_on_write_error,
+        locked_configs=locked_configs,
+    )
 
 
 def run_owned_lsp_integration(
@@ -413,6 +422,7 @@ def run_owned_lsp_integration(
         new_targets=new_targets,
         project_root=project_root,
         user_scope=user_scope,
+        locked_configs=dict(lockfile.lsp_configs),
         logger=logger,
         fail_on_write_error=fail_on_write_error,
     )
@@ -857,6 +867,7 @@ def run_lsp_integration(  # noqa: PLR0913
                 new_targets=new_targets,
                 project_root=project_root,
                 user_scope=user_scope,
+                locked_configs=old_lsp_configs,
                 logger=logger,
                 fail_on_write_error=fail_on_write_error,
             )
