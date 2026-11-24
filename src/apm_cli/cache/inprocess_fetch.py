@@ -377,37 +377,195 @@ def _plan(
     return files, reached
 
 
-def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, str]:
-    """``(upload-pack URL, proxy, CA)`` when git's request is provably anonymous and equal."""
-    from ..deps import anonymous_ref_listing as anon
+# W3d W2/W3: git config keys that change how git would make this anonymous
+# request force git; everything else is inert for it. ``credential.*`` is
+# consulted by git only after a 401, which B1 never answers (W1).
+_TRUST_KEYS = ("http.sslbackend", "http.sslcainfo")
+_FORCING_PREFIXES = ("url.", "http.", "protocol.https.")
+_FORCING_KEYS = frozenset({"protocol.allow", "core.gitproxy", "core.askpass"})
+# W3d W4: attributes outside the commit are inert only with these tokens.
+_INERT_ATTRIBUTES = frozenset({"diff", "merge", "binary", "delta", "export-ignore", "export-subst"})
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
+# W3d R2: git would fsck what it receives; B1 does not, so git keeps that request.
+_FSCK_KEYS = frozenset({"transfer.fsckobjects", "fetch.fsckobjects"})
+
+
+def _classify(entries) -> tuple[dict[str, str], tuple[str, ...]]:
+    """``(trust values, insteadOf prefixes)``; raises ``_Refuse`` naming the forcing key."""
+    from ..deps.anonymous_ref_listing import _list_key
+
+    values: dict[str, str] = {}
+    headers: dict[str, list[str]] = {}
+    prefixes: list[str] = []
+    for entry in entries:
+        key = entry.key.lower()
+        if key.startswith("credential."):
+            continue
+        if key in _FSCK_KEYS:
+            if entry.value.strip().lower() not in _FALSE:
+                raise _Refuse(f"git config {entry.key}")
+            continue
+        list_key = _list_key(entry.key)
+        if list_key is not None:
+            live = headers.get(list_key[1], [])
+            headers[list_key[1]] = [*live, entry.value] if entry.value else []
+        elif key in _TRUST_KEYS:
+            values[key] = entry.value
+        elif key.startswith("url.") and key.endswith(".insteadof"):
+            prefixes.append(entry.value)
+        elif key.startswith("url.") and key.endswith(".pushinsteadof"):
+            continue
+        elif key.startswith(_FORCING_PREFIXES) or key in _FORCING_KEYS:
+            raise _Refuse(f"git config {entry.key}")
+    if any(headers.values()):
+        raise _Refuse("git config http.extraHeader")
+    return values, tuple(prefixes)
+
+
+def _frozen_entries(child_env: Mapping[str, str]):
+    """The config git sees under *child_env*, read from the env ``git_network_env`` froze.
+
+    ``git_network_env`` re-reads the user's config on every call (through the
+    file-fingerprinted #5283 memo) and freezes it into ``GIT_CONFIG_KEY_n`` /
+    ``GIT_CONFIG_VALUE_n`` with system and global files disabled, so these
+    entries are exactly what ``git config --list`` would print for a fetch
+    run from outside any repository. ``None`` when the env is not frozen.
+    """
+    from types import SimpleNamespace
+
+    if (
+        child_env.get("GIT_CONFIG_NOSYSTEM") != "1"
+        or child_env.get("GIT_CONFIG_GLOBAL") != os.devnull
+        or child_env.get("GIT_CONFIG_PARAMETERS")
+    ):
+        return None
+    try:
+        count = int(child_env.get("GIT_CONFIG_COUNT") or "0")
+    except ValueError:
+        return None
+    entries = []
+    for index in range(count):
+        key = child_env.get(f"GIT_CONFIG_KEY_{index}")
+        value = child_env.get(f"GIT_CONFIG_VALUE_{index}")
+        if key is None or value is None:
+            return None
+        entries.append(SimpleNamespace(key=key, value=value))
+    return entries
+
+
+def _effective(env: Mapping[str, str]) -> tuple:
+    """``(trust values, child env, insteadOf prefixes, entries)`` for git's fetch under *env*.
+
+    Classified on every call (W3d R1): the user's config is re-read through
+    ``git_network_env`` each time; no verdict is kept.
+    """
+    from ..utils.git_env import _read_effective_git_config, git_network_env
 
     try:
-        path = anon._repository_path(url)
-        for name in anon._FALLBACK_ENV:
-            if env.get(name):
-                raise _Refuse(f"{name} is set")
-        config, child_env, prefixes = anon._effective_config(env)
-        if any(url.lower().startswith(prefix.lower()) for prefix in prefixes):
-            raise _Refuse("insteadOf rewrite")
-        allow = child_env.get("GIT_ALLOW_PROTOCOL")
-        if allow is not None and "https" not in allow.split(":"):
-            raise _Refuse("https not allowed")
-        proxy = anon._proxy(child_env)
-        ca = anon._verify(child_env, config)
+        child_env = git_network_env("https://github.com/apm/probe", dict(env))
+        entries = _frozen_entries(child_env)
+        if entries is None:
+            entries = _read_effective_git_config(child_env).entries
+    except Exception as exc:
+        raise _Refuse(f"git config unreadable: {type(exc).__name__}") from None
+    values, prefixes = _classify(entries)
+    return values, child_env, prefixes, entries
+
+
+def _trust(child_env: Mapping[str, str], values: Mapping[str, str]) -> tuple[str, str]:
+    """W3: ``("file", CA path)`` for git's OpenSSL trust, ``("os", "")`` for schannel's."""
+    from ..deps import anonymous_ref_listing as anon
+
+    backend = values.get("http.sslbackend", "").lower()
+    if backend == "schannel" and os.name == "nt":
+        # schannel ignores http.sslCAInfo unless schannelUseSSLCAInfo (an http.*
+        # key, which forces git); a CA env var would make the choice ambiguous.
+        if child_env.get("GIT_SSL_CAINFO"):
+            raise _Refuse("GIT_SSL_CAINFO with schannel")
+        return "os", ""
+    if backend not in ("", "openssl"):
+        raise _Refuse(f"git config http.sslBackend={backend}")
+    if os.name == "nt" and not (
+        child_env.get("GIT_SSL_CAINFO")
+        or values.get("http.sslcainfo")
+        or child_env.get("SSL_CERT_FILE")
+    ):
+        # W3d R5: Git for Windows' curl bundle is not certifi; no named CA file, no guess.
+        raise _Refuse("no CA file named for git's OpenSSL backend on Windows")
+    try:
+        return "file", anon._verify(child_env, values)
     except anon._Fallback as reason:
         raise _Refuse(str(reason)) from None
+
+
+def _gate(url: str, env: Mapping[str, str]) -> tuple[str, str | None, tuple[str, str]]:
+    """``(upload-pack URL, proxy, trust)`` when git's request is provably anonymous and equal."""
+    from ..deps import anonymous_ref_listing as anon
+
+    if any(
+        (source.get("APM_NO_INPROCESS_FETCH") or "").lower() in _TRUE
+        for source in (env, os.environ)
+    ):
+        raise _Refuse("APM_NO_INPROCESS_FETCH is set")
+    try:
+        path = anon._repository_path(url)
+    except anon._Fallback as reason:
+        raise _Refuse(str(reason)) from None
+    for name in anon._FALLBACK_ENV:
+        if env.get(name):
+            raise _Refuse(f"{name} is set")
+    values, child_env, prefixes, entries = _effective(env)
+    if any(url.lower().startswith(prefix.lower()) for prefix in prefixes):
+        raise _Refuse("git config url.*.insteadOf rewrites this URL")
+    allow = child_env.get("GIT_ALLOW_PROTOCOL")
+    if allow is not None and "https" not in allow.split(":"):
+        raise _Refuse("https not allowed")
+    for name in anon._FALLBACK_ENV:
+        if child_env.get(name):
+            raise _Refuse(f"{name} is set for git")
+    try:
+        proxy = anon._proxy(child_env)
+    except anon._Fallback as reason:
+        raise _Refuse(str(reason)) from None
+    trust = _trust(child_env, values)
     if url != f"https://github.com{path}":
         raise _Refuse("url is not the validated github.com form")
-    _require_no_attribute_sources(child_env)
-    return f"https://github.com{path}/git-upload-pack", proxy, ca
+    _require_inert_attributes(child_env, entries)
+    return f"https://github.com{path}/git-upload-pack", proxy, trust
 
 
 _ATTR_MEMO = "inprocess-fetch-attribute-sources"
 _attr_lock = threading.Lock()
 
 
-def _attribute_sources(child_env: Mapping[str, str]) -> bool:
-    """Whether any attributes source outside the commit could change git's checkout bytes (F7).
+def _inert_attributes(path: str) -> bool:
+    """W4: whether an attributes file holds only tokens that never change checkout bytes.
+
+    Pattern-agnostic: any ``text``/``eol``/``crlf``/``filter``/``ident``/
+    ``working-tree-encoding`` token, any ``[attr]`` macro, a quoted pattern or
+    any token outside the allowlist refuses, whatever path it names.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except (OSError, UnicodeError):
+        return False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(("[attr]", '"')):
+            return False
+        for token in line.split()[1:]:
+            name = token.lstrip("-!").split("=", 1)[0].lower()
+            if name not in _INERT_ATTRIBUTES and not name.startswith("linguist-"):
+                return False
+    return True
+
+
+def _attribute_files(child_env: Mapping[str, str], entries) -> list[tuple[str, str]]:
+    """``[(source, path)]`` of every attributes file outside the commit git would read.
 
     APM's git checkout always runs with the line-ending and symlink pins of
     ``utils/git_env`` (``_safe_git_args``), which outrank system and global
@@ -417,54 +575,83 @@ def _attribute_sources(child_env: Mapping[str, str]) -> bool:
     left is the global attributes file (``core.attributesFile`` or its XDG
     default) and the system one.
     """
-    from ..utils.git_env import _read_effective_git_config, get_git_executable
-
-    entries = _read_effective_git_config(dict(child_env)).entries
+    files: list[tuple[str, str]] = []
+    configured = None
     for entry in entries:
-        if entry.key.lower() == "core.attributesfile" and entry.value:
-            return True
-    xdg = child_env.get("XDG_CONFIG_HOME")
-    home = child_env.get("HOME") or child_env.get("USERPROFILE")
-    base = xdg if xdg else (os.path.join(home, ".config") if home else None)
-    if base and os.path.lexists(os.path.join(base, "git", "attributes")):
-        return True
-    if (child_env.get("GIT_ATTR_NOSYSTEM") or "").lower() in ("1", "true", "yes", "on"):
-        return False
-    probe = subprocess.run(
-        [get_git_executable(), "var", "GIT_ATTR_SYSTEM"],
-        env=dict(child_env),
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
-    system = probe.stdout.strip()
-    if probe.returncode != 0 or not system:
-        return True
-    return os.path.lexists(system)
+        if entry.key.lower() == "core.attributesfile":
+            configured = entry.value
+    if configured:
+        files.append(("core.attributesFile", os.path.expanduser(configured)))
+    else:
+        xdg = child_env.get("XDG_CONFIG_HOME")
+        home = child_env.get("HOME") or child_env.get("USERPROFILE")
+        base = xdg if xdg else (os.path.join(home, ".config") if home else None)
+        if base:
+            files.append(("global attributes", os.path.join(base, "git", "attributes")))
+    if (child_env.get("GIT_ATTR_NOSYSTEM") or "").lower() not in _TRUE:
+        files.append(("system attributes", _system_attributes_path(child_env)))
+    return files
 
 
-def _require_no_attribute_sources(child_env: Mapping[str, str]) -> None:
+_system_paths: dict[str, str] = {}
+
+
+def _system_attributes_path(child_env: Mapping[str, str]) -> str:
+    """Where this git build reads system attributes: a property of the binary, kept per binary."""
+    from ..utils.git_env import get_git_executable
+
+    git = get_git_executable()
+    with _attr_lock:
+        known = _system_paths.get(git)
+    if known is None:
+        probe = subprocess.run(
+            [git, "var", "GIT_ATTR_SYSTEM"],
+            env=dict(child_env),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+        known = probe.stdout.strip()
+        if probe.returncode != 0 or not known:
+            raise _Refuse("system attributes path unknown (git var GIT_ATTR_SYSTEM)")
+        with _attr_lock:
+            _system_paths[git] = known
+    if os.name == "nt" and known.startswith("/"):
+        raise _Refuse(f"system attributes path not a Windows path: {known}")
+    return known
+
+
+def _require_inert_attributes(child_env: Mapping[str, str], entries) -> None:
     from ..core.invocation_memo import invocation_memo
 
     # Kept for one command only (dropped after lifecycle scripts); no memo outside one.
     memo = invocation_memo(_ATTR_MEMO)
     fingerprint = tuple(sorted(child_env.items()))
-    cached = None
+    verdict = ""
     if memo is not None:
         with _attr_lock:
-            cached = memo.get(fingerprint)
-    if cached is None:
+            verdict = memo.get(fingerprint, "")
+    if verdict == "":
         try:
-            cached = _attribute_sources(child_env)
-        except Exception:
-            cached = True
+            verdict = next(
+                (
+                    f"{source} {path} has a checkout-affecting attribute"
+                    for source, path in _attribute_files(child_env, entries)
+                    if os.path.lexists(path) and not _inert_attributes(path)
+                ),
+                None,
+            )
+        except _Refuse as reason:
+            verdict = str(reason)
+        except Exception as exc:
+            verdict = f"attributes probe failed: {type(exc).__name__}"
         if memo is not None:
             with _attr_lock:
-                memo[fingerprint] = cached
-    if cached:
-        raise _Refuse("an attributes source outside the commit may change checkout bytes")
+                memo[fingerprint] = verdict
+    if verdict is not None:
+        raise _Refuse(verdict)
 
 
 _BREAKER_MEMO = "inprocess-fetch-rate-limited"
@@ -492,17 +679,75 @@ def _admit(status: int, headers: Mapping[str, str]) -> None:
         if memo is not None:
             memo["tripped"] = True
         raise _Refuse(f"rate limited (HTTP {status}); git serves the rest of this command")
+    if headers.get("WWW-Authenticate") is not None:
+        # W1: an auth challenge is git's to answer; nothing is retried in process.
+        raise _Refuse("auth challenge")
     if status != 200:
         raise _Refuse(f"HTTP {status}")
 
 
-def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
-    from ..deps.anonymous_ref_listing import _session_for_refs
+_os_session = None
+_os_session_lock = threading.Lock()
+
+
+def _session(trust: tuple[str, str]):
+    """ONE pooled keep-alive session (and SSL context) per trust source per process."""
+    global _os_session
+    if trust[0] == "file":
+        from ..deps.anonymous_ref_listing import _session_for_refs
+
+        return _session_for_refs(trust[1])
+    with _os_session_lock:
+        if _os_session is None:
+            import http.cookiejar
+            import ssl
+
+            import truststore
+            from requests.adapters import HTTPAdapter
+
+            from ..utils.http_credentials import CredentialScopedSession
+            from ..version import get_version
+
+            class _OsTrustContext(truststore.SSLContext):
+                """The OS store only (schannel's trust): requests' CA bundle is not added."""
+
+                def load_verify_locations(self, *args, **kwargs) -> None:
+                    return None
+
+            context = _OsTrustContext(ssl.PROTOCOL_TLS_CLIENT)
+
+            class _OsTrustAdapter(HTTPAdapter):
+                def init_poolmanager(self, *args, **kwargs):
+                    kwargs["ssl_context"] = context
+                    return super().init_poolmanager(*args, **kwargs)
+
+                def proxy_manager_for(self, proxy, **proxy_kwargs):
+                    proxy_kwargs["ssl_context"] = context
+                    return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+            session = CredentialScopedSession(ambient_credentials=False)
+            session.trust_env = False
+            session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+            session.headers.clear()
+            session.headers.update(
+                {
+                    "User-Agent": f"apm/{get_version()}",
+                    "Accept": "*/*",
+                    "Accept-Encoding": "identity",
+                    "Pragma": "no-cache",
+                }
+            )
+            session.mount("https://", _OsTrustAdapter(pool_connections=4, pool_maxsize=16))
+            _os_session = session
+        return _os_session
+
+
+def _post(upload_url: str, proxy: str | None, trust: tuple[str, str], body: bytes) -> bytes:
     from ..utils.http_credentials import origin_bounded_request
 
     deadline = time.monotonic() + _DEADLINE_SECONDS
     with origin_bounded_request(
-        _session_for_refs(ca),
+        _session(trust),
         "POST",
         upload_url,
         base_url=upload_url,
@@ -515,7 +760,7 @@ def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
         max_hops=0,
         ambient_credentials=False,
         proxies={"https": proxy} if proxy else {},
-        verify=ca,
+        verify=trust[1] if trust[0] == "file" else True,
         timeout=_TIMEOUT,
         stream=True,
     ) as response:
@@ -542,6 +787,11 @@ def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
             if total > _MAX_BODY:
                 raise _Refuse("pack exceeds the size cap")
             chunks.append(chunk)
+
+
+def _note(url: str, outcome: str) -> None:
+    """Debug-log each hit and fallback with the forcing key; never a credential (W3d R3)."""
+    _log.debug("in-process fetch %s: %s", _redact(url), _redact(outcome))
 
 
 def _write_file(path: str, data: bytes, executable: bool) -> None:
@@ -608,10 +858,10 @@ def fetch_worktree(
         _log.debug("in-process fetch skipped: rate limited earlier in this command")
         return None
     try:
-        upload_url, proxy, ca = _gate(url, env if env is not None else os.environ)
+        upload_url, proxy, trust = _gate(url, env if env is not None else os.environ)
         if _rate_limited():  # another download tripped it while this one was gated
             raise _Refuse("rate limited earlier in this command")
-        body = _post(upload_url, proxy, ca, _request_body(sha))
+        body = _post(upload_url, proxy, trust, _request_body(sha))
         objects = parse_pack(_pack_from_response(body))
         files, reached = _plan(objects, sha)
         root = str(staged)
@@ -632,12 +882,13 @@ def fetch_worktree(
             info = os.lstat(root)
             if not stat.S_ISDIR(info.st_mode):
                 raise _Refuse("staged root changed")
+        _note(url, "hit")
         return manifest
     except _Refuse as reason:
-        _log.debug("in-process fetch falls back to git for %s: %s", _redact(url), _redact(reason))
+        _note(url, f"fallback: {reason}")
         return None
     except Exception as exc:
-        _log.debug("in-process fetch falls back to git for %s: %s", _redact(url), _redact(exc))
+        _note(url, f"fallback: {type(exc).__name__}: {exc}")
         return None
 
 
