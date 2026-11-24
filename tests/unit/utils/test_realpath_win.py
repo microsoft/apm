@@ -285,3 +285,82 @@ def test_portable_relpaths_takes_the_fast_form(
         "apm_modules/o/r/missing.md",
     ]
     assert calls == []  # every resolve took a fast form, none fell back to ntpath.realpath
+
+
+def _mount_point_in_place(directory: Path, target: Path) -> None:
+    """Turn the existing empty *directory* into a junction to *target* (FSCTL_SET_REPARSE_POINT)."""
+    import ctypes
+    import struct
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    k32.DeviceIoControl.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    )
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    substitute = ("\\??\\" + str(target)).encode("utf-16-le")
+    printed = str(target).encode("utf-16-le")
+    names = substitute + b"\0\0" + printed + b"\0\0"
+    header = struct.pack(
+        "<HHHH", 0, len(substitute), len(substitute) + 2, len(printed)
+    )  # SubstituteNameOffset/Length, PrintNameOffset/Length
+    body = header + names
+    buffer = struct.pack("<IHH", 0xA0000003, len(body), 0) + body  # IO_REPARSE_TAG_MOUNT_POINT
+    handle = k32.CreateFileW(
+        str(directory),
+        0x100,  # FILE_WRITE_ATTRIBUTES: not share-checked, so the hold does not stop it
+        0x1 | 0x2 | 0x4,
+        None,
+        3,
+        0x02000000 | 0x00200000,
+        None,
+    )
+    assert handle not in (None, 0, ctypes.c_void_p(-1).value), ctypes.get_last_error()
+    try:
+        returned = wintypes.DWORD()
+        raw = ctypes.create_string_buffer(buffer, len(buffer))
+        ok = k32.DeviceIoControl(
+            handle, 0x000900A4, raw, len(buffer), None, 0, ctypes.byref(returned), None
+        )
+        assert ok, ctypes.get_last_error()
+    finally:
+        k32.CloseHandle(handle)
+
+
+@_WINDOWS
+def test_held_dir_turned_into_a_junction_in_place_takes_stock_resolve(project: Path) -> None:
+    """W3d RP1-RP3: a hold pins the name, not the kind; the escape must fall back."""
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+    outside = project / "outside"
+    outside.mkdir()
+    with _held_scope(project) as package:
+        empty = package / "empty"
+        empty.mkdir()
+        resolve_path(empty / "missing.md")
+        assert str(empty).lower() in _held_keys()
+
+        _mount_point_in_place(empty, outside)
+        assert (empty / "missing.md").resolve() == outside / "missing.md"
+        for path in (empty / "missing.md", empty, empty / "missing.md"):
+            assert str(resolve_path(path)) == str(path.resolve()), path
+        assert str(empty).lower() not in _held_keys()
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(empty / "missing.md", package)

@@ -214,6 +214,18 @@ def _kernel32():
         k32.GetFileInformationByHandle.restype = wintypes.BOOL
         k32.GetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.POINTER(_HandleInfo))
 
+        class _TagInfo(ctypes.Structure):
+            _fields_ = [("attributes", wintypes.DWORD), ("reparse_tag", wintypes.DWORD)]
+
+        k32.GetFileInformationByHandleEx.restype = wintypes.BOOL
+        k32.GetFileInformationByHandleEx.argtypes = (
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        )
+        _TAG_INFO.append(_TagInfo)
+
         class _Find(ctypes.Structure):
             _fields_ = [
                 ("attributes", wintypes.DWORD),
@@ -243,6 +255,8 @@ def _kernel32():
 
 
 _MISSING = object()
+_TAG_INFO: list = []  # the FILE_ATTRIBUTE_TAG_INFO structure, built with the kernel32 bindings
+_FILE_ATTRIBUTE_TAG_INFO = 9
 
 
 def _entry(path: str):
@@ -380,10 +394,39 @@ def _adopt(directory: str, proven: str) -> _Held | None:
         return held
 
 
+def _intact(held: _Held) -> bool:
+    """Whether the held object is still a plain directory (call under ``_lock``).
+
+    A hold pins the name, not the object's kind: an empty held directory can
+    be turned into a junction in place. The attribute is read on the held
+    handle itself; a reparse point or a failed read voids the hold.
+    """
+    ctypes, k32 = _kernel32()[:2]
+    info = _TAG_INFO[0]()
+    if not k32.GetFileInformationByHandleEx(
+        held[1], _FILE_ATTRIBUTE_TAG_INFO, ctypes.byref(info), ctypes.sizeof(info)
+    ):
+        return False
+    return not info.attributes & _FILE_ATTRIBUTE_REPARSE_POINT
+
+
 def _still_held(used: list[tuple[str, _Held]]) -> bool:
-    """Whether every hold a walk relied on was held for the whole walk."""
+    """Whether every hold an answer rests on is the same, intact hold now.
+
+    A hold found changed in kind is dropped (closed), so only :func:`_hold`,
+    which refuses reparse points, can hold that path again.
+    """
     with _lock:
-        return all(_held.get(key) is held for key, held in used)
+        for key, held in used:
+            if _held.get(key) is not held:
+                return False
+            if not _intact(held):
+                del _held[key]
+                if _root and _root[0] == key:
+                    _root[:] = [None]
+                _close(held[1])
+                return False
+    return True
 
 
 def _held_anchor(text: str) -> tuple[str, _Held] | None:
@@ -408,7 +451,7 @@ def _held_realpath(text: str) -> str | None:
         return None
     anchor, held = found
     if anchor == text:
-        return held[0]
+        return held[0] if _still_held([(anchor, held)]) else None
     parts = text[len(anchor) + 1 :].split("\\")
     inside_package = _registered_cover(text)
     if len(parts) > 1 and not inside_package:
@@ -496,8 +539,9 @@ def release_held(under: object = None) -> None:
             taken = [_held.pop(key) for key in keys]
             if _root and _root[0] is not None and _root[0] in keys:
                 _root[:] = [None]  # APM is changing the root itself: never re-hold it
-    for _final, handle in taken:
-        _close(handle)
+        # Closed under the lock: a handle value is never queried after its close.
+        for _final, handle in taken:
+            _close(handle)
 
 
 def held_count() -> int:
