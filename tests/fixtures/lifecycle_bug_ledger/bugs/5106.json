@@ -1,0 +1,15 @@
+{
+  "issue": 5106,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall <bundle> removed a hook script that a user hook still ran when the hook lived in another target or spelled the script as ./x.sh, cd <dir> && ./x.sh, or a path with ./ segments; any such reference now refuses the uninstall.",
+  "failure_modes": [
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_keeps_a_script_a_user_hook_runs_under_any_spelling",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_ignores_a_user_hook_running_another_script"
+  ]
+}

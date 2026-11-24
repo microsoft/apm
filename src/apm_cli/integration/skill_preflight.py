@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from apm_cli.core.remediation import SKILL_CONFLICT_UNMANAGED
-from apm_cli.install.deployed_paths import deployed_path_entry
+from apm_cli.install.deployed_paths import deployed_path_entry, refuse_symlinked_deploy
 from apm_cli.integration.base_integrator import (
     BaseIntegrator,
     recovery_directory,
@@ -281,7 +281,13 @@ def find_unmanaged_conflicts(
         for target in targets:
             if target.supports("skills"):
                 destination = integrator._target_skill_dir(target, project_root, name)
-                destinations.setdefault(destination.resolve(), (destination, target))
+                try:
+                    resolved = destination.resolve()
+                except (OSError, RuntimeError):
+                    # A link loop cannot be resolved; it is refused like any link (#5287).
+                    refuse_symlinked_deploy(destination, project_root)
+                    raise
+                destinations.setdefault(resolved, (destination, target))
         for source in files:
             suffix = relative_to(source, source_root)
             parent = source_root

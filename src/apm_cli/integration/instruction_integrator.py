@@ -1113,7 +1113,9 @@ def routed_claude_rule_renders(
     from apm_cli.models.apm_package import APMPackage, PackageInfo
 
     rules: dict[str, dict[str, str]] = {}
-    for dep in lockfile.get_all_dependencies():
+    # The "." self entry is the project's own content, never a dependency under
+    # apm_modules: it has no install path to render from (#5336).
+    for dep in lockfile.get_package_dependencies():
         if dep.source == "local" and not include_local:
             continue
         if dependency_keys is not None and dep.get_unique_key() not in dependency_keys:
