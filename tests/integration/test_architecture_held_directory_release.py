@@ -30,6 +30,17 @@ def _report(rule: str, path: str, old: str | None, new: str):
     return report
 
 
+def _expect_violation(report, rule: str) -> None:
+    """The guard reports *rule* (the linter's user-visible failure)."""
+    assert any(violation.rule_id == rule for violation in report.violations), report.violations
+
+
+def _expect_clean(report) -> None:
+    """The guard reports no failure and no violation."""
+    assert report.failures == ()
+    assert report.violations == ()
+
+
 @pytest.mark.parametrize(
     ("rule", "path", "old", "new"),
     [
@@ -74,8 +85,7 @@ def test_held_directory_guards_reject_unreleased_mutations(
     rule: str, path: str, old: str | None, new: str
 ) -> None:
     """A raw mutation without a release, a stale allowlist entry or a side-door registrar fails."""
-    report = _report(rule, path, old, new)
-    assert any(violation.rule_id == rule for violation in report.violations)
+    _expect_violation(_report(rule, path, old, new), rule)
 
 
 @pytest.mark.parametrize(
@@ -87,12 +97,9 @@ def test_held_directory_guards_reject_unreleased_mutations(
 )
 def test_held_directory_release_ignores_non_directory_replace(extra: str) -> None:
     """``str.replace`` and keyword ``replace`` calls are not directory mutations."""
-    report = _report(RELEASE, "src/apm_cli/commands/update.py", None, extra)
-    assert report.violations == ()
+    _expect_clean(_report(RELEASE, "src/apm_cli/commands/update.py", None, extra))
 
 
 def test_held_directory_guards_accept_current_sources() -> None:
     """Both rules are silent for production routing before mutation."""
-    report = run_selected_rules(ROOT, (RELEASE, REGISTRATION))
-    assert report.failures == ()
-    assert report.violations == ()
+    _expect_clean(run_selected_rules(ROOT, (RELEASE, REGISTRATION)))

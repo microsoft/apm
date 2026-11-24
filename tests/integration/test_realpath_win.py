@@ -4,8 +4,8 @@ Stock ``Path.resolve()`` is the oracle: every Windows cell compares the fast
 forms with it, or asserts what holding a directory must (and must not) do to
 other processes and to APM's own renames and deletes. Holds exist only inside
 one ``invocation_scope()``; each cell opens one with the project root as cwd
-and a registered package root, as activation does. The pure string helpers
-(``plain_win32``, ``_volatile``) run on every OS.
+and a registered package root, as activation does. These cells need a
+second process; the in-process cells are in tests/unit/utils/test_realpath_win.py.
 
 Test names avoid the volatile markers (staging, backup, ...): ``tmp_path`` is
 derived from the test name, and a volatile project root is never held.
@@ -22,17 +22,12 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.invocation_memo import forget_invocation_memos, invocation_scope
-from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.utils import realpath_win
-from apm_cli.utils.file_ops import robust_replace, robust_rmtree
 from apm_cli.utils.realpath import resolve_path
 from apm_cli.utils.realpath_win import (
-    _volatile,
     held_count,
-    plain_win32,
     register_held_root,
     release_held,
-    resolve_windows,
 )
 
 # Spawns processes, so it lives under tests/integration; windows_compat puts it
@@ -86,106 +81,6 @@ def _other_process(code: str, *args: object) -> subprocess.CompletedProcess[str]
 _RENAME = "import os, sys; os.rename(sys.argv[1], sys.argv[2])"
 
 
-def _short_path(path: Path) -> str | None:
-    import ctypes
-
-    buffer = ctypes.create_unicode_buffer(1024)
-    length = ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, 1024)
-    return buffer.value if 0 < length < 1024 and "~" in buffer.value else None
-
-
-# --------------------------------------------------------------------------
-# Pure helpers (every OS)
-# --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "C:\\",
-        "C:\\Users\\dev\\proj\\apm_modules\\o\\r\\SKILL.md",
-        "d:\\a b\\x.y.z",
-    ],
-)
-def test_plain_win32_accepts_plain_drive_paths(path: str) -> None:
-    assert plain_win32(path)
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "C:\\PROGRA~1\\x",  # 8.3 alias
-        "C:\\x\\name.",  # trailing dot
-        "C:\\x\\name ",  # trailing space
-        "C:\\x\\f.txt:stream",  # alternate data stream
-        "C:\\x\\CON",
-        "C:\\x\\nul.txt",
-        "C:\\x\\lpt9.log",
-        "C:\\x\\COM\u00b9",
-        "C:\\x\\caf\u00e9",  # non-ASCII
-        "C:\\" + "a" * 257,  # MAX_PATH
-        "\\\\server\\share\\x",  # UNC
-        "\\\\?\\C:\\x",  # already extended
-        "x\\y",  # relative
-        "C:x",  # drive-relative
-        "C:/x",  # forward slash
-        "C:\\x\\\\y",  # empty component
-    ],
-)
-def test_plain_win32_refuses_every_non_plain_form(path: str) -> None:
-    assert not plain_win32(path)
-
-
-@pytest.mark.parametrize(
-    ("path", "volatile"),
-    [
-        ("C:\\p\\.git\\HEAD", True),
-        ("C:\\p\\apm_modules\\.apm-resolution-staging\\abc", True),
-        ("C:\\p\\pkg.inc.1", True),
-        ("C:\\p\\x.tmp3", True),
-        ("C:\\p\\Backup-1", True),
-        ("C:\\p\\migration", True),
-        ("C:\\p\\refresh-x", True),
-        ("C:\\p\\apm_modules\\o\\r\\skills", False),
-        ("C:\\p\\.github\\gitlab", False),
-    ],
-)
-def test_volatile_matches_only_marked_components(path: str, volatile: bool) -> None:
-    assert _volatile(path) is volatile
-
-
-# --------------------------------------------------------------------------
-# Windows cells
-# --------------------------------------------------------------------------
-
-
-@_WINDOWS
-def test_differential_matches_stock_resolve(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(realpath_win, "_DIFFERENTIAL", True)
-    with _held_scope(project) as package:
-        (package / "longdirectoryname").mkdir()
-        inputs = [
-            package / "f.txt",
-            package / "sub",
-            package / "missing.txt",
-            package / "m1" / "m2.txt",
-            package / "f.txt" / "under-file",
-            project / "APM_MODULES" / "o" / "r" / "SUB",
-            package / "f.txt.",
-            package / "nul.txt",
-            project / ("d" * 70) / ("e" * 70) / ("f" * 70) / ("g" * 70) / "x.txt",
-            Path("apm_modules") / "o" / "r" / "f.txt",
-            project / "missing-root-child",
-        ]
-        short = _short_path(package / "longdirectoryname")
-        if short is not None:
-            inputs.append(Path(short))
-        for path in inputs:
-            assert str(resolve_path(path)) == str(path.resolve()), path
-        assert resolve_windows(package / "f.txt") is not None, "the fast form must engage"
-        assert held_count() >= 2
-
-
 @_WINDOWS
 def test_held_package_cannot_be_renamed_by_another_process(project: Path) -> None:
     with _held_scope(project) as package:
@@ -201,91 +96,6 @@ def test_held_package_cannot_be_renamed_by_another_process(project: Path) -> Non
         release_held()
         assert _other_process(_RENAME, package, moved).returncode == 0
         assert (moved / "f.txt").is_file()
-
-
-@_WINDOWS
-def test_robust_rmtree_and_replace_of_held_dirs_succeed(project: Path) -> None:
-    with _held_scope(project) as package:
-        resolve_path(package / "sub" / "b.txt")
-        assert str(package / "sub").lower() in _held_keys()
-        robust_replace(package / "sub", package / "sub-renamed")
-        assert (package / "sub-renamed" / "b.txt").is_file()
-
-        # Releasing package/sub unregistered its package: activation registers it again.
-        register_held_root(package, project / "apm_modules")
-        resolve_path(package / "other" / "c.txt")
-        assert {str(package).lower(), str(package / "other").lower()} <= _held_keys()
-        robust_rmtree(package)
-        assert not package.exists()
-        assert held_count() == 1  # only the project root
-
-
-@_WINDOWS
-def test_resolution_session_prepare_and_rollback_of_held_package(project: Path) -> None:
-    modules = project / "apm_modules"
-    with _held_scope(project) as package:
-        resolve_path(package / "sub" / "b.txt")
-        session = ResolutionStagingSession(modules)
-        session.prepare_path(package)
-        assert not package.exists()
-
-        (package / "sub").mkdir(parents=True)
-        (package / "f.txt").write_text("new", encoding="ascii")
-        register_held_root(package, modules)
-        resolve_path(package / "sub" / "x.txt")
-        assert str(package).lower() in _held_keys()
-
-        assert session.rollback() == []
-        assert (package / "f.txt").read_text(encoding="ascii") == "f"
-        assert (package / "sub" / "b.txt").is_file()
-
-
-@_WINDOWS
-def test_case_variant_returns_on_disk_case(project: Path) -> None:
-    with _held_scope(project) as package:
-        (package / "Skill.md").write_text("s", encoding="ascii")
-        for text in (package / "skill.MD", project / "Apm_Modules" / "O" / "r" / "SKILL.md"):
-            resolved = resolve_path(text)
-            assert str(resolved) == str(text.resolve())
-            assert str(resolved) == str(package / "Skill.md")
-
-
-@_WINDOWS
-def test_held_count_returns_to_zero_after_scope(project: Path) -> None:
-    with _held_scope(project) as package:
-        resolve_path(package / "sub" / "b.txt")
-        assert held_count() >= 3
-    assert held_count() == 0
-
-    def failing_body() -> None:
-        with _held_scope(project) as package:
-            resolve_path(package / "sub" / "b.txt")
-            assert held_count() >= 3
-            raise RuntimeError("body failed")
-
-    with pytest.raises(RuntimeError, match="body failed"):
-        failing_body()
-    assert held_count() == 0
-
-
-@_WINDOWS
-def test_r1_middle_junction_takes_the_followed_path(project: Path) -> None:
-    target = project / "elsewhere"
-    (target / "sub").mkdir(parents=True)
-    (target / "sub" / "x.txt").write_text("x", encoding="ascii")
-    with _held_scope(project) as package:
-        resolve_path(package / "f.txt")
-        link = package / "mid"
-        subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
-            check=True,
-            capture_output=True,
-        )
-        through = link / "sub" / "x.txt"
-        resolved = resolve_path(through)
-        assert str(resolved) == str(through.resolve())
-        assert str(resolved) == str(target / "sub" / "x.txt")
-        assert str(link).lower() not in _held_keys()
 
 
 @_WINDOWS
@@ -333,41 +143,3 @@ def test_r7_foreign_rmtree_of_held_package_fails_after_removing_unheld_entries(
         assert not (package / "f.txt").exists()
         assert not (package / "sub" / "b.txt").exists()
         assert not (package / "other").exists()
-
-
-@_WINDOWS
-def test_volatile_component_takes_stock_resolve(project: Path) -> None:
-    with _held_scope(project):
-        volatile = project / "apm_modules" / ".apm-resolution-staging" / "abc"
-        volatile.mkdir(parents=True)
-        for path in (volatile, volatile / "x.txt"):
-            assert resolve_windows(path) is None
-            assert str(resolve_path(path)) == str(path.resolve())
-
-
-@_WINDOWS
-def test_portable_relpaths_takes_the_fast_form(
-    project: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import ntpath
-
-    from apm_cli.utils.paths import portable_relpaths
-
-    calls: list[str] = []
-    stock = ntpath.realpath
-
-    def counted(path, *args, **kwargs):
-        calls.append(str(path))
-        return stock(path, *args, **kwargs)
-
-    monkeypatch.setattr(ntpath, "realpath", counted)
-    package = project / "apm_modules" / "o" / "r"
-    paths = [package / "f.txt", package / "sub" / "b.txt", package / "missing.md"]
-    with _held_scope(project):
-        relatives = portable_relpaths(paths, project)
-    assert relatives == [
-        "apm_modules/o/r/f.txt",
-        "apm_modules/o/r/sub/b.txt",
-        "apm_modules/o/r/missing.md",
-    ]
-    assert calls == []  # every resolve took a fast form, none fell back to ntpath.realpath
