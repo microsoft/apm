@@ -158,7 +158,12 @@ class DeployJournal:
             raise RuntimeError("no store to write the journal manifest to")
         # One private fd per store (W3d S5): the same O_NOFOLLOW/0600 open as
         # append_private, then one write per line, so record order and durability match.
+        # POSIX only: on Windows an open handle blocks the in-process replay's rename
+        # and delete of an abandoned store.
         path = self.store / _MANIFEST
+        if os.name == "nt":
+            _modes.append_private(path, json.dumps(line, sort_keys=True) + "\n")
+            return
         fd = getattr(self, "_journal_fd", None)
         if fd is None or getattr(self, "_journal_path", None) != path:
             self._close_journal()
