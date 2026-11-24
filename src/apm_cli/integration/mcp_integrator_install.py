@@ -25,11 +25,13 @@ from apm_cli.core.apm_yml import (
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_catalog import accepted_target_values
+from apm_cli.install import verdict_record
 from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
     MCPNativeConflictError,
     RequiredIntegrationError,
 )
+from apm_cli.integration.mcp_install_summary import mark_unknown_noop_forms
 from apm_cli.integration.mcp_registry_hints import (
     CHOOSING_MCP_REGISTRY_DOCS_URL,  # noqa: F401 -- re-exported for tests
     _emit_registry_choice_hint,
@@ -1495,6 +1497,12 @@ def _install_self_defined_deps(
     already_configured_self_defined = [
         name for name in already_configured_candidates_sd if name not in servers_to_update
     ]
+    mark_unknown_noop_forms(
+        servers_to_update,
+        already_configured_self_defined,
+        configuring=self_defined_to_install,
+        uncompared=[rt for rt in target_runtimes if rt not in protected_clients],
+    )
 
     if already_configured_self_defined:
         if console:
@@ -1691,6 +1699,7 @@ def _install_self_defined_deps(
             if is_update:
                 successful_updates.add(dep.name)
         if failed_runtimes:
+            verdict_record.unknown("mcp failure")
             strict_failures = sorted(
                 failed_runtimes
                 if fail_on_write_error
@@ -1723,6 +1732,7 @@ def _print_mcp_summary(
     if not console:
         return
     if configured_count > 0:
+        verdict_record.unknown("mcp configured servers")  # a write is never a no-op
         # Use successful_updates (not servers_to_update) for accurate counts.
         # servers_to_update = all drift-detected servers (some may have failed).
         # successful_updates = servers that were re-applied AND succeeded.
@@ -1981,6 +1991,7 @@ def run_mcp_install(  # noqa: PLR0913
 
     # --- Registry-based deps ---
     if registry_dep_names:
+        verdict_record.unknown("registry mcp")  # its no-op form is not known
         try:
             from apm_cli.registry.operations import MCPServerOperations
 

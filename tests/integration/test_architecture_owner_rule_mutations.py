@@ -3228,6 +3228,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The default-contract registries parse accepts any URL without the scheme owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-remote-read-reuse",
+        rule_id="install-deployment-remote-read-reuse",
+        path="src/apm_cli/install/fast_output.py",
+        old="    policy_gate.run(gate)\n",
+        new=(
+            "    from apm_cli.policy._remote import reuse_remote_reads\n\n"
+            "    with reuse_remote_reads():\n"
+            "        policy_gate.run(gate)\n"
+        ),
+        intent="A second caller reuses a remote read outside the record's no-op render.",
+    ),
+    MutationCase(
         guard_id="install-deployment-request-defaults",
         rule_id="install-deployment-request-defaults",
         path="src/apm_cli/install/request.py",
@@ -6717,7 +6729,13 @@ def test_version_rendering_guard_rejects_dropped_lazy_delegation() -> None:
     """entrypoint.py must preserve lazy delegation to apm_cli.cli.main."""
     path = "src/apm_cli/entrypoint.py"
     source = _source(path)
-    old = "from apm_cli.cli import main as cli_main\n\n    cli_main()"
+    old = (
+        "with verdict_record.recording(argv):\n"
+        "        # Imported inside the record: TLS startup reads its settings at import, so\n"
+        "        # the entry state precedes it and the reads are logged.\n"
+        "        from apm_cli.cli import main as cli_main\n\n"
+        "        cli_main()"
+    )
     new = "import apm_cli.commands.install  # bypass"
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)

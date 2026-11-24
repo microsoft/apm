@@ -444,7 +444,8 @@ MARKETPLACE_ORIGIN_RESTORE = _entry(
     "marketplace-origin-restore",
     "apm marketplace add {source} --name {name}",
     "keep the locked marketplace (add --ref or --path if the original registration used them)",
-    before="verify that source first",
+    # A rebound name may be credential-bound, so it is freed before the re-add (#5264).
+    before="verify that source first, then run 'apm marketplace remove {name} --yes'",
 )
 MARKETPLACE_ORIGIN_SWITCH = _entry(
     "marketplace-origin-switch",

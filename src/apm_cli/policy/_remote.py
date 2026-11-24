@@ -11,10 +11,13 @@ owners of git-remote reading and URL parsing.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
 from ..cache.url_normalize import SCP_LIKE_RE
+from ..core.invocation_memo import forget_epoch
 from ..utils.git_env import get_git_executable
 from ..utils.github_host import (
     is_azure_devops_hostname,
@@ -59,6 +62,28 @@ def _git(project_root: Path, *args: str) -> str | None:
     return result.stdout.strip()
 
 
+_READ_ORIGINS: dict[str, tuple[int, str | None]] = {}  # root -> (forget epoch, origin)
+_REUSING: list[bool] = []
+
+
+@contextmanager
+def reuse_remote_reads() -> Iterator[None]:
+    """Answer from this process's earlier read of the same root.
+
+    Only the verified-state record's writer enters this
+    (install/verdict_record.py), right after the no-op it proved: the install
+    never changes git remotes, and the record keys the git config bytes, so its
+    git spawns add nothing.
+    An answer read before user code ran (core/invocation_memo.forget_epoch)
+    is never reused.
+    """
+    _REUSING.append(True)
+    try:
+        yield
+    finally:
+        _REUSING.pop()
+
+
 def _git_remote_origin_url(project_root: Path) -> str | None:
     """Return the URL of the project's remote, or ``None`` when there is none.
 
@@ -70,15 +95,18 @@ def _git_remote_origin_url(project_root: Path) -> str | None:
     Raises:
         AmbiguousGitRemoteError: no ``origin`` and several other remotes.
     """
+    key, epoch = str(project_root), forget_epoch()
+    read = _READ_ORIGINS.get(key)
+    if _REUSING and read is not None and read[0] == epoch:
+        return read[1]
     origin = _git(project_root, "remote", "get-url", "origin")
-    if origin is not None:
-        return origin
-    names = sorted(name for name in (_git(project_root, "remote") or "").splitlines() if name)
-    if len(names) > 1:
-        raise AmbiguousGitRemoteError(names)
-    if not names:
-        return None
-    return _git(project_root, "remote", "get-url", names[0])
+    if origin is None:
+        names = sorted(n for n in (_git(project_root, "remote") or "").splitlines() if n)
+        if len(names) > 1:
+            raise AmbiguousGitRemoteError(names)
+        origin = _git(project_root, "remote", "get-url", names[0]) if names else None
+    _READ_ORIGINS[key] = (epoch, origin)
+    return origin
 
 
 def _extract_org_host_port_from_git_remote(

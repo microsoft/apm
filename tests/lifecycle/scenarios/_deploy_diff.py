@@ -181,7 +181,13 @@ CHANGES: dict[str, Change] = {
 # Caches (git objects, policy, deploy store) are not deployed state.
 HOME_CACHES = (".cache", "Library/Caches", ".apm/cache", ".apm/logs")
 # Per-checkout identity: a random installation id and receipts keyed by the project path.
-IDENTITY = (".apm-local", ".apm/deployment-receipts")
+IDENTITY = (
+    ".apm-local",
+    ".apm/deployment-receipts",
+    # The per-user verified-state key and per-checkout records (#4977).
+    ".apm/verdicts",
+    ".apm/verdict.key",
+)
 _IDENTITY_KEY = re.compile(r"install(ation)?_?id|receipt|generated_at")
 
 
