@@ -544,6 +544,36 @@ def _post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
             chunks.append(chunk)
 
 
+_SETTLED_MEMO = "inprocess-fetch-settled"
+_first_fetch_lock = threading.Lock()
+
+
+def _admitted_post(upload_url: str, proxy: str | None, ca: str, body: bytes) -> bytes:
+    """``_post`` behind the breaker, with the command's first answer awaited alone.
+
+    Until one in-process fetch of this command has been answered 200, fetches
+    run one at a time and re-check the breaker after waiting, so a throttle on
+    the first answer sends every other download to git without a second
+    request. After that they run concurrently (a later throttle still trips the
+    breaker for every fetch not yet sent).
+    """
+    from ..core.invocation_memo import invocation_memo
+
+    if _rate_limited():  # another download tripped it while this one was gated
+        raise _Refuse("rate limited earlier in this command")
+    settled = invocation_memo(_SETTLED_MEMO)
+    if settled is None or settled.get("ok"):
+        return _post(upload_url, proxy, ca, body)
+    with _first_fetch_lock:
+        if _rate_limited():
+            raise _Refuse("rate limited earlier in this command")
+        if settled.get("ok"):
+            return _post(upload_url, proxy, ca, body)
+        answer = _post(upload_url, proxy, ca, body)
+        settled["ok"] = True
+        return answer
+
+
 def _write_file(path: str, data: bytes, executable: bool) -> None:
     fd = os.open(path, _WRITE_FLAGS, 0o755 if executable else 0o644)
     try:
@@ -609,9 +639,7 @@ def fetch_worktree(
         return None
     try:
         upload_url, proxy, ca = _gate(url, env if env is not None else os.environ)
-        if _rate_limited():  # another download tripped it while this one was gated
-            raise _Refuse("rate limited earlier in this command")
-        body = _post(upload_url, proxy, ca, _request_body(sha))
+        body = _admitted_post(upload_url, proxy, ca, _request_body(sha))
         objects = parse_pack(_pack_from_response(body))
         files, reached = _plan(objects, sha)
         root = str(staged)
