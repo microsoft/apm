@@ -17,6 +17,7 @@ classification and output are unchanged. No credential is ever sent.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 import re
@@ -605,3 +606,85 @@ def _list_refs(
     except _Fallback as reason:
         _log.debug("anonymous ref listing falls back to git: %s", reason)
         return None
+
+
+# ``-c`` keys whose values cannot change an https ref advertisement request
+# (hooks, fsmonitor, submodules, checkout line endings and links).
+_INERT_BASE_KEYS = ("core.hookspath", "core.fsmonitor", "submodule.recurse", "core.longpaths")
+
+
+def _inert_git_arg_keys() -> frozenset[str]:
+    from apm_cli.utils.git_env import git_line_ending_pin_entries, git_symlink_pin_entry
+
+    pins = (key for key, _value in (*git_line_ending_pin_entries(), git_symlink_pin_entry()))
+    return frozenset((*_INERT_BASE_KEYS, *(key.lower() for key in pins)))
+
+
+_BRANCH_AND_TAG_PATTERNS = ("refs/heads/*", "refs/tags/*")
+_listing_lock = threading.Lock()
+
+
+def _inert(git_args) -> bool:
+    args = list(git_args)
+    if len(args) % 2:
+        return False
+    inert = _inert_git_arg_keys()
+    for flag, value in zip(args[::2], args[1::2], strict=True):
+        if flag != "-c" or value.partition("=")[0].lower() not in inert:
+            return False
+    return True
+
+
+def _listing_key(url: str, env: Mapping[str, str] | None, git_args) -> str:
+    """Digest of everything that can change the answer: the URL, the full git
+    env (config, credentials, proxy, TLS) and the extra git args."""
+    scope = sorted((os.environ if env is None else env).items())
+    material = repr((url, env is None, scope, list(git_args)))
+    return hashlib.sha256(material.encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def branch_and_tag_refs(
+    url: str,
+    *,
+    env: Mapping[str, str] | None,
+    timeout: int,
+    git_args=(),
+    memo: dict | None = None,
+):
+    """``git ls-remote <url> refs/heads/* refs/tags/*``, answered in process when possible.
+
+    Answers from the in-process anonymous listing when git's request is
+    provably identical, else runs ``git ls-remote`` exactly as before. With
+    *memo* (the caller's one-attempt scope, never process-wide) a successful
+    answer is reused for the same URL, env and git args; failures are never
+    reused. Env and args are part of the key, so an answer obtained under one
+    credential context never answers another.
+    """
+    import subprocess
+
+    from apm_cli.utils.git_env import git_remote_refs
+
+    key = _listing_key(url, env, git_args)
+    if memo is not None:
+        with _listing_lock:
+            cached = memo.get(key)
+        if cached is not None:
+            return cached
+    # env=None makes git build its env from the process; only an explicit
+    # env can be judged for equivalence.
+    eligible = env is not None and _inert(git_args)
+    listed = list_refs_anonymously(url, include_heads=True, env=env) if eligible else None
+    if listed is not None:
+        result = subprocess.CompletedProcess(["git", "ls-remote", url], 0, listed, "")
+    else:
+        result = git_remote_refs(
+            url,
+            *_BRANCH_AND_TAG_PATTERNS,
+            env=None if env is None else dict(env),
+            timeout=timeout,
+            git_args=git_args,
+        )
+    if memo is not None and result.returncode == 0:
+        with _listing_lock:
+            memo.setdefault(key, result)
+    return result

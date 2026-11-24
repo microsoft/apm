@@ -88,7 +88,7 @@ def render_and_deploy_codex_agent(
     from ..integration.agent_integrator import _SKIPPED, AgentIntegrator, CodexAgentFieldError
     from ..utils.atomic_io import normalize_crlf_to_lf
     from ..utils.diagnostics import DiagnosticCollector
-    from ..utils.path_security import PathTraversalError
+    from ..utils.path_security import PathTraversalError, SymlinkedDeployError
 
     def _warn(message: str) -> None:
         if diagnostics is not None:
@@ -156,9 +156,12 @@ def render_and_deploy_codex_agent(
                 diagnostics=collector,
                 target_paths=[],
             )
+        except SymlinkedDeployError:
+            raise
         except (PathTraversalError, ValueError) as exc:
             _warn(f"Skipped unsafe bundle entry {rel_path!r}: {exc}")
             return None
+
         if outcome == _SKIPPED:
             return None
         if logger is not None:

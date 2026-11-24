@@ -86,7 +86,7 @@
       "id": "url-path-containment-decoding",
       "decision": "Symlink-component containment, filesystem-aware (case-insensitive) path containment and strict percent-encoded URL-path decoding",
       "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments)",
-      "selectors": ["src/apm_cli/utils/path_security.py"],
+      "selectors": ["src/apm_cli/utils/path_security.py", "src/apm_cli/utils/realpath.py"],
       "guards": ["transport-platform-url-path-security"]
     },
     {
@@ -127,8 +127,8 @@
     {
       "id": "git-child-repository-isolation",
       "decision": "Git child-process repository location and URL rewrite safety",
-      "owner": "utils/git_env.py (network execution config, URL rewrite validation and its per-invocation effective-config probe memo in utils/git_config_memo.py, Git auth-channel scrubbing, the dependency core.symlinks and line-ending pins, and trusted_executable: every helper program APM launches or probes resolves on PATH outside the project, never the working directory)",
-      "selectors": ["src/apm_cli/utils/git_env.py", "src/apm_cli/utils/git_config_memo.py"],
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation and its per-invocation effective-config probe memo in utils/git_config_memo.py, the strict GIT_CONFIG_PARAMETERS parser in utils/git_config_parameters.py, Git auth-channel scrubbing, the dependency core.symlinks and line-ending pins, and trusted_executable: every helper program APM launches or probes resolves on PATH outside the project, never the working directory)",
+      "selectors": ["src/apm_cli/utils/git_env.py", "src/apm_cli/utils/git_config_memo.py", "src/apm_cli/utils/git_config_parameters.py", "src/apm_cli/utils/git_config_once.py"],
       "guards": [
         "transport-platform-external-executable-owner",
         "transport-platform-git-child-environment",

@@ -488,3 +488,35 @@ def test_a_lock_recording_another_identitys_name_writes_no_entry(
     assert not world.known.exists()
     assert not world.receipt.exists()
     assert f"own marketplace name is '{world.name()}'" in _text(result), _evidence(result)
+
+
+def test_a_failed_uninstall_cleanup_converges_on_the_next_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5258: uninstall could not remove APM's entry (a linked plugins/ directory), so it
+    kept the receipt; once the link is gone, the next command removes exactly that entry."""
+    world = _World(tmp_path, apm_binary_path)
+    world.ok("install", "--no-policy")
+    name = world.marketplace()
+    _seed(world.known, json.dumps({**_OTHER, **_known(world)}, indent=2).encode("utf-8") + b"\n")
+    plugins = world.known.parent
+    real = plugins.with_name("plugins-real")
+    plugins.rename(real)
+    plugins.symlink_to(real, target_is_directory=True)
+
+    failed = world.ok("uninstall", world.plugin.as_posix())
+    assert "did not update Claude Code's marketplace registry" in _text(failed), _evidence(failed)
+    plugins.unlink()
+    real.rename(plugins)
+    assert name in _known(world)
+    before = world.known.read_bytes()
+    world.ok("lock")
+    assert world.known.read_bytes() == before, "apm lock writes only the lockfile"
+
+    result = world.ok("install", "--no-policy")
+
+    assert "Traceback" not in _text(result), _evidence(result)
+    assert set(_known(world)) == set(_OTHER), _evidence(result)
+    assert not world.receipt.exists() or name not in json.dumps(
+        json.loads(world.receipt.read_text("utf-8"))
+    )

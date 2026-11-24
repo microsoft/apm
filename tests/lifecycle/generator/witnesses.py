@@ -101,6 +101,14 @@ GATE_PLUGIN_BIN_SPINE = (
 SOURCE_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
 )
+SOURCE_KIT_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::"
+    "test_source_kit_spine_credits_registry_executable_cells"
+)
+SOURCE_BUNDLE_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::"
+    "test_source_bundle_spine_credits_bundle_executable_cells"
+)
 _OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
 # Witnesses whose package can deploy a bin/ artifact, with the scope it lands at
 # (#4981). Loose bin/ deploys only for a user-scope marketplace plugin with a
@@ -274,8 +282,14 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
     from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
-    from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
+    from tests.lifecycle.machines._gate_plugin_bin import (
+        KNOWN_PLUGIN,
+        deploys_bin,
+        plugin_bin_cells,
+    )
     from tests.lifecycle.machines._source_bin import source_bin_cells
+    from tests.lifecycle.machines._source_bundle import source_bundle_cells
+    from tests.lifecycle.machines._source_kit import KNOWN_IDS, source_kit_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
@@ -315,13 +329,16 @@ def machine_cells() -> list[MachineCell]:
             assignment = _gate_assignment(key)
             if witness == GATE_BUNDLE_SPINE:
                 assignment = {**assignment, "SRC": "local-bundle"}
-            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
+            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key) or KNOWN_PLUGIN.get(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
             if assignment["GATE"] == "denied-dependency":
                 # A refusal proves its GATE level only, never a success cell.
                 continue
-            if witness == GATE_PACK_SPINE:
-                # A real pack over the primitive also proves the OP x PRIM pair.
+            if witness == GATE_PACK_SPINE or (
+                witness == GATE_PLUGIN_BIN_SPINE and assignment["OP"] == "pack"
+            ):
+                # A real pack over the primitive also proves the OP x PRIM pair; the
+                # plugin bin spine's pack runs over a deployed plugin bin/ (#5253).
                 context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
                 cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
             if witness == GATE_BUNDLE_SPINE and assignment["GATE"] in ("none", "allowed"):
@@ -338,6 +355,16 @@ def machine_cells() -> list[MachineCell]:
         _, op, form = key.split("|")
         assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": "bin"}
         cells.append(MachineCell(key, SOURCE_BIN_SPINE, "T-2", assignment))
+    for key in sorted(source_kit_cells()):
+        # A registry package's executable observed through one command (#4096).
+        _, op, form, prim = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": prim}
+        cells.append(MachineCell(key, SOURCE_KIT_SPINE, "T-2", assignment, KNOWN_IDS.get(key)))
+    for key in sorted(source_bundle_cells()):
+        # A local bundle's executable observed through one command (#4096).
+        _, op, form, prim = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": prim}
+        cells.append(MachineCell(key, SOURCE_BUNDLE_SPINE, "T-2", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)

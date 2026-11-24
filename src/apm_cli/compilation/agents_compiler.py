@@ -49,6 +49,7 @@ from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .managed_section import ManagedSectionError
+from .output_writer import refuse_unsafe_output
 from .root_context_protection import (
     _build_expected_rule_filenames,
     _get_deployed_instruction_filenames,
@@ -1729,7 +1730,7 @@ class AgentsCompiler:
         self, output_path: str, content: str, config: "CompilationConfig"
     ) -> str:
         """Build managed-section or full content without mutating disk."""
-        from .managed_section import ManagedSectionError, apply_managed_section
+        from .managed_section import apply_managed_section
 
         if config.agents_md_mode == "managed_section":
             target = Path(output_path)
@@ -1811,10 +1812,9 @@ class AgentsCompiler:
             and self._hand_authored_root_context_blocks_write(agents_path)
         ):
             return None
-        if config.agents_md_mode == "managed_section" and agents_path.is_symlink():
-            raise ManagedSectionError(
-                f"{agents_path} is a symlink. Managed-section output must be a regular file."
-            )
+        refuse_unsafe_output(
+            agents_path, self.base_dir, managed=config.agents_md_mode == "managed_section"
+        )
         try:
             ensure_path_within(agents_path, self.base_dir)
 

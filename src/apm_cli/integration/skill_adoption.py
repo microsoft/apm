@@ -415,6 +415,7 @@ def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple
         _scoped_known_targets_for_reconciliation,
     )
     from apm_cli.integration.skill_layout import resolve_skill_layout
+    from apm_cli.utils.realpath import resolve_path
 
     targets = list(integrator._skill_targets or ())
     # A harness a native plugin route serves is not outside this install (#5036).
@@ -422,7 +423,7 @@ def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple
         getattr(integrator, "_skill_native_harnesses", frozenset())
     )
     active_roots = {
-        target.skills_deploy_path(project_root).resolve()
+        resolve_path(target.skills_deploy_path(project_root))
         for target in targets
         if target.supports("skills")
     }
@@ -439,7 +440,7 @@ def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple
             if legacy and candidate is profile:
                 continue
             root = candidate.skills_deploy_path(project_root)
-            if root.resolve() not in active_roots:
+            if resolve_path(root) not in active_roots:
                 yield candidate, root, legacy
 
 
