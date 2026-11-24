@@ -37,6 +37,7 @@ from apm_cli.utils.path_security import (
     resolve_for_containment,
     resolved_relative_within,
 )
+from apm_cli.utils.realpath import resolve_path
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
@@ -598,7 +599,7 @@ class DeploymentMaterializationSession:
             prepared.append(
                 (
                     DeploymentRecord(locator, (owner,), owner, content_hash),
-                    path.resolve().as_posix(),
+                    resolve_path(path).as_posix(),
                     deployed_path_entry(path, self.root, targets),
                 )
             )

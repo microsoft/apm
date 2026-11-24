@@ -151,3 +151,65 @@ def test_a_fifo_leaf_resolves_without_blocking(tree: Path) -> None:
     fifo = tree / "dir" / "pipe"
     os.mkfifo(fifo)
     assert resolve_path(fifo) == fifo.resolve()
+
+
+@pytest.fixture
+def fresh_proof():
+    realpath._reset_proof()
+    yield
+    realpath._reset_proof()
+
+
+@pytest.mark.skipif(not realpath._FAST, reason="kernel form is Linux-only")
+def test_a_failed_proc_proof_leaves_every_later_call_to_pathlib(
+    tree: Path, fresh_proof: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = tree / "dir" / "sub" / "file.md"
+    expected = candidate.resolve()
+
+    def diverged(*_args, **_kwargs):
+        raise OSError("not reachable from this root")
+
+    monkeypatch.setattr(os, "stat", diverged)
+    assert resolve_path(candidate) == expected
+    monkeypatch.undo()
+
+    def no_kernel(*_args, **_kwargs):
+        raise AssertionError("the kernel form must stay off")
+
+    monkeypatch.setattr(os, "readlink", no_kernel)
+    assert [resolve_path(candidate), resolve_path(tree / "dir")] == [
+        expected,
+        (tree / "dir").resolve(),
+    ]
+
+
+@pytest.mark.skipif(
+    not realpath._FAST or not hasattr(os, "fork"), reason="kernel form is Linux-only"
+)
+def test_a_forked_child_proves_again(tree: Path, fresh_proof: None) -> None:
+    assert resolve_path(tree / "dir") == (tree / "dir").resolve()
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - child
+        os._exit(0 if realpath._proc_state == {"proven": False, "refused": False} else 1)
+    _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 0
+
+
+@_LINKS
+def test_a_skill_linked_out_of_the_bundle_is_still_refused(tmp_path: Path) -> None:
+    from apm_cli.models.validation import validate_apm_package
+
+    outside = tmp_path / "outside" / "evil"
+    outside.mkdir(parents=True)
+    (outside / "SKILL.md").write_text(
+        "---\nname: evil\ndescription: x\n---\n# x\n", encoding="utf-8"
+    )
+    skills = tmp_path / "pkg" / "skills"
+    (skills / "good").mkdir(parents=True)
+    (skills / "good" / "SKILL.md").write_text(
+        "---\nname: good\ndescription: x\n---\n# x\n", encoding="utf-8"
+    )
+    (skills / "evil").symlink_to(outside, target_is_directory=True)
+    result = validate_apm_package(tmp_path / "pkg")
+    assert [e for e in result.errors if "evil" in e and "outside" in e]
