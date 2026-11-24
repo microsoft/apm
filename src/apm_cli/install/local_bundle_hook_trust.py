@@ -299,7 +299,9 @@ def bundle_hook_ownership(
     problems: list[str] = []
     for state in states:
         scripted = _scripted_slugs(state, bundle_paths, project_root)
-        if state.sidecar_unreadable or (state.config_unreadable and scripted):
+        if state.sidecar_unreadable or (
+            state.config_unreadable and (scripted or _recorded_slugs(state))
+        ):
             problems.append(
                 f"{state.label}: the hook config or its ownership record cannot be read, "
                 "so bundle hooks there cannot be attributed"

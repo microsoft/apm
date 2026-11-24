@@ -35,7 +35,9 @@ pytestmark = [
 ]
 
 
-def _hooked_bundle(world: MarketplacePackWorld, tmp_path: Path) -> tuple[Path, str]:
+def _hooked_bundle(
+    world: MarketplacePackWorld, tmp_path: Path, *, inline: bool = False
+) -> tuple[Path, str]:
     producer = world.isolated.work_root / "hookpkg"
     write(
         producer / "apm.yml",
@@ -43,11 +45,10 @@ def _hooked_bundle(world: MarketplacePackWorld, tmp_path: Path) -> tuple[Path, s
         "dependencies:\n  apm: []\n",
     )
     write(producer / ".apm" / "skills" / "hs" / "SKILL.md", skill_md("hs"))
+    command = "echo inline" if inline else "./scripts/x.sh"
     hook = {
         "hooks": {
-            "PreToolUse": [
-                {"matcher": "Bash", "hooks": [{"type": "command", "command": "./scripts/x.sh"}]}
-            ]
+            "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": command}]}]
         }
     }
     write(producer / ".apm" / "hooks" / "hooks.json", json.dumps(hook))
@@ -69,6 +70,9 @@ _EXPECTED = {
     "marker-copied": "hookpkg: a deployed hook entry was changed outside APM",
     "sidecar-corrupt": ".claude/settings.json: the hook config or its ownership record cannot be read",
     "sidecar-missing": "hookpkg: .claude/settings.json has no ownership record",
+    "config-unreadable-inline": (
+        ".claude/settings.json: the hook config or its ownership record cannot be read"
+    ),
 }
 
 
@@ -79,7 +83,7 @@ def test_audit_names_bundle_hooks_apm_can_no_longer_attribute(
     """An approved bundle hook passes audit; an edited entry, or an unreadable or missing
     ownership record, fails it naming what APM can no longer attribute (#5078)."""
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
-    bundle, key = _hooked_bundle(world, tmp_path)
+    bundle, key = _hooked_bundle(world, tmp_path, inline=change == "config-unreadable-inline")
     consumer = world.consumer("consumer", targets=("claude",))
     manifest = load_yaml(consumer / "apm.yml")
     manifest["executables"] = {"allow": {key: {"hooks": True}}}
@@ -100,9 +104,12 @@ def test_audit_names_bundle_hooks_apm_can_no_longer_attribute(
         sidecar.write_text("{not json", encoding="utf-8")
     elif change == "sidecar-missing":
         sidecar.unlink()
+    elif change == "config-unreadable-inline":
+        # A JSONC comment a harness tolerates; APM cannot parse it.
+        settings_path.write_text("// mine\n" + settings_path.read_text("utf-8"), encoding="utf-8")
     before = settings_path.read_bytes()
 
-    audit = world.apm(consumer, "audit", "--ci", "--no-policy", expect=None)
+    audit = world.apm(consumer, "audit", "--ci", "--no-policy", "--no-fail-fast", expect=None)
 
     text = output(audit)
     if _EXPECTED[change] is None:
