@@ -119,14 +119,14 @@ def interrupted_staging(
 ) -> set[str]:
     """Staging files an atomic write left when killed before its rename (#5395).
 
-    A regular file named with APM's staging prefix is APM's in-flight state
+    A regular file with the exact name an atomic write stages under is APM's in-flight state
     only when nothing recorded it (*known*: the prior state, the unit's seal
     and every write event) and a content write APM began in the same
     directory, below the unit, never sealed. A directory creation or removal
     is no such write. Anything else is judged as before, so a recorded file
     a user edited is still kept.
     """
-    from apm_cli.utils.atomic_io import STAGING_PREFIX
+    from apm_cli.utils.atomic_io import STAGING_NAME
 
     pending = {
         posixpath.dirname(rel)
@@ -137,7 +137,7 @@ def interrupted_staging(
         rel
         for rel, fingerprint in entries.items()
         if rel not in known
-        and posixpath.basename(rel).startswith(STAGING_PREFIX)
+        and STAGING_NAME.fullmatch(posixpath.basename(rel))
         and posixpath.dirname(rel) in pending
         # A regular file: "<hash>:<mode>", never a directory, link or other entry.
         and ":" in fingerprint

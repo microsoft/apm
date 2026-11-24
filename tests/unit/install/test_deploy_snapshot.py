@@ -2754,7 +2754,7 @@ def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_hom
     assert manifest.read_text(encoding="utf-8").count("\n") >= 2
 
 
-_STAGED = "apm-atomic-k3x9"
+_STAGED = "apm-atomic-k3x9q2_z"
 _WRITE = ("pending", "sha256:" + "0" * 64, None)
 _SEALED = "sha256:" + "0" * 64 + ":420"
 
@@ -2766,7 +2766,8 @@ _SEALED = "sha256:" + "0" * 64 + ":420"
         (_STAGED, {"SKILL.md": _SEALED}, False, False),
         ("notes.md", {"SKILL.md": _WRITE}, False, False),
         (_STAGED, {"SKILL.md": _WRITE}, True, False),
-        (_STAGED, {"": ("pending", "absent", None)}, False, False),
+        (_STAGED, {"": "removal"}, False, False),
+        ("apm-atomic-notes.md", {"SKILL.md": _WRITE}, False, False),
     ],
     ids=[
         "staging-beside-unsealed-write",
@@ -2774,6 +2775,7 @@ _SEALED = "sha256:" + "0" * 64 + ":420"
         "user-file",
         "recorded-staging-name-edited",
         "pending-directory-removal-only",
+        "staging-prefix-wrong-shape",
     ],
 )
 def test_a_staging_file_is_apms_only_beside_an_unsealed_write(
@@ -2792,6 +2794,10 @@ def test_a_staging_file_is_apms_only_beside_an_unsealed_write(
     (skill / name).write_bytes(b"partial bytes")
     sealed = {name: "sha256:" + "1" * 64 + ":420"} if recorded else {}
     whole = {"dir": sealed, "mode": file_mode(skill)}
+    if events.get("") == "removal":
+        # A removal of the directory APM began after sealing it, never sealed: replay
+        # judges the partial tree entry by entry (#5087).
+        events = {"": ("pending", "absent", whole)}
     unit = _Replay("skill", skill, "absent", None, {}, (), events={"": whole, **events})
 
     apply, kept = _decide([unit])
