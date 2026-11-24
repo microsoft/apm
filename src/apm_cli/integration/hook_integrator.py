@@ -85,6 +85,7 @@ from apm_cli.integration.hook_ownership import (
 from apm_cli.integration.hook_ownership import (
     reinject_apm_source_from_sidecar as _reinject_apm_source_from_sidecar,
 )
+from apm_cli.integration.hook_ownership import require_hook_event_lists as _hook_lists
 from apm_cli.integration.hook_source_selection import (
     HookSourceSelection,
     _parse_hook_json,
@@ -1341,8 +1342,8 @@ class HookIntegrator(BaseIntegrator):
                 if not isinstance(entries, list) or not entries:
                     continue
                 event_name = event_map.get(raw_event_name, raw_event_name)
-                if event_name not in json_config[container]:
-                    json_config[container][event_name] = []
+                events = (event_name, *sorted(reverse_map.get(event_name, ())))
+                _hook_lists(json_config[container], events, json_path, project_root, user_scope)
                 legacy_content_keys = {
                     self._hook_entry_content_key(entry)
                     for entry in _legacy_hook_entries(entries, config.target_key)

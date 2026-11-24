@@ -858,3 +858,45 @@ def test_safety_rejection_of_a_consent_kept_file_is_always_a_failure(
 
     assert rel in result.rejected and rel in failures and rel in unsafe
     assert (outside / "kept.json").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+@pytest.mark.parametrize("consent", [True, False], ids=["trust-lockfile", "plain"])
+def test_hook_sync_unlinks_agrees_with_the_hook_sync_under_consent(
+    tmp_path: Path, consent: bool
+) -> None:
+    """#5139: the read-only hook link decision keeps what the consented hook sync keeps."""
+    from apm_cli.integration.cleanup import (
+        DeploymentEvidence,
+        hook_sync_unlinks,
+        managed_hook_prefixes,
+        remove_synced_files,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    rel = ".github/hooks/pkg-hooks.json"
+    real = _make_managed_file(tmp_path, "elsewhere/hooks.json")
+    link = tmp_path / rel
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(real)
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path, receipts={}, render=lambda _owner: None, kept=()
+    )
+    if consent:
+        evidence.consent_to_lockfile_hashes()
+
+    predicted = hook_sync_unlinks(rel, tmp_path, recorded_hash=None, lockfile_consent=consent)
+    result = remove_synced_files(
+        {rel},
+        tmp_path,
+        prefixes=managed_hook_prefixes(),
+        dep_key="<uninstall hooks>",
+        targets=list(KNOWN_TARGETS.values()),
+        evidence=evidence,
+        recorded_hashes={},
+        allow_final_symlink=True,
+    )
+
+    assert predicted is (rel in result.deleted)
+    assert predicted is not consent
+    assert link.is_symlink() is consent

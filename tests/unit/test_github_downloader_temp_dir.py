@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
 pytestmark = pytest.mark.component
 
@@ -34,8 +35,12 @@ def _make_downloader():
         return GitHubPackageDownloader()
 
 
-def _make_virtual_dep_ref(subdir="src/agent", ref="main"):
-    """Return a MagicMock dep_ref that passes is_virtual subdirectory checks."""
+def _make_virtual_dep_ref(subdir="src/agent", ref=None):
+    """Return a MagicMock dep_ref that passes is_virtual subdirectory checks.
+
+    The default branch: a named ref is resolved to its commit before any
+    temp directory exists (#5138), which a mock cannot do.
+    """
     dep_ref = MagicMock()
     dep_ref.is_virtual = True
     dep_ref.virtual_path = subdir
@@ -74,6 +79,23 @@ class TestDownloadSubdirectoryPermissionError:
             )
         msg = str(exc_info.value)
         assert "apm config set temp-dir" in msg
+
+    def test_permission_error_for_a_named_ref_raises_runtime_error_with_suggestion(self, tmp_path):
+        """A named ref reaches the same mkdtemp handling once resolved to its commit."""
+        downloader = _make_downloader()
+        dep_ref = _make_virtual_dep_ref(ref="main")
+        resolved = ResolvedReference("main", GitReferenceType.BRANCH, "a" * 40, "main")
+        downloader.resolve_git_reference = MagicMock(return_value=resolved)
+        with (
+            patch("apm_cli.cache.commit_reachability.admit_pinned_commit") as admit,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            self._invoke_with_mkdtemp_error(
+                downloader, dep_ref, PermissionError("denied"), tmp_path
+            )
+        assert "apm config set temp-dir" in str(exc_info.value)
+        assert admit.call_args.kwargs["resolved"] is resolved
+        assert not (tmp_path / "target").exists()
 
     def test_permission_error_message_mentions_access_denied(self, tmp_path):
         """RuntimeError message explains that access was denied."""

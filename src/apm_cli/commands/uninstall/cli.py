@@ -74,6 +74,7 @@ from .local_reanchor import (
     _refuse_unverifiable_local_survivors,
     _rename_reanchored_receipts,
     _undo_reanchor,
+    discard_set_aside_copies,
 )
 from .selection_shrink import (
     _shrink_surviving_selections,
@@ -560,6 +561,7 @@ def _persist_lock_then_resync_native(
     except BaseException as exc:
         _undo_reanchor(exc, moved, modules_dir, still_needed_repairs, logger)
         raise
+    discard_set_aside_copies(moved, modules_dir, logger)
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,
@@ -846,11 +848,13 @@ def _cleanup_stale_lsp(
     deploy_root: Any,
     user_scope: bool,
     logger: Any,
+    command: str = "Uninstall",
 ) -> tuple[bool, Exception | None]:
-    """Reconcile LSP state after uninstall and render an actionable failure.
+    """Reconcile LSP state after uninstall or prune and render an actionable failure.
 
     The post-removal manifest is loaded here when MCP cleanup did not already
-    load it, so LSP-only scopes reconcile too (#4045, #3768).
+    load it, so LSP-only scopes reconcile too (#4045, #3768). ``apm prune``
+    calls it for the packages it removes (#5250).
     """
     try:
         from ...install.lsp.integration import (
@@ -876,7 +880,7 @@ def _cleanup_stale_lsp(
     except Exception as cleanup_error:
         recovery_command = "apm install --global" if user_scope else "apm install"
         logger.error(
-            "Uninstall incomplete: package removal completed, but LSP cleanup "
+            f"{command} incomplete: package removal completed, but LSP cleanup "
             f"failed: {cleanup_error}. Fix the LSP config path, then run "
             f"'{recovery_command}' to reconcile stale entries."
         )

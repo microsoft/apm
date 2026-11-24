@@ -983,6 +983,7 @@ def integrate_local_bundle(
                 hooks_approved=_hooks_approved_bundle,
                 canvas_approved=_canvas_ok,
                 rendering_extension=_renderings.get(_rel_norm),
+                source=src,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -992,6 +993,7 @@ def integrate_local_bundle(
                     target=target,
                     hooks_approved=_hooks_approved_bundle,
                     canvas_approved=_canvas_ok,
+                    source=src,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))
@@ -1145,7 +1147,10 @@ def integrate_local_bundle(
     if _canvas_ok and not dry_run:
         from .local_bundle_canvas import record_bundle_canvas
 
-        record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)
+        user_scope = scope is InstallScope.USER
+        record_bundle_canvas(
+            project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope
+        )
 
     from .local_bundle_hooks import integrate_local_bundle_hooks
 

@@ -98,6 +98,9 @@ GATE_PLUGIN_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::"
     "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
 )
+SOURCE_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
+)
 _OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
 # Witnesses whose package can deploy a bin/ artifact, with the scope it lands at
 # (#4981). Loose bin/ deploys only for a user-scope marketplace plugin with a
@@ -107,6 +110,7 @@ _OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
 BIN_WITNESSES: Mapping[str, str] = {
     GATE_BIN_SPINE: "user",
     GATE_PLUGIN_BIN_SPINE: "project",
+    SOURCE_BIN_SPINE: "project",
     **{
         _OWNERSHIP + name: "user"
         for name in (
@@ -117,6 +121,8 @@ BIN_WITNESSES: Mapping[str, str] = {
     },
     "tests/lifecycle/scenarios/test_user_scope.py::"
     "test_a_plugin_bin_deploys_under_home_once_trusted": "user",
+    "tests/lifecycle/scenarios/test_user_scope.py::"
+    "test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states": "user",
     "tests/lifecycle/scenarios/test_policy_pairs.py::"
     "test_a_denied_plugin_with_bin_is_refused_at_user_scope": "user",
     **{
@@ -138,6 +144,51 @@ def credits_bin(node: str, cell: Mapping[str, str]) -> bool:
         return True
     scope = BIN_WITNESSES.get(node)
     return scope is not None and cell.get("SCOPE", scope) == scope
+
+
+# (OP, SRC, PRIM) source-spine steps whose primitive the spine never observed on a
+# surface (dimension audit, lifecycle-journeys run 45258714621): a registry or local
+# bundle package's executable at a non-install step. The spine records no gate level
+# there, so neither a deploy nor a parked decision is proven (#4981 generalized).
+SOURCE_SPINE_UNOBSERVED: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        *(
+            (op, "pkg-registry", prim)
+            for op in ("audit", "lock", "prune", "uninstall", "update")
+            for prim in ("hook", "lsp", "canvas")
+        ),
+        ("compile", "pkg-registry", "canvas"),
+        *((op, "local-bundle", "canvas") for op in ("approve-deny", "audit", "compile", "lock")),
+        *((op, "local-bundle", "hook") for op in ("audit", "lock")),
+        *((op, "local-bundle", "lsp") for op in ("approve-deny", "audit", "lock")),
+    }
+)
+
+
+def deployable_prims(scope: str) -> frozenset[str]:
+    """Primitives a lifecycle world can deploy at *scope*: the kinds of that scope's
+    surface table (``rows._SURFACE_GLOBS``, ``machines._kit.USER_SURFACE_GLOBS``),
+    plus skills and project instructions. bin/ is decided by ``BIN_WITNESSES``."""
+    from tests.lifecycle.machines._kit import USER_SURFACE_GLOBS
+    from tests.lifecycle.rows import _SURFACE_GLOBS
+
+    table = _SURFACE_GLOBS if scope == "project" else USER_SURFACE_GLOBS
+    extra = {"skill", "other-file"} if scope == "project" else {"skill"}
+    return frozenset({kind for kind, _ in table} | extra) - {"bin"}
+
+
+def credits_dimension(node: str, cell: Mapping[str, str]) -> bool:
+    """Whether *node* exercises *cell*'s primitive: it deploys (or the gate decides) that
+    primitive at the cell's scope. A witness that never does proves nothing about it."""
+    prim = cell.get("PRIM")
+    if prim is None:
+        return True
+    if prim == "bin":
+        return credits_bin(node, cell)
+    if "SCOPE" in cell and prim not in deployable_prims(cell["SCOPE"]):
+        return False
+    step = (cell.get("OP"), cell.get("SRC"), prim)
+    return not (node == SOURCE_SPINE and step in SOURCE_SPINE_UNOBSERVED)
 
 
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
@@ -224,6 +275,7 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
+    from tests.lifecycle.machines._source_bin import source_bin_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
@@ -281,6 +333,11 @@ def machine_cells() -> list[MachineCell]:
         # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
         assignment = {"PRIM": "bin", "SCOPE": "project"}
         cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
+    for key in sorted(source_bin_cells()):
+        # A whole plugin's bin/ declared by one form through one command (#4096).
+        _, op, form = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": "bin"}
+        cells.append(MachineCell(key, SOURCE_BIN_SPINE, "T-2", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)
@@ -336,8 +393,11 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
+        # The whole step, not only the projected id: an unexercised step credits no pair.
+        if not credits_dimension(cell.witness, cell.assignment):
+            continue
         for key in credits(cell):
-            if key in obligations and credits_bin(cell.witness, parse_cell(key)[1]):
+            if key in obligations and credits_dimension(cell.witness, parse_cell(key)[1]):
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
     for key, nodes in sorted(by_node.items()):
@@ -412,7 +472,7 @@ def scenario_witnesses(
             if (
                 key in obligations
                 and lanes.get(key) in SCENARIO_LANES
-                and credits_bin(credit.node, parse_cell(key)[1])
+                and credits_dimension(credit.node, parse_cell(key)[1])
             ):
                 by_key.setdefault(key, []).append(credit)
     witnesses: dict[str, Witness] = {}

@@ -607,6 +607,98 @@ def test_a_shared_config_a_user_edits_after_the_kill_is_kept(
     assert _text(result).isascii(), _evidence(result)
 
 
+# -- two writers of one shared config in one install (#5051) ---------------------------
+#
+# Each package's hooks are merged into the shared settings by its own write. The
+# journal keeps the settings as the install first found them, so the records must
+# vouch for undoing every write of this install, not only the last one.
+
+
+def _write_package_hook(chain: Chain, revision: str) -> None:
+    hooks = chain.project / "pkg" / ".apm" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    command = {"type": "command", "command": f"echo pkg-{revision}"}
+    data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [command]}]}}
+    (hooks / "pkg.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_a_kill_after_two_writers_changed_one_shared_config_is_restored(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    chain = Chain(tmp_path / "two-writers", apm_binary_path, dirs=(".claude",))
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    chain.write_manifest([], apm=["./pkg"], targets=["claude"], includes="auto")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    settings = chain.project / _SETTINGS
+    installed = settings.read_text(encoding="utf-8")
+    assert "lint-v1" in installed and "pkg-v1" in installed, installed
+
+    _write_package_hook(chain, "v2")
+    _write_root_hook(chain, "v2")
+    _kill_mid_refusal(chain, _SHARED_GATE.fault)
+    _unit(_journal(_abandoned(chain)), _SETTINGS)
+    changed = settings.read_text(encoding="utf-8")
+    assert "lint-v2" in changed and "pkg-v2" in changed, changed
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "Kept" not in _text(result), _evidence(result)
+    assert "interrupted install" in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+
+
+# -- cleanup rewrites of files the records do not know yet (#5038) ---------------------
+#
+# An install before the config file records existed left hook settings with no
+# record. A later install's cleanup that rewrites them records them as legacy, so a
+# kill after that rewrite is restored on the next install like any recorded write.
+
+_USERS_SETTINGS = {"permissions": {"allow": ["Bash(ls)"]}}
+
+
+def test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    chain = Chain(tmp_path / "cleanup", apm_binary_path, dirs=(".claude", ".github"))
+    settings = chain.project / _SETTINGS
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps(_USERS_SETTINGS, indent=2) + "\n", encoding="utf-8")
+    _write_root_hook(chain, "v1")
+    chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    assert "lint-v1" in settings.read_text(encoding="utf-8")
+    # Installed before the records existed: nothing vouches for the settings yet.
+    shutil.rmtree(Path(chain.env["APM_HOME"]) / "deployment-receipts" / "config-files")
+
+    # Dropping Claude cleans APM's hook out of the shared settings; kill after that
+    # write is done (and recorded), before the sidecar is touched.
+    chain.write_manifest([], apm=[], targets=["copilot"], includes="auto")
+    _kill_mid_refusal(chain, "deploy+kill", APM_TEST_DEPLOY_KILL_BEFORE=_SIDECAR)
+    journal = _journal(_abandoned(chain))
+    assert _unit(journal, _SETTINGS)["path"] == _SETTINGS, journal
+    assert _SIDECAR not in {line.get("path") for line in journal}, journal
+    assert json.loads(settings.read_text(encoding="utf-8")) == _USERS_SETTINGS
+    chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "Kept" not in _text(result), _evidence(result)
+    assert "interrupted install" in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+
+
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -750,3 +842,68 @@ def test_a_local_bundle_retire_killed_mid_delete_is_replayed(
     assert _tree_state(chain.project) == before, _evidence(result)
     assert _stores(chain) == [], _evidence(result)
     _assert_lock_matches_disk(chain.project)
+
+
+# -- adversarial journals for the two-writer case (#5098 cut hunt) ---------------------
+
+
+def _killed_two_writers(tmp_path: Path, binary: Path) -> tuple[Chain, dict[str, str]]:
+    chain = Chain(tmp_path / "two-writers", binary, dirs=(".claude",))
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    chain.write_manifest([], apm=["./pkg"], targets=["claude"], includes="auto")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    _write_package_hook(chain, "v2")
+    _write_root_hook(chain, "v2")
+    _kill_mid_refusal(chain, _SHARED_GATE.fault)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    return chain, before
+
+
+def test_a_journal_whose_token_is_forged_does_not_vouch_for_two_writers(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The records vouch only for the journal token they name: a header with another
+    token restores nothing, keeps the journal and names the shared config (#5051)."""
+    chain, _before = _killed_two_writers(tmp_path, apm_binary_path)
+    store = _abandoned(chain)
+    journal = _journal(store)
+    assert journal[0].get("token"), journal[0]
+    journal[0]["token"] = "0" * len(str(journal[0]["token"]))
+    _write_journal(store, journal)
+    settings = chain.project / _SETTINGS
+    held = settings.read_bytes()
+
+    _assert_kept_and_reported(chain, _SHARED_GATE, store, _SETTINGS)
+    assert settings.read_bytes() == held
+
+
+def test_a_cold_clone_without_the_journal_converges_on_the_next_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A fresh clone of the killed tree on another machine: no abandoned journal, no
+    apm_modules, no deployment or config-file receipts and no download cache. The next
+    install has nothing to replay: it converges to the manifest, the lockfile matches
+    disk and ``audit --ci`` passes."""
+    chain, before = _killed_two_writers(tmp_path, apm_binary_path)
+    shutil.rmtree(_abandoned(chain))
+    shutil.rmtree(chain.project / "apm_modules", ignore_errors=True)
+    receipts = sorted(Path(chain.env["APM_HOME"]).glob("deployment-receipts*"))
+    assert receipts, sorted(Path(chain.env["APM_HOME"]).iterdir())
+    for machine_local in (*receipts, chain.isolated.cache_root):
+        shutil.rmtree(machine_local, ignore_errors=True)
+    chain.isolated.cache_root.mkdir(parents=True)
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "interrupted install" not in _text(result), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    _assert_lock_matches_disk(chain.project)
+    audit = chain.run("audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)

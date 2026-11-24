@@ -27,7 +27,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -742,16 +742,16 @@ class GitConfigEntry:
 
     scope: str
     key: str
-    value: str
+    value: str = field(repr=False)  # may carry an extraheader credential
 
 
 @dataclass(frozen=True)
 class _GitConfigSnapshot:
     """Configuration facts validated for one Git child."""
 
-    entries: tuple[GitConfigEntry, ...]
-    rewrites: tuple[tuple[str, str], ...]
-    http_headers: tuple[GitConfigEntry, ...]
+    entries: tuple[GitConfigEntry, ...] = field(repr=False)
+    rewrites: tuple[tuple[str, str], ...] = field(repr=False)
+    http_headers: tuple[GitConfigEntry, ...] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -771,7 +771,26 @@ def _read_effective_git_config(
     git_dir: Path | None = None,
     worktree: Path | None = None,
 ) -> _GitConfigSnapshot:
-    """Return the flattened config visible to one Git child."""
+    """Return the flattened config visible to one Git child, probed once per invocation."""
+    from apm_cli.utils import git_config_memo
+
+    return git_config_memo.read(
+        lambda: _probe_effective_git_config(env, git_dir=git_dir, worktree=worktree),
+        env,
+        git=get_git_executable(),
+        git_dir=git_dir,
+        worktree=worktree,
+        config_paths=git_config_memo.git_config_paths,
+    )
+
+
+def _probe_effective_git_config(
+    env: dict[str, str],
+    *,
+    git_dir: Path | None = None,
+    worktree: Path | None = None,
+) -> _GitConfigSnapshot:
+    """Spawn ``git config --list`` for the flattened config visible to one Git child."""
     if git_dir is not None and worktree is not None:
         raise ValueError("git_dir and worktree are mutually exclusive")
     command = [get_git_executable()]
@@ -2050,6 +2069,9 @@ def reset_git_cache() -> None:
     _git_executable = None
     _gh_executable = None
     _real_git_tls_config_cache = None
+    from apm_cli.utils import git_config_memo
+
+    git_config_memo.forget()
 
 
 def git_long_paths_args() -> list[str]:

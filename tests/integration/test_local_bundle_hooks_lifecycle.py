@@ -521,6 +521,82 @@ def test_tampered_bundle_refusal_names_the_reason_and_remedy(
     assert tree_bytes(consumer) == before
 
 
+# -- the bundle's hook sidecar is in the config file records (#5039) -------------------
+
+_SIDECAR = ".github/apm-hooks.json"
+
+
+def _named_bundle(world: MarketplacePackWorld, tmp_path: Path, name: str) -> tuple[Path, str]:
+    producer = _hooked_package(world.isolated.work_root / name, name, "Bash", f"{name}-skill")
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / f"out-{name}"))
+    bundle = tmp_path / f"out-{name}" / f"{name}-1.0.0"
+    info = detect_local_bundle(bundle)
+    return bundle, local_bundle_approval_key(
+        info.package_id, str(info.plugin_json.get("version") or ""), info.source_dir, info.lockfile
+    )
+
+
+def _recorded(world: MarketplacePackWorld, path: Path) -> dict | None:
+    """This machine's config file record of *path* (what crash recovery verifies)."""
+    records = Path(world.env["APM_HOME"]) / "deployment-receipts" / "config-files"
+    rows = [
+        row
+        for store in (sorted(records.glob("*.json")) if records.is_dir() else ())
+        for row in json.loads(store.read_text(encoding="utf-8")).get("files", [])
+    ]
+    return next((row for row in rows if row["path"] == path.resolve().as_posix()), None)
+
+
+def test_bundle_sidecar_writes_keep_the_config_file_records_current(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Every write of the bundle hook sidecar is recorded with the bytes it left, so
+    crash recovery can verify the sidecar when a journaled install later changes it."""
+    import hashlib
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle_a, key_a = _named_bundle(world, tmp_path, "pkga")
+    bundle_b, key_b = _named_bundle(world, tmp_path, "pkgb")
+    consumer = world.consumer("bundle-consumer", targets=("copilot",))
+    _allow(consumer, key_a, key_b)
+    sidecar = consumer / _SIDECAR
+
+    for bundle in (bundle_a, bundle_b):
+        world.apm(consumer, "install", str(bundle), "--no-policy")
+        row = _recorded(world, sidecar)
+        assert row is not None, f"no record of {_SIDECAR} after installing {bundle.name}"
+        digest = "sha256:" + hashlib.sha256(sidecar.read_bytes()).hexdigest()
+        assert row["hash"] == digest, (row, sidecar.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("outside", ["dangling", "json"])
+def test_bundle_sidecar_link_is_replaced_and_its_target_left_alone(
+    tmp_path: Path, apm_binary_path: Path, outside: str
+) -> None:
+    """A linked hook record file is replaced by a regular file; what it linked to is untouched."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _named_bundle(world, tmp_path, "pkga")
+    consumer = world.consumer("linked-sidecar", targets=("copilot",))
+    _allow(consumer, key)
+    target = tmp_path / "outside" / "hooks.json"
+    target.parent.mkdir()
+    if outside == "json":
+        target.write_text('{"keep": true}\n', encoding="utf-8")
+    before = target.read_bytes() if target.exists() else None
+    sidecar = consumer / _SIDECAR
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        sidecar.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+
+    assert (target.read_bytes() if target.exists() else None) == before
+    assert sidecar.is_file() and not sidecar.is_symlink()
+
+
 def _bundle_hook_claims(world: MarketplacePackWorld, project: Path) -> list[str]:
     lock = world.lock(project)
     return [p for p in lock.get("local_deployed_files") or [] if "/hooks/" in p]
@@ -1564,6 +1640,56 @@ def test_uninstall_bundle_keeps_kiro_scripts_beside_an_unreadable_hook_file(
     assert all((consumer / c).is_file() and c in claims for c in kiro_scripts), claims
 
 
+def test_uninstall_bundle_refuses_a_sidecar_record_with_malformed_hook_files(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144: ``hook_files: {}`` is a corrupted record, never "no hook files"; refuse."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "malformed-hook-files-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = {}
+    write(sidecar, json.dumps(data))
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+    assert ".github/apm-hooks.json (unreadable)" in refused, refused
+    assert "Traceback" not in refused, refused
+    assert tree_bytes(consumer) == before
+
+
+def test_install_retires_nothing_from_a_corrupt_sidecar_and_names_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5144 review: reconciliation reads the sidecar first; nothing is unlinked."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, hook = _copilot_bundle_consumer(world, tmp_path, "corrupt-revoked-consumer")
+    sidecar = consumer / ".github" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    (record,) = data["local-bundle-hooks"]
+    record["hook_files"] = {}
+    write(sidecar, json.dumps(data))
+    _allow(consumer, "sha256:" + "0" * 64)  # the gate stays on; the bundle is revoked
+    deployed = {
+        path: (consumer / path).read_bytes()
+        for path in [hook, *(c for c in _claims(world, consumer) if c.endswith("/x.sh"))]
+    }
+    sidecar_bytes = sidecar.read_bytes()
+    dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
+
+    # Installing anything reconciles bundle hooks the trust no longer admits.
+    result = world.apm(consumer, "install", str(dep), "--no-policy", expect=None)
+
+    text = output(result)
+    assert result.returncode != 0, text
+    assert ".github/apm-hooks.json (unreadable)" in text, text
+    assert "Traceback" not in text, text
+    assert {path: (consumer / path).read_bytes() for path in deployed} == deployed
+    assert sidecar.read_bytes() == sidecar_bytes
+    assert all(path in _claims(world, consumer) for path in deployed)
+
+
 def test_uninstall_bundle_refuses_a_malformed_per_file_sidecar_before_writing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -1600,3 +1726,154 @@ def test_uninstall_bundle_path_refuses_a_keyed_and_a_keyless_copy(
     assert "hookpkg, team-hooks" in refused, refused
     assert "Run 'apm uninstall <installed-name>'" in refused, refused
     assert tree_bytes(consumer) == before
+
+
+_BUNDLE_SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+
+
+def _user_hook(consumer: Path, where: str, command: str) -> str:
+    """Register a user hook that runs *command*; return the config it lives in."""
+    if where == "copilot":
+        write(
+            consumer / ".github" / "hooks" / "mine.json",
+            json.dumps(
+                {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": command}]}}
+            ),
+        )
+        return ".github/hooks/mine.json"
+    settings = consumer / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    entry = {"matcher": "Mine", "hooks": [{"type": "command", "command": command}]}
+    data["hooks"]["PreToolUse"].append(entry)
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return ".claude/settings.json"
+
+
+@pytest.mark.parametrize(
+    ("where", "command"),
+    [
+        ("copilot", f"bash {_BUNDLE_SCRIPT}"),
+        ("claude", "./x.sh"),
+        ("claude", "cd .claude/hooks/hookpkg/hooks/scripts && ./x.sh"),
+        ("claude", "sh .claude/hooks/hookpkg/hooks/scripts/./x.sh"),
+        ("claude", "sh hooks/hookpkg/hooks/scripts/./x.sh"),
+        ("claude", "sh -c 'sh .claude/hooks/hookpkg/hooks/scripts/./x.sh'"),
+        ("claude", "S=x; sh .claude/hooks/hookpkg/hooks/scripts/$S.sh"),
+        ("copilot", "sh .claude/hooks/hookpkg/hooks/scripts/x.\\\nsh"),
+    ],
+    ids=[
+        "other-target",
+        "dot-slash",
+        "cd-prefix",
+        "dot-segment",
+        "target-root",
+        "nested",
+        "variable",
+        "backslash-newline",
+    ],
+)
+def test_uninstall_bundle_keeps_a_script_a_user_hook_runs_under_any_spelling(
+    tmp_path: Path, apm_binary_path: Path, where: str, command: str
+) -> None:
+    """#5106: a user hook still running a bundle script, however spelled, refuses uninstall."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, f"spelling-{where}-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    config = _user_hook(consumer, where, command)
+    assert _BUNDLE_SCRIPT in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+
+    assert config in text, text
+    assert "Removed hooks from local bundle 'hookpkg'" not in text, text
+    assert "Traceback" not in text, text
+    assert (consumer / _BUNDLE_SCRIPT).is_file()
+    assert _BUNDLE_SCRIPT in _claims(world, consumer)
+
+
+def test_uninstall_bundle_ignores_a_user_hook_running_another_script(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5106 control: a user hook that runs an unrelated script never blocks uninstall."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "unrelated-hook-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    _user_hook(consumer, "claude", "./tools/lint.sh")
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / _BUNDLE_SCRIPT).exists()
+    assert _BUNDLE_SCRIPT not in _claims(world, consumer)
+    assert _hook_entries(consumer) == {"PreToolUse": ["Mine"]}
+
+
+def _user_hook_naming_the_script(consumer: Path, document_for) -> str:
+    """Write an unowned per-file hook built around the bundle's script; return the script."""
+    (script,) = [c for c in _claims_of(consumer) if c.endswith("/x.sh")]
+    write(consumer / ".github" / "hooks" / "user.json", json.dumps(document_for(script)))
+    return script
+
+
+def _claims_of(consumer: Path) -> list[str]:
+    return list(load_yaml(consumer / "apm.lock.yaml").get("local_deployed_files") or [])
+
+
+def test_uninstall_bundle_ignores_a_script_named_only_in_hook_metadata(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5136: only handler command fields run a script; env metadata naming it does not."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "metadata-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {
+                "preToolUse": [{"type": "command", "bash": "echo safe", "env": {"command": path}}]
+            },
+        },
+    )
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg"))
+
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / script).exists()
+    assert script not in _claims_of(consumer)
+
+
+def test_uninstall_bundle_keeps_a_script_a_user_hook_handler_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5136 control: a handler that runs the script still keeps it and refuses."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "handler-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": path}]}},
+    )
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".github/hooks/user.json" in text, text
+    assert "Traceback" not in text, text
+    assert (consumer / script).is_file()
+    assert script in _claims_of(consumer)
+
+
+def test_uninstall_bundle_refuses_a_hook_shape_the_grammar_does_not_recognize(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5136: an unrecognized hook shape naming the script fails closed, as before."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "unknown-shape-consumer")
+    script = _user_hook_naming_the_script(
+        consumer, lambda path: {"hooks": [{"action": {"type": "command", "command": path}}]}
+    )
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".github/hooks/user.json" in text, text
+    assert (consumer / script).is_file()

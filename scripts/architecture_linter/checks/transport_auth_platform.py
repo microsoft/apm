@@ -1725,7 +1725,7 @@ _RID_URL_PATH = "transport-platform-url-path-security"
 _PATH_SECURITY_OWNER = "src/apm_cli/utils/path_security.py"
 
 
-_SYMLINK_DEF = re.compile(r"^def has_symlink_component\(")
+_SYMLINK_DEF = re.compile(r"^def (has_symlink_component|first_symlink_component)\(")
 
 
 _UNQUOTE = re.compile(r"unquote(_to_bytes)?\(")
@@ -1778,8 +1778,22 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
             inv,
             _RID_URL_PATH,
             _PATH_SECURITY_OWNER,
-            (("re", r"^def has_symlink_component\(", 1, "eq"),),
-            "has_symlink_component must be owned by utils/path_security.py",
+            (
+                ("re", r"^def has_symlink_component\(", 1, "eq"),
+                ("re", r"^def first_symlink_component\(", 1, "eq"),
+            ),
+            "has_symlink_component and first_symlink_component must be owned by "
+            "utils/path_security.py",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            _PATH_SECURITY_OWNER,
+            ("return first_symlink_component(base_dir, path) is not None",),
+            "has_symlink_component must decide through first_symlink_component",
         )
     )
     findings.extend(

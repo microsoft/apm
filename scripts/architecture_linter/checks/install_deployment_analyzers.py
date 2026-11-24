@@ -182,6 +182,10 @@ from scripts.architecture_linter.checks.install_reanchor_receipts import (
     GUARD_REANCHOR_RECEIPT_HISTORY,
     check_reanchor_receipt_history,
 )
+from scripts.architecture_linter.checks.install_reanchor_writers import (
+    GUARD_REANCHOR_WRITER_PREDICTION,
+    check_reanchor_writer_prediction,
+)
 from scripts.architecture_linter.checks.install_receipt_collection import (
     GUARD_RECEIPT_COLLECTION,
     check_receipt_collection,
@@ -271,10 +275,17 @@ from scripts.architecture_linter.checks.install_uninstall_preflight import (
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
-    _rule(
-        GUARD_UNINSTALL_PREFLIGHT,
-        "Uninstall validates recorded paths and survivor trust before its first write.",
-        check_uninstall_preflight,
+    Rule(
+        id=GUARD_UNINSTALL_PREFLIGHT,
+        group="install_deployment",
+        guard_ids=(
+            GUARD_UNINSTALL_PREFLIGHT,
+            f"{GUARD_UNINSTALL_PREFLIGHT}-consent-kept-link-route",
+            f"{GUARD_UNINSTALL_PREFLIGHT}-hook-sync-consent-route",
+            f"{GUARD_UNINSTALL_PREFLIGHT}-hook-sync-route",
+        ),
+        description="Uninstall validates recorded paths and survivor trust before its first write.",
+        check=check_uninstall_preflight,
     ),
     _rule(
         GUARD_INSTALL_LOCKFILE_PREFLIGHT,
@@ -319,6 +330,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_REANCHOR_RECEIPT_HISTORY,
         "A re-anchored local owner's receipts keep their hash history.",
         check_reanchor_receipt_history,
+    ),
+    _rule(
+        GUARD_REANCHOR_WRITER_PREDICTION,
+        "A re-anchor predicts a shared path's writer only through install's owners.",
+        check_reanchor_writer_prediction,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,

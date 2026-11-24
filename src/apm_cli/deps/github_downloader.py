@@ -18,6 +18,8 @@ import requests
 
 from ..cache.cached_repo import validate_cached_links
 from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
+from ..cache.commit_reachability import name_a_lost_admitted_commit
+from ..cache.git_cache import dir_size, raise_if_tampered
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
@@ -52,6 +54,7 @@ from ..utils.github_host import (
 from .bare_cache import (
     bare_clone_with_fallback,
     clone_with_fallback,
+    fetch_commit_worktree,
     fetch_sha_into_bare,
     materialize_from_bare,
 )
@@ -110,31 +113,6 @@ def _rmtree(path) -> None:
     from ..utils.file_ops import robust_rmtree
 
     robust_rmtree(path, ignore_errors=True)
-
-
-def _dir_size_bytes(path: Path) -> int:
-    """Return the total on-disk size of a directory tree in bytes.
-
-    Best-effort: silently skips files that disappear or cannot be
-    stat-ed mid-walk (e.g. transient .git lock files). Uses ``lstat``
-    so symlinks contribute the size of the link itself, never the
-    target -- this keeps the measurement bounded to the directory
-    tree and matches :func:`apm_cli.cache.git_cache._dir_size`. Used
-    only for verbose-mode perf diagnostics (#1433) -- never gates
-    behavior.
-    """
-    total = 0
-    try:
-        for dirpath, _dirnames, filenames in os.walk(str(path)):
-            for fname in filenames:
-                fpath = os.path.join(dirpath, fname)
-                try:
-                    total += os.lstat(fpath).st_size
-                except OSError:
-                    continue
-    except OSError:
-        return 0
-    return total
 
 
 def _git_progress_reporter_class() -> type:
@@ -422,6 +400,7 @@ class GitHubPackageDownloader:
                     locked_sha=locked_sha,
                     env=attempt_env,
                     sparse_paths=sparse_paths,
+                    label=dep_ref.get_unique_key(),
                 )
 
             checkout = self.auth_resolver.try_with_fallback(
@@ -446,6 +425,7 @@ class GitHubPackageDownloader:
                     remote_url=None if cache_remote == repository_url else cache_remote,
                 ),
                 sparse_paths=sparse_paths,
+                label=dep_ref.get_unique_key(),
             )
         resolver = getattr(self, "_tiered_resolver", None)
         if (
@@ -1412,9 +1392,9 @@ class GitHubPackageDownloader:
                 # calling get_checkout so the cache skips its internal
                 # ls-remote. Same pattern as the non-subdir path at
                 # line ~1604 which passes locked_sha=resolved.
-                try:
-                    _resolved = self.resolve_git_reference(dep_ref)
-                    _resolved_sha_for_cache = _resolved.resolved_commit
+                try:  # A declared ref is already its admitted commit; never resolve it again.
+                    _resolved = None if dep_ref.reference else self.resolve_git_reference(dep_ref)
+                    _resolved_sha_for_cache = _resolved.resolved_commit if _resolved else ref
                 except Exception:
                     _resolved_sha_for_cache = None
                 # Sparse-cone (#1433): keying the persistent shard by
@@ -1431,7 +1411,9 @@ class GitHubPackageDownloader:
                     locked_sha=_resolved_sha_for_cache,
                     sparse_paths=[subdir_path],
                 )
-            except Exception:
+            except Exception as exc:
+                # A read-only reader reports a tampered cache instead of cloning past it.
+                raise_if_tampered(exc)
                 # Cache miss or failure -- fall through to normal clone path.
                 _persistent_checkout = None
 
@@ -1469,7 +1451,7 @@ class GitHubPackageDownloader:
                             _persistent_checkout,
                             env=self._git_env_dict(),
                         ),
-                        consumer_size_bytes=_dir_size_bytes(_persistent_checkout),
+                        consumer_size_bytes=dir_size(_persistent_checkout),
                     )
             elif use_shared:
                 # WS2 (#1126): shared cache holds BARE clones keyed by
@@ -1566,7 +1548,7 @@ class GitHubPackageDownloader:
                             temp_clone_path,
                             env=self._git_env_dict(),
                         ),
-                        consumer_size_bytes=_dir_size_bytes(temp_clone_path),
+                        consumer_size_bytes=dir_size(temp_clone_path),
                     )
             else:
                 # Legacy per-dep clone path (no shared cache).
@@ -1799,6 +1781,7 @@ class GitHubPackageDownloader:
             progress_obj=progress_obj,
         )
 
+    @name_a_lost_admitted_commit
     def download_package(
         self,
         repo_ref: Union[str, "DependencyReference"],
@@ -1960,7 +1943,8 @@ class GitHubPackageDownloader:
                 if target_path.exists():
                     _rmtree(target_path)
                 raise
-            except Exception:
+            except Exception as exc:
+                raise_if_tampered(exc)
                 # Any cache failure -> fall back to network clone.
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)
@@ -1972,19 +1956,12 @@ class GitHubPackageDownloader:
         package_display_name = repo_segments[-1] if repo_segments else dep_ref.repo_url
 
         try:
-            # Clone the repository using fallback authentication methods
-            # Use shallow clone for performance if we have a specific commit
-            if resolved_ref.ref_type == GitReferenceType.COMMIT or resolved_ref.ref_name.startswith(
-                "refs/"
-            ):
-                # Commits and fully qualified refs: clone, then check out the resolved commit
-                progress_reporter = (
-                    _git_progress_reporter_class()(
-                        progress_task_id, progress_obj, package_display_name
-                    )
-                    if progress_task_id and progress_obj
-                    else None
-                )
+            progress_reporter = (
+                _git_progress_reporter_class()(progress_task_id, progress_obj, package_display_name)
+                if progress_task_id and progress_obj
+                else None
+            )
+            if resolved_ref.ref_type == GitReferenceType.COMMIT:
                 self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,
@@ -1993,15 +1970,17 @@ class GitHubPackageDownloader:
                     verbose_callback=verbose_callback,
                 )
                 checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
-            else:
-                # For branches and tags, we can use shallow clone
-                progress_reporter = (
-                    _git_progress_reporter_class()(
-                        progress_task_id, progress_obj, package_display_name
-                    )
-                    if progress_task_id and progress_obj
-                    else None
+            elif dep_ref.reference:
+                # A named ref: its admitted commit, fetched shallowly by commit (#5138)
+                fetch_commit_worktree(
+                    self._execute_transport_plan,
+                    dep_ref.repo_url,
+                    target_path,
+                    dep_ref=dep_ref,
+                    sha=resolved_ref.resolved_commit,
+                    verbose_callback=verbose_callback,
                 )
+            else:
                 self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,

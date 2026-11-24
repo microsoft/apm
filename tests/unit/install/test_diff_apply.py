@@ -509,6 +509,27 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     assert "rendered before the failure" not in capsys.readouterr().out, "fallback prints once"
 
 
+@pytest.mark.parametrize("existed", [False, True])
+def test_an_apply_with_no_package_to_stage_leaves_apm_modules_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existed: bool
+) -> None:
+    """A converged apply of a project without packages adds no apm_modules (#5159 I2)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    modules = project / "apm_modules"
+    if existed:
+        modules.mkdir()
+    (project / "apm.lock.yaml").write_text("locked\n", encoding="utf-8")
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+
+    diff_apply._commit(project, None, [], [], [], session, False, lambda: None)
+
+    assert modules.is_dir() is existed
+    if existed:
+        assert not any(modules.iterdir())
+
+
 @pytest.mark.skipif(
     os.name == "nt" or os.geteuid() == 0, reason="needs POSIX directory permissions"
 )
@@ -567,6 +588,39 @@ def test_a_lost_create_race_keeps_the_file_that_won(
 
     assert not ours.exists(), "what APPLY created goes"
     assert theirs.read_text(encoding="utf-8") == "someone else\n", "what it did not create stays"
+
+
+def test_a_fast_apply_undo_never_cleans_through_a_linked_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Undoing what an apply created keeps and reports a path below a parent
+    that became a link; it never removes a directory through it (#5207)."""
+    import shutil
+
+    from apm_cli.install.transaction import ApplyRestoreIncomplete
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    target = project / ".github" / "prompts" / "a.prompt.md"
+    outside = tmp_path / "outside"
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+
+    def render() -> None:
+        shutil.rmtree(project / ".github")
+        (outside / "prompts").mkdir(parents=True)
+        try:
+            (project / ".github").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+        raise OSError("disk full")
+
+    files = [(target, b"x\n", _digest(b"x\n"), "o/p")]
+    with pytest.raises(ApplyRestoreIncomplete) as caught:
+        diff_apply._commit(project, None, [], files, [], session, False, render)
+
+    assert (outside / "prompts").is_dir()
+    assert target in [path for path, _reason in caught.value.issues]
 
 
 def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
@@ -734,7 +788,7 @@ def test_a_fast_apply_config_write_is_sealed_at_the_write_seam(
     config = tmp_path / "project" / ".gitignore"
     config.parent.mkdir()
 
-    with journaled_apply() as journal:
+    with journaled_apply(config.parent) as journal:
         sealed_by = write_seam._after
         write_seam.write_text(config, "apm_modules/\n")
         recorded = [unit.path for unit in journal.units]
@@ -743,3 +797,43 @@ def test_a_fast_apply_config_write_is_sealed_at_the_write_seam(
     assert recorded == [config]
     assert config.read_text(encoding="utf-8") == "apm_modules/\n"
     assert write_seam._after is None, "the seam stops listening once the apply settles"
+
+
+def test_a_fast_apply_rollback_keeps_a_config_below_a_linked_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed fast apply never restores a config through a parent replaced by a link."""
+    import shutil
+
+    from apm_cli.install.transaction import ApplyRestoreIncomplete, journaled_apply
+    from apm_cli.integration import write_seam
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    project = tmp_path / "project"
+    config = project / ".github" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "config.json").write_text('{"keep": true}\n', encoding="utf-8")
+
+    with pytest.raises(ApplyRestoreIncomplete) as caught:
+        with journaled_apply(project):
+            write_seam.write_text(config, '{"apm": true}\n')
+            shutil.rmtree(project / ".github")
+            try:
+                (project / ".github").symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+            raise RuntimeError("apply failed")
+
+    assert (outside / "config.json").read_text(encoding="utf-8") == '{"keep": true}\n'
+    assert config in [path for path, _reason in caught.value.issues]
+
+
+def test_a_fast_apply_journal_needs_its_containment_root() -> None:
+    """A fast apply cannot start without the root that bounds its rollback (#5207)."""
+    from apm_cli.install.transaction import journaled_apply
+
+    with pytest.raises(TypeError):
+        journaled_apply()

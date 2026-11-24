@@ -554,7 +554,7 @@ class DeploymentEvidence:
         replaced by a link after preflight is kept too (#4815), and recorded as
         kept so the uninstall does not report it as a failure.
         """
-        if not (self._lockfile_consent and physical.is_symlink()):
+        if not _consent_keeps_link(physical, lockfile_consent=self._lockfile_consent):
             return False
         self._consent_refused[_claim_key(claim)] = None
         return True
@@ -799,12 +799,22 @@ def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
 
 
 def _render_locked(
-    lockfile: LockFile, owner: str | None, lockfile_root: Path, user_scope: bool, diagnostics
+    lockfile: LockFile,
+    owner: str | None,
+    lockfile_root: Path,
+    user_scope: bool,
+    diagnostics,
+    *,
+    cache_only: bool = False,
+    on_package=None,
+    records: bool = True,
 ) -> Path | None:
     """Render the locked packages (or only *owner*) into a private scratch tree.
 
     The replay uses every target the lock recorded as well as the current
     manifest's, so files of a target the manifest just dropped stay provable.
+    *cache_only* never fetches; *on_package* is the replay's per-package hook,
+    which needs *records* off so every package renders live.
     """
     from apm_cli.install.drift import (
         CheckLogger,
@@ -822,7 +832,9 @@ def _render_locked(
     config = ReplayConfig(
         project_root=lockfile_root,
         lockfile_path=snapshot,
-        cache_only=False,
+        cache_only=cache_only,
+        records=records,
+        on_package=on_package,
         scratch_root=scratch,
         modules_root=scratch / "apm_modules",
         user_scope=user_scope,
@@ -1854,11 +1866,23 @@ def managed_hook_prefixes(targets=None) -> tuple[str, ...]:
     )
 
 
-def hook_sync_unlinks(rel_path: str, project_root: Path, *, recorded_hash: str | None) -> bool:
+def _consent_keeps_link(physical: Path, *, lockfile_consent: bool) -> bool:
+    """Whether ``--trust-lockfile`` consent keeps *physical* because it is a link (#4295, #5139)."""
+    return lockfile_consent and physical.is_symlink()
+
+
+def hook_sync_unlinks(
+    rel_path: str,
+    project_root: Path,
+    *,
+    recorded_hash: str | None,
+    lockfile_consent: bool = False,
+) -> bool:
     """Whether uninstall's hook sync removes a managed hook final symlink (#5035).
 
-    Read-only, through the same prefix, gate and link decisions the hook sync
-    applies with ``allow_final_symlink=True``.
+    Read-only, through the same prefix, gate, consent and link decisions the
+    hook sync applies with ``allow_final_symlink=True``. Audit's advice offers
+    an uninstall without ``--trust-lockfile``, so it passes no consent (#5139).
     """
     from .targets import KNOWN_TARGETS
 
@@ -1872,6 +1896,7 @@ def hook_sync_unlinks(rel_path: str, project_root: Path, *, recorded_hash: str |
             allow_final_symlink=True,
         )
         and (project_root / rel_path).is_symlink()
+        and not _consent_keeps_link(project_root / rel_path, lockfile_consent=lockfile_consent)
         and _managed_link_unlinkable(recorded_hash)
     )
 

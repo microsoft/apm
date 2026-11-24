@@ -28,10 +28,48 @@ def read_hook_object(path: Path) -> dict[str, Any]:
     return data
 
 
+def require_hook_event_lists(
+    hooks: dict, events, path: Path, project_root: Path, user_scope: bool = False
+) -> None:
+    """Ensure the merge target event, and every alias it clears, is a list (#5137).
+
+    The first of *events* is created when missing; a present event (or alias
+    spelling) that is not a list raises a ``ValueError`` naming the file and
+    that event, with the scope's remedy.
+    """
+    hooks.setdefault(events[0], [])
+    for event in events:
+        if event in hooks and not isinstance(hooks[event], list):
+            raise ValueError(malformed_hook_event(path, project_root, event, user_scope))
+
+
+def malformed_hook_event(
+    path: Path, project_root: Path, event: str, user_scope: bool = False
+) -> str:
+    """Name a hook event in a deployed config that is not a list of entries (#5137)."""
+    from apm_cli.core.remediation import HOOK_EVENT_MALFORMED
+    from apm_cli.utils.diagnostics import printable_ascii_text
+    from apm_cli.utils.paths import portable_relpath
+
+    try:
+        shown = portable_relpath(path, project_root)
+    except ValueError:
+        shown = path.as_posix()
+    remedy = (
+        HOOK_EVENT_MALFORMED.with_command("apm install -g") if user_scope else HOOK_EVENT_MALFORMED
+    )
+    # The event name comes from package and user files: never print control bytes.
+    return (
+        f"{printable_ascii_text(shown)}: hook event '{printable_ascii_text(event)}' is not a "
+        f"list of hook entries. {remedy.sentence()}"
+    )
+
+
 def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
     """Restore sidecar ownership markers onto matching in-memory entries."""
     for event_name, sidecar_entries in sidecar_data.items():
-        if event_name not in hooks or not isinstance(sidecar_entries, list):
+        if not isinstance(sidecar_entries, list) or not isinstance(hooks.get(event_name), list):
+            # A missing or malformed event on disk holds no entry to mark (#5137).
             continue
         pool: dict[str, deque[str]] = {}
         for sidecar_entry in sidecar_entries:
@@ -615,17 +653,21 @@ def per_file_bundle_records(
 def per_file_bundle_hook_keys(
     sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS
 ) -> dict[str, tuple[str | None, list[str]]]:
-    """Return ``slug -> (approval_key, files)`` for the *kind* records of a sidecar."""
+    """Return ``slug -> (approval_key, files)`` for the *kind* records of a sidecar.
+
+    Raises:
+        TypeError: A bundle's record lists its files as anything but a list of
+            paths: a corrupted record is never read as "no files" (#5144).
+    """
     files_key = _RECORD_KINDS[kind][1]
     found: dict[str, tuple[str | None, list[str]]] = {}
     for record in per_file_bundle_records(sidecar_path, kind):
         parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
         files = record.get(files_key)
         if parsed is not None:
-            found[parsed[0]] = (
-                parsed[1],
-                [str(item) for item in files] if isinstance(files, list) else [],
-            )
+            if not isinstance(files, list) or not all(isinstance(item, str) for item in files):
+                raise TypeError(f"local-bundle {kind} record {files_key} must be a list of paths")
+            found[parsed[0]] = (parsed[1], list(files))
     return found
 
 
@@ -635,8 +677,14 @@ def write_per_file_bundle_record(
     approval_key: str | None,
     hook_files: list[str],
     kind: str = BUNDLE_RECORD_HOOKS,
+    project_root: Path | None = None,
+    user_scope: bool = False,
 ) -> None:
-    """Record (or, with no *hook_files*, drop) one bundle's *kind* approval record."""
+    """Record (or, with no *hook_files*, drop) one bundle's *kind* approval record.
+
+    The sidecar is written through :func:`write_hook_sidecar` (#5039);
+    *project_root* marks an install write, as there.
+    """
     records_key, files_key = _RECORD_KINDS[kind]
     kept = [
         record
@@ -657,7 +705,7 @@ def write_per_file_bundle_record(
         data.pop(records_key, None)
     if data:
         write_seam.mkdir(sidecar_path.parent, parents=True, exist_ok=True)
-        write_seam.write_text(sidecar_path, json.dumps(data, indent=2) + "\n")
+        write_hook_sidecar(sidecar_path, data, project_root, user_scope)
     elif sidecar_path.exists():
         remove_hook_sidecar(sidecar_path)
 

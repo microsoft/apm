@@ -172,7 +172,15 @@ MCP_CONFIGS: Mapping[tuple[str, str], str] = {
     ("user", "copilot"): ".copilot/mcp-config.json",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
-PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
+PROJECT_HOME_ALLOWED = (
+    ".apm/deployment-receipts",
+    ".apm-local",
+    ".local/state/gh",
+    ".cache/apm",
+    # Claude Code's marketplace registry and APM's record of its entry (#5176).
+    ".claude/plugins/known_marketplaces.json",
+    ".apm/claude-known-marketplaces.json",
+)
 _RECONCILING = frozenset({"install", "update"})
 _OUTPUT_LAWS = frozenset({"I6", "I8", "I9"})
 _SELECTING = frozenset({"install", "uninstall", "approve", "deny", "update"})

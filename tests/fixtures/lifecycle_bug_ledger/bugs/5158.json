@@ -1,0 +1,16 @@
+{
+  "issue": 5158,
+  "fixed_in": "Unreleased",
+  "summary": "Uninstall's re-anchor link check compared paths with exact spelling, so a case or NFD variant of a link into the moving local copy was missed and the link dangled after the move; tokens and moving copies now compare by the case-folded NFC key and refuse.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_local_reanchor_parity_lifecycle.py::test_a_case_variant_link_into_the_moving_copy_refuses",
+    "tests/integration/test_uninstall_local_reanchor_parity_lifecycle.py::test_an_nfd_variant_link_into_the_moving_copy_refuses"
+  ]
+}
