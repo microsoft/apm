@@ -114,7 +114,7 @@ def load():
     meta = {}
     if os.path.exists(REPORT):
         d = json.load(open(REPORT))
-        meta = {k: d.get(k) for k in ("base", "new")}
+        meta = {k: d.get(k) for k in ("base", "new", "new_label")}
         for r in d["rows"]:
             if not r.get("speedup"):
                 continue
@@ -142,6 +142,7 @@ def load():
 ROWS, META = load()
 NEW_SHA = (META.get("new") or "9ba3589d")[:8]
 OLD_NEW = "9ba3589d"
+NEW_LABEL = META.get("new_label") or ""
 FAT = os.environ.get("PERF_REPORT_FORCE_FAT") == "1" or NEW_SHA != OLD_NEW
 STAMP = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 

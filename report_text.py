@@ -54,8 +54,8 @@ def render(g, srcs):
       + ("; NEW = the fat train head" if FAT else "") + "). "
       "Final refresh after Wednesday's final bench pass.*")
     a("")
-    a(("**Two baselines, both paired.** (a) " if any(r["src"] == "interim" for r in ROWS) else "**Baseline (paired).** ") + "**Before the epic** = main `e37400fa` (v0.38.0) vs main "
-      f"`{new}`: Journey Hunt bench (6 pairs per cell" + ("; rows marked *provisional* come from the v1 harness "
+    a(("**Two baselines, both paired.** (a) " if any(r["src"] == "interim" for r in ROWS) else "**Baseline (paired).** ") + "**Before the epic** = main `e37400fa` (v0.38.0) vs "
+      + (g.get("NEW_LABEL") or ("the measured head" if FAT else "main")) + f" `{new}`: Journey Hunt bench (6 pairs per cell" + ("; rows marked *provisional* come from the v1 harness "
       "and are replaced when v2 lands" if any(r["prov"] for r in ROWS if r["src"] == "final") else "") + ")."
       + ((" (b) **Validated interim** = main `703acd6f` (Nov 23 evening, already after the "
       "locked engine #4893) vs main `c0296fab`, 15 pairs, install only, **Windows on the OpenSSL TLS backend**. "

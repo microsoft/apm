@@ -144,6 +144,8 @@ def main():
     ap.add_argument("--requests", default=os.path.join(DATA, "requests.log"))
     ap.add_argument("--out", default=os.path.join(DATA, "report.json"))
     ap.add_argument("--new", default="", help="NEW sha (else from requests.log NEW= line)")
+    ap.add_argument("--new-label", default=os.environ.get("PERF_NEW_LABEL", ""),
+                    help='e.g. "the fat train head (#5406)" or "main"')
     a = ap.parse_args()
     todo, pending, new = [], [], a.new
     if os.path.exists(a.requests):
@@ -181,7 +183,7 @@ def main():
                 best[k] = r
         print(f"[i] run {rid} {os_} {concl}: {len(rows)} cells", file=sys.stderr)
     os.makedirs(DATA, exist_ok=True)
-    out = {"base": BASE_FULL, "new": new or "?", "harness": "danielmeppiel-perf-ceo-report",
+    out = {"base": BASE_FULL, "new": new or "?", "new_label": a.new_label, "harness": "danielmeppiel-perf-ceo-report",
            "reference_cpu_class": REFERENCE_CLASS, "collected": datetime.datetime.now().isoformat(timespec="minutes"),
            "rows": [best[k] for k in sorted(best)], "pending": pending}
     json.dump(out, open(a.out, "w"), indent=1)
