@@ -449,7 +449,7 @@ def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
     return _bounded_load(text, _BoundedCSafeLoader)
 
 
-_TOP_LEVEL_LIMIT = 4
+_TOP_LEVEL_LIMIT = 100_000  # RESEARCH: uncapped memo
 _top_level_values: dict[tuple[str, str], list[str | None] | None] = {}
 _top_level_lock = threading.Lock()
 
