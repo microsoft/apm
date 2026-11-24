@@ -535,6 +535,11 @@ def _refuse_native_plugins(project_root: Path, lock: Any) -> None:
     if os.path.lexists(ledger_path_for(project_root / APM_MODULES_DIR)):
         # Codex registrations APM owns: the full run refreshes or retires them.
         raise Decline("codex native registrations")
+    from apm_cli.native_plugins.claude_marketplaces import project_release_pending
+
+    if project_release_pending(project_root):
+        # A Claude registry entry a failed uninstall left: the full run releases it (#5258).
+        raise Decline("claude marketplace registration")
     plugins = {PackageType.AGENT_PLUGIN.value, PackageType.MARKETPLACE_PLUGIN.value}
     if any(getattr(dep, "package_type", None) in plugins for dep in lock.dependencies.values()):
         raise Decline("plugin package")
