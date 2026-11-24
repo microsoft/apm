@@ -1138,16 +1138,17 @@ def yardstick_cpu_s() -> float:
     """CPU seconds of a fixed single-thread workload: the runner's speed, not the CLI's.
 
     Pure-Python arithmetic plus SHA-256 over fixed bytes; same work on every
-    runner, so the value tells CPU classes apart. Best of three.
+    runner, so the value tells CPU classes apart. Best of three; each pass runs
+    about half a second, well above Windows' 15.6 ms process-time tick.
     """
     data = b"apm-perf-yardstick" * 65536
     best = math.inf
     for _ in range(3):
         start = time.process_time()
         total = 0
-        for i in range(1_000_000):
+        for i in range(6_000_000):
             total += i * i % 7
-        for _ in range(8):
+        for _ in range(48):
             hashlib.sha256(data).digest()
         best = min(best, time.process_time() - start)
     return round(best, 4)
