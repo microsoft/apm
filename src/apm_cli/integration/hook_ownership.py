@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import stat
 from collections import Counter, deque
 from pathlib import Path
 from typing import Any, NoReturn
@@ -16,6 +14,7 @@ from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     has_symlink_component,
+    open_regular_file,
     validate_path_segments,
 )
 
@@ -484,10 +483,7 @@ def _strict_object(project_root: Path, path: Path) -> dict[str, Any]:
     """Parse *path* only as a regular file reached through no link; a FIFO never blocks."""
     if has_symlink_component(project_root, path):
         raise ValueError(f"linked hook file: {path.name}")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    with os.fdopen(os.open(path, flags), "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise ValueError(f"not a regular file: {path.name}")
+    with open_regular_file(path) as handle:
         raw = handle.read()
     data = json.loads(
         raw.decode("utf-8"),

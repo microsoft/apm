@@ -56,7 +56,7 @@ def test_only_a_prefix_is_read_when_the_fence_closes_inside_it(tmp_path: Path, m
     path = tmp_path / "a.md"
     path.write_bytes(b"---\nhooks: {}\n---\n" + b"b" * _LONG + b"\xff\n")
     reads: list[int] = []
-    real_open = Path.open
+    real_fdopen = os.fdopen
 
     class CountingReader:
         def __init__(self, handle):
@@ -73,10 +73,11 @@ def test_only_a_prefix_is_read_when_the_fence_closes_inside_it(tmp_path: Path, m
             reads.append(len(data))
             return data
 
-    def counting_open(self, *args, **kwargs):
-        return CountingReader(real_open(self, *args, **kwargs))
+    def counting_fdopen(descriptor, *args, **kwargs):
+        return CountingReader(real_fdopen(descriptor, *args, **kwargs))
 
-    monkeypatch.setattr(Path, "open", counting_open)
+    # The reader opens through a descriptor it has judged a regular file (#5268).
+    monkeypatch.setattr(os, "fdopen", counting_fdopen)
 
     _assert_declares(path, True, True)
     assert reads == [4096] * 2

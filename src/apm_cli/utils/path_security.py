@@ -22,10 +22,12 @@ Design
 
 from __future__ import annotations
 
+import errno
 import os
 import urllib.parse as _up
 from pathlib import Path
-from stat import S_ISLNK
+from stat import S_ISLNK, S_ISREG
+from typing import BinaryIO
 
 from .file_ops import robust_rmtree
 
@@ -352,6 +354,33 @@ def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
         if linked:
             return current
     return None
+
+
+def open_regular_file(path: Path) -> BinaryIO:
+    """Open *path* for binary reading only as a regular file.
+
+    Never through a final-component link and never blocking: the file is
+    opened non-blocking, then judged on the opened descriptor, so a FIFO or
+    device raises ``OSError`` instead of waiting for a writer. Where
+    ``O_NOFOLLOW`` is unavailable (Windows) a link is refused by ``lstat``
+    first.
+    """
+    if not hasattr(os, "O_NOFOLLOW") and _existing_link(Path(path)):
+        raise OSError(errno.ELOOP, "refusing to read through a link", str(path))
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        if not S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:

@@ -82,15 +82,10 @@ def _text(value: Any) -> str:
 
 
 def _regular_bytes(path: Path) -> bytes:
-    """Read *path* only as a regular file: a FIFO or device never blocks the read.
+    """Read *path* only as a regular file: a FIFO or device never blocks the read."""
+    from apm_cli.utils.path_security import open_regular_file
 
-    Opened non-blocking and never through a final-component link, then judged
-    on the opened file; anything but a regular file raises ``OSError``.
-    """
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    with os.fdopen(os.open(path, flags), "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise OSError(f"not a regular file: {path.name}")
+    with open_regular_file(path) as handle:
         return handle.read()
 
 
