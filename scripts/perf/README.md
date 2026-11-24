@@ -29,7 +29,7 @@ overhead <= 1%").
    `perf-bench.yml` accepts `PAIRS` 1-9 per runner on 3 runners, so request 30
    pairs as two simultaneous `PAIRS=5` requests (3 runners each) and pool their
    pairs into one statistic per cell.
-5. **The band.** Pair key: (runner shard, pair index); a pair is the base and
+5. **The band.** Pair key: (workflow run, runner shard, pair index); a pair is the base and
    new CPU of the same journey and fixture on the same runner, and every pair
    is pooled across runners (and across the two requests of a 30-pair rerun)
    with no grouping term. The ratio is new/base per pair. The 95% band is the
@@ -39,6 +39,8 @@ overhead <= 1%").
    bootstrap. To reproduce it, run `gh run download <run> --pattern
    'perf-bench-shard-*'`, read `runs/<side>-<i>/*.json` in each shard (the
    first sample with returncode 0 gives `cpu_s`), pair base and new by
-   (shard, i), and apply the ranks above.
+   (run, shard, i), and apply the ranks above. Download each run of a
+   30-pair rerun into its own directory: both runs reuse the same shard names
+   and pair indices.
 6. **Pre-register.** This method is merged (or at the merge desk) before a PR
    claims a pass with it.
