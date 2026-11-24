@@ -278,14 +278,42 @@ def test_an_edited_file_with_an_unusual_name_is_reported_on_one_ascii_line(
     assert served.returncode != 0, output
     assert output.isascii(), output
     assert not any(line.startswith("[+] all checks passed") for line in output.splitlines()), output
+    # The edited file is one drift-list entry, whatever escaping it uses: the printable
+    # ASCII text around its unusual characters survives on that one line.
+    unusual = [i for i, char in enumerate(file_name) if not " " <= char <= "~"]
+    head, tail = file_name[: unusual[0]], file_name[unusual[-1] + 1 :]
+    entries = [
+        line
+        for line in output.splitlines()
+        if line.startswith("    - .agents/skills/plain-helper/references/")
+        and line.endswith("  [test/plain]")
+    ]
+    assert len(entries) == 1, output
+    entry = entries[0].removeprefix("    - .agents/skills/plain-helper/references/")
+    assert entry.startswith(head) and entry.removesuffix("  [test/plain]").endswith(tail), output
 
 
 _FIFO_BLOCKS_THE_AUDIT = KnownFailure(
     "#5280",
     "audit --ci blocks reading a FIFO at a deployed path",
-    r"timed out after",
-    raises=subprocess.TimeoutExpired,
+    r"audit --ci blocked on the FIFO",
 )
+
+
+def _bounded_audit(world: ReplayWorld, binary: Path, *, records: bool) -> CommandResult:
+    """``audit --ci --no-fail-fast`` with a 60 s budget; a block is an assertion failure."""
+    env = dict(world.env)
+    env["APM_AUDIT_RECORDS"] = "1" if records else "0"
+    command = (str(binary), "audit", "--ci", "--no-fail-fast")
+    try:
+        done = subprocess.run(
+            command, cwd=world.project, env=env, capture_output=True, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired:
+        raise AssertionError(
+            f"audit --ci blocked on the FIFO (records={records}, no exit in 60 s)"
+        ) from None
+    return CommandResult(command, done.returncode, done.stdout, done.stderr, world.project)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFOs")
@@ -300,16 +328,16 @@ def test_a_fifo_at_a_deployed_path_fails_the_audit_without_blocking(
     target.unlink()
     os.mkfifo(target)
 
-    result = subprocess.run(
-        (str(apm_binary_path), "audit", "--ci", "--no-fail-fast"),
-        cwd=world.project,
-        env=world.env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    served = _bounded_audit(world, apm_binary_path, records=True)
+    live = _bounded_audit(world, apm_binary_path, records=False)
 
-    output = result.stdout + result.stderr
-    assert result.returncode != 0, output
+    output = served.stdout + served.stderr
+    evidence = f"served={output!r}\nlive={live.stdout + live.stderr!r}"
+    assert (served.returncode, served.stdout, served.stderr) == (
+        live.returncode,
+        live.stdout,
+        live.stderr,
+    ), evidence
+    assert served.returncode != 0, output
     assert "style.instructions.md" in output, output
     assert output.isascii(), output

@@ -834,15 +834,45 @@ def bundle_hook_cleanup_targets(targets: Any, *, user_scope: bool) -> list[Any]:
     manifest's targets; retirement only touches what the bundle owns, so the
     cleanup set covers every target that can hold hooks in this scope.
     """
+    from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
     from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+    from apm_cli.utils.path_security import PathTraversalError
 
     found = {target.name: target for target in targets or ()}
     for profile in KNOWN_TARGETS.values():
-        # An unresolvable user root (relative CODEX_HOME) only drops that target.
-        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
-        if scoped is not None and scoped.name not in found and scoped.supports("hooks"):
+        if profile.name in found or not profile.supports("hooks"):
+            continue
+        # An unresolvable user root (relative CODEX_HOME, two OneDrive mounts)
+        # never received a deploy, so it only drops that target.
+        try:
+            scoped = scoped_profile_or_none(profile, user_scope=user_scope)
+        except (CoworkResolutionError, PathTraversalError, OSError, ValueError):
+            continue
+        if scoped is not None and scoped.supports("hooks"):
             found[scoped.name] = scoped
     return list(found.values())
+
+
+def bundle_hook_recheck_targets(targets: Any, *, root: Path, user_scope: bool) -> list[Any]:
+    """Return every hook target of the scope the bundle hook re-check covers.
+
+    The manifest's *targets* plus every hook-capable target (see
+    :func:`bundle_hook_cleanup_targets`). At project scope an added target
+    whose root under *root* is reached through a link is left out: the
+    manifest did not choose it, and it may name another project's config.
+    """
+    from apm_cli.utils.path_security import has_symlink_component
+
+    found = bundle_hook_cleanup_targets(targets, user_scope=user_scope)
+    if user_scope:
+        return found
+    named = {target.name for target in targets or ()}
+    base = Path(root)
+    return [
+        target
+        for target in found
+        if target.name in named or not has_symlink_component(base, base / target.root_dir)
+    ]
 
 
 class BundleHookTargetsUnresolved(RuntimeError):
@@ -883,13 +913,16 @@ def reconcile_scope_bundle_hooks(
 
     Install, update and prune call this. Returns the unadmitted hooks.
     """
-    from apm_cli.core.scope import get_apm_dir
+    from apm_cli.core.scope import get_apm_dir, is_user_scope
 
     from .local_bundle_canvas import retire_unadmitted_bundle_canvas
 
     root, targets, allow_provider = scope_bundle_hook_inputs(
         scope, apm_package, no_policy=no_policy, logger=logger
     )
+    # A bundle installed with --target may hold hooks in a target the manifest
+    # does not name: every hook target of the scope is re-checked.
+    targets = bundle_hook_recheck_targets(targets, root=root, user_scope=is_user_scope(scope))
     lock_dir = get_apm_dir(scope)
     hooks = retire_unadmitted_bundle_hooks(
         root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
