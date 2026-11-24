@@ -581,8 +581,9 @@ class CompiledCoverage:
         """With no record for this root (a fresh clone), read the destination (#5344).
 
         The record lives in APM home, so a committed compiled ``AGENTS.md`` is
-        recognized when Claude loads it and it holds the body verbatim; a body
-        compile rewrote (links) still asks for ``apm compile``.
+        recognized when Claude loads it and it holds the body verbatim, as
+        whole lines under the instruction's own scope section; a body compile
+        rewrote (links) still asks for ``apm compile``.
         """
         text = body.replace("\r\n", "\n").strip()
         prefix = "" if _is_always_on(apply_to) else directory_scope(apply_to)
@@ -594,10 +595,39 @@ class CompiledCoverage:
         compiled = self._texts[directory]
         carries = (
             compiled is not None
-            and text in compiled.replace("\r\n", "\n")
+            and _section_carries_block(compiled, apply_to, text)
             and self._claude_loads(directory)
         )
         return directory / "AGENTS.md" if carries else None
+
+
+# The section headings compile's instruction renderer writes (template_builder).
+_SECTION_HEADING = re.compile(r"^## (?:Global Instructions|Files matching `.*`)$")
+
+
+def _section_carries_block(compiled: str, apply_to: object, text: str) -> bool:
+    """Whether *compiled* holds *text* as whole lines under its own scope section.
+
+    The body's lines must appear as one contiguous run of complete lines
+    inside the section compile writes for this ``applyTo`` (``## Global
+    Instructions`` or ``## Files matching `<applyTo>```), so "use tabs"
+    never matches inside "never use tabs" or under another scope (#5343).
+    """
+    scope = normalize_apply_to(apply_to, default="")
+    heading = f"## Files matching `{scope}`" if scope else "## Global Instructions"
+    lines = [line.rstrip() for line in compiled.replace("\r\n", "\n").split("\n")]
+    block = [line.rstrip() for line in text.split("\n")]
+    for start, line in enumerate(lines):
+        if line != heading:
+            continue
+        end = next(
+            (i for i in range(start + 1, len(lines)) if _SECTION_HEADING.match(lines[i])),
+            len(lines),
+        )
+        section = lines[start + 1 : end]
+        if any(section[i : i + len(block)] == block for i in range(len(section) - len(block) + 1)):
+            return True
+    return False
 
 
 def refresh_compiled_digest(base_dir: Path, agents_md: Path) -> None:
