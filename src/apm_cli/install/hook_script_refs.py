@@ -110,8 +110,11 @@ def runs_script(
             return home if name == "HOME" else project_root.as_posix()
 
         text = _ANCHOR_VARIABLES.sub(anchor, command)
-    # An expansion left after the anchors may spell a name: _runs fails closed.
-    if not (_HIDES_A_NAME.search(text) or _mentions(command, pattern)):
+    # An expansion left after the anchors may spell a name anywhere: fail closed,
+    # even beside a literal path to another file of that name.
+    if _HIDES_A_NAME.search(text):
+        return True
+    if not _mentions(command, pattern):
         return False
     return _runs(text, pattern, paths, tuple(bases), moved=False)
 
@@ -133,11 +136,24 @@ def _runs(
         return True  # the name sits in syntax the words lost: fail closed
     for word in named:
         if nested and any(space in word for space in " \t"):
-            if _runs(word, pattern, paths, bases, moved=moved):
+            # The intact word may itself be a script path with a space in it.
+            if _names_a_script(word, paths, bases, moved) or _runs(
+                word, pattern, paths, bases, moved=moved
+            ):
                 return True
         elif not _certainly_elsewhere(word, paths, bases, moved):
             return True
     return False
+
+
+def _names_a_script(word: str, paths: frozenset, bases: tuple, moved: bool) -> bool:
+    """Whether *word*, read whole as a path, resolves to a recorded script."""
+    if word.startswith("/") or _DRIVE.match(word):
+        return _normalized(word) in paths
+    relative = posixpath.normpath(word)
+    return not moved and any(
+        _normalized(f"{base.as_posix()}/{relative}") in paths for base in bases
+    )
 
 
 def _certainly_elsewhere(word: str, paths: frozenset, bases: tuple, moved: bool) -> bool:

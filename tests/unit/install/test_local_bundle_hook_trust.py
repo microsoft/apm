@@ -174,6 +174,13 @@ def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> 
     assert runs_script(
         f'sh "{spaced.as_posix()}/{_SCRIPT}"', script_refs(spaced, [_SCRIPT]), (spaced,), spaced
     )
+    # An option hands quoted words to a rescan, which must not split a spaced root.
+    assert runs_script(
+        f'sh -e "{spaced.as_posix()}/{_SCRIPT.replace("/scripts/", "/scripts/./")}"',
+        script_refs(spaced, [_SCRIPT]),
+        (spaced,),
+        spaced,
+    )
     refs = (frozenset({"x.sh"}), frozenset({f"c:/project/{_SCRIPT}"}))
     assert runs_script(
         "C:/project/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (Path("/"),), Path("/")
@@ -251,6 +258,7 @@ _DIR = ".claude/hooks/hookpkg/hooks/scripts"
         f'a=x; b=.sh; eval "sh {_DIR}/$a$b"',
         f"set RUN=x&& sh {_DIR}/%RUN%.sh",
         f"set RUN=x&& sh {_DIR}/!RUN!.sh",
+        f"sh /opt/tools/x.sh; S=x; sh {_DIR}/$S.sh",
     ],
     ids=[
         "braced-variable",
@@ -265,6 +273,7 @@ _DIR = ".claude/hooks/hookpkg/hooks/scripts"
         "eval-variables",
         "cmd-percent-variable",
         "cmd-delayed-variable",
+        "hidden-beside-unrelated-same-name",
     ],
 )
 def test_a_spelling_that_hides_the_script_name_fails_closed(command: str) -> None:
