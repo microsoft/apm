@@ -85,7 +85,7 @@
     {
       "id": "url-path-containment-decoding",
       "decision": "Symlink-component containment, filesystem-aware (case-insensitive) path containment and strict percent-encoded URL-path decoding",
-      "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments)",
+      "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments); the uninstall in-use hook cwd check (install/local_bundle_hook_cwd.py, consumed by install/local_bundle_hook_trust.py) decides containment through ensure_path_within (#5310)",
       "selectors": ["src/apm_cli/utils/path_security.py", "src/apm_cli/utils/realpath.py"],
       "guards": ["transport-platform-url-path-security"]
     },

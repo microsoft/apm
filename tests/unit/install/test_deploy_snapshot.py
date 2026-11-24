@@ -2174,18 +2174,62 @@ def test_an_apm_home_others_can_write_is_kept_and_reported(tmp_path: Path, apm_h
     assert config.read_bytes() == b"killed\n"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
-def test_a_group_writable_apm_home_is_still_trusted(tmp_path: Path, apm_home: Path) -> None:
-    """A user-private group (umask 0o002) leaves APM_HOME group writable: still replayed."""
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner, group and mode bits")
+@pytest.mark.parametrize(
+    ("group", "private"),
+    [
+        ("user-private", True),
+        ("another-member", False),
+        ("another-account-primary", False),
+        ("not-the-primary-group", False),
+        ("unknown-group", False),
+    ],
+)
+def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, group: str, private: bool
+) -> None:
+    """#5313: APM_HOME may be group writable only when its group is private to this user."""
+    import grp
+    import pwd
+    from types import SimpleNamespace
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
     project = tmp_path / "project"
     config, ledger = _private_config(project)
     _killed_journal(apm_home, project, config)
     apm_home.chmod(0o775)
+    gid = apm_home.stat().st_gid
+    me = SimpleNamespace(
+        pw_name="me",
+        pw_uid=os.geteuid(),
+        pw_gid=gid + 1 if group == "not-the-primary-group" else gid,
+    )
+    other = SimpleNamespace(
+        pw_name="other",
+        pw_uid=os.geteuid() + 1,
+        pw_gid=gid if group == "another-account-primary" else gid + 1,
+    )
+    members = ["me", "other"] if group == "another-member" else ["me"]
 
-    outcome = _replay(apm_home, project, lambda: ledger)
+    def getgrgid(wanted: int):
+        if group == "unknown-group":
+            raise KeyError(wanted)
+        return SimpleNamespace(gr_name="me", gr_gid=wanted, gr_mem=members)
 
-    assert (outcome.restored, outcome.kept) == (1, ())
-    assert config.read_bytes() == _CONFIG_BYTES
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: me)
+    monkeypatch.setattr(pwd, "getpwall", lambda: [me, other])
+    monkeypatch.setattr(grp, "getgrgid", getgrgid)
+
+    if private:
+        outcome = _replay(apm_home, project, lambda: ledger)
+        assert (outcome.restored, outcome.kept) == (1, ())
+        assert config.read_bytes() == _CONFIG_BYTES
+        return
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")

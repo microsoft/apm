@@ -1,0 +1,14 @@
+{
+  "issue": 5280,
+  "fixed_in": "Unreleased",
+  "summary": "apm audit --ci blocked forever when a FIFO stood at a deployed file's path, because the content-integrity scan opened the path without checking it was a regular file; the scan now opens it without blocking and reports it as drift and incomplete coverage.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_audit_drift_records_parity_lifecycle.py::test_a_fifo_at_a_deployed_path_fails_the_audit_without_blocking"
+  ]
+}

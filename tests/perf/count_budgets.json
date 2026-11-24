@@ -3,10 +3,10 @@
   "journeys": {
     "install-cold": {
       "fs.files_written": {
-        "budget": 1404,
-        "measured": 1337,
-        "reason": "tightened 1819 -> 1404: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 1819,
+        "measured": 1732,
+        "reason": "#5330 in-process pinned fetch: the checkout's files are now written by the apm process (inprocess_fetch.py os.open), which the counter sees, instead of by an uncounted git clone/checkout child; tree-10, offline mirror, rtt 0; max of CI runs 45401098857 (1520) and 45403013362 (1732)",
+        "pr": "#5340"
       },
       "fs.hash_objects": {
         "budget": 1950,
@@ -27,22 +27,22 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 10428,
-        "measured": 9931,
-        "reason": "tightened 15059 -> 10428: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 15059,
+        "measured": 14341,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.realpath_calls": {
-        "budget": 1048,
-        "measured": 998,
-        "reason": "tightened 1185 -> 1048: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 1185,
+        "measured": 1128,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.stat_calls": {
-        "budget": 19390,
-        "measured": 18466,
-        "reason": "tightened 21960 -> 19390: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 21960,
+        "measured": 20914,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "git.config": {
         "budget": 10,
@@ -51,10 +51,10 @@
         "pr": "#5378"
       },
       "git.remote": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "tightened 13 -> 3: #5325/#5333 memoized git reads; the #5338 baseline (12) predates them; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 13,
+        "measured": 12,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "git.var": {
         "budget": 5,
@@ -63,24 +63,24 @@
         "pr": "#5340"
       },
       "http.connects": {
-        "budget": 4,
-        "measured": 3,
-        "reason": "tightened 14 -> 4: #5330 in-process pinned fetch replaces the 20 git clones (#5338 baseline 13 connects); measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 14,
+        "measured": 13,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "http.requests": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "tightened 42 -> 21: #5330 in-process pinned fetch replaces the 20 git clones (#5338 baseline 40 requests); measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 42,
+        "measured": 40,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       }
     },
     "install-warm": {
       "fs.files_written": {
-        "budget": 458,
-        "measured": 436,
-        "reason": "tightened 856 -> 458: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 856,
+        "measured": 815,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.hash_objects": {
         "budget": 1917,
@@ -101,22 +101,22 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 11143,
-        "measured": 10612,
-        "reason": "tightened 15826 -> 11143: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 15826,
+        "measured": 15072,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.realpath_calls": {
-        "budget": 1064,
-        "measured": 1013,
-        "reason": "tightened 1201 -> 1064: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 1201,
+        "measured": 1143,
+        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
+        "pr": "#5380"
       },
       "fs.stat_calls": {
-        "budget": 19211,
-        "measured": 18296,
-        "reason": "tightened 21844 -> 19211: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 21844,
+        "measured": 20803,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "git.cat-file": {
         "budget": 11,
@@ -125,10 +125,10 @@
         "pr": "#5338"
       },
       "git.config": {
-        "budget": 9,
-        "measured": 8,
-        "reason": "tightened 13 -> 9: #5325/#5333 memoized git config reads; the #5338 baseline (12) predates them; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 13,
+        "measured": 12,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "git.ls-tree": {
         "budget": 11,
@@ -187,16 +187,16 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 5979,
-        "measured": 5694,
-        "reason": "tightened 23099 -> 5979: #5325/#5333 path-check memoization plus #5345's fixed-depth world; the #5338 baseline predates both; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 23099,
+        "measured": 21999,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.realpath_calls": {
-        "budget": 1048,
-        "measured": 998,
-        "reason": "tightened 2762 -> 1048: #5325/#5333 path-check memoization plus #5345's fixed-depth world; the #5338 baseline predates both; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 2762,
+        "measured": 2630,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
+        "pr": "#5338"
       },
       "fs.stat_calls": {
         "budget": 6999,
@@ -385,10 +385,10 @@
     },
     "install-cold-auth": {
       "fs.files_written": {
-        "budget": 811,
-        "measured": 772,
-        "reason": "tightened 1212 -> 811: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 1572,
+        "measured": 1497,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "fs.hash_objects": {
         "budget": 1979,
@@ -409,58 +409,58 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 11219,
-        "measured": 10684,
-        "reason": "tightened 16774 -> 11219: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 16774,
+        "measured": 15975,
+        "reason": "lstat_calls 11802 -> 15975: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.realpath_calls": {
-        "budget": 1124,
-        "measured": 1070,
-        "reason": "tightened 1810 -> 1124: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 1810,
+        "measured": 1723,
+        "reason": "realpath_calls 1202 -> 1723: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.stat_calls": {
-        "budget": 19294,
-        "measured": 18375,
-        "reason": "tightened 21899 -> 19294: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 21899,
+        "measured": 20856,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
       },
       "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.checkout": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.clone": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.config": {
-        "budget": 10,
-        "measured": 9,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 12,
+        "measured": 11,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.ls-remote": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.ls-tree": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.remote": {
         "budget": 3,
@@ -475,24 +475,24 @@
         "pr": "#5345"
       },
       "http.connects": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 4,
+        "measured": 3,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "http.requests": {
-        "budget": 53,
-        "measured": 50,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 21,
+        "measured": 20,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       }
     },
     "install-warm-auth": {
       "fs.files_written": {
-        "budget": 467,
-        "measured": 444,
-        "reason": "tightened 868 -> 467: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 868,
+        "measured": 826,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
       },
       "fs.hash_objects": {
         "budget": 1943,
@@ -513,22 +513,22 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 10592,
-        "measured": 10087,
-        "reason": "tightened 16147 -> 10592: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 16147,
+        "measured": 15378,
+        "reason": "lstat_calls 11199 -> 15378: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.realpath_calls": {
-        "budget": 1071,
-        "measured": 1020,
-        "reason": "tightened 1757 -> 1071: #5380 kernel-form portable_relpaths restores the pre-#5354 count, then #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 1757,
+        "measured": 1673,
+        "reason": "realpath_calls 1150 -> 1673: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
+        "pr": "#5378"
       },
       "fs.stat_calls": {
-        "budget": 19213,
-        "measured": 18298,
-        "reason": "tightened 21825 -> 19213: #5367 (perf small-cars train) cuts install writes and path checks; measured on main c0a4ad55 (Lifecycle Full Suite run 45468064531); Smoke matches it and Integration sits within the slack (post-#5345 jobs 138652519702 / 138655354703)",
-        "pr": "#5389"
+        "budget": 21825,
+        "measured": 20785,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
       },
       "git.cat-file": {
         "budget": 11,
@@ -543,10 +543,10 @@
         "pr": "#5345"
       },
       "git.ls-remote": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.ls-tree": {
         "budget": 11,
@@ -567,16 +567,16 @@
         "pr": "#5345"
       },
       "http.connects": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 4,
+        "measured": 3,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "http.requests": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 11,
+        "measured": 10,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       }
     }
   }

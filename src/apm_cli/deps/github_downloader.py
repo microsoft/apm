@@ -782,6 +782,23 @@ class GitHubPackageDownloader:
             sparse_paths=sparse_paths,
         )
 
+    def _require_commit_in_bare(
+        self, bare_path: Path, sha: str | None, dep_ref: "DependencyReference"
+    ) -> None:
+        """Fetch admitted full commit *sha* into a cached bare that predates it (#5199).
+
+        A no-op for a ref that is not a full commit, or when the bare holds it.
+        Raises ``RuntimeError`` when it cannot be fetched, so no other commit is
+        ever checked out in its place.
+        """
+        if not sha or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            return
+        if not self._fetch_sha_into_bare(bare_path, sha, dep_ref=dep_ref):
+            raise RuntimeError(
+                f"The cached clone of {dep_ref.repo_url} does not hold the admitted "
+                f"commit {sha[:12]} and it could not be fetched."
+            )
+
     def _fetch_sha_into_bare(
         self,
         bare_path: Path,
@@ -1392,8 +1409,8 @@ class GitHubPackageDownloader:
                 # calling get_checkout so the cache skips its internal
                 # ls-remote. Same pattern as the non-subdir path at
                 # line ~1604 which passes locked_sha=resolved.
-                try:  # A declared ref is already its admitted commit; never resolve it again.
-                    _resolved = None if dep_ref.reference else self.resolve_git_reference(dep_ref)
+                try:  # An admitted ref is already its commit; never resolve it again.
+                    _resolved = None if ref else self.resolve_git_reference(dep_ref)
                     _resolved_sha_for_cache = _resolved.resolved_commit if _resolved else ref
                 except Exception:
                     _resolved_sha_for_cache = None
@@ -1471,6 +1488,8 @@ class GitHubPackageDownloader:
                         ref=ref,
                         is_commit_sha=bool(is_commit_sha),
                     )
+                    # Under the cache lock, before the bare is shared (#5199).
+                    self._require_commit_in_bare(bare_target, ref, dep_ref)
 
                 def _shared_bare_fetch_fn(existing_bare: Path, ref_or_sha: str) -> bool:
                     # get_or_clone passes `ref` here; for SHA pins it is the SHA.
@@ -1868,7 +1887,7 @@ class GitHubPackageDownloader:
             )
 
         # Regular package download: a declared commit is admitted before resolution can fetch it.
-        from ..cache.commit_reachability import admit_and_resolve
+        from ..cache.commit_reachability import admit_and_resolve, admitted_full_commit
 
         resolved_ref = admit_and_resolve(self, dep_ref)
 
@@ -1970,8 +1989,9 @@ class GitHubPackageDownloader:
                     verbose_callback=verbose_callback,
                 )
                 checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
-            elif dep_ref.reference:
-                # A named ref: its admitted commit, fetched shallowly by commit (#5138)
+            elif dep_ref.reference or admitted_full_commit(resolved_ref):
+                # A named ref (#5138) or the default branch (#5199): its admitted
+                # commit, fetched shallowly by commit
                 fetch_commit_worktree(
                     self._execute_transport_plan,
                     dep_ref.repo_url,

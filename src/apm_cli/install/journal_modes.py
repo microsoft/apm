@@ -281,8 +281,8 @@ def require_private_store(store: Path) -> None:
     The install-snapshots directory and the store must each be a real directory and the
     journal a regular file (never a link), on POSIX owned by this user with no group or
     other write. APM_HOME may be a link (a dotfiles home): its target must be a directory
-    this user owns, which may be group writable (a user-private group's umask), never
-    other writable.
+    this user owns, never other writable, and group writable only when its group is
+    private to this user (:func:`_user_private_group`, #5313).
     """
     home = (store.parent.parent, os.stat, stat.S_ISDIR, 0o002)
     dirs = [(path, os.lstat, stat.S_ISDIR, 0o022) for path in (store.parent, store)]
@@ -296,6 +296,34 @@ def require_private_store(store: Path) -> None:
             raise ValueError(NOT_PRIVATE)
         if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & forbidden):
             raise ValueError(NOT_PRIVATE)
+        if os.name != "nt" and st.st_mode & 0o020 and not _user_private_group(st.st_gid):
+            raise ValueError(NOT_PRIVATE)  # only APM_HOME may get here group writable
+
+
+def _user_private_group(gid: int) -> bool:
+    """Whether group *gid* is verifiably private to this user (#5313).
+
+    It is this user's primary group, lists no other member, and is no other
+    account's primary group. Any lookup that fails or is unavailable answers
+    ``False`` (fail closed). Cost, paid only for a group-writable APM_HOME on
+    replay: one group lookup and one enumeration of the account database, which
+    under NSS (LDAP, SSSD) may be slow; an account NSS does not enumerate is not
+    seen.
+    """
+    try:
+        import grp
+        import pwd
+
+        me = pwd.getpwuid(os.geteuid())
+        if me.pw_gid != gid:
+            return False
+        if set(grp.getgrgid(gid).gr_mem) - {me.pw_name}:
+            return False
+        return not any(
+            account.pw_gid == gid and account.pw_uid != me.pw_uid for account in pwd.getpwall()
+        )
+    except (ImportError, KeyError, OSError):
+        return False
 
 
 def read_private_journal(path: Path, *, first_line: bool = False) -> str:

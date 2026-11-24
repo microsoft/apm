@@ -221,6 +221,27 @@ def _reset_config_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_verdict_stage():
+    """Discard a commit-reachability verdict stage a test left open.
+
+    An install transaction opens a process-global stage whose ref listings
+    are memoized per remote. A test that builds one without committing or
+    discarding it would serve those listings to later tests on the worker
+    (#5199: a no-ref dependency now lists refs too).
+    """
+    from apm_cli.cache import commit_reachability
+
+    def _discard() -> None:
+        stage = commit_reachability._stage()
+        if stage is not None:
+            stage.discard()
+
+    _discard()
+    yield
+    _discard()
+
+
+@pytest.fixture(autouse=True)
 def _reset_marketplace_registry_cache():
     """Drop the process-wide marketplace registry cache around each test.
 
