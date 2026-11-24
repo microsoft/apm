@@ -151,3 +151,81 @@ def test_a_fifo_leaf_resolves_without_blocking(tree: Path) -> None:
     fifo = tree / "dir" / "pipe"
     os.mkfifo(fifo)
     assert resolve_path(fifo) == fifo.resolve()
+
+
+_WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows resolution")
+
+
+def _short_name(path: Path) -> str | None:
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(1024)
+    size = ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, len(buffer))
+    return buffer.value if 0 < size < len(buffer) else None
+
+
+@_WINDOWS
+def test_windows_shapes_match_pathlib(tmp_path: Path) -> None:
+    import _winapi
+
+    real = tmp_path / "a-long-directory-name"
+    (real / "sub").mkdir(parents=True)
+    (real / "sub" / "file.md").write_text("x", encoding="utf-8")
+    _winapi.CreateJunction(str(real), str(tmp_path / "junction"))
+    candidates = [
+        real / "sub" / "file.md",
+        tmp_path / "junction" / "sub" / "file.md",
+        tmp_path / "junction" / "missing" / "x.md",
+        real / "trailing.",
+        real / "CON",
+        real / "nul.txt",
+        real / ("d" * 120) / ("e" * 120) / "deep.md",
+        real / "sub" / ".." / "sub" / "file.md",
+    ]
+    short = _short_name(real)
+    if short and short != str(real):
+        candidates.append(Path(short) / "sub" / "file.md")
+    for candidate in candidates:
+        assert str(resolve_path(candidate)) == str(candidate.resolve()), candidate
+
+
+@_WINDOWS
+def test_windows_resolves_a_plain_path_with_one_final_name_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nt
+    import ntpath
+
+    target = tmp_path / "dir" / "file.md"
+    target.parent.mkdir()
+    target.write_text("x", encoding="utf-8")
+    expected = target.resolve()
+    calls: list[str] = []
+    final = nt._getfinalpathname
+
+    def counted(value):
+        calls.append(value)
+        return final(value)
+
+    def no_slow_path(*_args, **_kwargs):
+        raise AssertionError("ntpath.realpath must not run")
+
+    monkeypatch.setattr(nt, "_getfinalpathname", counted)
+    monkeypatch.setattr(ntpath, "realpath", no_slow_path)
+    assert (resolve_path(target), len(calls)) == (expected, 1)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "\\\\server\\share\\x",
+        "C:\\a\\..\\b",
+        "C:\\a\\b.",
+        "C:\\a\\COM1.txt",
+        "C:\\PROGRA~1\\x",
+        "C:\\" + "a" * 300,
+        "C:\\a\\b:stream",
+    ],
+)
+def test_a_path_win32_may_parse_differently_is_never_stripped(text: str) -> None:
+    assert realpath._plain_win32(text) is False
