@@ -50,8 +50,15 @@ def _file_content(body: str = "# Test prompt\n") -> bytes:
 
 @pytest.fixture(autouse=True)
 def _isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep reachability markers out of the developer's cache."""
+    """Keep reachability markers out of the developer's cache, and stay offline.
+
+    The cells script ``git ls-remote``; the in-process anonymous listing would
+    otherwise ask the real github.com for ``owner/repo`` first.
+    """
     monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        "apm_cli.deps.anonymous_ref_listing.list_refs_anonymously", lambda *a, **k: None
+    )
 
 
 def _ls_remote(stdout: str, returncode: int = 0) -> MagicMock:
