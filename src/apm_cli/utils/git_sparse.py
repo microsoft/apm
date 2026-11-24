@@ -300,7 +300,7 @@ class _LinkResolver:
 
 
 # PERF PROTOTYPE: recompute and fail loudly on any difference.
-_GITPATH_DIFFERENTIAL = True
+_GITPATH_DIFFERENTIAL = False
 _LINK_PLANS: dict[tuple[str, tuple[str, ...] | None], tuple[dict, dict]] = {}
 
 

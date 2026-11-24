@@ -317,7 +317,7 @@ def _variant_key(sparse_paths: list[str] | None) -> str:
 
 
 # PERF PROTOTYPE: compute git's answer too and fail loudly on any difference.
-_GITPATH_DIFFERENTIAL = True
+_GITPATH_DIFFERENTIAL = False
 
 
 def _packed_commit(git_dir: Path, sha: str) -> bool | None:
