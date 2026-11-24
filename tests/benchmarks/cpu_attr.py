@@ -41,6 +41,9 @@ def _subcommand(args) -> str:
         if item in skip_value:
             next(rest, None)
         elif not item.startswith("-"):
+            if item == "config":
+                flags = [a for a in argv[argv.index(item) + 1 :] if a.startswith("--")]
+                return "git config " + " ".join(flags[:3])
             return f"git {item}"
     return "git"
 
@@ -49,14 +52,40 @@ _children: dict[str, list[float]] = collections.defaultdict(lambda: [0, 0.0])
 _children_lock = threading.Lock()
 
 
+_children_by_caller: dict[str, list[float]] = collections.defaultdict(lambda: [0, 0.0])
+
+
 def _note_child(popen, cpu: float) -> None:
     if getattr(popen, "_attr_noted", False):
         return
     popen._attr_noted = True
+    sub = _subcommand(popen.args)
     with _children_lock:
-        slot = _children[_subcommand(popen.args)]
+        slot = _children[sub]
         slot[0] += 1
         slot[1] += cpu
+        slot = _children_by_caller[f"{sub} <- {getattr(popen, '_attr_caller', '?')}"]
+        slot[0] += 1
+        slot[1] += cpu
+
+
+_orig_popen_init = subprocess.Popen.__init__
+
+
+def _popen_init(self, *args, **kwargs):
+    frame, owner, depth = sys._getframe(1), "<no apm frame>", 0
+    while frame is not None and depth < 80:
+        path = frame.f_code.co_filename.replace("\\", "/")
+        marker = path.rfind("apm_cli/")
+        if marker >= 0:
+            owner = f"{path[marker:]}:{frame.f_code.co_name}"
+            break
+        frame, depth = frame.f_back, depth + 1
+    self._attr_caller = owner
+    _orig_popen_init(self, *args, **kwargs)
+
+
+subprocess.Popen.__init__ = _popen_init
 
 
 if _WIN:
@@ -271,6 +300,10 @@ def _report(out: str, wall: float, exit_code) -> None:
         "children_by_subcommand": {
             k: {"count": v[0], "cpu_s": round(v[1], 4)}
             for k, v in sorted(_children.items(), key=lambda kv: -kv[1][1])
+        },
+        "children_by_subcommand_caller": {
+            k: {"count": v[0], "cpu_s": round(v[1], 4)}
+            for k, v in sorted(_children_by_caller.items(), key=lambda kv: -kv[1][1])
         },
         "children_exact": not _WIN,
         "module_inclusive": top(_module_incl, 40),
