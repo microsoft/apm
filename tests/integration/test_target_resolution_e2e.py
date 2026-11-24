@@ -541,6 +541,43 @@ def test_s16e_installed_cli_subdirectory_add_relative_package(tmp_path, apm_bina
     assert _snapshot_dir(subdir) == before
 
 
+def test_s16f_installed_cli_nested_project_is_not_swallowed_by_its_parent(
+    tmp_path, apm_binary_path: Path
+):
+    """A nested project with its own apm.yml installs as itself from below it (#4545).
+
+    The nearest apm.yml wins: the parent's manifest, lockfile and deployed
+    files are untouched, and nothing is written under the invoking directory.
+    """
+    parent = _setup(tmp_path / "project", "s16b_provenance_cwd")
+    nested = parent / "subdir" / "nested"
+    shutil.copytree(FIXTURES / "s16b_provenance_cwd", nested)
+    (nested / "apm.yml").write_text("name: nested-project\nversion: 0.1.0\n", encoding="utf-8")
+    invoking = nested / "subdir"
+    parent_before = {
+        path: data for path, data in _snapshot_dir(parent).items() if not path.startswith("subdir/")
+    }
+    invoking_before = _snapshot_dir(invoking)
+
+    res = subprocess.run(
+        [str(apm_binary_path), "install"],
+        cwd=invoking,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    combined = res.stdout + res.stderr
+    assert f"project root: {nested.resolve()}" in combined, combined
+    assert (nested / "apm.lock.yaml").is_file()
+    assert not (parent / "apm.lock.yaml").exists()
+    assert {
+        path: data for path, data in _snapshot_dir(parent).items() if not path.startswith("subdir/")
+    } == parent_before
+    assert _snapshot_dir(invoking) == invoking_before
+
+
 def test_s16_control_root_flag_from_subdirectory(tmp_path):
     """Control: --root DIR from a subdirectory keeps today's sources and writes."""
     project = _setup(tmp_path, "s16b_provenance_cwd")
