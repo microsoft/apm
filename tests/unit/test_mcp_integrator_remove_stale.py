@@ -208,6 +208,33 @@ def test_clean_json_atomic_failure_preserves_original_and_mode(tmp_path):
     assert list(tmp_path.glob("apm-atomic-*")) == []
 
 
+def test_clean_json_of_an_unrecorded_config_records_it_for_crash_recovery(tmp_path, monkeypatch):
+    """A cleanup rewrite of a config an older APM wrote into is recorded as legacy (#5038)."""
+    import json
+
+    from apm_cli.integration.config_file_provenance import (
+        Origin,
+        config_file_origin,
+        vouches_for_current_bytes,
+    )
+    from apm_cli.integration.mcp_integrator import _clean_json_mcp_config
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home" / ".apm"))
+    config_path = tmp_path / "project" / "mcp.json"
+    config_path.parent.mkdir()
+    servers = {"stale-server": {"command": "old"}, "user-authored": {"command": "keep"}}
+    config_path.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+    before = config_path.read_bytes()
+
+    removed = _clean_json_mcp_config(config_path, {"stale-server"}, MagicMock(), "test MCP config")
+
+    assert removed == 1
+    kept = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert set(kept) == {"user-authored"}
+    assert config_file_origin(config_path) is Origin.LEGACY
+    assert vouches_for_current_bytes(config_path, before) is True
+
+
 @pytest.mark.windows_compat
 def test_clean_json_strict_malformed_shape_preserves_original(tmp_path):
     from apm_cli.install.errors import RequiredIntegrationError

@@ -12,11 +12,14 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
 * ``settle+kill``: exit when the journal is discarded, right after the
   lockfile reached disk, so the journal records a committed install.
 * ``deploy+kill``: exit mid-deploy, before the next journal record once
-  ``APM_TEST_DEPLOY_KILL_AFTER`` paths were journaled, written and sealed.
+  ``APM_TEST_DEPLOY_KILL_AFTER`` paths were journaled, written and sealed, or
+  before journaling the first path ending in ``APM_TEST_DEPLOY_KILL_BEFORE``.
 * ``path+kill``: exit once the write to ``APM_TEST_DEPLOY_KILL_PATH`` (POSIX,
   relative) finished, before its post-write seal.
 * ``unsealed+kill``: exit once the ``APM_TEST_DEPLOY_KILL_AFTER``-th journaled
   path is written, before its post-write seal.
+* ``retire+kill``: exit right after the first journaled delete is sealed
+  (a retire killed partway, #5130).
 
 Python runs only the first ``sitecustomize`` on its path, so this one runs
 the next one (the isolated environment's network guard) before anything else.
@@ -46,12 +49,14 @@ if _FAULT:
     if "settle" in faults:
         deploy_snapshot.DeployJournal.discard = _killed
     elif "deploy" in faults:
-        _after = int(os.environ["APM_TEST_DEPLOY_KILL_AFTER"])
+        _after = int(os.environ.get("APM_TEST_DEPLOY_KILL_AFTER", "0") or 0)
+        _before = os.environ.get("APM_TEST_DEPLOY_KILL_BEFORE", "")
         _record = deploy_snapshot.DeployJournal.record
 
         def _record_or_kill(self, path, **kwargs):
             # Every recorded path before this call has also been written.
-            if len(self.units) >= _after:
+            reached = str(path).replace(os.sep, "/").endswith(_before) if _before else False
+            if reached or (_after and len(self.units) >= _after):
                 os._exit(_KILLED_EXIT)
             return _record(self, path, **kwargs)
 
@@ -66,6 +71,16 @@ if _FAULT:
             return _seal(self, path)
 
         deploy_snapshot.DeployJournal.after_write = _seal_path_or_kill
+    elif "retire" in faults:
+        _sealed = deploy_snapshot.DeployJournal.after_write
+
+        def _seal_then_kill(self, path):
+            _sealed(self, path)
+            # A persisted journal just sealed a path that is gone: a delete finished.
+            if self.root is not None and not os.path.lexists(path):
+                os._exit(_KILLED_EXIT)
+
+        deploy_snapshot.DeployJournal.after_write = _seal_then_kill
     elif "unsealed" in faults:
         _after = int(os.environ["APM_TEST_DEPLOY_KILL_AFTER"])
         _seal = deploy_snapshot.DeployJournal.after_write

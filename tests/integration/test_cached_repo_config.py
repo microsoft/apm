@@ -99,8 +99,22 @@ def _origin(root: Path) -> tuple[Path, str, str]:
     return origin, first, _git("-C", str(origin), "rev-parse", "HEAD")
 
 
-def _cached_bare(cache_root: Path, origin: Path, first: str, url: str) -> Path:
-    """Lay down the bare APM would cache for *url*, holding only the first commit."""
+def _cached_bare(
+    cache_root: Path, origin: Path, first: str, url: str, *, verified: bool = True
+) -> Path:
+    """Lay down the bare APM would cache for *url*, holding only the first commit.
+
+    With *verified*, also the reachability verdicts APM records beside the
+    commits it admitted (every origin commit here); a cache from an older APM
+    has none.
+    """
+    if verified:
+        from apm_cli.cache.commit_reachability import _marker, _verdict_key, _write_marker
+
+        for sha in _git("-C", str(origin), "rev-list", "--all").split():
+            _write_marker(
+                _marker(cache_root, cache_shard_key(url), sha), _verdict_key(url, url, None)
+            )
     bare = cache_root / "git" / "db_v1" / cache_shard_key(url)
     bare.parent.mkdir(parents=True)
     _git("clone", "-q", "--bare", "--no-tags", "--template=", str(origin), str(bare))
@@ -217,6 +231,24 @@ def test_an_unmodified_cached_bare_is_used_as_is(tmp_path: Path, server_url: str
     again = GitCache(tmp_path / "cache").get_checkout(url, None, locked_sha=first)
     assert again == checkout
     assert sentinel.exists()
+
+
+def test_an_upgraded_cache_without_a_verdict_fails_closed_offline(
+    tmp_path: Path, server_url: str
+) -> None:
+    """A cache from an older APM holds no verdict: the one verification needs the origin."""
+    origin, first, _second = _origin(tmp_path)
+    url = f"{server_url}/o/r.git"
+    _cached_bare(tmp_path / "cache", origin, first, url, verified=False)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        GitCache(tmp_path / "cache").get_checkout(url, None, locked_sha=first)
+
+    message = " ".join(str(excinfo.value).split())
+    assert "needs network access once" in message
+    assert "pin a branch or tag" in message
+    assert not (tmp_path / "cache" / "reachability" / "verified-v2").exists()
+    assert not list((tmp_path / "cache").rglob("verified-v2/*"))
 
 
 def test_a_cached_checkout_with_foreign_config_is_rebuilt(tmp_path: Path) -> None:

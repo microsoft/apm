@@ -18,9 +18,9 @@ import pytest
 from apm_cli.cache.git_cache import (
     CachePruneError,
     GitCache,
-    _dir_size,
     _safe_git_args,
     _sanitize_url,
+    dir_size,
 )
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
@@ -100,6 +100,14 @@ class TestGitCacheInit:
 @trust_cached_repos()
 @trust_checkout_contents()
 class TestGetCheckout:
+    @pytest.fixture(autouse=True)
+    def _reachable_pins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Scripted git children; the reachability check has its own cells.
+        monkeypatch.setattr(
+            "apm_cli.cache.commit_reachability.require_reachable_commit",
+            lambda *_args, **_kwargs: None,
+        )
+
     def test_cache_hit_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"
         sha = "a" * 40
@@ -308,11 +316,10 @@ class TestLsRemoteResolve:
     def test_matches_refs_tags_prefix(self, cache: GitCache, remote: _Remote) -> None:
         assert cache._ls_remote_resolve(remote.url, "v1.0.0") == remote.main
 
-    def test_falls_back_to_first_sha_when_no_exact_match(
-        self, cache: GitCache, remote: _Remote
-    ) -> None:
+    def test_a_tail_match_never_resolves(self, cache: GitCache, remote: _Remote) -> None:
         # ``topic`` matches refs/heads/feature/topic by tail only, never exactly.
-        assert cache._ls_remote_resolve(remote.url, "topic") == remote.topic
+        with pytest.raises(RuntimeError, match="not a branch or tag"):
+            cache._ls_remote_resolve(remote.url, "topic")
 
     def test_unknown_ref_raises_runtime_error(self, cache: GitCache, remote: _Remote) -> None:
         with pytest.raises(RuntimeError, match="Could not resolve ref 'missing'"):
@@ -331,7 +338,8 @@ class TestLsRemoteResolve:
 
         assert cache._ls_remote_resolve(remote.url, "main") == remote.main
         (argv, _env), *_rest = child.calls
-        assert argv[1:] == [*_safe_git_args(), "ls-remote", remote.url, "main"]
+        # The peeled pattern lists an annotated tag's commit.
+        assert argv[1:] == [*_safe_git_args(), "ls-remote", remote.url, "main", "main^{}"]
 
     def test_uses_explicit_env_when_provided(
         self, cache: GitCache, monkeypatch: pytest.MonkeyPatch
@@ -363,10 +371,12 @@ class TestLsRemoteResolve:
     @pytest.mark.parametrize(
         ("stdout", "ref", "expected"),
         [
-            pytest.param(f"{'5' * 40}\tmain\n", "main", "5" * 40, id="exact-ref-name"),
+            pytest.param(
+                f"{'5' * 40}\trefs/heads/main\n", "main", "5" * 40, id="exact-branch-name"
+            ),
             pytest.param(
                 f"not-a-sha\trefs/heads/main\n{'a' * 40}\trefs/heads/other\n",
-                "missing",
+                "other",
                 "a" * 40,
                 id="skips-non-sha-lines",
             ),
@@ -420,7 +430,10 @@ class TestEnsureBareRepo:
             result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "a" * 40)
 
         assert result == bare_dir
-        mock_has_sha.assert_called_once_with(bare_dir, "a" * 40, env=None)
+        # The trust check also accepts the effective contact URL of this origin.
+        mock_has_sha.assert_called_once_with(
+            bare_dir, "a" * 40, env=None, url="https://example.com/repo.git"
+        )
         mock_fetch.assert_not_called()
 
     def test_existing_bare_repo_without_sha_fetches(self, cache: GitCache) -> None:
@@ -495,7 +508,8 @@ class TestEnsureBareRepo:
 
         assert result == winner
         assert _git_dir_has(winner, remote.main)
-        assert child.subcommands() == ["clone", "cat-file"], (
+        # The staged clone is probed for a tag-only commit before it lands.
+        assert child.subcommands() == ["clone", "cat-file", "cat-file"], (
             "a winner holding the sha is not fetched"
         )
 
@@ -908,7 +922,7 @@ class TestHelperFunctions:
         nested.mkdir()
         (nested / "two.bin").write_bytes(b"xyz")
 
-        assert _dir_size(root) == 7
+        assert dir_size(root) == 7
 
     def test_dir_size_ignores_lstat_errors(self, tmp_path: Path) -> None:
         root = tmp_path / "payload"
@@ -923,7 +937,7 @@ class TestHelperFunctions:
             return original_lstat(path)
 
         with patch("os.lstat", side_effect=_fake_lstat):
-            assert _dir_size(root) == 0
+            assert dir_size(root) == 0
 
     def test_dir_size_ignores_walk_errors(self, tmp_path: Path) -> None:
         root = tmp_path / "payload"
@@ -934,7 +948,7 @@ class TestHelperFunctions:
             yield from ()
 
         with patch("os.walk", side_effect=_raise):
-            assert _dir_size(root) == 0
+            assert dir_size(root) == 0
 
     def test_sanitize_url_redacts_userinfo_and_preserves_port(self) -> None:
         sanitized = _sanitize_url("https://alice:secret@example.com:8443/repo.git")

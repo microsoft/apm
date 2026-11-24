@@ -671,6 +671,34 @@ class TestRmtreeNeverFollowsALink:
         assert stat.S_IMODE(pack.stat().st_mode) == read_only
         pack.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="directory junctions are Windows-only")
+    def test_a_junction_inside_a_read_only_tree_leaves_its_target_alone(self, tmp_path):
+        """#5085: removing a tree never reaches through a junction to clear read-only bits."""
+        import _winapi
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        kept = outside / "kept.txt"
+        kept.write_text("kept", encoding="utf-8")
+        kept.chmod(stat.S_IREAD)
+        tree = tmp_path / "tree"
+        (tree / "objects" / "pack").mkdir(parents=True)
+        pack = tree / "objects" / "pack" / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+        _winapi.CreateJunction(str(outside), str(tree / "objects" / "linked"))
+        modes = {path.name: stat.S_IMODE(path.stat().st_mode) for path in (outside, kept)}
+        try:
+            robust_rmtree(tree)
+
+            assert not tree.exists()
+            assert kept.read_text(encoding="utf-8") == "kept"
+            assert {path.name: stat.S_IMODE(path.stat().st_mode) for path in (outside, kept)} == (
+                modes
+            )
+        finally:
+            kept.chmod(stat.S_IREAD | stat.S_IWRITE)
+
 
 # ---------------------------------------------------------------------------
 # Integration: _rmtree in github_downloader uses robust_rmtree

@@ -1,0 +1,17 @@
+{
+  "issue": 5092,
+  "fixed_in": "Unreleased",
+  "summary": "Parked native retention matched lock claims only in the default layout: under a CLAUDE_CONFIG_DIR outside HOME, audit --ci reported the kept skill as orphaned drift (the replay never rebased absolute claims into the external replay root) and the note printed ~//<path>; after a --legacy-skill-paths install, a flagless parked upgrade cleaned and migrated the kept .github/skills files.",
+  "failure_modes": [
+    "cleanup",
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_parked_native_claude_replacement_lifecycle.py::test_a_parked_native_replacement_keeps_the_loose_skill_under_a_relocated_claude_root",
+    "tests/integration/test_parked_native_claude_replacement_lifecycle.py::test_a_parked_native_replacement_keeps_legacy_layout_skills_in_a_project"
+  ]
+}

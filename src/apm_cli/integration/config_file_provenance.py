@@ -29,7 +29,7 @@ from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 _log = logging.getLogger(__name__)
@@ -66,9 +66,9 @@ def config_file_key(path: str | os.PathLike[str]) -> str:
 
 def installation_root(project_root: Path, user_scope: bool) -> Path:
     """The root holding an installation's manifest and lockfile (``$APM_HOME`` at user scope)."""
-    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.core.scope import manifest_root
 
-    return get_apm_dir(InstallScope.USER) if user_scope else project_root
+    return manifest_root(project_root, user_scope=user_scope)
 
 
 @contextmanager
@@ -107,6 +107,23 @@ def _regular_bytes(path: Path) -> bytes | None:
     return path.read_bytes() if _regular(path) else None
 
 
+def _canonical_key(key: str) -> bool:
+    """Whether *key* is an absolute POSIX-spelled path with no ``.``/``..``/empty parts."""
+    if not Path(key).is_absolute():
+        return False
+    if "\\" in key:
+        if os.name == "nt":
+            return False  # a Windows key is POSIX-spelled
+        rest = key  # on POSIX a backslash is a filename character
+    else:
+        # The parsed Windows anchor ("C:", "//server/share") is stripped, so a UNC key
+        # is checked below its share like any drive-letter key.
+        rest = key[len(PureWindowsPath(key).drive) :]
+    if not rest.startswith("/"):
+        return False
+    return all(part not in ("", ".", "..") for part in rest[1:].split("/"))
+
+
 class _UnreadableStore(ValueError):
     pass
 
@@ -115,6 +132,10 @@ class _UnreadableStore(ValueError):
 class _Store:
     path: Path
     files: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Per recorded file, the digest of the bytes it held before APM's last write
+    # (``prior``), so crash recovery can prove a journal copy (#5009). Kept under a
+    # top-level ``history`` map: earlier contents, not the file's current record.
+    history: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> _Store:
@@ -132,9 +153,17 @@ class _Store:
             raise _UnreadableStore(f"{path}: {exc}") from exc
         for row in data["files"]:
             key = row.get("path") if isinstance(row, dict) else None
-            # A path that is not its own resolved form (relative, "..") proves nothing.
-            if isinstance(key, str) and Path(key).is_absolute() and config_file_key(key) == key:
+            # A key not in canonical form (relative, ".", "..", "//") proves nothing. It is
+            # checked as written, never re-resolved: a path linked for now keeps its record.
+            if isinstance(key, str) and _canonical_key(key):
                 store.files[key] = {k: v for k, v in row.items() if k != "path"}
+        history = data.get("history")
+        if isinstance(history, dict):
+            store.history = {
+                key: prior
+                for key, prior in history.items()
+                if key in store.files and isinstance(prior, str)
+            }
         return store
 
     def lookup(self, path: Path) -> tuple[str, dict[str, Any] | None]:
@@ -148,9 +177,13 @@ class _Store:
             # costs no identity checks however many records the machine holds.
             for other, row in self.files.items():
                 try:
-                    if os.path.samefile(other, path):
+                    # A key that now resolves elsewhere passes through a link: its
+                    # record never transfers to the file that link reaches.
+                    if config_file_key(other) == other and os.path.samefile(other, path):
                         return other, row
-                except OSError:
+                except (OSError, RuntimeError):
+                    # RuntimeError: a key that became a symlink loop (Python < 3.13);
+                    # its record stays, it just never aliases another file.
                     continue
         return key, None
 
@@ -182,7 +215,10 @@ class _Store:
                 unlink(self.path)  # like the other receipts: no records, no file
             return
         # Machine-local evidence, not a user-editable config.
-        data = {"version": _VERSION, "files": rows}
+        data: dict[str, Any] = {"version": _VERSION, "files": rows}
+        history = {key: self.history[key] for key in sorted(self.history) if key in self.files}
+        if history:
+            data["history"] = history
         text = json.dumps(data, indent=2) + "\n"  # architecture-authority-exempt: evidence
         if _regular(self.path) and self.path.read_text(encoding="utf-8") == text:
             return  # a converged install rewrites nothing (I2)
@@ -256,7 +292,8 @@ def _origin_before_write(
     if recorded is not None:
         return key, recorded
     if manifest_root is None:
-        return key, None  # a rewrite of an unrecorded file stays unrecorded
+        # A cleanup rewrite (#5038): an older APM's entries are legacy's content proof.
+        return key, Origin.LEGACY if _holds_entries(before) else None
     return key, _unrecorded_origin(manifest_root, before)
 
 
@@ -292,7 +329,14 @@ def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None)
     if before == after or origin is None:
         return  # nothing written (a converged install records nothing, I2), or unrecorded
     store = _Store.load()
-    store.files[config_file_key(path)] = {"origin": origin.value, "hash": _digest(after)}
+    if origin is Origin.LEGACY and store.lookup(path)[1] is None and not _holds_entries(after):
+        return  # a new legacy record never claims a bare skeleton (#5038)
+    key = config_file_key(path)
+    store.files[key] = {"origin": origin.value, "hash": _digest(after)}
+    if before is None:
+        store.history.pop(key, None)  # created: no earlier bytes to restore
+    else:
+        store.history[key] = _digest(before)
     store.save()
 
 
@@ -303,8 +347,9 @@ def recorded_config_write(
     """Record who created *path* around one APM write of it.
 
     *manifest_root* (the project, or ``$APM_HOME`` at user scope) classifies a
-    file that existed without a record; a cleanup rewrite passes none and only
-    keeps an existing record current. A link or other non-regular path is
+    file that existed without a record; a cleanup rewrite passes none and
+    records such a file as legacy only when it holds entries before and after
+    (#5038). A link or other non-regular path is
     never recorded. Recording failures never fail the write.
     """
     path = Path(path)
@@ -336,6 +381,45 @@ def recorded_install_write(
 ) -> AbstractContextManager[None]:
     """:func:`recorded_config_write` for an install write at *project_root*'s scope."""
     return recorded_config_write(path, manifest_root=installation_root(project_root, user_scope))
+
+
+def vouches_for_current_bytes(path: str | os.PathLike[str], prior: bytes) -> bool:
+    """Whether this machine's record vouches for undoing APM's last write to *path*.
+
+    APM last wrote exactly the bytes *path* holds, and *prior* (the copy crash
+    recovery would put back, #5009) is exactly what the file held before that
+    write. A link or other non-regular file, a missing, unreadable or
+    VCS-tracked record, a record without its ``prior`` digest, or other bytes
+    never vouch.
+    """
+    path = Path(path)
+    if not _regular(path):
+        return False
+    try:
+        store = _Store.load()
+        current = _regular_bytes(path)
+    except (OSError, _UnreadableStore):
+        return False
+    key, row = store.lookup(path)
+    return (
+        current is not None
+        and _origin(row) is not None
+        and row.get("hash") == _digest(current)
+        and store.history.get(key) == _digest(prior)
+        and store.local()
+    )
+
+
+def forget_config_file(path: str | os.PathLike[str]) -> None:
+    """Forget the record of a file APM itself removed (for example its hook sidecar)."""
+    try:
+        store = _Store.load()
+        key, row = store.lookup(Path(path))
+        if row is not None:
+            store.files.pop(key, None)
+            store.save()
+    except (OSError, _UnreadableStore):
+        _log.debug("Could not forget the record of %s", path, exc_info=True)
 
 
 def delete_emptied_config(
