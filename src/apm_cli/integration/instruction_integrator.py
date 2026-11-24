@@ -609,12 +609,17 @@ class InstructionIntegrator(BaseIntegrator):
                 target_paths,
                 expected_content=new_content,
             )
-            # Written, adopted or already identical: this package holds the path.
-            if claude_rule and (
-                not skip
-                or adopted
-                or self.is_content_identical_to_text(
-                    target_path, new_content, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
+            # Written, adopted or already identical in the real pass (never a
+            # planning pass, which may be skipped): this package holds the path.
+            if (
+                claude_rule
+                and self._overwrite_plan is None
+                and (
+                    not skip
+                    or adopted
+                    or self.is_content_identical_to_text(
+                        target_path, new_content, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
+                    )
                 )
             ):
                 self._claude_rule_writers.setdefault(
