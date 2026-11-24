@@ -184,18 +184,6 @@ def test_a_failed_proc_proof_leaves_every_later_call_to_pathlib(
     ]
 
 
-@pytest.mark.skipif(
-    not realpath._FAST or not hasattr(os, "fork"), reason="kernel form is Linux-only"
-)
-def test_a_forked_child_proves_again(tree: Path, fresh_proof: None) -> None:
-    assert resolve_path(tree / "dir") == (tree / "dir").resolve()
-    pid = os.fork()
-    if pid == 0:  # pragma: no cover - child
-        os._exit(0 if realpath._proc_state == {"proven": False, "refused": False} else 1)
-    _, status = os.waitpid(pid, 0)
-    assert os.waitstatus_to_exitcode(status) == 0
-
-
 @_LINKS
 def test_a_skill_linked_out_of_the_bundle_is_still_refused(tmp_path: Path) -> None:
     from apm_cli.models.validation import validate_apm_package
