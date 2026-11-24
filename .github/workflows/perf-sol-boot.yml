@@ -2,7 +2,7 @@ name: Perf SoL boot floor (research)
 
 on:
   push:
-    branches: [perf-research/arch-boot]
+    branches: [perf-research/arch-boot, perf-research/arch-lazy-imports]
 
 permissions:
   contents: read
