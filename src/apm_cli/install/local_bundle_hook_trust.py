@@ -625,22 +625,56 @@ def _runs_through_cwd(document: Any, project_root: Path, scripts: Collection[str
     """Whether a handler runs a bundle script relative to its ``cwd`` field (#5281).
 
     The cwd resolves against the project root. One that cannot be resolved
-    with certainty (not a plain path, a variable or ``~``, or outside the
-    project) may run anything, so it counts as running the scripts.
+    with certainty (not a plain path, a variable, ``~`` or outside the
+    project) may run anything, so it counts as running the scripts. Besides
+    the lexical match, the cwd is matched by file identity, so a symlink, a
+    symlinked ancestor or a case variant naming a script's directory counts.
     """
     root = Path(os.path.abspath(project_root))
+    located = [Path(os.path.normpath(root / value)) for value in scripts]
+    index: dict[tuple[int, int], set[str]] | None = None
     for command, cwd in _handler_cwds(document):
-        if not isinstance(cwd, str) or not cwd.strip() or cwd.startswith("~") or "$" in cwd:
+        if not isinstance(cwd, str) or not cwd.strip() or cwd.startswith("~"):
+            return True
+        if "$" in cwd or "%" in cwd:
             return True
         base = Path(os.path.normpath(root / cwd.replace("\\", "/")))
         if not base.is_relative_to(root):
             return True
         text = command.replace("\\", "/")
-        for value in scripts:
-            script = Path(os.path.normpath(root / value))
-            if script.is_relative_to(base) and script.relative_to(base).as_posix() in text:
-                return True
+        if any(
+            script.is_relative_to(base) and script.relative_to(base).as_posix() in text
+            for script in located
+        ):
+            return True
+        try:
+            identity = os.stat(base)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True  # a directory that cannot be read cannot be cleared
+        if index is None:
+            index = _script_directories(root, located)
+        if any(rel in text for rel in index.get((identity.st_dev, identity.st_ino), ())):
+            return True
     return False
+
+
+def _script_directories(root: Path, scripts: Collection[Path]) -> dict[tuple[int, int], set[str]]:
+    """``(st_dev, st_ino)`` of each directory above a script, up to the root -> its relative path."""
+    index: dict[tuple[int, int], set[str]] = {}
+    for script in scripts:
+        for directory in script.parents:
+            if not directory.is_relative_to(root):
+                break
+            try:
+                found = os.stat(directory)
+            except OSError:
+                continue
+            index.setdefault((found.st_dev, found.st_ino), set()).add(
+                script.relative_to(directory).as_posix()
+            )
+    return index
 
 
 def _configs_still_running(
