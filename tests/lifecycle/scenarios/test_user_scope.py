@@ -174,27 +174,40 @@ def test_a_plugin_bin_deploys_under_home_once_trusted(lifecycle_world) -> None:
     scenario.finish()
 
 
-_BIN_ONLINE = {**_USER, "OP": "install", "PRIM": "bin", "SRC": "git", "GATE": "none"}
+_BIN_ONLINE = {**_USER, "OP": "install", "PRIM": "bin", "SRC": "git"}
 _BIN_STATES = {
-    "first": {**_FIRST, **_BIN_ONLINE, "LOCK": "absent"},
-    "converged": {**_BIN_ONLINE, "LOCK": "consistent", "DEPLOYED": "clean", "NET": "online"},
-    "no-policy": {**_BIN_ONLINE, "NOPOLICY": "on", "DEPLOYED": "clean", "NET": "online"},
-    "offline": {**_BIN_ONLINE, "NET": "offline", "DEPLOYED": "clean"},
+    "first": {**_FIRST, **_BIN_ONLINE, "GATE": "unapproved-exec", "LOCK": "absent"},
+    "converged": {
+        **_BIN_ONLINE,
+        "GATE": "allowed",
+        "LOCK": "consistent",
+        "DEPLOYED": "clean",
+        "NET": "online",
+    },
+    "no-policy": {
+        **_BIN_ONLINE,
+        "GATE": "allowed",
+        "NOPOLICY": "on",
+        "DEPLOYED": "clean",
+        "NET": "online",
+    },
+    "offline": {**_BIN_ONLINE, "GATE": "allowed", "NET": "offline", "DEPLOYED": "clean"},
 }
 
 
 def test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states(lifecycle_world) -> None:
-    """U-BIN pairs (#4097 T-3, #4104 T-6e, #4108 T-7b): the plugin's bin/ deploys under
-    HOME on the first install with no lockfile, then a converged install, a --no-policy
-    install and an offline install each keep its bytes unchanged."""
+    """U-BIN pairs (#4097 T-3, #4104 T-6e, #4108 T-7b): with no lockfile the first
+    install withholds the unapproved plugin's bin/; once approved it deploys under
+    HOME, and a converged, a --no-policy and an offline install keep its bytes."""
     specs = {"p-native-claude-bin": lifecycle_world.packages["p-native-claude-bin:git"].spec}
     scenario = Scenario(lifecycle_world, specs, scope="user", targets=("claude",))
     binary = lifecycle_world.home / _PLUGIN_BIN
     scenario.run("install --trust-bin p-native-claude-bin", credit=[_BIN_STATES["first"]])
+    assert not binary.exists(), "an unapproved plugin bin/ deployed"
+    scenario.run("approve p-native-claude-bin")
+    scenario.run("install --trust-bin", credit=[_BIN_STATES["converged"]])
     assert binary.is_file()
     deployed = binary.read_bytes()
-    scenario.run("install --trust-bin", credit=[_BIN_STATES["converged"]])
-    assert binary.read_bytes() == deployed
     step = scenario.run("install --trust-bin --no-policy", credit=[_BIN_STATES["no-policy"]])
     assert re.search(_NO_POLICY_SAYS, step.output), step.output
     assert binary.read_bytes() == deployed
