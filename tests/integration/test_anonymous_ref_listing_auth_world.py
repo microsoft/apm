@@ -55,6 +55,14 @@ def _git_ls_remote(url: str, env: dict[str, str]) -> subprocess.CompletedProcess
     return git_remote_refs(url, env=env, options=("--tags", "--heads"))
 
 
+def _assert_git_lists_it(listed: str | None, observations, *, hosts: set[str] | None = None):
+    """No in-process listing answered (git does): nothing was listed in process."""
+    assert listed is None
+    assert [r for r in observations if _listing(r) and r.status == 200] == []
+    if hosts is not None:
+        assert {r.host for r in observations} == hosts
+
+
 def test_a_private_listing_in_process_equals_git_with_the_same_header(tmp_path: Path) -> None:
     """LA1/LA5: byte-equal to git ls-remote; the only header sent is git's own extraheader."""
     tree, url = _world(tmp_path)
@@ -92,10 +100,9 @@ def test_a_redirect_falls_back_and_never_carries_the_header_away(tmp_path: Path)
         world.services.proxy.clear()
 
         listed = list_refs_authenticated(url, include_heads=True, env=_attempt_env(world))
-        hosts = {r.host for r in world.services.proxy.observations}
+        observed = world.services.proxy.observations
 
-    assert listed is None
-    assert hosts == {"github.com"}
+    _assert_git_lists_it(listed, observed, hosts={"github.com"})
 
 
 def test_a_revoked_token_falls_back_to_git_which_fails_as_today(tmp_path: Path) -> None:
@@ -121,10 +128,10 @@ def test_a_user_extra_header_sends_the_listing_to_git(tmp_path: Path) -> None:
         world.services.proxy.clear()
 
         listed = list_refs_authenticated(url, include_heads=True, env=_attempt_env(world))
-        in_process = [r for r in world.services.proxy.observations if _listing(r)]
+        observed = world.services.proxy.observations
 
-    assert listed is None
-    assert in_process == []
+    _assert_git_lists_it(listed, observed)
+    assert [r for r in observed if _listing(r)] == []
 
 
 def test_an_env_without_apms_header_never_lists_in_process(tmp_path: Path) -> None:
@@ -134,10 +141,10 @@ def test_an_env_without_apms_header_never_lists_in_process(tmp_path: Path) -> No
         world.services.proxy.clear()
 
         listed = list_refs_authenticated(url, include_heads=True, env=dict(world.env))
-        in_process = [r for r in world.services.proxy.observations if _listing(r)]
+        observed = world.services.proxy.observations
 
-    assert listed is None
-    assert in_process == []
+    _assert_git_lists_it(listed, observed)
+    assert [r for r in observed if _listing(r)] == []
 
 
 def test_the_token_never_reaches_debug_logs(
@@ -183,5 +190,10 @@ def test_a_rate_limited_listing_stops_every_later_in_process_request(tmp_path: P
             unauthenticated = list_refs_anonymously(other, include_heads=True, env=anonymous)
         in_process = [r for r in world.services.proxy.observations if _listing(r)]
 
-    assert (first, later, unauthenticated) == (None, None, None)
+    _assert_breaker_held((first, later, unauthenticated), in_process)
+
+
+def _assert_breaker_held(answers: tuple, in_process: list) -> None:
+    """Every listing fell back to git, and the only in-process request was the 429."""
+    assert answers == (None, None, None)
     assert [r.status for r in in_process] == [429], "no in-process request after the 429"
