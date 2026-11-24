@@ -480,11 +480,20 @@ class Context:
     is_installed: bool = False
     locks: dict[str, bytes] | None = None
 
+    def _env(self) -> dict[str, str]:
+        """The world env; the authenticated journey adds a token and auth-first (research)."""
+        env = self._env()
+        token = os.environ.get("APM_BENCH_GITHUB_TOKEN")
+        if token:
+            env["GITHUB_APM_PAT"] = token
+            env["APM_GITHUB_AUTH_FIRST"] = "1"
+        return env
+
     def run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
             [*self.apm, *argv],
             cwd=cwd,
-            env=self.world.env,
+            env=self._env(),
             capture_output=True,
             text=True,
             timeout=_COMMAND_TIMEOUT_S,
@@ -542,7 +551,7 @@ class Context:
         ):
             subprocess.run(
                 ["git", "-C", str(self.project), *argv],
-                env=self.world.env,
+                env=self._env(),
                 capture_output=True,
                 check=True,
                 timeout=60,

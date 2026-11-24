@@ -171,6 +171,7 @@ jobs:
         RTT: ${{ needs.request.outputs.rtt }}
         SHARD: ${{ matrix.shard }}
         PROFILE: ${{ needs.request.outputs.profile }}
+        APM_BENCH_GITHUB_TOKEN: ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       run: |
         PROFILE_FLAG=()
         if [ "$PROFILE" = 1 ] && [ "$SHARD" = 1 ]; then PROFILE_FLAG=(--profile); fi
