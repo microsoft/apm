@@ -136,6 +136,10 @@ class PackIndexMismatch(AssertionError):
 
 
 def check(answer: bool | None, spawned: bool) -> None:
-    """The differential: an index answer must equal git's."""
-    if answer is not None and answer != spawned:
+    """The differential (APM_DEBUG only): an index answer must equal git's.
+
+    Outside the differential git's answer simply wins: a pack repacked between
+    the two reads must never fail an install.
+    """
+    if differential() and answer is not None and answer != spawned:
         raise PackIndexMismatch("pack index answer differs from git cat-file -t")

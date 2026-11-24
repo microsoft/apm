@@ -135,9 +135,19 @@ def test_a_real_packed_repository_agrees_with_git(tmp_path: Path) -> None:
         _assert_answer(git_dir, kind == "commit", sha=sha)
 
 
-def test_the_differential_raises_on_disagreement() -> None:
+def test_the_differential_raises_on_disagreement(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APM_DEBUG", "1")
     with pytest.raises(pack_index.PackIndexMismatch):
-        pack_index.check(True, False)
+        pack_index.check(False, True)
+
+
+def test_outside_the_differential_git_wins_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W3d R1: the index said "not a commit", git says commit (a concurrent repack):
+    no raise, and the caller acts on git's answer (no fetch)."""
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    _assert_git_answer_used(pack_index.check(False, True))
 
 
 def _git_runner(repo: Path):
@@ -198,6 +208,11 @@ def test_the_link_plan_key_names_the_object_format(tmp_path: Path) -> None:
 def _assert_answer(git_dir: Path, expected: bool | None, *, sha: str = SHA) -> None:
     """What the cache acts on: True/False skip the spawn, None asks git."""
     assert pack_index.packed_commit(git_dir, sha) is expected
+
+
+def _assert_git_answer_used(result) -> None:
+    """check() returned: the install continues on git's answer."""
+    assert result is None
 
 
 def _assert_plan(plan, expected) -> None:
