@@ -20,6 +20,7 @@ import pytest
 
 from apm_cli.cache.inprocess_fetch import fetch_worktree
 from apm_cli.core.auth import AuthResolver
+from apm_cli.utils.git_env import reset_git_cache
 from apm_cli.utils.yaml_io import load_yaml
 from tests.fixtures.perf import TREE_RECIPES, build_tree, serve_offline
 
@@ -30,6 +31,15 @@ pytestmark = [
     pytest.mark.windows_compat,
     pytest.mark.promise("P-OWN-git-transport-selection"),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_ambient_git_config():
+    """Each offline world has its own CA: drop the process-life ambient TLS probe around it."""
+    reset_git_cache()
+    yield
+    reset_git_cache()
+
 
 _ENGAGED = "In-process fetch: "
 # A per-install identifier that differs on every run by design.
