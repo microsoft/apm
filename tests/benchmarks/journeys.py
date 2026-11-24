@@ -747,7 +747,12 @@ def _setup_replay(ctx: Context) -> None:
     """
     ctx.installed()
     for root in ctx.roots():
-        ctx.checked(["install"], root)
+        first = _replay_outcome(ctx.run(["install"], root).stderr)
+        # The first unchanged re-install must record (a CLI without the record prints nothing).
+        if first and "recorded" not in first:
+            raise RuntimeError(
+                f"first no-op after install did not record in {root}: replay {first}"
+            )
         # Up to three more untimed no-ops until one replays: a CLI may need more
         # than one no-op to write its record (the count is in the trace).
         seen = []
