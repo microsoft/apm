@@ -308,19 +308,20 @@ def bundle_entry_within(
 ) -> bool:
     """Whether *dest* stays inside *deploy_root*; a skipped entry is warned about.
 
-    A link loop cannot be resolved, so it is refused like any linked parent (#5287).
+    A link loop or a link out of scope is refused like any linked parent
+    (#5287, #5300); only a lexical escape is skipped.
     """
     from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
+    base = project_root if dest.is_relative_to(project_root) else deploy_root
     try:
         ensure_path_within(dest, deploy_root)
     except PathTraversalError as exc:
+        refuse_symlinked_deploy(dest, base)
         if logger is not None:
             logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
         return False
     except (OSError, RuntimeError):
-        refuse_symlinked_deploy(
-            dest, project_root if dest.is_relative_to(project_root) else deploy_root
-        )
+        refuse_symlinked_deploy(dest, base)
         raise
     return True

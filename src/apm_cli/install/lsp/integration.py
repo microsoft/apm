@@ -224,6 +224,33 @@ def _dependency_provenance(dependencies: list["LSPDependency"]) -> dict[str, str
     }
 
 
+def _locked_plugin_roots(
+    lockfile, provenance: Mapping[str, str], modules_dir, project_root
+) -> dict[str, str]:
+    """Each regular LSP server's declaring package root, as install bound it (#5263).
+
+    A package's root is its materialized directory, from its lock row or, once
+    the row is gone, from the recorded reference itself; the project's own
+    declarations bind the project root. A root derived wrongly only makes the
+    render differ, which keeps the entry: never a guess that deletes.
+    """
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    roots: dict[str, str] = {}
+    for name, owner in provenance.items():
+        try:
+            if owner == _PROJECT_LSP_OWNER:
+                roots[name] = str(Path(project_root).resolve())
+            elif owner.startswith(_PACKAGE_LSP_OWNER_PREFIX) and modules_dir is not None:
+                key = owner.removeprefix(_PACKAGE_LSP_OWNER_PREFIX)
+                row = lockfile.get_dependency(key) if lockfile is not None else None
+                ref = row.to_dependency_ref() if row is not None else DependencyReference.parse(key)
+                roots[name] = str(ref.get_install_path(Path(modules_dir)).resolve())
+        except (OSError, ValueError, TypeError):
+            continue
+    return roots
+
+
 def _is_regular_owner(owner: str) -> bool:
     """Return whether an LSP owner belongs to the replayable install graph."""
     return owner == _PROJECT_LSP_OWNER or owner.startswith(_PACKAGE_LSP_OWNER_PREFIX)
@@ -313,21 +340,32 @@ def _clean_target_differences(
     user_scope: bool,
     logger,
     fail_on_write_error: bool,
+    locked_configs: dict[str, dict] | None = None,
+    plugin_roots: Mapping[str, str] | None = None,
 ) -> None:
-    """Remove only target-scoped LSP entries whose recorded ownership was dropped."""
+    """Remove only target-scoped LSP entries whose recorded ownership was dropped.
+
+    Every target config is read before the first change, and an entry edited
+    since APM wrote it from *locked_configs* is kept (#5263).
+    """
     from apm_cli.integration.lsp_integrator import LSPIntegrator
 
-    for runtime, old_names in old_targets.items():
-        stale = old_names - new_targets.get(runtime, set())
-        if stale:
-            LSPIntegrator.remove_stale(
-                stale,
-                project_root=project_root,
-                user_scope=user_scope,
-                logger=logger,
-                target_runtimes=[runtime],
-                fail_on_write_error=fail_on_write_error,
-            )
+    stale = {
+        runtime: old_names - new_targets.get(runtime, set())
+        for runtime, old_names in old_targets.items()
+    }
+    stale = {runtime: names for runtime, names in stale.items() if names}
+    if not stale:
+        return
+    LSPIntegrator.remove_stale_targets(
+        stale,
+        project_root=project_root,
+        user_scope=user_scope,
+        logger=logger,
+        fail_on_write_error=fail_on_write_error,
+        locked_configs=locked_configs,
+        plugin_roots=plugin_roots,
+    )
 
 
 def run_owned_lsp_integration(
@@ -413,6 +451,7 @@ def run_owned_lsp_integration(
         new_targets=new_targets,
         project_root=project_root,
         user_scope=user_scope,
+        locked_configs=dict(lockfile.lsp_configs),
         logger=logger,
         fail_on_write_error=fail_on_write_error,
     )
@@ -857,6 +896,10 @@ def run_lsp_integration(  # noqa: PLR0913
                 new_targets=new_targets,
                 project_root=project_root,
                 user_scope=user_scope,
+                locked_configs=old_lsp_configs,
+                plugin_roots=_locked_plugin_roots(
+                    existing_lock, old_lsp_provenance, apm_modules_path, project_root
+                ),
                 logger=logger,
                 fail_on_write_error=fail_on_write_error,
             )

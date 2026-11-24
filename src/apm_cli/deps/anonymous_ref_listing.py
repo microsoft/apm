@@ -307,42 +307,46 @@ def _git_trust_context(ca: str) -> ssl.SSLContext:
     return context
 
 
+def _session_with_context(context):
+    """A credential-free pooled session whose direct and proxied TLS use only *context*."""
+    import http.cookiejar
+
+    from requests.adapters import HTTPAdapter
+
+    from apm_cli.utils.http_credentials import CredentialScopedSession
+    from apm_cli.version import get_version
+
+    class _PinnedTrustAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            kwargs["ssl_context"] = context
+            return super().init_poolmanager(*args, **kwargs)
+
+        def proxy_manager_for(self, proxy, **proxy_kwargs):
+            proxy_kwargs["ssl_context"] = context
+            return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+    session = CredentialScopedSession(ambient_credentials=False)
+    session.trust_env = False
+    session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+    session.headers.clear()
+    session.headers.update(
+        {
+            "User-Agent": f"apm/{get_version()}",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+            "Pragma": "no-cache",
+        }
+    )
+    session.mount("https://", _PinnedTrustAdapter(pool_connections=4, pool_maxsize=16))
+    return session
+
+
 def _session_for_refs(ca: str):
     """One pooled session per CA, whose direct and proxied TLS use only *ca*."""
     with _session_lock:
         session = _sessions.get(ca)
         if session is None:
-            import http.cookiejar
-
-            from requests.adapters import HTTPAdapter
-
-            from apm_cli.utils.http_credentials import CredentialScopedSession
-            from apm_cli.version import get_version
-
-            context = _git_trust_context(ca)
-
-            class _GitTrustAdapter(HTTPAdapter):
-                def init_poolmanager(self, *args, **kwargs):
-                    kwargs["ssl_context"] = context
-                    return super().init_poolmanager(*args, **kwargs)
-
-                def proxy_manager_for(self, proxy, **proxy_kwargs):
-                    proxy_kwargs["ssl_context"] = context
-                    return super().proxy_manager_for(proxy, **proxy_kwargs)
-
-            session = CredentialScopedSession(ambient_credentials=False)
-            session.trust_env = False
-            session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
-            session.headers.clear()
-            session.headers.update(
-                {
-                    "User-Agent": f"apm/{get_version()}",
-                    "Accept": "*/*",
-                    "Accept-Encoding": "identity",
-                    "Pragma": "no-cache",
-                }
-            )
-            session.mount("https://", _GitTrustAdapter(pool_connections=4, pool_maxsize=16))
+            session = _session_with_context(_git_trust_context(ca))
             _sessions[ca] = session
         return session
 

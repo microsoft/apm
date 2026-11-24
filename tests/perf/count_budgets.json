@@ -222,6 +222,362 @@
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
       }
+    },
+    "outdated": {
+      "fs.files_written": {
+        "budget": 23,
+        "measured": 21,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hash_objects": {
+        "budget": 14,
+        "measured": 13,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 429,
+        "measured": 408,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 2,
+        "measured": 1,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 132,
+        "measured": 125,
+        "reason": "max across CI jobs: Integration shard 13 run 45416492731 at 0c60e291 observed 125, Lifecycle Full Suite run 45409372587 observed 109; the job-environment spread is not yet isolated (tracked under #5339)",
+        "pr": "#5345"
+      },
+      "fs.realpath_calls": {
+        "budget": 33,
+        "measured": 31,
+        "reason": "max across CI jobs: Integration shard 13 run 45416492731 at 0c60e291 observed 31, Lifecycle Full Suite run 45409372587 observed 28; the job-environment spread is not yet isolated (tracked under #5339)",
+        "pr": "#5345"
+      },
+      "fs.stat_calls": {
+        "budget": 163,
+        "measured": 155,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.config": {
+        "budget": 4,
+        "measured": 3,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 5,
+        "measured": 4,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.requests": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      }
+    },
+    "update": {
+      "fs.files_written": {
+        "budget": 376,
+        "measured": 358,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hash_objects": {
+        "budget": 873,
+        "measured": 831,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 1089867,
+        "measured": 1037968,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 16,
+        "measured": 15,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 3270,
+        "measured": 3114,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.realpath_calls": {
+        "budget": 243,
+        "measured": 231,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.stat_calls": {
+        "budget": 7819,
+        "measured": 7446,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.cat-file": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.config": {
+        "budget": 9,
+        "measured": 8,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.ls-tree": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.remote": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.version": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 4,
+        "measured": 3,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.requests": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      }
+    },
+    "install-cold-auth": {
+      "fs.files_written": {
+        "budget": 1212,
+        "measured": 1154,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hash_objects": {
+        "budget": 1979,
+        "measured": 1884,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 3469439,
+        "measured": 3304227,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 12393,
+        "measured": 11802,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.realpath_calls": {
+        "budget": 1263,
+        "measured": 1202,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.stat_calls": {
+        "budget": 21899,
+        "measured": 20856,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.cat-file": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.checkout": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.clone": {
+        "budget": 21,
+        "measured": 20,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.config": {
+        "budget": 10,
+        "measured": 9,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.ls-remote": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.ls-tree": {
+        "budget": 21,
+        "measured": 20,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.remote": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 21,
+        "measured": 20,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.requests": {
+        "budget": 53,
+        "measured": 50,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      }
+    },
+    "install-warm-auth": {
+      "fs.files_written": {
+        "budget": 868,
+        "measured": 826,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hash_objects": {
+        "budget": 1943,
+        "measured": 1850,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.hashed_bytes": {
+        "budget": 3468635,
+        "measured": 3303461,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lockfile_reads": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.lstat_calls": {
+        "budget": 11759,
+        "measured": 11199,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.realpath_calls": {
+        "budget": 1208,
+        "measured": 1150,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "fs.stat_calls": {
+        "budget": 21825,
+        "measured": 20785,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.cat-file": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.config": {
+        "budget": 9,
+        "measured": 8,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.ls-remote": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.ls-tree": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.remote": {
+        "budget": 3,
+        "measured": 2,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "git.var": {
+        "budget": 2,
+        "measured": 1,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.connects": {
+        "budget": 11,
+        "measured": 10,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      },
+      "http.requests": {
+        "budget": 21,
+        "measured": 20,
+        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
+        "pr": "#5345"
+      }
     }
   }
 }

@@ -1,0 +1,14 @@
+{
+  "issue": 5344,
+  "fixed_in": "Unreleased",
+  "summary": "With claude and copilot targets and no apm compile, install dropped .claude/rules files for instructions routed to AGENTS.md with only an info line; install now warns naming them and audit --ci reports the same warning.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_dropped_routed_instructions_lifecycle.py::test_an_instruction_routed_to_agents_md_is_named_until_compiled"
+  ]
+}

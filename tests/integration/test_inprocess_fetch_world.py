@@ -2,7 +2,7 @@
 
 F12: a cold ``apm install`` of the tree-10 offline mirror (TLS through the
 world's proxy) with the in-process fetch engaged, and again with git forced
-by an inert global attributes file, must produce identical lockfiles,
+(APM_NO_INPROCESS_FETCH=1), must produce identical lockfiles,
 deployed bytes and deploy-store receipts. The hit-rate cell installs under a
 realistic user git config and reports how many packages were fetched in
 process. The rate-limit cells prove the fetch never moves a user to another
@@ -12,7 +12,6 @@ sends the rest of the command to git with the same lockfile.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,6 +20,7 @@ import pytest
 
 from apm_cli.cache.inprocess_fetch import fetch_worktree
 from apm_cli.core.auth import AuthResolver
+from apm_cli.utils.git_env import reset_git_cache
 from apm_cli.utils.yaml_io import load_yaml
 from tests.fixtures.perf import TREE_RECIPES, build_tree, serve_offline
 
@@ -28,13 +28,20 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.windows_compat,
     pytest.mark.promise("P-OWN-git-transport-selection"),
 ]
 
+
+@pytest.fixture(autouse=True)
+def _fresh_ambient_git_config():
+    """Each offline world has its own CA: drop the process-life ambient TLS probe around it."""
+    reset_git_cache()
+    yield
+    reset_git_cache()
+
+
 _ENGAGED = "In-process fetch: "
-_NOT_YET_ON_WINDOWS = pytest.mark.skipif(
-    os.name == "nt", reason="B1 engages on Windows in the W4 follow-up"
-)
 # A per-install identifier that differs on every run by design.
 _PER_RUN = {".apm-local/installation"}
 
@@ -85,14 +92,6 @@ def _receipts(cache_dir: Path) -> list[dict]:
     return sorted((load_yaml(path)["files"] for path in records), key=repr)
 
 
-def _global_attributes(env: dict[str, str]) -> Path:
-    xdg = env.get("XDG_CONFIG_HOME")
-    home = env.get("HOME") or env.get("USERPROFILE")
-    assert xdg or home, "the world names a config home"
-    return Path(xdg) / "git" / "attributes" if xdg else Path(home) / ".config/git/attributes"
-
-
-@_NOT_YET_ON_WINDOWS
 def test_in_process_and_git_installs_are_byte_identical(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -104,17 +103,10 @@ def test_in_process_and_git_installs_are_byte_identical(
         engaged = _assert_installed(apm_binary_path, fast, env)
         fast_receipts = _receipts(world.cache_dir)
 
-        # An empty global attributes file changes no bytes but makes the fetch refuse.
-        attributes = _global_attributes(env)
-        attributes.parent.mkdir(parents=True, exist_ok=True)
-        attributes.write_bytes(b"")
-        try:
-            world.clear_cache()
-            slow = tmp_path / "git"
-            shutil.copytree(tree.project, slow)
-            forced = _assert_installed(apm_binary_path, slow, env)
-        finally:
-            os.unlink(attributes)
+        world.clear_cache()
+        slow = tmp_path / "git"
+        shutil.copytree(tree.project, slow)
+        forced = _assert_installed(apm_binary_path, slow, {**env, "APM_NO_INPROCESS_FETCH": "1"})
         git_receipts = _receipts(world.cache_dir)
 
         assert engaged == len(tree.packages) == 10
@@ -124,7 +116,6 @@ def test_in_process_and_git_installs_are_byte_identical(
         assert fast_receipts and fast_receipts == git_receipts
 
 
-@_NOT_YET_ON_WINDOWS
 def test_every_package_is_fetched_in_process_under_a_realistic_user_config(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -156,7 +147,6 @@ def _fetches(world) -> list:
     return [request for request in world.services.proxy.observations if _in_process_fetch(request)]
 
 
-@_NOT_YET_ON_WINDOWS
 def test_a_rate_limit_mid_install_sends_the_rest_to_git_with_the_same_lockfile(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
@@ -192,7 +182,6 @@ def test_a_rate_limit_mid_install_sends_the_rest_to_git_with_the_same_lockfile(
         assert _tree(project) == _tree(reference)
 
 
-@_NOT_YET_ON_WINDOWS
 def test_an_authenticated_attempt_never_uses_the_in_process_fetch(
     apm_binary_path: Path, tmp_path: Path
 ) -> None:
