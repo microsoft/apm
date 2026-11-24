@@ -31,6 +31,7 @@ A sample counts only when the 1-min load average is under ``--max-load``
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import json
 import math
@@ -829,7 +830,8 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             check=False,
         )
         if result.returncode != 0 or not target.is_file():
-            print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
+            stderr = _redact(result.stderr[-500:].decode(errors="replace"))
+            print(f"[!] cProfile run failed for {journey.name}: {stderr}")
             return None
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
@@ -884,8 +886,17 @@ def _real_token(ctx: Context) -> str:
 
 
 def _redact(text: str) -> str:
-    """*text* without the bench token (error tails land in uploaded artifacts)."""
-    return text.replace(_BENCH_REAL_TOKEN, "***") if _BENCH_REAL_TOKEN and text else text
+    """*text* without the bench token (error tails land in uploaded artifacts).
+
+    Covers the raw token and the Basic credential git sends for it
+    (``x-access-token:<token>``, plain and base64).
+    """
+    if not _BENCH_REAL_TOKEN or not text:
+        return text
+    basic = f"x-access-token:{_BENCH_REAL_TOKEN}"
+    for secret in (base64.b64encode(basic.encode()).decode(), basic, _BENCH_REAL_TOKEN):
+        text = text.replace(secret, "***")
+    return text
 
 
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
@@ -901,7 +912,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         try:
             journey.setup(ctx)
         except RuntimeError as exc:
-            error = str(exc)
+            error = _redact(str(exc))
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
