@@ -158,3 +158,16 @@ if _LOG:
 
         for _name in ("sha256", "sha1", "sha512", "md5"):
             setattr(hashlib, _name, _hash_factory(getattr(hashlib, _name)))
+
+        _real_new = hashlib.new
+
+        def _new(name, *a, **k):
+            # hashlib.new(name, data): git object ids; hashlib.file_digest(f, "sha256")
+            # also builds its digest through the module's ``new``, then feeds it chunks.
+            _bump(_fs, "hash_objects")
+            data = a[0] if a else k.get("data", k.get("string", b""))
+            if data:
+                _bump(_fs, "hashed_bytes", len(data))
+            return _Hash(_real_new(name, *a, **k))
+
+        hashlib.new = _new

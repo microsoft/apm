@@ -29,6 +29,7 @@ import os
 import shutil
 import sys
 import warnings
+from pathlib import Path
 
 import pytest
 
@@ -111,6 +112,27 @@ def test_journey_stays_within_its_count_budget(journey: str, journey_runs) -> No
     for note in tighten:
         warnings.warn(note, TightenNote, stacklevel=1)
     assert not over, "count budget exceeded:\n" + "\n".join(over)
+
+
+def test_the_hash_counters_see_hashlib_new_and_file_digest(tmp_path: Path) -> None:
+    """hashlib.new (git object ids) and hashlib.file_digest (drift records) are counted."""
+    data = tmp_path / "data.bin"
+    data.write_bytes(b"x" * 1000)
+    script = (
+        "import hashlib, sys\n"
+        "hashlib.new('sha1', b'abc', usedforsecurity=False).hexdigest()\n"
+        "with open(sys.argv[1], 'rb') as handle:\n"
+        "    hashlib.file_digest(handle, 'sha256').hexdigest()\n"
+    )
+    result, counts = run_counted(
+        [sys.executable, "-c", script, str(data)],
+        cwd=tmp_path,
+        env=dict(os.environ),
+        log=tmp_path / "counts.jsonl",
+    )
+    assert result.returncode == 0, result.stderr
+    assert counts["fs"]["hash_objects"] == 2, counts["fs"]
+    assert counts["fs"]["hashed_bytes"] == 3 + 1000, counts["fs"]
 
 
 def test_cold_install_clones_and_fetches_while_noop_spawns_no_git_fetch(journey_runs) -> None:
