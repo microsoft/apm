@@ -179,6 +179,33 @@ def _graph_rows(project: Path) -> dict[str, tuple]:
     }
 
 
+def _kept_declared(seed, project: Path, rows, needed, exit_code: int, output: str) -> str | None:
+    """The first broken promise after prune: a declared package lost, or an unnamed keep."""
+    for name in sorted(needed):
+        if not any(row.get("name") == name for row in rows):
+            return f"seed {seed}: lock row of declared {name} deleted; {output}"
+        if not (project / ".claude" / "skills" / f"{name}-skill" / "SKILL.md").is_file():
+            return f"seed {seed}: deployed skill of declared {name} deleted; {output}"
+    if exit_code != 0:
+        return f"seed {seed}: prune exited {exit_code}; {output}"
+    unnamed = [row["repo_url"] for row in rows if row.get("name") not in needed]
+    return f"seed {seed}: {unnamed[0]} kept without a name; {output}" if unnamed else None
+
+
+def _converges(seed: int, project: Path) -> str:
+    """A fresh resolve of the pruned project records the same graph (#5126).
+
+    The edited manifest's new content hash is install's to record, not prune's.
+    """
+    settled = _graph_rows(project)
+    clear_apm_yml_cache()
+    resolved = _run(project, "install", "--no-frozen")
+    if resolved.exit_code != 0 or _graph_rows(project) != settled:
+        changed = sorted(map(repr, set(_graph_rows(project).items()) ^ set(settled.items())))
+        return f"seed {seed}: install --no-frozen after prune changed {changed}"
+    return "converged"
+
+
 def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | None, bool | None]:
     """``(verdict, dropped root removed)``.
 
@@ -236,35 +263,19 @@ def _check_seed(seed: int, root: Path, *, rekeyed: bool = False) -> tuple[str | 
         if graph.motif or promoted or dropped in _needed(graph)
         else not any(row.get("name") == dropped for row in rows)
     )
-    for name in sorted(needed):
-        if not any(row.get("name") == name for row in rows):
-            return f"seed {seed}: lock row of declared {name} deleted; {output}", removed
-        if not (project / ".claude" / "skills" / f"{name}-skill" / "SKILL.md").is_file():
-            return f"seed {seed}: deployed skill of declared {name} deleted; {output}", removed
-    if pruned.exit_code != 0:
-        return f"seed {seed}: prune exited {pruned.exit_code}; {output}", removed
-    for row in rows:
-        if row.get("name") not in needed:
-            return f"seed {seed}: {row['repo_url']} kept without a name; {output}", removed
+    verdict = _kept_declared(seed, project, rows, needed, pruned.exit_code, output)
+    if verdict is not None:
+        return verdict, removed
     if named or dropped in needed:
         # A fail-closed keep is named; a hand-dropped root another package
         # still declares stays direct until install records it (#3668).
         return None, removed
-    if promoted or graph.aliased & needed:
+    if (promoted or graph.aliased & needed) and not rekeyed:
         # A survivor now declared directly, or one reached through an alias
         # spelling, is re-keyed only by install (#5238); the strict companion
         # cell below fails once prune converges on these too.
-        if not rekeyed:
-            return "rekeyed", removed
-    # Converged: a fresh resolve of the pruned project records the same graph.
-    # The edited manifest's new content hash is install's to record, not prune's.
-    settled = _graph_rows(project)
-    clear_apm_yml_cache()
-    resolved = _run(project, "install", "--no-frozen")
-    if resolved.exit_code != 0 or _graph_rows(project) != settled:
-        changed = sorted(map(repr, set(_graph_rows(project).items()) ^ set(settled.items())))
-        return f"seed {seed}: install --no-frozen after prune changed {changed}", removed
-    return "converged", removed
+        return "rekeyed", removed
+    return _converges(seed, project), removed
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
