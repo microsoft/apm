@@ -2055,6 +2055,8 @@ class HookIntegrator(BaseIntegrator):
         empty event arrays and the *container* key itself.  *container*
         defaults to ``"hooks"``; Antigravity passes ``"apm"`` (its reserved
         hook-name container) so sibling user hook-names are left intact.
+        The cleaned file replaces *json_path* atomically, so a linked config
+        path becomes a regular file and the link's target is not written.
         """
         if not json_path.exists():
             return
@@ -2084,7 +2086,7 @@ class HookIntegrator(BaseIntegrator):
                 stats["files_removed"] += 1
             elif modified:
                 with provenance.recorded_config_write(json_path):
-                    write_seam.write_text(json_path, json.dumps(data, indent=2) + "\n")
+                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if kept:
                 write_hook_sidecar(sidecar_path, kept)
