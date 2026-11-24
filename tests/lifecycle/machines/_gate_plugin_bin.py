@@ -66,7 +66,13 @@ _RESOLVE_BLOCKED = r"Blocked by org policy at .*\(dependency-denylist\)\. Nothin
 # approve under an org dependency deny says "approved" and points at apm install,
 # which refuses: the approval names no org block (#5236).
 _ORG_BLOCK_NAMED = r"(?i)org policy"
-KNOWN_PLUGIN: dict[str, str] = {"G1|approve|bin|denied-dependency|project": "#5236"}
+# pack refuses a project whose native plugin it cannot verify, and its "run apm install"
+# remedy does not change that (#5253): pack must exit 0 and carry the plugin.
+_PACK_REFUSED = r"records no deployed files for it"
+KNOWN_PLUGIN: dict[str, str] = {
+    "G1|approve|bin|denied-dependency|project": "#5236",
+    "G1|pack|bin|allowed|project": "#5253",
+}
 # The same cells for the known-cell issue snapshot (tests/quality/known_cell_issues.py).
 KNOWN_CELLS = (
     KnownCell(
@@ -76,6 +82,7 @@ KNOWN_CELLS = (
         _ORG_BLOCK_NAMED,
         lambda *_args: False,
     ),
+    KnownCell("G1|pack|bin|allowed|project", "I8", "#5253", _PACK_REFUSED, lambda *_args: False),
 )
 # The project gate matrix already labels its p-exec steps under the org deny with these
 # ops (its bin/ never deploys, so it credits no bin cell, #4981); this spine's steps carry
@@ -178,10 +185,16 @@ class GatePluginBin(StepRunner):
             words, exits=frozenset({0, 1}), cells=(cell,), model=requested.model(), mutating=False
         )
         output = step.result.stdout + step.result.stderr
-        assert not re.search(_ORG_BLOCK_NAMED, output), (
-            f"{cell} now names the org block: remove it from KNOWN_PLUGIN "
-            f"({KNOWN_PLUGIN[cell]})\n{output}"
-        )
+        if cell.startswith("G1|pack|"):
+            # Still the #5253 refusal: exit 1 naming the unverifiable native plugin.
+            assert step.result.returncode == 1 and re.search(_PACK_REFUSED, output), (
+                f"{cell} no longer fails as #5253 records: remove it from KNOWN_PLUGIN\n{output}"
+            )
+        else:
+            assert not re.search(_ORG_BLOCK_NAMED, output), (
+                f"{cell} now names the org block: remove it from KNOWN_PLUGIN "
+                f"({KNOWN_PLUGIN[cell]})\n{output}"
+            )
         assert set(step.after.deployed) == set(step.before.deployed), cell
         self.expected_seen.add(cell)
 
@@ -379,6 +392,8 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.run("prune", "prune")
     for op, (flags, _factors) in CONTEXT_INSTALLS.items():
         machine.run(op, *install, *flags)
+    # pack over the deployed plugin (a strict known cell, #5253).
+    machine.run("pack", "pack", "--dry-run")
     # Widen to claude and copilot (a target change), re-install unchanged, narrow back.
     machine.set_targets("claude", "copilot")
     machine.run("install", *install)
