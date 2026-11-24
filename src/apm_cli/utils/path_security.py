@@ -29,6 +29,7 @@ from stat import S_ISLNK
 
 from .file_ops import robust_rmtree
 from .paths import is_within, relative_posix, relative_to
+from .realpath import resolve_path
 
 
 class PathTraversalError(ValueError):
@@ -212,13 +213,13 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     """
     return ensure_path_within_resolved(
         path,
-        _strip_extended_prefix(base_dir.resolve()),
+        _strip_extended_prefix(resolve_path(base_dir)),
     )
 
 
 def resolve_for_containment(path: Path) -> Path:
     """Resolve *path* once (symlinks followed) for a containment check made now."""
-    return _strip_extended_prefix(path.resolve())
+    return _strip_extended_prefix(resolve_path(path))
 
 
 def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
@@ -244,7 +245,7 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
 
 def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     """Resolve *path* and assert containment against a pre-resolved base."""
-    resolved = _strip_extended_prefix(path.resolve())
+    resolved = _strip_extended_prefix(resolve_path(path))
     resolved_base = _strip_extended_prefix(resolved_base)
     try:
         if not is_within(resolved, resolved_base):
