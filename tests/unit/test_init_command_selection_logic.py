@@ -161,7 +161,7 @@ class TestConfirmSetupSummary:
             _confirm_setup_summary(config, logger)
         assert exc_info.value.code == 0
 
-    def test_targets_line_shows_in_summary(self):
+    def test_targets_line_shows_in_summary(self, capsys):
         from apm_cli.commands.init import _confirm_setup_summary
 
         config = {
@@ -180,6 +180,8 @@ class TestConfirmSetupSummary:
             patch("click.confirm", return_value=True),
         ):
             _confirm_setup_summary(config, logger)
+
+        assert "targets: copilot, claude" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
