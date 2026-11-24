@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from dataclasses import replace
@@ -45,6 +46,37 @@ def _write(root: Path, relative: str, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _scanner_read() -> bool:
+    """Whether the current ``os.open`` comes from the scanner's primitive reader."""
+    frame = inspect.currentframe()
+    while frame is not None:
+        code = frame.f_code
+        if code.co_name == "_regular_bytes" and Path(code.co_filename).name == "file_scanner.py":
+            return True
+        frame = frame.f_back
+    return False
+
+
+def _opens(monkeypatch: pytest.MonkeyPatch, deny: Path | None = None) -> list[Path]:
+    """Every path the scanner's primitive reader opens through ``os.open`` (#5280).
+
+    Other readers in the same scan (content hashes, for one) are not counted.
+    *deny* raises ``PermissionError`` for that one path, as an unreadable file would.
+    """
+    real_open = os.open
+    opened: list[Path] = []
+
+    def watched(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        if Path(path) == deny:
+            raise PermissionError("fixture access denied")
+        if _scanner_read():
+            opened.append(Path(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", watched)
+    return opened
 
 
 def _settings(root: Path, *, prompt: bool = False) -> Path:
@@ -243,6 +275,7 @@ def test_unreadable_recognized_file_is_reported(
     # Deny every read API so the fixture does not depend on how the scanner reads.
     monkeypatch.setattr(Path, "read_text", unreadable(read_text))
     monkeypatch.setattr(Path, "read_bytes", unreadable(read_bytes))
+    _opens(monkeypatch, deny=settings)
     result = CliRunner().invoke(cli, ["audit", "--no-drift", "--format", "json"])
     assert result.exit_code == 1, result.output
     report = json.loads(result.stdout)
@@ -394,9 +427,12 @@ def test_excluded_transcripts_are_not_walked_or_read(
 
     monkeypatch.setattr(os, "walk", bounded_walk)
     monkeypatch.setattr(Path, "read_text", bounded_read)
+    opened = _opens(monkeypatch)
     result = scan_project_result(project, targets=(KNOWN_TARGETS["claude"],))
     assert result.scanned_files == frozenset({".claude/skills/manual/SKILL.md"})
+    reads.extend(opened)
     assert skill in reads
+    assert not any(path.suffix == ".jsonl" for path in reads), reads
     assert walks == [project / ".claude/skills"]
 
 
@@ -665,11 +701,13 @@ def test_overlapping_claims_read_each_interpretation_once(
         return read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", counted)
+    opened = _opens(monkeypatch)
     result = scan_project_result(
         project,
         targets=(KNOWN_TARGETS["claude"],),
         lockfile=LockFile(local_deployed_files=[".claude/skills/", *relative]),
     )
+    reads.extend(path for path in opened if path in paths)
     assert len(reads) == count
     assert len(result.scanned_files) == count
     assert all(entry.tracked for entry in result.inventory)
@@ -736,12 +774,14 @@ def test_shared_skills_use_one_interpretation_and_selected_attribution(
         return read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", counted)
+    opened = _opens(monkeypatch)
     relative = skill.relative_to(project).as_posix()
     result = scan_project_result(
         project,
         lockfile=LockFile(local_deployed_files=[relative]),
         targets=tuple(KNOWN_TARGETS[name] for name in targets),
     )
+    reads.extend(path for path in opened if path == skill)
     assert reads == [skill]
     assert len(result.inventory) == 1
     assert result.inventory[0].target == "copilot"
@@ -766,7 +806,9 @@ def test_cached_content_rebinds_attribution_without_reparsing(
         pytest.fail("equivalent cached content was read again")
 
     monkeypatch.setattr(Path, "read_text", no_read)
+    opened = _opens(monkeypatch)
     second = _scan_primitive(skill, surfaces[1], "second", tracked=True, cache=cache)
+    assert skill not in opened, "equivalent cached content was read again"
     assert first.inventory[0].tracked is False
     assert second.inventory[0].tracked is True
     assert second.inventory[0].target == "agent-skills"
@@ -853,7 +895,9 @@ def test_symlink_prompt_is_never_read(project: Path, monkeypatch: pytest.MonkeyP
         return read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", guarded_read)
+    opened = _opens(monkeypatch)
     result = scan_project_result(project, targets=(KNOWN_TARGETS["claude"],))
+    assert not {link, outside} & set(opened), "audit followed a user symlink"
     assert result.scanned_files == frozenset()
     assert result.inventory == ()
 

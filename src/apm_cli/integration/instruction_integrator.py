@@ -33,6 +33,7 @@ from apm_cli.utils.patterns import (
     yaml_globs_scalar,
     yaml_plain_scalar,
 )
+from apm_cli.utils.realpath import resolve_path
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
@@ -314,9 +315,9 @@ class InstructionIntegrator(BaseIntegrator):
     ) -> tuple[str, str, str, str, str]:
         """Return the per-package, per-target identity for a prepared rule plan."""
         return (
-            str(package_path.resolve()),
-            str(project_root.resolve()),
-            str(deploy_dir.resolve()),
+            str(resolve_path(package_path)),
+            str(resolve_path(project_root)),
+            str(resolve_path(deploy_dir)),
             extension,
             fmt,
         )

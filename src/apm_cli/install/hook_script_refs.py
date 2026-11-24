@@ -34,6 +34,13 @@ _DIRECTORY_CHANGES = frozenset({"cd", "pushd", "popd"})
 _HIDES_A_NAME = re.compile(r"[$`*?\[\\]|\{[^{}]*(?:,|\.\.)[^{}]*\}|%[A-Za-z_]\w*%|![A-Za-z_]\w*!")
 _QUOTING = re.compile(r"[\"'\\]")
 _HANDS_TO_SHELL = re.compile(r"^(?:-.*|/[A-Za-z]|eval|exec|source|\.|<+)$")
+# A POSIX shell run on a script file with only options that take no command
+# string (#5210): ``sh -e``, ``bash -eu``, ``sh -o errexit -x``. ``-c``, ``-s``,
+# long options and any other option keep the rescan (fail closed).
+_SHELLS = frozenset({"sh", "bash", "dash", "ksh", "zsh"})
+_SHELL_FLAGS = re.compile(r"^[-+][abCefhmnuvxBEHPT]+$")
+_SHELL_OPTION_NAME = re.compile(r"^[a-z][a-z-]*$")
+_SEPARATORS = frozenset({";", "&", "&&", "|", "||", "(", ")"})
 
 
 def script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozenset, frozenset]:
@@ -89,7 +96,12 @@ def _mentions(command: str, pattern: re.Pattern[str]) -> bool:
 
 
 def runs_script(
-    command: str, refs: tuple[frozenset, frozenset], bases: Collection[Path], project_root: Path
+    command: str,
+    refs: tuple[frozenset, frozenset],
+    bases: Collection[Path],
+    project_root: Path,
+    *,
+    from_cwd: bool = False,
 ) -> bool:
     """Whether *command* may run a bundle script, in any target and spelling (#5106).
 
@@ -98,7 +110,9 @@ def runs_script(
     separator) that certainly resolves elsewhere. An absolute path resolves
     as written; a relative one from every base in *bases*, and only when the
     command never changes directory. ``${CLAUDE_PROJECT_DIR}`` and ``$HOME``
-    count as plain anchors unless the command assigns them.
+    count as plain anchors unless the command assigns them. With *from_cwd*
+    the bases are the handler's declared working directory, so ``./name``
+    resolves from it (#5332); otherwise a bare name may be any directory's.
     """
     names, paths = refs
     pattern = _name_pattern(names)
@@ -117,11 +131,17 @@ def runs_script(
         return True
     if not _mentions(command, pattern):
         return False
-    return _runs(text, pattern, paths, tuple(bases), moved=False)
+    return _runs(text, pattern, paths, tuple(bases), moved=False, from_cwd=from_cwd)
 
 
 def _runs(
-    text: str, pattern: re.Pattern[str], paths: frozenset, bases: tuple, *, moved: bool
+    text: str,
+    pattern: re.Pattern[str],
+    paths: frozenset,
+    bases: tuple,
+    *,
+    moved: bool,
+    from_cwd: bool = False,
 ) -> bool:
     if "$(" in text or "`" in text:
         return True  # a command substitution may build the path around the name
@@ -129,22 +149,62 @@ def _runs(
     if words is None:
         return True
     moved = moved or any(word in _DIRECTORY_CHANGES for word in words)
+    operands, options = _script_operands(words)
     # An option, ``eval`` or a redirection may hand a quoted word to a shell
     # (``sh -c``, ``cmd /c``, ``pwsh -Command``, ``bash <<<``): rescan it.
-    nested = any(_HANDS_TO_SHELL.match(word) for word in words)
-    named = [word for word in words if pattern.search(caseless(word))]
+    nested = any(_HANDS_TO_SHELL.match(w) for i, w in enumerate(words) if i not in options)
+    named = [(i, word) for i, word in enumerate(words) if pattern.search(caseless(word))]
     if not named:
         return True  # the name sits in syntax the words lost: fail closed
-    for word in named:
-        if nested and any(space in word for space in " \t"):
+    for index, word in named:
+        if index in operands:
+            # A shell's script operand is one path, judged whole (#5210), from
+            # the handler's cwd when it declares one (#5332).
+            if not _certainly_elsewhere(word, paths, bases, moved, from_cwd):
+                return True
+        elif nested and any(space in word for space in " \t"):
             # The intact word may itself be a script path with a space in it.
             if _names_a_script(word, paths, bases, moved) or _runs(
-                word, pattern, paths, bases, moved=moved
+                word, pattern, paths, bases, moved=moved, from_cwd=from_cwd
             ):
                 return True
-        elif not _certainly_elsewhere(word, paths, bases, moved):
+        elif not _certainly_elsewhere(word, paths, bases, moved, from_cwd):
             return True
     return False
+
+
+def _script_operands(words: list[str]) -> tuple[set[int], set[int]]:
+    """Indices of shell script operands and of the known options before them (#5210).
+
+    Only a shell word that starts a command, followed by at least one known option
+    and then a word that is no option or separator, counts; anything else is left
+    to the rescan.
+    """
+    operands: set[int] = set()
+    options: set[int] = set()
+    for start, word in enumerate(words):
+        if start and words[start - 1] not in _SEPARATORS:
+            continue
+        if posixpath.basename(word) not in _SHELLS:
+            continue
+        seen: list[int] = []
+        at = start + 1
+        while at < len(words):
+            if words[at] in ("-o", "+o") and at + 1 < len(words):
+                if not _SHELL_OPTION_NAME.match(words[at + 1]):
+                    break
+                seen += [at, at + 1]
+                at += 2
+            elif _SHELL_FLAGS.match(words[at]):
+                seen.append(at)
+                at += 1
+            else:
+                break
+        if seen and at < len(words) and not words[at].startswith(("-", "+")):
+            if words[at] not in _SEPARATORS:
+                operands.add(at)
+                options.update(seen)
+    return operands, options
 
 
 def _names_a_script(word: str, paths: frozenset, bases: tuple, moved: bool) -> bool:
@@ -157,26 +217,37 @@ def _names_a_script(word: str, paths: frozenset, bases: tuple, moved: bool) -> b
     )
 
 
-def _certainly_elsewhere(word: str, paths: frozenset, bases: tuple, moved: bool) -> bool:
+def _certainly_elsewhere(
+    word: str, paths: frozenset, bases: tuple, moved: bool, from_cwd: bool = False
+) -> bool:
     """Whether *word* is a plain path that resolves, with certainty, to no script."""
     if _NOT_PLAIN.search(word.replace(" ", "")):
         return False
     if word.startswith("/") or _DRIVE.match(word):
+        if _linked_below(Path(Path(word).anchor or "/"), word):
+            return False  # a link may alias the bundle script: identity is not certain
         return _normalized(word) not in paths
     relative = posixpath.normpath(word)
-    if moved or "/" not in relative or relative.startswith(".."):
+    qualified = "/" in relative or (from_cwd and word.startswith("./"))
+    if moved or not qualified or relative.startswith(".."):
         return False  # a bare name, or a directory that is not certain
+    if any(_linked_below(base, relative) for base in bases):
+        return False  # a link may alias the bundle script: identity is not certain
     return all(_normalized(f"{base.as_posix()}/{relative}") not in paths for base in bases)
 
 
-def script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
-    """Return each script row under *target_root*, spelled relative to it."""
-    tails = []
-    for value in scripts:
-        spelled = Path(value) if Path(value).is_absolute() else project_root / value
-        if spelled.is_relative_to(target_root):
-            tails.append(spelled.relative_to(target_root).as_posix())
-    return tails
+def _linked_below(base: Path, relative: str) -> bool:
+    """Whether an existing *relative* below *base* goes through a link (or cannot be proven not to).
+
+    A link or junction anywhere on the path may alias a bundle script, so a
+    lexical mismatch proves nothing there (fail closed).
+    """
+    from ..utils.path_security import has_symlink_component
+
+    candidate = Path(base) / relative
+    if not (candidate.is_symlink() or candidate.exists()):
+        return False
+    return has_symlink_component(Path(base), candidate)
 
 
 def hook_commands(document: Any) -> list[str]:
@@ -193,7 +264,7 @@ def hook_commands(document: Any) -> list[str]:
         commands = [declared.command for declared in parse_hook_source(document).commands]
     except HookContractError:
         commands = list(_every_command_field(document))
-    # Raw text: the matcher reads backslash escapes; only the tail match normalizes (#5106).
+    # Raw text: the matcher reads backslash escapes (#5106).
     return commands
 
 

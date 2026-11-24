@@ -13,8 +13,6 @@ from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, W
 
 from .realpath import resolve_path
 
-_WINDOWS = os.name == "nt"
-
 # Marks an input the string comparison does not decide; pathlib decides it.
 _UNDECIDED = object()
 # Only pathlib's own classes: a subclass may override relative_to/is_relative_to.

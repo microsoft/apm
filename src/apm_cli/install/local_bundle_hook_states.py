@@ -8,9 +8,26 @@ removed outside APM are found by content match against the sidecar record.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+@dataclass
+class _BundleHookState:
+    """One per-file local bundle's recorded keys and deployed hook files."""
+
+    keys: set[str | None] = field(default_factory=set)
+    hook_files: set[str] = field(default_factory=set)
+    # Sidecars whose approval records could not be read (#5144).
+    unreadable: set[str] = field(default_factory=set)
+
+    def unreadable_reason(self) -> str:
+        """Name the unreadable sidecars; a corrupt record proves no approval."""
+        from apm_cli.utils.diagnostics import printable_ascii_text
+
+        where = printable_ascii_text(", ".join(sorted(self.unreadable)))
+        return f"approval record in {where} is unreadable"
 
 
 @dataclass
@@ -25,11 +42,45 @@ class _MergedHookState:
     config_unreadable: bool = False
     sidecar_unreadable: bool = False
 
+    @property
+    def sidecar_label(self) -> str:
+        """The project-relative path of this target's ownership sidecar."""
+        from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
 
-def _merged_hook_states(project_root: Path, targets: Any) -> Iterator[_MergedHookState]:
+        return Path(self.target.root_dir, _APM_HOOKS_SIDECAR).as_posix()
+
+
+class ReadOnce:
+    """Read each hook document at most once; every caller gets its own copy (#5211)."""
+
+    def __init__(self) -> None:
+        self._documents: dict[tuple[Path, bool], tuple[Any, Exception | None]] = {}
+
+    def __call__(self, path: Path, *, regular_only: bool = True) -> dict[str, Any]:
+        """Sidecars are read as regular files only (#5328); a native config passes False."""
+        import copy
+
+        from apm_cli.integration.hook_ownership import read_hook_object
+
+        key = (Path(path), regular_only)
+        if key not in self._documents:
+            try:
+                self._documents[key] = (read_hook_object(key[0], regular_only=regular_only), None)
+            except (OSError, ValueError, TypeError) as exc:
+                self._documents[key] = (None, exc)
+        document, error = self._documents[key]
+        if error is not None:
+            raise error
+        return copy.deepcopy(document)
+
+
+def _merged_hook_states(
+    project_root: Path, targets: Any, read_hook_object: Any = None
+) -> Iterator[_MergedHookState]:
     """Read every merged hook target's config and sidecar, each once (#5078)."""
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
-    from apm_cli.integration.hook_ownership import read_hook_object
+
+    read_hook_object = read_hook_object or ReadOnce()
 
     for target in targets or ():
         config = _MERGE_HOOK_TARGETS.get(getattr(target, "name", None))
@@ -37,9 +88,13 @@ def _merged_hook_states(project_root: Path, targets: Any) -> Iterator[_MergedHoo
             continue
         json_path = Path(project_root) / target.root_dir / config.config_filename
         documents: list[dict[str, Any] | None] = []
-        for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
+        # The sidecar is APM's own record: never read through a link or a FIFO (#5328).
+        for path, regular_only in (
+            (json_path, False),
+            (json_path.parent / _APM_HOOKS_SIDECAR, True),
+        ):
             try:
-                documents.append(read_hook_object(path))
+                documents.append(read_hook_object(path, regular_only=regular_only))
             except (OSError, ValueError, TypeError):
                 documents.append(None)
         yield _MergedHookState(
@@ -53,14 +108,69 @@ def _merged_hook_states(project_root: Path, targets: Any) -> Iterator[_MergedHoo
         )
 
 
-def _merged_hook_documents(project_root: Path, targets: Any):
-    """Yield ``(config, sidecar, container)`` for every merged hook target."""
-    for state in _merged_hook_states(project_root, targets):
+def _per_file_targets(targets: Any) -> list[Any]:
+    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+    return [
+        target
+        for target in targets or ()
+        if getattr(target, "name", None) not in _MERGE_HOOK_TARGETS
+        and callable(getattr(target, "supports", None))
+        and target.supports("hooks")
+    ]
+
+
+@dataclass
+class _PerFileHookState:
+    """One per-file hook target's bundle approval records; ``None`` when unreadable."""
+
+    target: Any
+    label: str
+    records: dict[str, tuple[str | None, list[str]]] | None
+
+
+@dataclass
+class BundleHookStates:
+    """Every hook target's config, sidecar and bundle records, read once (#5211)."""
+
+    merged: list[_MergedHookState]
+    per_file: list[_PerFileHookState]
+    read: ReadOnce
+
+
+def read_bundle_hook_states(project_root: Path, targets: Any) -> BundleHookStates:
+    """Read each merged config and sidecar, and each per-file record, exactly once (#5211)."""
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
+    from apm_cli.integration.hook_ownership import per_file_bundle_hook_keys
+
+    read = ReadOnce()
+    per_file = []
+    for target in _per_file_targets(targets):
+        records: dict[str, tuple[str | None, list[str]]] | None
+        sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
+        try:
+            records = per_file_bundle_hook_keys(sidecar, read=read)
+        except (OSError, ValueError, TypeError):
+            records = None
+        label = Path(target.root_dir, _APM_HOOKS_SIDECAR).as_posix()
+        per_file.append(_PerFileHookState(target, label, records))
+    merged = list(_merged_hook_states(project_root, targets, read))
+    return BundleHookStates(merged, per_file, read)
+
+
+def _merged_hook_documents(project_root: Path, targets: Any, states: Any = None):
+    """Yield ``(config, sidecar, container)`` for every merged hook target.
+
+    With *states* already read, each config is a copy: a reader may mutate it.
+    """
+    import copy
+
+    for state in states if states is not None else _merged_hook_states(project_root, targets):
         if state.config_unreadable or state.sidecar_unreadable:
             # Unreadable ownership state cannot prove an approval.
             yield None, None, state.container
         else:
-            yield state.config, state.sidecar, state.container
+            yield copy.deepcopy(state.config), state.sidecar, state.container
 
 
 def _markers(entries_by_event: Any) -> list[str]:

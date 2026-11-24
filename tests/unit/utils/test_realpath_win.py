@@ -364,3 +364,14 @@ def test_held_dir_turned_into_a_junction_in_place_takes_stock_resolve(project: P
         assert str(empty).lower() not in _held_keys()
         with pytest.raises(PathTraversalError):
             ensure_path_within(empty / "missing.md", package)
+
+
+@_WINDOWS
+def test_release_under_another_spelling_releases_everything(project: Path) -> None:
+    with _held_scope(project) as package:
+        resolve_path(package / "sub" / "b.txt")
+        assert held_count() >= 3
+        realpath_win.release_held("\\\\?\\" + str(package))
+        assert held_count() == 0
+        robust_rmtree(package)
+        assert not package.exists()

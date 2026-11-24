@@ -385,10 +385,10 @@
     },
     "install-cold-auth": {
       "fs.files_written": {
-        "budget": 1212,
-        "measured": 1154,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1572,
+        "measured": 1497,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "fs.hash_objects": {
         "budget": 1979,
@@ -427,40 +427,40 @@
         "pr": "#5345"
       },
       "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.checkout": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.clone": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.config": {
-        "budget": 10,
-        "measured": 9,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 12,
+        "measured": 11,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.ls-remote": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.ls-tree": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.remote": {
         "budget": 3,
@@ -475,16 +475,16 @@
         "pr": "#5345"
       },
       "http.connects": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 4,
+        "measured": 3,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "http.requests": {
-        "budget": 53,
-        "measured": 50,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 21,
+        "measured": 20,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       }
     },
     "install-warm-auth": {
@@ -543,10 +543,10 @@
         "pr": "#5345"
       },
       "git.ls-remote": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 1,
+        "measured": 0,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "git.ls-tree": {
         "budget": 11,
@@ -567,16 +567,16 @@
         "pr": "#5345"
       },
       "http.connects": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 4,
+        "measured": 3,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       },
       "http.requests": {
-        "budget": 21,
-        "measured": 20,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 11,
+        "measured": 10,
+        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
+        "pr": "#5353"
       }
     }
   }
