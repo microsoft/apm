@@ -21,11 +21,14 @@ could not run: it does not establish a network failure.
 
 To recover a project install, stay in your project directory: changing it
 changes which `apm.yml` APM installs and where it deploys. Move Git, or the
-`PATH` entry that finds it, outside the exclusion root instead, rerun
-`apm doctor`, and retry once its `git` row passes. For `apm doctor` itself and
-for global (`--global`) installs, running from another working directory
-outside the exclusion root also works. Network access, authentication, or
-later installation steps may still need attention.
+`PATH` entry that finds it, outside the project's exclusion root instead,
+rerun `apm doctor`, and retry once its `git` row passes. For `apm doctor`
+itself and for global (`--global`) installs, you can instead run from another
+working directory, but APM recomputes the exclusion root there: pick one whose
+own exclusion root contains neither Git's `PATH` directory nor its resolved
+executable. For example, moving from `/home/example` to `/home` makes `/home`
+the root, which still excludes `/home/example/tools/bin/git`. Network access,
+authentication, or later installation steps may still need attention.
 
 APM skips any `git` found at or below an **exclusion root**: the nearest
 directory containing `.git`, else the nearest containing `apm.yml`, else the
