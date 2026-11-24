@@ -1331,8 +1331,8 @@ class TestClaudeRulesIntegration:
         assert "# TypeScript" in deployed
         assert "Use strict mode." in deployed
 
-    def test_unconditional_rule_routes_to_agents_md(self):
-        """Project instructions without applyTo load from AGENTS.md, not rules (#3939)."""
+    def test_unconditional_rule_stays_until_agents_md_carries_it(self):
+        """With no compiled AGENTS.md, an instruction without applyTo stays a rule (#5343)."""
         (self.project_root / ".claude").mkdir()
 
         pkg = self.project_root / "package"
@@ -1345,8 +1345,9 @@ class TestClaudeRulesIntegration:
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
 
-        assert result.target_paths == []
-        assert not (self.project_root / ".claude" / "rules" / "general.md").exists()
+        rule = self.project_root / ".claude" / "rules" / "general.md"
+        assert result.target_paths == [rule]
+        assert rule.read_text(encoding="utf-8").startswith("# General")
 
     def test_unconditional_rule_has_no_frontmatter(self):
         """A blocked AGENTS.md route keeps unconditional rules without frontmatter."""

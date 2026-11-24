@@ -561,13 +561,23 @@ class CompiledCoverage:
         wherever the shared optimizer placed the instruction, and its sibling
         ``CLAUDE.md`` must import it (a pre-#3939 compile does not).
         """
-        files = self._fingerprint_index().get(instruction_fingerprint(apply_to, body), ())
-        return any(
-            self._current.get(agents_md) and self._claude_loads(agents_md.parent)
-            for agents_md in files
-        ) or (not self._current and self._destination_carries(apply_to, body))
+        return self.carrier(apply_to, body) is not None
 
-    def _destination_carries(self, apply_to: object, body: str) -> bool:
+    def carrier(self, apply_to: object, body: str) -> Path | None:
+        """The compiled ``AGENTS.md`` Claude loads that carries this body, if any (#5343).
+
+        Install writes no ``.claude/rules/`` file for a routed instruction only
+        when one exists, and names it when it retires the rule.
+        """
+        files = self._fingerprint_index().get(instruction_fingerprint(apply_to, body), ())
+        for agents_md in files:
+            if self._current.get(agents_md) and self._claude_loads(agents_md.parent):
+                return agents_md
+        if not self._current:
+            return self._destination_carrier(apply_to, body)
+        return None
+
+    def _destination_carrier(self, apply_to: object, body: str) -> Path | None:
         """With no record for this root (a fresh clone), read the destination (#5344).
 
         The record lives in APM home, so a committed compiled ``AGENTS.md`` is
@@ -577,16 +587,17 @@ class CompiledCoverage:
         text = body.replace("\r\n", "\n").strip()
         prefix = "" if _is_always_on(apply_to) else directory_scope(apply_to)
         if not text or prefix is None:
-            return False
+            return None
         directory = self.project_root / prefix if prefix else self.project_root
         if directory not in self._texts:
             self._texts[directory] = _read_text(directory / "AGENTS.md", self.project_root)
         compiled = self._texts[directory]
-        return (
+        carries = (
             compiled is not None
             and text in compiled.replace("\r\n", "\n")
             and self._claude_loads(directory)
         )
+        return directory / "AGENTS.md" if carries else None
 
 
 def refresh_compiled_digest(base_dir: Path, agents_md: Path) -> None:

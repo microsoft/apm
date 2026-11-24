@@ -111,6 +111,9 @@ class InstructionIntegrator(BaseIntegrator):
         self.agents_md_routed: set[str] = set()
         # Routed sources no compiled AGENTS.md carries yet (new or changed).
         self.agents_md_stale: set[str] = set()
+        # Rule path -> the compiled AGENTS.md that now carries it, for each rule
+        # on disk this install stops writing (#5343); finalize names the moves.
+        self.agents_md_carried: dict[Path, Path] = {}
         # One compiled-coverage snapshot per project root for this install.
         self._compiled_coverage: dict[Path, Any] = {}
         # Routing verdicts per root and directory for this install (#4787).
@@ -632,13 +635,17 @@ class InstructionIntegrator(BaseIntegrator):
         project_root: Path,
         scope,
         diagnostics,
+        *,
+        all_routed: bool = False,
     ) -> list[Path]:
-        """Drop project instructions Claude loads from AGENTS.md (#3939).
+        """Drop project instructions Claude already loads from AGENTS.md (#3939).
 
-        Always-on and single-directory instructions reach Claude Code through
-        the compiled ``AGENTS.md`` that ``CLAUDE.md`` imports, so only the
-        remaining path-scoped instructions become ``.claude/rules/`` files.
-        Routed sources are recorded so install can ask for ``apm compile``.
+        Always-on and single-directory instructions route to the compiled
+        ``AGENTS.md`` that ``CLAUDE.md`` imports, but each one is dropped from
+        ``.claude/rules/`` only once a compiled file Claude loads carries its
+        exact scope and body; until then its rule stays (#5343). Routed
+        sources are recorded so install can ask for ``apm compile``. With
+        *all_routed* (pack), every routed source is dropped, carried or not.
         User scope and projects with a blocking hand-authored root file keep
         every instruction in ``.claude/rules/``. Drift replay writes to a
         scratch root, so scope and the blocker come from the live root it replays.
@@ -679,14 +686,27 @@ class InstructionIntegrator(BaseIntegrator):
                 self._claude_blocker_warned.add(warned)
                 diagnostics.warn(claude_agents_md_blocker_warning(blocker))
             return instruction_files
+        if all_routed:
+            return [source for source in instruction_files if source not in routed]
         self.agents_md_routed.update(source.name for source in routed)
         coverage = self._compiled_coverage.setdefault(live_root, CompiledCoverage(live_root))
+        mapping = target.primitives["instructions"]
+        carried = set()
         for source in routed:
             prepared = prepared_instructions[source]
             apply_to = self._parse_frontmatter(prepared.content)[0].get("applyTo")
-            if not coverage.has(apply_to, prepared.body):
+            agents_md = coverage.carrier(apply_to, prepared.body)
+            if agents_md is None:
                 self.agents_md_stale.add(source.name)
-        return [source for source in instruction_files if source not in routed]
+                continue
+            carried.add(source)
+            stem = source.name.removesuffix(".instructions.md")
+            rule = live_root / target.root_dir / mapping.subdir / f"{stem}{mapping.extension}"
+            if rule.is_file():
+                self.agents_md_carried[rule] = agents_md
+        # Never drop without a replacement (#5343): a routed rule stays, in the
+        # 0.37 layout, until a compiled AGENTS.md Claude loads carries it.
+        return [source for source in instruction_files if source not in carried]
 
     def render_agents_md_routed_rules(
         self, package_info, project_root: Path, source_plan
@@ -712,7 +732,7 @@ class InstructionIntegrator(BaseIntegrator):
         prepared = {source: self._prepare_instruction(source) for source in sources}
         kept = set(
             self._claude_rule_sources(
-                target, sources, prepared, package_info, project_root, None, None
+                target, sources, prepared, package_info, project_root, None, None, all_routed=True
             )
         )
         routed = [source for source in sources if source not in kept]

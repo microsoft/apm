@@ -57,8 +57,12 @@ def test_claude_install_then_compile_routes_instructions_to_agents_md(
 
     installed = output(scenario.run("install", "--no-policy", cwd=project))
     rules = project / ".claude" / "rules"
-    assert sorted(path.name for path in rules.glob("*.md")) == ["py.md"]
+    # Routed rules stay until a compiled AGENTS.md carries them (#5343); a 0.38
+    # project that compiled has none, so model it before compiling.
+    assert sorted(path.name for path in rules.glob("*.md")) == ["py.md", "src.md", "style.md"]
     assert "Run 'apm compile' to update AGENTS.md / CLAUDE.md." in installed, installed
+    (rules / "src.md").unlink()
+    (rules / "style.md").unlink()
     py_rule = (rules / "py.md").read_bytes()
 
     scenario.run("compile", cwd=project)
@@ -77,10 +81,12 @@ def test_claude_install_then_compile_routes_instructions_to_agents_md(
     # instruction does.
     quiet = output(scenario.run("install", "--no-policy", cwd=project))
     assert "Run 'apm compile'" not in quiet, quiet
+    assert sorted(path.name for path in rules.glob("*.md")) == ["py.md"]
     source = project / ".apm/instructions/src.instructions.md"
     source.write_text(source.read_text(encoding="ascii") + "Updated.\n", encoding="ascii")
     changed = output(scenario.run("install", "--no-policy", cwd=project))
     assert "Run 'apm compile' to update AGENTS.md / CLAUDE.md." in changed, changed
+    assert "Updated." in (rules / "src.md").read_text(encoding="utf-8")
 
 
 def test_hand_authored_claude_md_keeps_rules_until_it_imports_agents_md(
@@ -100,9 +106,13 @@ def test_hand_authored_claude_md_keeps_rules_until_it_imports_agents_md(
     write(project / "CLAUDE.md", "@AGENTS.md\n# Team notes\n")
     scenario.run("install", "--no-policy", cwd=project)
     scenario.run("compile", cwd=project)
+    scenario.run("install", "--no-policy", cwd=project)
 
-    assert sorted(path.name for path in rules.glob("*.md")) == ["py.md"]
-    assert "STYLE_BODY" in (project / "AGENTS.md").read_text(encoding="utf-8")
+    # The rules stay (#5343) and compile's Claude dedup keeps them out of
+    # AGENTS.md: Claude has exactly one copy of each.
+    assert sorted(path.name for path in rules.glob("*.md")) == ["py.md", "src.md", "style.md"]
+    agents = project / "AGENTS.md"
+    assert "STYLE_BODY" not in (agents.read_text(encoding="utf-8") if agents.is_file() else "")
     assert (project / "CLAUDE.md").read_text(encoding="ascii") == "@AGENTS.md\n# Team notes\n"
 
 
@@ -177,6 +187,7 @@ def test_a_compiled_agents_md_retires_the_rule_and_names_where_it_moved(
 
     settled = output(scenario.run("install", "--no-policy", cwd=project))
 
+    assert not (project / ".claude/rules/style.md").exists(), settled
     assert sorted(_rules(project)) == ["py.md"], settled
     # Routed instructions only: compile's file-type duplicate with Copilot is a 0.40 issue.
     for marker in ("STYLE_BODY", "SRC_BODY", "NESTED_BODY"):
@@ -196,6 +207,7 @@ def test_install_retires_a_rule_a_later_compile_carries_and_names_it(
 
     settled = output(scenario.run("install", "--no-policy", cwd=project))
 
+    assert not (project / ".claude/rules/style.md").exists(), settled
     assert sorted(_rules(project)) == ["py.md"], settled
     assert "Retired .claude/rules/style.md: AGENTS.md now carries it" in settled, settled
     for marker in ("STYLE_BODY", "SRC_BODY", "NESTED_BODY"):
@@ -220,7 +232,8 @@ def test_an_edited_routed_instruction_keeps_exactly_one_claude_copy(
 
     edited = output(scenario.run("install", "--no-policy", cwd=project))
 
-    assert "STYLE_EDIT" in _rules(project).get("style.md", ""), edited
+    style_rule = project / ".claude/rules/style.md"
+    assert "STYLE_EDIT" in style_rule.read_text(encoding="utf-8"), edited
     assert _claude_copies(project, "STYLE_EDIT") == 1, edited
     scenario.run("compile", cwd=project)
     scenario.run("install", "--no-policy", cwd=project)

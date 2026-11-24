@@ -221,14 +221,15 @@ def _compile_package(
 class TestInstallRouting:
     FILES = {"style": "**", "tests": "src/test/**", "python": "**/*.py"}  # noqa: RUF012
 
-    def test_project_install_keeps_only_file_type_rules(self, tmp_path):
+    def test_project_install_keeps_every_rule_until_agents_md_carries_it(self, tmp_path):
+        """No compiled AGENTS.md yet: routed instructions stay rules (#5343)."""
         (tmp_path / ".claude").mkdir()
         (tmp_path / "src" / "test").mkdir(parents=True)
         integrator = InstructionIntegrator()
         result = integrator.integrate_instructions_for_target(
             KNOWN_TARGETS["claude"], _package(tmp_path, self.FILES), tmp_path
         )
-        assert [p.name for p in result.target_paths] == ["python.md"]
+        assert sorted(p.name for p in result.target_paths) == ["python.md", "style.md", "tests.md"]
         assert integrator.agents_md_routed == {
             "style.instructions.md",
             "tests.instructions.md",
@@ -246,6 +247,9 @@ class TestInstallRouting:
             return integrator.agents_md_stale
 
         assert stale() == {"style.instructions.md", "tests.instructions.md"}
+        # A 0.38 project that compiled: no routed rule left for Claude's dedup to keep.
+        for name in ("style.md", "tests.md"):
+            (tmp_path / ".claude" / "rules" / name).unlink()
         _compile_package(tmp_path, package)
         assert stale() == set()
         # Claude loads AGENTS.md only through a CLAUDE.md that imports it; a
@@ -262,7 +266,11 @@ class TestInstallRouting:
 
     def test_directory_rule_stays_when_directory_is_missing(self, tmp_path):
         (tmp_path / ".claude").mkdir()
-        assert _deploy(tmp_path, _package(tmp_path, self.FILES)) == ["python.md", "tests.md"]
+        assert _deploy(tmp_path, _package(tmp_path, self.FILES)) == [
+            "python.md",
+            "style.md",
+            "tests.md",
+        ]
 
     def test_single_file_project_keeps_directory_rule(self, tmp_path):
         (tmp_path / ".claude").mkdir()
@@ -271,7 +279,11 @@ class TestInstallRouting:
             "name: p\nversion: 1.0.0\ncompilation:\n  strategy: single-file\n",
             encoding="utf-8",
         )
-        assert _deploy(tmp_path, _package(tmp_path, self.FILES)) == ["python.md", "tests.md"]
+        assert _deploy(tmp_path, _package(tmp_path, self.FILES)) == [
+            "python.md",
+            "style.md",
+            "tests.md",
+        ]
 
     def test_user_scope_keeps_every_rule(self, tmp_path):
         (tmp_path / ".claude").mkdir()
