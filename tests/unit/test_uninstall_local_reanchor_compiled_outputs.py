@@ -63,3 +63,28 @@ def test_a_managed_section_far_into_a_file_is_found_and_read_whole(tmp_path: Pat
 
     assert _marked_regular_file(agents, _MARKERS, b"<!-- apm:start -->") == body
     assert _marked_regular_file(agents, _MARKERS, b"<!-- not:here -->") is None
+
+
+def test_a_custom_managed_section_marker_is_read_from_the_project_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """compilation.agents_md.start_marker comes from the project's apm.yml, not the cwd's."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: p\nversion: 1.0.0\ncompilation:\n  agents_md:\n"
+        "    mode: managed_section\n    start_marker: '<!-- team:begin -->'\n"
+        "    end_marker: '<!-- team:end -->'\n",
+        encoding="utf-8",
+    )
+    (project / "AGENTS.md").write_text(
+        "# Authored\n\n<!-- team:begin -->\n[g](vendor/pkg/g.md)\n<!-- team:end -->\n",
+        encoding="utf-8",
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    assert _compiled_output_naming(project, lambda _path, _data=None: True) == "AGENTS.md"
+    (project / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    assert _compiled_output_naming(project, lambda _path, _data=None: True) is None

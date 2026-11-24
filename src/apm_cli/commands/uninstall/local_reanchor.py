@@ -891,7 +891,7 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
     )
 
     root = Path(project_root)
-    section = _managed_section_start(root).encode("utf-8")
+    section = _managed_section_start(root)
 
     def refuse(error: OSError) -> None:
         raise _UnreadableDir(error.filename or root)
@@ -923,21 +923,15 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
     return None
 
 
-def _managed_section_start(project_root: Path) -> str:
-    """The managed-section begin marker the project's compile uses (#5097)."""
-    from ...compilation.agents_compiler import CompilationConfig
-    from ...core.scope import manifest_file
-    from ...utils.yaml_io import load_yaml
+def _managed_section_start(project_root: Path) -> bytes:
+    """The managed-section begin marker the project's compile uses (#5097).
 
-    try:
-        data = load_yaml(manifest_file(project_root)) or {}
-        agents_md = (data.get("compilation") or {}).get("agents_md") or {}
-        marker = agents_md.get("start_marker")
-    except (OSError, ValueError, AttributeError, TypeError):
-        marker = None
-    return (
-        marker if isinstance(marker, str) and marker else CompilationConfig.agents_md_start_marker
-    )
+    Read through compile's own config owner, so a custom marker is honored.
+    """
+    from ...compilation.agents_compiler import CompilationConfig
+
+    marker = CompilationConfig.from_apm_yml(project_root=project_root).agents_md_start_marker
+    return marker.encode("utf-8") if isinstance(marker, str) else b""
 
 
 def _marked_regular_file(path: Path, markers, section: bytes = b"") -> bytes | None:

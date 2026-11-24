@@ -184,10 +184,11 @@ class CompilationConfig:
         return (self.agents_md_start_marker, self.agents_md_end_marker)
 
     @classmethod
-    def from_apm_yml(cls, **overrides) -> "CompilationConfig":
+    def from_apm_yml(cls, project_root: Path | None = None, **overrides) -> "CompilationConfig":
         """Create configuration from apm.yml with command-line overrides.
 
         Args:
+            project_root: Directory holding apm.yml (default: the working directory).
             **overrides: Command-line arguments that override config file values.
 
         Returns:
@@ -199,10 +200,11 @@ class CompilationConfig:
         try:
             from ..core.scope import manifest_file
 
-            if manifest_file(Path(".")).exists():
+            manifest = manifest_file(Path(".") if project_root is None else Path(project_root))
+            if manifest.exists():
                 from ..utils.yaml_io import load_yaml
 
-                apm_config = load_yaml("apm.yml") or {}
+                apm_config = load_yaml(manifest) or {}
 
                 # Look for compilation section
                 compilation_config = apm_config.get("compilation", {})
