@@ -556,3 +556,28 @@ def test_an_edited_hooked_file_under_a_granted_bundle_is_named_as_kept(
     assert "Kept 1 Markdown file(s) with frontmatter hooks" in text, text
     assert _DEPLOYED["command"] in text, text
     assert hooked.read_bytes() == edited
+
+
+def test_an_unresolvable_user_root_is_named_and_leaves_other_bundles_alone(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5254: a root the scope cannot resolve (two OneDrive mounts) is skipped and named."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _bundle(world, tmp_path, "command")
+    home = world.isolated.home
+    (home / ".claude").mkdir(exist_ok=True)
+    write(home / ".apm" / "apm.yml", "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    manifest = load_yaml(home / ".apm" / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, home / ".apm" / "apm.yml")
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle), "--no-policy")
+    user_file = home / ".claude" / "commands" / "run.md"
+    assert user_file.is_file()
+    for mount in ("OneDrive-Org", "OneDrive-SharedLibraries-Team"):
+        (home / "Library" / "CloudStorage" / mount).mkdir(parents=True)
+
+    result = world.apm(world.isolated.work_root, "install", "-g", "--no-policy", "--verbose")
+
+    text = output(result)
+    assert "Skipped target copilot-cowork for the bundle Markdown hook re-check" in text, text
+    assert user_file.is_file()
