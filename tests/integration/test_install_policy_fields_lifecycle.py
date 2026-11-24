@@ -15,6 +15,7 @@ A control without the offending input installs.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -641,3 +642,99 @@ def test_warn_policy_at_the_root_destination_warns_on_an_mcp_install(
     assert _HAND_WRITTEN in text, text
     assert path.read_text(encoding="utf-8") == "# hand written\n"
     assert (target / ".mcp.json").is_file()
+
+
+def _approved_hook_bundle_install(world: World, target: str) -> None:
+    """Install ``p-exec`` for *target*, approve its exact key, and install it again."""
+    bundle = world.packages["p-exec:bundle"].spec
+    parked = _assert_ok(world, "install", "--target", target, bundle)
+    key = re.search(r"apm approve '([^']+)'", _text(parked))
+    assert key is not None, _evidence(parked)
+    _assert_ok(world, "approve", key.group(1))
+    _assert_ok(world, "install", "--target", target, bundle)
+
+
+def test_unmanaged_files_deny_passes_audit_after_an_approved_copilot_hook_bundle(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "copilot")
+    assert (world.project / ".github" / "hooks" / "p-exec-hooks.json").is_file()
+    audit = _assert_ok(world, "audit", "--ci")
+    assert "No unmanaged files in governance directories" in _text(audit), _evidence(audit)
+
+
+def test_unmanaged_files_deny_counts_apm_owned_claude_hook_files(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "claude")
+    assert (world.project / ".claude" / "apm-hooks.json").is_file()
+    audit = _apm(world, "audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)
+
+
+def _edit_sidecar_entry(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    sidecar.write_text(sidecar.read_text(encoding="utf-8").replace("echo p-exec", "echo other"))
+
+
+def _drop_settings_hooks(claude: Path) -> None:
+    (claude / "settings.json").write_text('{"hooks": {}}\n', encoding="utf-8")
+
+
+def _truncate_sidecar(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    sidecar.write_bytes(sidecar.read_bytes()[:-3])
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [_edit_sidecar_entry, _drop_settings_hooks, _truncate_sidecar],
+    ids=["sidecar-entry-edited", "settings-hooks-removed", "sidecar-unparsable"],
+)
+def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_verify(
+    lifecycle_world: World,  # noqa: F811
+    tamper,
+) -> None:
+    """#5277: APM's hook files count as managed only while their ownership verifies."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "claude")
+    claude = world.project / ".claude"
+    tamper(claude)
+    before = {name: (claude / name).read_bytes() for name in ("apm-hooks.json", "settings.json")}
+
+    audit = _apm(world, "audit", "--ci")
+    text = _text(audit)
+
+    assert audit.returncode == 1, _evidence(audit)
+    assert "2 unmanaged file(s) in governance directories" in text, _evidence(audit)
+    assert ".claude/apm-hooks.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+    assert ".claude/settings.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+    assert {name: (claude / name).read_bytes() for name in before} == before
+
+
+def test_unmanaged_files_deny_still_flags_a_user_file_beside_verified_hook_files(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """#5277: verified hook ownership never covers a user-authored file in the same directory."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "claude")
+    (world.project / ".claude" / "notes.md").write_text("# mine\n", encoding="utf-8")
+
+    audit = _apm(world, "audit", "--ci")
+    text = _text(audit)
+
+    assert audit.returncode == 1, _evidence(audit)
+    assert "1 unmanaged file(s) in governance directories" in text, _evidence(audit)
+    assert ".claude/notes.md -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+    assert ".claude/settings.json" not in text, _evidence(audit)
+    assert ".claude/apm-hooks.json" not in text, _evidence(audit)

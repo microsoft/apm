@@ -1238,6 +1238,7 @@ def _check_unmanaged_files(
     resolve. Paths matching ``policy.exclude`` are suppressed. This is drift /
     divergence visibility, not supply-chain-attack prevention.
     """
+    from ..integration.hook_ownership import verified_apm_hook_files
     from .matcher import first_matching_pattern
 
     if policy.effective_action == "ignore":
@@ -1250,8 +1251,7 @@ def _check_unmanaged_files(
     dirs = policy.directories if policy.directories else _DEFAULT_GOVERNANCE_DIRS
     exclude = policy.exclude or ()
 
-    # Build set of deployed files AND directory prefixes from lockfile
-    deployed: set[str] = set()
+    deployed: set[str] = set(verified_apm_hook_files(project_root, lock)) if lock else set()
     deployed_dir_prefixes: list[str] = []
     if lock:
         for _key, dep in lock.dependencies.items():

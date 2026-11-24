@@ -412,6 +412,83 @@ def dependency_hook_source_marker(dependency_ref) -> str:
     return dependency_ref.get_canonical_dependency_string()
 
 
+def verified_apm_hook_files(project_root: Path, lock) -> frozenset[str]:
+    """Return the merged hook configs and sidecars APM provably owns (#5277).
+
+    ``unmanaged_files`` counts these as managed. A config and its
+    ``apm-hooks.json`` sidecar count only while their ownership verifies: both
+    are regular files reached through no symlink, both parse as strict JSON
+    objects, every sidecar event is a list of entries whose ``_apm_source``
+    names a local bundle or a dependency *lock* records, and each of those
+    entries is still present in the config. Anything else, including a
+    hand-edited sidecar or config, stays unmanaged (fail closed).
+    """
+    from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    try:
+        sources = {
+            dependency_hook_source_marker(locked.to_dependency_ref())
+            for locked in lock.get_all_dependencies()
+        }
+    except (AttributeError, TypeError, ValueError, KeyError):
+        return frozenset()
+    managed: set[str] = set()
+    specs = merge_hook_config_projection_specs(list(KNOWN_TARGETS.values()))
+    for config_rel, (sidecar_rel, container_key) in specs.items():
+        if _hook_ownership_verifies(project_root, config_rel, sidecar_rel, container_key, sources):
+            managed.update((config_rel, sidecar_rel))
+    return frozenset(managed)
+
+
+def _strict_object(project_root: Path, path: Path) -> dict[str, Any]:
+    if not path.is_file() or has_symlink_component(project_root, path):
+        raise ValueError(f"not a regular file: {path.name}")
+    data = json.loads(
+        path.read_bytes().decode("utf-8"),
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=_reject_non_json_constant,
+    )
+    if not isinstance(data, dict):
+        raise ValueError(f"not a JSON object: {path.name}")
+    return data
+
+
+def _content_key(entry: dict[str, Any]) -> str:
+    return json.dumps({k: v for k, v in entry.items() if k != "_apm_source"}, sort_keys=True)
+
+
+def _owned_by(entry: object, sources: set[str]) -> bool:
+    """Whether *entry* carries a marker naming a local bundle or a locked dependency."""
+    marker = entry.get("_apm_source") if isinstance(entry, dict) else None
+    parsed = parse_local_bundle_hook_source(marker)
+    if parsed is not None:
+        return bool(parsed[0])
+    return isinstance(marker, str) and marker in sources
+
+
+def _hook_ownership_verifies(
+    project_root: Path, config_rel: str, sidecar_rel: str, container_key: str, sources: set[str]
+) -> bool:
+    try:
+        sidecar = _strict_object(project_root, project_root / sidecar_rel)
+        container = _strict_object(project_root, project_root / config_rel).get(container_key)
+    except (OSError, ValueError):
+        return False
+    if not sidecar or not isinstance(container, dict):
+        return False
+    for event_name, owned in sidecar.items():
+        on_disk = container.get(event_name)
+        if not isinstance(owned, list) or not owned or not isinstance(on_disk, list):
+            return False
+        if not all(_owned_by(entry, sources) for entry in owned):
+            return False
+        present = Counter(_content_key(e) for e in on_disk if isinstance(e, dict))
+        if any(present[key] < count for key, count in Counter(map(_content_key, owned)).items()):
+            return False
+    return True
+
+
 def lockfile_dependency_identities(
     project_root: Path,
 ) -> tuple[list[tuple[str, str]], bool]:
