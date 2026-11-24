@@ -98,7 +98,13 @@ def test_reset_traffic_and_negative_rtt(tmp_path: Path) -> None:
             timeout=30,
         )
         proxy.reset_traffic()
-        assert proxy.traffic().as_dict() == {"connects": 0, "requests": 0, "round_trips": 0}
+        assert proxy.traffic().as_dict() == {
+            "connects": 0,
+            "requests": 0,
+            "round_trips": 0,
+            "bytes_up": 0,
+            "bytes_down": 0,
+        }
         assert len(proxy.observations) == 1
         with pytest.raises(ValueError, match="rtt_ms"):
             proxy.rtt_ms = -1

@@ -101,6 +101,8 @@ class Traffic:
 
     connects: int = 0
     requests: int = 0
+    bytes_up: int = 0
+    bytes_down: int = 0
 
     @property
     def round_trips(self) -> int:
@@ -111,6 +113,8 @@ class Traffic:
             "connects": self.connects,
             "requests": self.requests,
             "round_trips": self.round_trips,
+            "bytes_up": self.bytes_up,
+            "bytes_down": self.bytes_down,
         }
 
 
@@ -197,6 +201,8 @@ class _ScriptedServer(ThreadingHTTPServer):
     rtt_ms: float = 0.0
     connects: int = 0
     requests: int = 0
+    bytes_up: int = 0
+    bytes_down: int = 0
 
     def simulate_round_trips(self, count: int) -> None:
         if self.rtt_ms > 0:
@@ -248,6 +254,8 @@ class _OriginHandler(BaseHTTPRequestHandler):
             response = ScriptedResponse(500, {"Content-Type": "text/plain"}, repr(exc).encode())
         with self.server.observations_lock:
             self.server.observations.append(dataclasses.replace(request, status=response.status))
+            self.server.bytes_up += len(request.body)
+            self.server.bytes_down += 0 if self.command == "HEAD" else len(response.body)
         self.send_response(response.status)
         for name, value in response.headers.items():
             if name.lower() not in ("content-length", "transfer-encoding", "connection"):
@@ -337,12 +345,19 @@ class ScriptedHttpsProxy:
     def traffic(self) -> Traffic:
         """Tunnels and requests carried since the last ``reset_traffic``."""
         with self._server.observations_lock:
-            return Traffic(self._server.connects, self._server.requests)
+            return Traffic(
+                self._server.connects,
+                self._server.requests,
+                self._server.bytes_up,
+                self._server.bytes_down,
+            )
 
     def reset_traffic(self) -> None:
         with self._server.observations_lock:
             self._server.connects = 0
             self._server.requests = 0
+            self._server.bytes_up = 0
+            self._server.bytes_down = 0
 
     def requests_to(self, host: str) -> tuple[ScriptedRequest, ...]:
         return tuple(o for o in self.observations if o.host == host and o.method != "CONNECT")

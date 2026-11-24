@@ -179,6 +179,17 @@ def summarize(root: Path) -> list[dict]:
                 "spawns": _total(last.get("spawns")),
                 "spawns_by_exe": last.get("spawns"),
                 "modules": last.get("modules"),
+                "bytes_down": traffic.get("bytes_down"),
+                "bytes_up": traffic.get("bytes_up"),
+                "routes": last.get("routes"),
+                "counters": last.get("counters"),
+                "self_cpu_p50_s": _median(
+                    [
+                        c["self_cpu_s"]
+                        for r in records
+                        if not r.get("error") and (c := r.get("counters"))
+                    ]
+                ),
             }
         row["paired_new_over_base"] = _paired(sides, _cpu)
         row["paired_wall_new_over_base"] = _paired(sides, _wall)
