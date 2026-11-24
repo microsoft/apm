@@ -467,11 +467,15 @@ def parse_advertisement(data: bytes, prefixes: tuple[str, ...]) -> str:
 def _fetch(
     refs_url: str, proxy: str | None, ca: str, holder: dict, credential: str | None = None
 ) -> bytes:
+    from apm_cli.cache.inprocess_fetch import _rate_limited, trip_if_rate_limited
     from apm_cli.utils.http_credentials import (
         origin_bounded_request,
         per_request_credential_headers,
     )
 
+    # Another listing or fetch may have tripped the breaker during this one's checks.
+    if _rate_limited():
+        raise _Fallback("rate limited earlier in this command")
     # Per request only (never session.headers), exact origin, no redirect hop.
     headers = per_request_credential_headers(credential) if credential else None
 
@@ -491,8 +495,6 @@ def _fetch(
         **({"headers": headers} if headers else {}),
     ) as response:
         holder["response"] = response
-        from apm_cli.cache.inprocess_fetch import trip_if_rate_limited
-
         if trip_if_rate_limited(response.status_code, response.headers):
             raise _Fallback(f"rate limited (HTTP {response.status_code})")
         if response.headers.get("WWW-Authenticate") is not None:

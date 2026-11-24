@@ -411,6 +411,31 @@ def test_a_fetch_stuck_past_the_budget_falls_back(monkeypatch):
     assert time.monotonic() - started < 2.0
 
 
+def test_a_breaker_tripped_during_the_checks_sends_no_request(monkeypatch):
+    """The breaker contract: once tripped, no listing request leaves, even one already checking."""
+    from apm_cli.cache.inprocess_fetch import trip_if_rate_limited
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    ca = _eligible(monkeypatch)
+    sent: list[str] = []
+
+    def trip_while_checking_the_ca(path: str) -> bool:
+        trip_if_rate_limited(403, {})  # a concurrent fetch's 403 lands now
+        return path == ca
+
+    def request(*_args, **_kwargs):
+        sent.append("request")
+        raise RuntimeError("no request after the breaker tripped")
+
+    monkeypatch.setattr(arl.os.path, "isfile", trip_while_checking_the_ca)
+    monkeypatch.setattr(_REQUEST, request)
+    with invocation_scope():
+        listed = arl.list_refs_anonymously("https://github.com/o/r", include_heads=False, env={})
+
+    assert listed is None
+    assert sent == []
+
+
 class _FailingRaw:
     def __init__(self, error: Exception) -> None:
         self.error = error
