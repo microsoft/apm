@@ -81,6 +81,27 @@ MUTATIONS: tuple[ContractMutation, ...] = (
         ),
     ),
     ContractMutation(
+        "binary-selection-aliased-subprocess",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=(
+            "\n\nimport subprocess as _sp\n\n\ndef _rogue_binary_selection():\n"
+            '    return _sp.run(["apm", "--version"], check=False)\n'
+        ),
+    ),
+    ContractMutation(
+        "binary-selection-bare-uv-run",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=('\n\n_ROGUE_COMMAND = ["uv", "run", "apm", "--version"]\n'),
+    ),
+    ContractMutation(
+        "binary-selection-fixture-facade",
+        "tests/integration/test_architecture_apply_to_patterns.py",
+        append=(
+            "\n\nimport pytest as _pt\n\n\n@_pt.fixture\n"
+            "def _rogue_binary(apm_binary_path):\n    chosen = apm_binary_path\n    return chosen\n"
+        ),
+    ),
+    ContractMutation(
         "rendered-parity-owner",
         "scripts/check_cli_docs.py",
         "def public_top_level_commands(",

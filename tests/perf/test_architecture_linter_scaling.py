@@ -620,3 +620,32 @@ def test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n() -> Non
         f"ratio {large / small:.2f}"
     )
     assert large / small <= _MAX_MATRIX_RATIO
+
+
+def test_binary_selection_prefilter_finds_what_every_detector_finds() -> None:
+    """The binary-selection pre-filter (#5196) never hides a finding: on every
+    tracked Python file, the filtered detectors report exactly the unfiltered ones."""
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_subcheck_results,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+    from scripts.architecture_linter.inventory import build_inventory
+
+    root = Path(__file__).resolve().parents[2]
+    inventory = build_inventory(root)
+    provider = FactsProvider(root, inventory.files, registry=None)
+    differences: list[str] = []
+    hits = 0
+    for path in inventory.files:
+        if not path.endswith(".py"):
+            continue
+        index = provider.tree_index(path)
+        if index is None or index.root is None:
+            continue
+        filtered = [lines for lines, _ in _binary_subcheck_results(index)]
+        unfiltered = [lines for lines, _ in _binary_subcheck_results(index, prefilter=False)]
+        hits += sum(1 for lines in unfiltered if lines)
+        if filtered != unfiltered:
+            differences.append(path)
+    assert differences == [], f"the pre-filter hides findings in {differences[:5]}"
+    assert hits > 0, "no detector fired anywhere: the comparison proves nothing"
