@@ -169,6 +169,51 @@ def test_codex_bundle_agent_render_failure_writes_nothing(
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
 
 
+def _symlinked_user_agents(tmp_path: Path, apm_binary_path: Path, kind: str):
+    """A packed bundle and a ~/.codex/agents that is a *kind* link."""
+    world = _World(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    outside = world.root / "outside-agents"
+    outside.mkdir()
+    agents = world.isolated.home / ".codex" / "agents"
+    agents.parent.mkdir(exist_ok=True)
+    agents.symlink_to("agents" if kind == "loop" else outside, target_is_directory=True)
+    install = ("install", "-g", str(bundle), "--target", "codex", _NO_POLICY)
+    return world, install, outside
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs an unprivileged symlink")
+def test_codex_bundle_agent_through_a_user_agents_link_loop_is_refused(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A looping ~/.codex/agents fails the install with the standard refusal (#5287)."""
+    world, install, outside = _symlinked_user_agents(tmp_path, apm_binary_path, "loop")
+
+    text = _output(world.apm(world.root, *install, expect=1))
+
+    assert (
+        "Refusing deployment through a symlinked path component: .codex/agents. "
+        "Replace the symlink with a regular directory or remove it, then retry."
+    ) in text, text
+    assert "Symlink loop" not in text, text
+    assert not any(outside.iterdir())
+    assert not (world.isolated.config_root / "apm.lock.yaml").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs an unprivileged symlink")
+def test_codex_bundle_agent_through_a_user_agents_link_out_of_scope_is_skipped(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Pinned as today: the agent is skipped with a warning and nothing is written
+    through the link (#5287); whether the install should fail is tracked separately."""
+    world, install, outside = _symlinked_user_agents(tmp_path, apm_binary_path, "outside")
+
+    text = _output(world.apm(world.root, *install))
+
+    assert "Skipped unsafe bundle entry 'agents/rev.agent.md'" in text, text
+    assert not any(outside.iterdir())
+
+
 @pytest.mark.parametrize("codex_home", [False, True], ids=["default-home", "codex-home"])
 def test_codex_bundle_agent_user_scope_lifecycle(
     tmp_path: Path, apm_binary_path: Path, codex_home: bool
