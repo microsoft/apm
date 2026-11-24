@@ -610,8 +610,9 @@ def _section_carries_block(compiled: str, apply_to: object, text: str) -> bool:
 
     The body's lines must appear as one contiguous run of complete lines
     inside the section compile writes for this ``applyTo`` (``## Global
-    Instructions`` or ``## Files matching `<applyTo>```), so "use tabs"
-    never matches inside "never use tabs" or under another scope (#5343).
+    Instructions`` or ``## Files matching `<applyTo>```), bounded as a whole
+    block, so "use tabs" never matches inside "never use tabs", a shortened
+    body never matches a longer stale block, and no other scope counts (#5343).
     """
     scope = normalize_apply_to(apply_to, default="")
     heading = f"## Files matching `{scope}`" if scope else "## Global Instructions"
@@ -625,9 +626,25 @@ def _section_carries_block(compiled: str, apply_to: object, text: str) -> bool:
             len(lines),
         )
         section = lines[start + 1 : end]
-        if any(section[i : i + len(block)] == block for i in range(len(section) - len(block) + 1)):
+        if any(
+            section[i : i + len(block)] == block and _block_bounded(section, i, i + len(block))
+            for i in range(len(section) - len(block) + 1)
+        ):
             return True
     return False
+
+
+def _block_bounded(section: list[str], start: int, end: int) -> bool:
+    """Whether ``section[start:end]`` is a whole emitted block, not part of one.
+
+    Compile separates blocks with a blank line (or a ``Source`` comment), so a
+    shortened body never matches the head or tail of a longer stale one.
+    """
+    before = section[start - 1] if start > 0 else ""
+    after = section[end] if end < len(section) else ""
+    return (not before or before.startswith("<!-- Source:")) and (
+        not after or after.startswith("<!-- End source:")
+    )
 
 
 def refresh_compiled_digest(base_dir: Path, agents_md: Path) -> None:
