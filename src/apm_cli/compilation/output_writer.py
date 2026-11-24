@@ -91,6 +91,13 @@ def refuse_unsafe_output(path: Path, base_dir: Path, *, managed: bool) -> None:
         )
 
 
+def output_error_message(action: str, path: Path, exc: Exception) -> str:
+    """Return a special-file refusal as is; wrap any other failure with *action* and *path*."""
+    if isinstance(exc, CompiledOutputSpecialFileError):
+        return str(exc)
+    return f"{action} {path}: {exc}"
+
+
 def _output_root(base_dir: Path, target: Path) -> Path | None:
     """Return the ancestor of *target* that spells *base_dir*, if any.
 
