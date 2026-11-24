@@ -712,6 +712,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             lock_dep.to_dependency_ref().get_install_path(deployment_modules_dir)
                         )
                     package_info.deployment_frame = deployment_frame
+                    package_info.replay_recorded_files = frozenset(lock_dep.deployed_files)
                     dep_key = lock_dep.get_unique_key()
 
                     # Replay deploys the locked selection, as uninstall does (#3760).

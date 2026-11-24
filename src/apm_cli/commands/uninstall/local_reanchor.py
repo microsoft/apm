@@ -90,25 +90,35 @@ def _nearest_parents(walk, key: str) -> list[str]:
     ]
 
 
+def _declaring_edge(walk, key: str, nearest: list[str], renames=None) -> str:
+    """The parent whose edge install records for *key*: the shared diamond rule (#5386)."""
+    from ...deps.local_identity import recorded_declaring_edge
+
+    edges = walk.declaring_edges.get(key, {})
+    ranked = _ranked_parent(nearest, renames or {})
+    return recorded_declaring_edge(nearest[0], ranked, lambda p: (edges.get(p) or (None, None))[1])
+
+
 def _root_identities(
     lockfile, walk, local_roots, label, modules_dir: Path
 ) -> dict[str, tuple[str, str, Any, str]]:
     """``(local_path, declaring parent key, anchored dir, repo_url)`` of each root.
 
-    Install keeps the first shallowest declaring edge on the node it creates,
-    so that edge, not the nearest-parent tie rule, names the local identity.
+    The edge install records on the node it creates (:func:`_declaring_edge`)
+    names the local identity.
     """
     identities: dict[str, tuple[str, str, Any, str]] = {}
     for key in local_roots:
         nearest = _nearest_parents(walk, key)
         real_dir = walk.local_dirs.get(key)
-        via = walk.declaring_edges.get(key, {}).get(nearest[0]) if nearest else None
-        if via is None or via[1] is None or real_dir is None:
+        parent = _declaring_edge(walk, key, nearest) if nearest else None
+        via = walk.declaring_edges.get(key, {}).get(parent) if parent else None
+        if parent is None or via is None or via[1] is None or real_dir is None:
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its new declaring parent could not be determined"
             )
-        declared = _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
-        identities[key] = (via[1], nearest[0], real_dir, declared)
+        declared = _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir)
+        identities[key] = (via[1], parent, real_dir, declared)
     return identities
 
 
@@ -145,8 +155,9 @@ def _respelled_descendants(
         nearest = _nearest_parents(walk, key)
         if row is None or row.source != "local" or not nearest:
             continue
-        declared, alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))
-        via = walk.declaring_edges.get(key, {}).get(nearest[0])
+        parent = _declaring_edge(walk, key, nearest)
+        declared, alias = walk.local_edge_repos.get((key, parent), (None, None))
+        via = walk.declaring_edges.get(key, {}).get(parent)
         real_dir = walk.local_dirs.get(key)
         if (
             declared == row.repo_url
@@ -158,7 +169,7 @@ def _respelled_descendants(
                 row,
                 declared,
                 modules_dir,
-                source=_edge_sources(walk, key, nearest[0], row, modules_dir),
+                source=_edge_sources(walk, key, parent, row, modules_dir),
             )
         ):
             continue
@@ -170,7 +181,7 @@ def _respelled_descendants(
         spelled = replace(row.to_dependency_ref(), local_path=via[1], repo_url=declared)
         stays = os.fspath(spelled.get_install_path(modules_dir)) == os.fspath(copy)
         _require_fresh_copy(row, real_dir, copy, key, label, modules_dir, unhashed=stays)
-        respelled[key] = (via[1], nearest[0], real_dir, declared)
+        respelled[key] = (via[1], parent, real_dir, declared)
     return respelled
 
 
@@ -346,7 +357,7 @@ def plan_local_reanchor(
         row = lockfile.get_dependency(key)
         if row is not None and row.source == "local" and key not in nodes:
             # A re-parented descendant must still install where its row says, from a copy.
-            first = _nearest_parents(walk, key)[0]
+            first = _declaring_edge(walk, key, _nearest_parents(walk, key), renames)
             _winning_edge_installs_here(walk, key, first, lockfile, label, modules_dir)
             copy = row.to_dependency_ref().get_install_path(modules_dir)
             _require_copy(copy, key, label, modules_dir)
@@ -375,8 +386,9 @@ def reparent_rows(
     """The parent install records for each of *keys*, from a complete walk.
 
     Returns ``(declaring_parents, resolved_by)`` for :class:`LocalReanchorPlan`:
-    a local row takes the first shallowest declaring edge, and every row the
-    nearest parent, ties to the lowest key as install ranks them (#4833).
+    a local row takes the edge install records (:func:`_declaring_edge`, #5386),
+    and every row the nearest parent, ties to the lowest key as install ranks
+    them (#4833).
     ``apm prune`` re-parents a survivor whose recorded parent it removes (#4989);
     with *locked_identity* a parent that keeps its lock row is named by that
     row, so a parent reached through a symlink alias names its own row.
@@ -406,8 +418,10 @@ def reparent_rows(
             and (row.declaring_parent or locked_identity)
         ):
             # A legacy row resolves local_path against resolved_by, so it takes
-            # that parent's edge; others keep install's first shallowest edge.
-            first = nearest[0] if row.declaring_parent else parent_key
+            # that parent's edge; others take the edge install records.
+            first = (
+                _declaring_edge(walk, key, nearest, renames) if row.declaring_parent else parent_key
+            )
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
     return declaring_parents, resolved_by
 
