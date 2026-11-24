@@ -37,6 +37,27 @@ class PathTraversalError(ValueError):
     """Raised when a computed path escapes its expected base directory."""
 
 
+def symlinked_deploy_refusal(link: str) -> str:
+    """The one refusal for a deploy reached through a linked directory (#5174, #5287).
+
+    *link* is repository- or user-controlled: it is shown as printable ASCII (#5215).
+    """
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    return (
+        f"Refusing deployment through a symlinked path component: {printable_ascii_text(link)}. "
+        "Replace the symlink with a regular directory or remove it, then retry."
+    )
+
+
+class SymlinkedDeployError(PathTraversalError):
+    """A deploy path crosses a symlinked directory; *link* is relative to its root."""
+
+    def __init__(self, link: str) -> None:
+        super().__init__(symlinked_deploy_refusal(link))
+        self.link = link
+
+
 def decode_url_path_segments(
     raw_path: str,
     *,
