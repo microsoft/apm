@@ -15,8 +15,15 @@ is involved. Three isolated environments play the roles:
   closed on an artifact outage and on wrong bytes, then passes ``audit --ci``.
 
 Every step asserts the exit code, the resolved source and version, the
-deployed bytes and the lockfile state. Later stages of #3299 land with their
-owning issues and are deliberately not represented here.
+deployed bytes and the lockfile state.
+
+Stage: catalog-following update. The company catalog routes ``widget`` to a
+registry selector, then advertises v2 while v3 sits in the same registry.
+Locked restore stays on the recorded selection without reading the catalog,
+``apm update`` follows the company selection (never v3), a catalog outage
+fails the refresh without changing a byte, and a manifest constraint outranks
+a later catalog move. Other stages of #3299 land with their owning issues and
+are deliberately not represented here.
 """
 
 from __future__ import annotations
@@ -58,6 +65,7 @@ pytestmark = [
         "req-rg-001",
         "P-LAW-lockfile.frozen_preserves_bytes",
         "P-OWN-credential-origin-scope",
+        "P-OWN-marketplace-locked-selection",
     ),
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only fixture"),
@@ -80,8 +88,9 @@ SENTINEL = ".github/instructions/team.instructions.md"
 SENTINEL_BYTES = b"---\napplyTo: '**'\n---\n# Team rules owned by the consumer\n"
 
 
-def _instruction(name: str) -> str:
-    return f"---\napplyTo: '**'\ndescription: {name} registry package\n---\n# {name}\n"
+def _instruction(name: str, version: str = VERSION) -> str:
+    body = f"# {name}\n" if version == VERSION else f"# {name} {version}\n"
+    return f"---\napplyTo: '**'\ndescription: {name} registry package\n---\n{body}"
 
 
 def _deployed(name: str) -> str:
@@ -115,6 +124,7 @@ class EnterpriseRegistryWorld:
         self.ci = IsolatedApmEnvironment.create(tmp_path / "cold-ci", base_env=base_env)
         self.tls = tmp_path / "tls"
         self.producer_git: list[ScriptedRequest] = []
+        self.catalog_outage = False
         self.catalog = {
             "name": "corp-catalog",
             "owner": {"name": "Corp Platform"},
@@ -132,6 +142,8 @@ class EnterpriseRegistryWorld:
         return ScriptedResponse(503, {"Content-Type": "text/plain"}, b"producer Git unreachable")
 
     def _catalog(self, request: ScriptedRequest) -> ScriptedResponse:
+        if self.catalog_outage:
+            return ScriptedResponse(503, {"Content-Type": "text/plain"}, b"catalog down")
         if request.method == "GET" and request.path == "/apm/marketplace.json":
             body = json.dumps(self.catalog).encode()
             return ScriptedResponse(200, {"Content-Type": "application/json"}, body)
@@ -170,14 +182,15 @@ class EnterpriseRegistryWorld:
         cwd: Path,
         *args: str,
         step: str,
-        allowed: str = REGISTRY_HOST,
+        allowed: str | frozenset[str] = REGISTRY_HOST,
         expect_failure: bool = False,
         token_hosts: frozenset[str] | None = None,
     ) -> CommandResult:
         """Run one networked step; egress is judged before the exit code."""
+        hosts = {allowed} if isinstance(allowed, str) else allowed
         proxy.clear()
         result = self.run(env, cwd, *args, step=step, expect=None)
-        foreign = [(o.host, o.method, o.path) for o in proxy.observations if o.host != allowed]
+        foreign = [(o.host, o.method, o.path) for o in proxy.observations if o.host not in hosts]
         assert foreign == [], f"step={step} reached hosts other than {allowed}: {foreign}"
         assert self.producer_git == [], f"step={step} contacted the producer Git host"
         if token_hosts is not None:
@@ -203,10 +216,12 @@ class EnterpriseRegistryWorld:
         assert config["experimental"]["registries"] is True, config
         assert config["registries"][REGISTRY_NAME]["url"] == REGISTRY_URL, config
 
-    def manifest(self, name: str, dependencies: tuple[str, ...] = ()) -> dict[str, object]:
+    def manifest(
+        self, name: str, dependencies: tuple[str, ...] = (), version: str = VERSION
+    ) -> dict[str, object]:
         manifest: dict[str, object] = {
             "name": name,
-            "version": VERSION,
+            "version": version,
             "description": f"{name} enterprise registry fixture",
             "registries": {REGISTRY_NAME: {"url": REGISTRY_URL}, "default": REGISTRY_NAME},
         }
@@ -214,32 +229,44 @@ class EnterpriseRegistryWorld:
             manifest["dependencies"] = {"apm": list(dependencies)}
         return manifest
 
+    def publish(
+        self,
+        proxy: ScriptedHttpsProxy,
+        env: dict[str, str],
+        name: str,
+        version: str = VERSION,
+        dependencies: tuple[str, ...] = (),
+    ) -> RegistryArtifact:
+        """Publish ``acme/<name>`` at *version* through the Registry HTTP API."""
+        root = self.producer.work_root / f"{name}-{version}"
+        (root / ".apm" / "instructions").mkdir(parents=True)
+        dump_yaml(self.manifest(name, dependencies, version), root / "apm.yml")
+        source = root / ".apm" / "instructions" / f"{name}.instructions.md"
+        source.write_text(_instruction(name, version), encoding="utf-8")
+        (root / "LICENSE").write_text("MIT\n", encoding="utf-8")
+        self.egress_step(
+            proxy,
+            env,
+            root,
+            "publish",
+            "--package",
+            f"acme/{name}",
+            "--registry",
+            REGISTRY_NAME,
+            step=f"producer-publish-{name}-{version}",
+        )
+        artifact = self.registry.uploads[-1]
+        assert (artifact.package, artifact.version) == (f"acme/{name}", version)
+        assert _member(artifact.data, name) == source.read_bytes()
+        return artifact
+
     def publish_all(self, proxy: ScriptedHttpsProxy) -> dict[str, RegistryArtifact]:
         env = self.env(self.producer, proxy)
         self.provision(self.producer, env, self.producer.work_root)
-        artifacts: dict[str, RegistryArtifact] = {}
-        for name, dependencies in PACKAGES:
-            root = self.producer.work_root / name
-            (root / ".apm" / "instructions").mkdir(parents=True)
-            dump_yaml(self.manifest(name, dependencies), root / "apm.yml")
-            source = root / ".apm" / "instructions" / f"{name}.instructions.md"
-            source.write_text(_instruction(name), encoding="utf-8")
-            (root / "LICENSE").write_text("MIT\n", encoding="utf-8")
-            self.egress_step(
-                proxy,
-                env,
-                root,
-                "publish",
-                "--package",
-                f"acme/{name}",
-                "--registry",
-                REGISTRY_NAME,
-                step=f"producer-publish-{name}",
-            )
-            artifact = self.registry.uploads[-1]
-            assert (artifact.package, artifact.version) == (f"acme/{name}", VERSION)
-            assert _member(artifact.data, name) == source.read_bytes()
-            artifacts[name] = artifact
+        artifacts = {
+            name: self.publish(proxy, env, name, dependencies=dependencies)
+            for name, dependencies in PACKAGES
+        }
         assert [a.package for a in self.registry.uploads] == ["acme/base", "acme/widget"]
         return artifacts
 
@@ -400,3 +427,206 @@ def test_employee_registers_and_browses_public_https_catalog(
     assert registered["marketplaces"] == [{"name": "corp-catalog", "url": CATALOG_URL, "path": ""}]
     assert not (project / "apm.yml").exists()
     assert not (project / "apm.lock.yaml").exists()
+
+
+WIDGET_VERSIONS = ("1.0.0", "2.0.0", "2.1.0", "3.0.0")
+CATALOG_NAME = "corp-catalog"
+CATALOG_DECLARATION = {"name": "widget", "marketplace": CATALOG_NAME}
+
+
+def _advertise(world: EnterpriseRegistryWorld, selector: str) -> None:
+    """The company catalog routes ``widget`` to the registry at *selector*."""
+    entry = world.catalog["plugins"][0]
+    entry.update({"registry": REGISTRY_NAME, "version": selector})
+
+
+def _assert_selected(
+    project: Path, artifact: RegistryArtifact, registry: LocalPackageRegistry
+) -> None:
+    """Lock row, resolved URL and hash, and deployed bytes name exactly *artifact*."""
+    locked = _locked(project)
+    assert set(locked) == {"acme/widget"}, locked
+    entry = locked["acme/widget"]
+    assert entry["source"] == "registry", entry
+    assert entry["version"] == artifact.version, entry
+    assert entry["resolved_url"] == (
+        f"https://{REGISTRY_HOST}{registry.download_path('acme/widget', artifact.version)}"
+    ), entry
+    assert entry["resolved_hash"] == artifact.digest, entry
+    assert entry["marketplace_plugin_name"] == "widget", entry
+    assert entry["deployed_files"] == [_deployed("widget")], entry
+    assert (project / _deployed("widget")).read_bytes() == _member(artifact.data, "widget")
+    assert (project / SENTINEL).read_bytes() == SENTINEL_BYTES
+
+
+def _state(project: Path) -> dict[str, bytes]:
+    """Every byte the consumer owns outside apm_modules/."""
+    return {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*"))
+        if path.is_file() and "apm_modules" not in path.relative_to(project).parts
+    }
+
+
+def _downloaded(proxy: ScriptedHttpsProxy, registry: LocalPackageRegistry) -> set[str]:
+    paths = {o.path for o in proxy.requests_to(REGISTRY_HOST)}
+    return {v for v in WIDGET_VERSIONS if registry.download_path("acme/widget", v) in paths}
+
+
+def test_company_catalog_selection_drives_update_not_newest_registry_version(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Catalog-following update (#3299): locked restore stays, update follows the catalog.
+
+    The company catalog first routes ``widget`` to 1.0.0, then advertises
+    ``^2.0.0`` while 3.0.0 sits in the same registry. Frozen and plain
+    installs keep the recorded selection without reading the catalog; an
+    explicit ``apm update`` follows the company selection to 2.1.0 and never
+    takes 3.0.0; a manifest constraint outranks a later catalog move.
+    """
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    both = frozenset({CATALOG_HOST, REGISTRY_HOST})
+    update = ("update", "--yes", "--target", "copilot")
+    with world.serve() as proxy:
+        producer = world.env(world.producer, proxy)
+        world.provision(world.producer, producer, world.producer.work_root)
+        published = {v: world.publish(proxy, producer, "widget", v) for v in WIDGET_VERSIONS}
+
+        employee = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        (project / SENTINEL).parent.mkdir(parents=True)
+        (project / SENTINEL).write_bytes(SENTINEL_BYTES)
+        consumer = world.manifest("consumer")
+        consumer["targets"] = ["copilot"]
+        consumer["registries"] = {REGISTRY_NAME: {"url": REGISTRY_URL}}
+        consumer["dependencies"] = {"apm": [CATALOG_DECLARATION]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, employee, project)
+        _advertise(world, "1.0.0")
+        world.egress_step(
+            proxy,
+            employee,
+            project,
+            "marketplace",
+            "add",
+            CATALOG_URL,
+            step="add-catalog",
+            allowed=CATALOG_HOST,
+        )
+        world.egress_step(proxy, employee, project, *INSTALL, step="install", allowed=both)
+        _assert_selected(project, published["1.0.0"], world.registry)
+        assert _downloaded(proxy, world.registry) == {"1.0.0"}
+
+        # The company advertises v2 while v3 is published in the same registry.
+        _advertise(world, "^2.0.0")
+        before = _state(project)
+        for step, args in (("frozen", (*INSTALL, "--frozen")), ("reinstall", INSTALL)):
+            world.egress_step(proxy, employee, project, *args, step=step)
+            assert not proxy.requests_to(CATALOG_HOST), f"step={step} re-read the catalog"
+            assert _state(project) == before, f"step={step} changed the locked selection"
+        _assert_selected(project, published["1.0.0"], world.registry)
+
+        plan = world.egress_step(
+            proxy,
+            employee,
+            project,
+            "update",
+            "--dry-run",
+            "--target",
+            "copilot",
+            step="update-plan",
+            allowed=both,
+        )
+        assert "1.0.0 -> 2.1.0" in plan.stdout, _evidence(plan)
+        assert _state(project) == before
+        # The plan may fetch the selected archive to list its files; never v3.
+        assert _downloaded(proxy, world.registry) <= {"2.1.0"}
+
+        # A catalog outage fails the refresh, keeps every byte, and the printed
+        # hint holds: a plain install still restores the locked selection.
+        world.catalog_outage = True
+        failed = world.egress_step(
+            proxy,
+            employee,
+            project,
+            *update,
+            step="update-catalog-outage",
+            allowed=both,
+            expect_failure=True,
+        )
+        message = " ".join((failed.stdout + failed.stderr).split())
+        assert "nothing was changed" in message, _evidence(failed, proxy)
+        assert "a plain 'apm install' still uses the cached copy" in message, _evidence(failed)
+        assert _state(project) == before, _evidence(failed, proxy)
+        world.egress_step(proxy, employee, project, *INSTALL, step="hint-install-in-outage")
+        assert _state(project) == before
+        world.catalog_outage = False
+
+        world.egress_step(proxy, employee, project, *update, step="update", allowed=both)
+        _assert_selected(project, published["2.1.0"], world.registry)
+        assert _downloaded(proxy, world.registry) == {"2.1.0"}
+        assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == [CATALOG_DECLARATION]
+        updated = _state(project)
+        world.egress_step(proxy, employee, project, *(*INSTALL, "--frozen"), step="frozen-2")
+        assert _state(project) == updated
+
+        # A manifest constraint outranks a later catalog move to v3.
+        constrained = {**CATALOG_DECLARATION, "version": "^2.0.0"}
+        consumer["dependencies"] = {"apm": [constrained]}
+        dump_yaml(consumer, project / "apm.yml")
+        _advertise(world, "^3.0.0")
+        world.egress_step(
+            proxy, employee, project, *update, step="update-constrained", allowed=both
+        )
+        _assert_selected(project, published["2.1.0"], world.registry)
+        assert _downloaded(proxy, world.registry) <= {"2.1.0"}
+
+        audit = world.egress_step(
+            proxy, employee, project, "audit", "--ci", "-f", "json", step="audit"
+        )
+        checks = {c["name"]: c["passed"] for c in json.loads(audit.stdout)["checks"]}
+        assert checks and all(checks.values()), _evidence(audit)
+    assert world.registry.uploads[-1].version == "3.0.0"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#5256: registries.default claims a {name, marketplace} declaration at manifest load",
+)
+@pytest.mark.parametrize(
+    "declaration",
+    [CATALOG_DECLARATION, {**CATALOG_DECLARATION, "version": "^1.0.0"}],
+    ids=["catalog-selector", "manifest-selector"],
+)
+def test_catalog_declaration_installs_under_a_default_registry(
+    tmp_path: Path, apm_binary_path: Path, declaration: dict[str, str]
+) -> None:
+    """A ``registries.default`` must not claim a ``{name, marketplace}`` declaration."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    both = frozenset({CATALOG_HOST, REGISTRY_HOST})
+    with world.serve() as proxy:
+        producer = world.env(world.producer, proxy)
+        world.provision(world.producer, producer, world.producer.work_root)
+        artifact = world.publish(proxy, producer, "widget", "1.0.0")
+        employee = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        (project / SENTINEL).parent.mkdir(parents=True)
+        (project / SENTINEL).write_bytes(SENTINEL_BYTES)
+        consumer = world.manifest("consumer")
+        consumer["targets"] = ["copilot"]
+        consumer["dependencies"] = {"apm": [declaration]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, employee, project)
+        _advertise(world, "1.0.0")
+        world.egress_step(
+            proxy,
+            employee,
+            project,
+            "marketplace",
+            "add",
+            CATALOG_URL,
+            step="add-catalog",
+            allowed=CATALOG_HOST,
+        )
+        world.egress_step(proxy, employee, project, *INSTALL, step="install", allowed=both)
+        _assert_selected(project, artifact, world.registry)
