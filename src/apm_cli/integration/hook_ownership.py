@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, deque
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -138,6 +139,40 @@ def drop_source_entries(
             hooks[event_name] = kept
         else:
             del hooks[event_name]
+
+
+def _owned_entry(entry: Any) -> bool:
+    return isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+
+
+def _slot_sorted(items: list, owned: Callable[[Any], bool], key: Callable[[Any], str]) -> list:
+    """*items* with the owned ones stably sorted by *key* inside the slots they hold."""
+    ranked = iter(sorted((item for item in items if owned(item)), key=key))
+    return [next(ranked) if owned(item) else item for item in items]
+
+
+def canonical_hook_order(hooks: dict) -> None:
+    """Give APM's merged hook entries one order, whatever order packages were added (#5285).
+
+    In every event, APM-owned entries are stably sorted by ``_apm_source``
+    inside the slots they already hold, and events holding only APM entries
+    are sorted by name inside their key slots. User entries and events never
+    move, so a single, incremental, full or update install writes the same
+    bytes for the same set of packages.
+    """
+    for event_name, entries in hooks.items():
+        if isinstance(entries, list):
+            hooks[event_name] = _slot_sorted(entries, _owned_entry, lambda e: e["_apm_source"])
+
+    def apm_only(event_name: str) -> bool:
+        entries = hooks[event_name]
+        return isinstance(entries, list) and bool(entries) and all(map(_owned_entry, entries))
+
+    order = _slot_sorted(list(hooks), apm_only, str)
+    if order != list(hooks):
+        reordered = {name: hooks[name] for name in order}
+        hooks.clear()
+        hooks.update(reordered)
 
 
 def drop_dependency_owned_entries(hooks: dict) -> bool:

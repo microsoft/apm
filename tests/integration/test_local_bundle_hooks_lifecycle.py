@@ -201,7 +201,8 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
     _allow(consumer, key, f"{dep}#1.0.0")
     world.apm(consumer, "install", str(dep), "--no-policy")
-    assert _hook_entries(consumer) == {"PreToolUse": ["Bash", "Write"]}
+    # APM entries take one canonical order by source (#5285).
+    assert _hook_entries(consumer) == {"PreToolUse": ["Write", "Bash"]}
     world.apm(consumer, "audit", "--ci", "--no-policy")
     world.apm(consumer, "uninstall", str(dep))
     assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
@@ -632,7 +633,7 @@ def test_uninstall_bundle_removes_its_hooks_and_claims(
     dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
     _allow(consumer, key, f"{dep}#1.0.0")
     world.apm(consumer, "install", str(dep))
-    assert _hook_entries(consumer) == {"Stop": ["Mine"], "PreToolUse": ["Bash", "Write"]}
+    assert _hook_entries(consumer) == {"Stop": ["Mine"], "PreToolUse": ["Write", "Bash"]}
     script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
     assert _bundle_hook_claims(world, consumer) == [script]
     _assert_lock_matches_disk(world, consumer)

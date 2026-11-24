@@ -1379,9 +1379,10 @@ class TestCursorIntegration:
         assert len(config["hooks"]["stop"]) == 2
         assert all("_apm_source" not in entry for entry in config["hooks"]["stop"])
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
+        # One canonical order by source, whatever the addition order (#5285).
         assert [entry["_apm_source"] for entry in sidecar["stop"]] == [
-            "ralph-loop",
             "other-pkg",
+            "ralph-loop",
         ]
 
     def test_scripts_copied_to_cursor_hooks_dir(self, temp_project):
@@ -4560,7 +4561,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["dep-hooks", "_local/sample-project"]
+        assert sources == ["_local/sample-project", "dep-hooks"]  # canonical order (#5285)
 
     @pytest.mark.parametrize(
         "relative_path",
@@ -4627,7 +4628,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["dep-hooks", "_local/sample-project"]
+        assert sources == ["_local/sample-project", "dep-hooks"]  # canonical order (#5285)
 
     def test_dependency_hook_sources_uses_lockfile_paths(
         self,
@@ -4825,7 +4826,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["matching-dep", "_local/matching-dep"]
+        assert sources == ["_local/matching-dep", "matching-dep"]  # canonical order (#5285)
 
     def test_root_local_heals_stale_source_for_multiple_hook_files_same_event(
         self,
