@@ -498,25 +498,61 @@ def _verify(
     env: dict[str, str] | None,
 ) -> _Manifest:
     algorithm = object_format(sha)
+    from .pack_objects import PackObjects
+
+    pack = PackObjects(repo, algorithm, env)
+    try:
+        return _verify_with(repo, sha, scope, cone, algorithm, _PackSource(pack, algorithm))
+    except _PackMiss:
+        pass  # all-or-nothing per package (W3d 2a): git answers the whole package
+    finally:
+        pack.close()
     objects = _Objects(git_exe, repo, env, algorithm)
     try:
-        commit = objects.read(sha, "commit")
-        first = commit.split(b"\n", 1)[0]
-        if not first.startswith(b"tree "):
-            raise CheckoutVerificationError(f"commit {sha[:12]} names no tree")
-        tree = _Tree(objects, first[5:].decode("ascii"), 32 if algorithm == "sha256" else 20)
-        run = _Run(algorithm, objects, tree, _Attributes(tree, objects))
-        expected = _expected(tree, objects, scope, cone)
-        accepted: dict[str, tuple[str, bool]] = {}
-        for rel, path in _worktree_files(repo):
-            want = expected.get(rel) or _lookup(run, rel, scope, cone)
-            accepted[rel] = (_accept_file(run, rel, path, want), want.executable)
-        missing = sorted(set(expected) - set(accepted))
-        if missing:
-            raise CheckoutVerificationError(f"{missing[0]} is missing from the checkout")
-        return _Manifest(algorithm, accepted)
+        return _verify_with(repo, sha, scope, cone, algorithm, objects)
     finally:
         objects.close()
+
+
+class _PackMiss(Exception):
+    """The pack could not serve an object: verify the package through git instead."""
+
+
+class _PackSource:
+    def __init__(self, pack, algorithm: str) -> None:
+        self._pack = pack
+        self._algorithm = algorithm
+
+    def read(self, oid: str, kind: str) -> bytes:
+        found = self._pack.read(oid)
+        if found is None:
+            raise _PackMiss(oid)
+        if found[0] != kind:
+            raise CheckoutVerificationError(f"object {oid[:12]} is not a {kind}")
+        if git_object_id(self._algorithm, kind, found[1]) != oid:
+            raise CheckoutVerificationError(f"{kind} {oid[:12]} does not hash to its id")
+        return found[1]
+
+    def close(self) -> None:
+        pass
+
+
+def _verify_with(repo, sha, scope, cone, algorithm, objects) -> _Manifest:
+    commit = objects.read(sha, "commit")
+    first = commit.split(b"\n", 1)[0]
+    if not first.startswith(b"tree "):
+        raise CheckoutVerificationError(f"commit {sha[:12]} names no tree")
+    tree = _Tree(objects, first[5:].decode("ascii"), 32 if algorithm == "sha256" else 20)
+    run = _Run(algorithm, objects, tree, _Attributes(tree, objects))
+    expected = _expected(tree, objects, scope, cone)
+    accepted: dict[str, tuple[str, bool]] = {}
+    for rel, path in _worktree_files(repo):
+        want = expected.get(rel) or _lookup(run, rel, scope, cone)
+        accepted[rel] = (_accept_file(run, rel, path, want), want.executable)
+    missing = sorted(set(expected) - set(accepted))
+    if missing:
+        raise CheckoutVerificationError(f"{missing[0]} is missing from the checkout")
+    return _Manifest(algorithm, accepted)
 
 
 def _key(repo: Path, sha: str) -> tuple[str, str]:
