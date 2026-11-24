@@ -207,7 +207,7 @@ the registry's published version list. A missing version selector (no
 component) are both rejected during `apm install` -- the write gate rejects
 them before `apm.yml` is changed.
 
-Routing applies to every still-unrouted shorthand entry with a `#<ref>`: a valid semver range is range-matched, any other selector is exact-matched, and a malformed range-like ref is rejected. Object-form entries (`- git:`, `- path:`, `- id:`) are left alone.
+Routing applies to every still-unrouted shorthand entry with a `#<ref>`: a valid semver range is range-matched, any other selector is exact-matched, and a malformed range-like ref is rejected. Object-form entries (`- git:`, `- path:`, `- id:`) are left alone. A marketplace declaration (`{name, marketplace}`) is not routed either: it resolves through its catalog, whose entry names the registry and version.
 
 ### Object form -- explicit per-dep routing and virtual packages
 
