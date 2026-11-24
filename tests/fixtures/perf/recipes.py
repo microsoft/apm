@@ -52,6 +52,11 @@ class TreeRecipe:
     # Git host shapes the packages are referenced through (``generator.HOST_SPECS``);
     # each package keeps one host for every parent, so its identity never forks.
     hosts: tuple[str, ...] = ("github",)
+    # How the consumer pins its direct dependencies: "tag" (``#<tag>``), "tip"
+    # (no ref: the default branch tip) or "sha" (``#<full SHA>`` of a commit
+    # that is no longer the branch tip). Transitive edges keep "tag" except
+    # under "tip"; the tag names the same commit as the "sha" pin.
+    pin: str = "tag"
 
 
 @dataclass(frozen=True)
@@ -79,7 +84,8 @@ class MonorepoRecipe:
 
 # Enterprise shapes: the same trees referenced across GitHub, GHE Cloud, GitLab
 # and Azure DevOps (``-multi``), and with a stdio MCP server in every package
-# (``-mcp``). Same seeds, so only the variant's axis differs from the base tree.
+# (``-mcp``). Pin shapes: branch-tip (``-tip``) and non-tip commit SHA (``-sha``)
+# direct dependencies. Same seeds, so only the variant's axis differs.
 _MULTI_HOSTS = ("github", "ghe", "gitlab", "ado")
 _MCP_HEAVY = PrimitiveMix(mcp_every=1)
 _BASE_TREES = (
@@ -97,6 +103,8 @@ TREE_RECIPES: dict[str, TreeRecipe] = {
         replace(base, name=f"{base.name}-mcp", primitives=_MCP_HEAVY),
         # Rule-dir and command targets render instructions and prompts (#4940).
         replace(base, name=f"{base.name}-claude", targets=("claude",)),
+        replace(base, name=f"{base.name}-tip", pin="tip"),
+        replace(base, name=f"{base.name}-sha", pin="sha"),
     )
 }
 

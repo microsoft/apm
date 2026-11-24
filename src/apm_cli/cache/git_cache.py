@@ -83,6 +83,86 @@ class IncompleteCheckoutError(RuntimeError):
         self.stderr = stderr
 
 
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+def _oid(value: str, width: int) -> str | None:
+    return value if len(value) == width and set(value) <= _HEX_DIGITS else None
+
+
+def _packed_branch_tips(text: str, width: int) -> dict[str, str] | None:
+    """Branch entries of a packed-refs text, or None unless every line is well formed."""
+    tips: dict[str, str] = {}
+    previous: str | None = None
+    if text and not text.endswith("\n"):
+        return None  # an unterminated last line
+    for number, line in enumerate(text.split("\n")[:-1]):
+        if number == 0 and line.startswith("# pack-refs with:"):
+            continue
+        if line.startswith("^"):
+            # A peel line follows one tag entry; a branch that peels names no commit.
+            if previous is None or previous.startswith("refs/heads/") or not _oid(line[1:], width):
+                return None
+            previous = None
+            continue
+        oid, sep, name = line.partition(" ")
+        if not sep or _oid(oid, width) is None or not name.startswith("refs/") or " " in name:
+            return None
+        previous = name
+        if name.startswith("refs/heads/"):
+            tips[name] = oid
+    return tips
+
+
+def _branch_tips(git_dir: Path, width: int) -> set[str] | None:
+    """Branch tips of *git_dir* as git resolves them (loose over packed), or None if unusual."""
+    if (git_dir / "reftable").exists():
+        return None
+    tips: dict[str, str] = {}
+    packed = git_dir / "packed-refs"
+    if packed.exists():
+        found = _packed_branch_tips(packed.read_text(encoding="ascii"), width)
+        if found is None:
+            return None
+        tips.update(found)
+    heads = git_dir / "refs" / "heads"
+    for ref in heads.rglob("*") if heads.is_dir() else ():
+        if ref.is_symlink() or ref.name.endswith(".lock"):
+            return None
+        if ref.is_dir():
+            continue
+        name = "/".join(("refs", "heads", *ref.relative_to(heads).parts))
+        text = ref.read_text(encoding="ascii")
+        if not text.endswith("\n") or text.count("\n") != 1:
+            return None
+        if text.startswith("ref: "):
+            tips.pop(name, None)  # names no commit itself; a branch target is read on its own
+            continue
+        oid = _oid(text[:-1], width)
+        if oid is None:
+            return None
+        tips[name] = oid
+    return set(tips.values())
+
+
+def _is_ref_tip(git_dir: Path, sha: str) -> bool:
+    """Whether a branch of the fresh clone *git_dir* points at *sha* (read, not run).
+
+    Only a positive answer is used (a branch tip is a commit the clone holds).
+    Refs resolve as git resolves them: a loose ref wins over its packed entry,
+    and tags, peel lines and symbolic refs name nothing. Anything unreadable,
+    malformed or unusual answers False, and the caller asks git.
+    """
+    sha = sha.lower()
+    if _oid(sha, len(sha)) is None or len(sha) not in (40, 64):
+        return False
+    try:
+        tips = _branch_tips(git_dir, len(sha))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return tips is not None and sha in tips
+
+
 def _safe_git_args() -> list[str]:
     """Return hardening ``-c`` args prepended to every git subprocess.
 
@@ -812,6 +892,8 @@ class GitCache:
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
+        if _is_ref_tip(staged, sha):
+            return  # a ref of the clone names it, so the commit is present
         try:
             probe = run_git_text(
                 [
