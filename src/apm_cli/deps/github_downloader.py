@@ -18,6 +18,7 @@ import requests
 
 from ..cache.cached_repo import validate_cached_links
 from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
+from ..cache.commit_reachability import name_a_lost_admitted_commit
 from ..cache.git_cache import dir_size, raise_if_tampered
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
@@ -53,6 +54,7 @@ from ..utils.github_host import (
 from .bare_cache import (
     bare_clone_with_fallback,
     clone_with_fallback,
+    fetch_commit_worktree,
     fetch_sha_into_bare,
     materialize_from_bare,
 )
@@ -1390,9 +1392,9 @@ class GitHubPackageDownloader:
                 # calling get_checkout so the cache skips its internal
                 # ls-remote. Same pattern as the non-subdir path at
                 # line ~1604 which passes locked_sha=resolved.
-                try:
-                    _resolved = self.resolve_git_reference(dep_ref)
-                    _resolved_sha_for_cache = _resolved.resolved_commit
+                try:  # A declared ref is already its admitted commit; never resolve it again.
+                    _resolved = None if dep_ref.reference else self.resolve_git_reference(dep_ref)
+                    _resolved_sha_for_cache = _resolved.resolved_commit if _resolved else ref
                 except Exception:
                     _resolved_sha_for_cache = None
                 # Sparse-cone (#1433): keying the persistent shard by
@@ -1779,6 +1781,7 @@ class GitHubPackageDownloader:
             progress_obj=progress_obj,
         )
 
+    @name_a_lost_admitted_commit
     def download_package(
         self,
         repo_ref: Union[str, "DependencyReference"],
@@ -1953,19 +1956,12 @@ class GitHubPackageDownloader:
         package_display_name = repo_segments[-1] if repo_segments else dep_ref.repo_url
 
         try:
-            # Clone the repository using fallback authentication methods
-            # Use shallow clone for performance if we have a specific commit
-            if resolved_ref.ref_type == GitReferenceType.COMMIT or resolved_ref.ref_name.startswith(
-                "refs/"
-            ):
-                # Commits and fully qualified refs: clone, then check out the resolved commit
-                progress_reporter = (
-                    _git_progress_reporter_class()(
-                        progress_task_id, progress_obj, package_display_name
-                    )
-                    if progress_task_id and progress_obj
-                    else None
-                )
+            progress_reporter = (
+                _git_progress_reporter_class()(progress_task_id, progress_obj, package_display_name)
+                if progress_task_id and progress_obj
+                else None
+            )
+            if resolved_ref.ref_type == GitReferenceType.COMMIT:
                 self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,
@@ -1974,15 +1970,17 @@ class GitHubPackageDownloader:
                     verbose_callback=verbose_callback,
                 )
                 checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
-            else:
-                # For branches and tags, we can use shallow clone
-                progress_reporter = (
-                    _git_progress_reporter_class()(
-                        progress_task_id, progress_obj, package_display_name
-                    )
-                    if progress_task_id and progress_obj
-                    else None
+            elif dep_ref.reference:
+                # A named ref: its admitted commit, fetched shallowly by commit (#5138)
+                fetch_commit_worktree(
+                    self._execute_transport_plan,
+                    dep_ref.repo_url,
+                    target_path,
+                    dep_ref=dep_ref,
+                    sha=resolved_ref.resolved_commit,
+                    verbose_callback=verbose_callback,
                 )
+            else:
                 self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,

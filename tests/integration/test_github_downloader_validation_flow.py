@@ -358,7 +358,7 @@ class TestDownloadSubdirectoryPersistentCache:
         dep_ref.repo_url = repo_url
         dep_ref.host = "github.com"
         dep_ref.virtual_path = "packages/my-pkg"
-        dep_ref.reference = "main"
+        dep_ref.reference = None  # the default-branch cache path
         dep_ref.get_unique_key.return_value = "owner/repo@main"
         dep_ref.to_github_url.return_value = f"https://gitlab.com/{repo_url}"
         return dep_ref

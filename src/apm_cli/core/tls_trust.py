@@ -264,6 +264,16 @@ def explicit_ca_bundle_path(env: Mapping[str, str] | None = None) -> str:
     return _explicit_ca_selection(env)[1]
 
 
+def selectable_ca_files(env: Mapping[str, str] | None = None) -> list[str]:
+    """Every CA bundle path *env* sets: the additive, replacement and SSL_CERT_FILE ones.
+
+    For callers that key the trust inputs of a run (the verified-state record).
+    """
+    environ = os.environ if env is None else env
+    names = (_EXTRA_CA_ENV_VAR, *_EXPLICIT_CA_ENV_VARS, _SSL_CERT_FILE_VAR)
+    return [value for value in ((environ.get(name) or "").strip() for name in names) if value]
+
+
 def _safe_path_display(path: Path) -> str:
     """Return an ASCII-safe path for CLI diagnostics."""
     return ascii(str(path))[1:-1]

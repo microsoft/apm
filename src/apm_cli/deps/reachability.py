@@ -37,7 +37,7 @@ its ``--dry-run`` preview.
 
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -790,6 +790,7 @@ def retained_lock_keys(
     apm_modules_dir: Path,
     declared_refs: list[DependencyReference],
     *,
+    dev_refs: Sequence[DependencyReference] = (),
     unverified: dict[str, str] | None = None,
     anchored: dict[str, str] | None = None,
     walks: list[ReachabilityResult] | None = None,
@@ -810,6 +811,8 @@ def retained_lock_keys(
     The walk, when one ran, is appended to *walks* for parent repairs. A row
     kept because a survivor reached through a symlink alias still resolves
     through it is named in *anchored*; what it declares is retained too.
+    *dev_refs* names the dev-only declarations among *declared_refs*; the
+    walk visits them after production roots, as install does.
     """
     declared = {ref.get_unique_key() for ref in declared_refs}
     retained: set[str] = set()
@@ -851,8 +854,15 @@ def retained_lock_keys(
         retained |= candidates
         candidates = set()
     if candidates:
+        # Dev-only roots walk after production, so dev status is install's (#5126).
+        dev_keys = {ref.get_unique_key() for ref in dev_refs}
         walk = compute_forward_reachable_keys(
-            lockfile, project_root, apm_modules_dir, declared_refs, frozenset(candidates)
+            lockfile,
+            project_root,
+            apm_modules_dir,
+            [ref for ref in declared_refs if ref.get_unique_key() not in dev_keys],
+            frozenset(candidates),
+            dev_refs=dev_refs,
         )
         if walks is not None:
             walks.append(walk)
@@ -974,7 +984,35 @@ def _retain_alias_anchors(
     )
 
 
-def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
+def parent_identity_counts(lockfile: LockFile) -> Counter:
+    """How many lock rows record each parent identity; built once per decision (#5126)."""
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    return Counter(
+        lockfile_parent_identity(row, lockfile.replacements)
+        for row in lockfile.dependencies.values()
+    )
+
+
+def reparent_blocker(
+    lockfile: LockFile, walk: ReachabilityResult, key: str, identity_counts: Counter
+) -> str | None:
+    """Why prune cannot re-derive *key*'s parent from *walk*, or None when it can (#5126).
+
+    *identity_counts* comes from :func:`parent_identity_counts` for *lockfile*.
+    """
+    depth = walk.depths.get(key)
+    nearest = [
+        parent
+        for parent in walk.declaring_edges.get(key, {})
+        if depth is not None and walk.depths.get(parent) == depth - 1
+    ]
+    return _anchor_reason(
+        lockfile, walk, key, lockfile.dependencies[key].repo_url, nearest, identity_counts
+    )
+
+
+def _anchor_reason(lockfile, walk, key, repo_url, nearest, identity_counts) -> str | None:
     """Why a survivor cannot be re-parented by prune, or None when it can.
 
     Re-parenting records the nearest surviving parent; it must be the first
@@ -995,6 +1033,15 @@ def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
         return (
             f"{repo_url} still resolves through it, and the package that now declares "
             f"{repo_url} is not in apm.lock.yaml"
+        )
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    identity = lockfile_parent_identity(lockfile.dependencies[parent], lockfile.replacements)
+    if identity_counts[identity] > 1:
+        # Recording a parent identity two rows share leaves the survivor ambiguous.
+        return (
+            f"{repo_url} still resolves through it, and the package that now declares "
+            f"{repo_url} shares its identity {identity} with another package"
         )
     declared = walk.local_edge_repos.get((key, parent), (None, None))[0]
     if declared in (None, repo_url):
@@ -1023,6 +1070,7 @@ def _alias_anchors(lockfile, removed_keys, walk) -> dict[str, str]:
         if key in lockfile.dependencies
     }
     anchors: dict[str, str] = {}
+    identity_counts = parent_identity_counts(lockfile)
     for key in sorted(lockfile.dependencies):
         # Every survivor, retained or declared, whose recorded parent goes.
         row = lockfile.dependencies.get(key)
@@ -1036,7 +1084,7 @@ def _alias_anchors(lockfile, removed_keys, walk) -> dict[str, str]:
             for parent in walk.declaring_edges.get(key, {})
             if walk.depths.get(parent) == depth - 1
         ]
-        reason = _anchor_reason(lockfile, walk, key, row.repo_url, nearest)
+        reason = _anchor_reason(lockfile, walk, key, row.repo_url, nearest, identity_counts)
         if reason is None:
             continue
         parent = gone.get(row.resolved_by)

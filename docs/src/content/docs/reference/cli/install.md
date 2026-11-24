@@ -495,7 +495,8 @@ the same hook merge a source install uses, once the exact bundle key printed by
 with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
 policy and retires those `hooks.json` entries and `hooks/` scripts when it no
-longer holds; `apm audit --ci` reports them first. A bundle Markdown file, such
+longer holds, in every hook target of the scope, including one the bundle was
+installed into with `--target`; `apm audit --ci` reports them first. A bundle Markdown file, such
 as a command `.md` or a `SKILL.md`, whose frontmatter declares `hooks` (or cannot
 be read) waits for the same approval: it is skipped and named until the key is
 approved. Revoking the approval later does not yet retire such a file once it
