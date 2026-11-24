@@ -748,10 +748,17 @@ def _setup_replay(ctx: Context) -> None:
     ctx.installed()
     for root in ctx.roots():
         ctx.checked(["install"], root)
-        outcome = _replay_outcome(ctx.run(["install"], root).stderr)
-        # No trace line: a CLI without the verified-state record (nothing to converge).
-        if outcome and outcome != "hit":
-            raise RuntimeError(f"setup no-op did not converge in {root}: replay {outcome}")
+        # Up to three more untimed no-ops until one replays: a CLI may need more
+        # than one no-op to write its record (the count is in the trace).
+        seen = []
+        for _ in range(3):
+            outcome = _replay_outcome(ctx.run(["install"], root).stderr)
+            seen.append(outcome or "-")
+            # No trace line: a CLI without the verified-state record (nothing to converge).
+            if not outcome or outcome == "hit":
+                break
+        else:
+            raise RuntimeError(f"setup no-op did not converge in {root}: replay {seen}")
 
 
 def _replay_outcome(tail: str) -> str:
