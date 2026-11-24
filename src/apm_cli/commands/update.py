@@ -180,7 +180,7 @@ def _report_pin_repairs(staged: tuple[Any, ...], suffix: str) -> None:
         noun = "repair" if failed == 1 else "repairs"
         _rich_warning(
             f"Could not save {failed} marketplace ref pin {noun}; the conflicting pins are "
-            "unchanged. Re-run 'apm update --yes' to retry."
+            "unchanged, so the next resolution refuses them again."
         )
         if suffix:
             _rich_success(suffix.strip())
