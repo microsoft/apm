@@ -842,3 +842,62 @@ def test_a_local_bundle_retire_killed_mid_delete_is_replayed(
     assert _tree_state(chain.project) == before, _evidence(result)
     assert _stores(chain) == [], _evidence(result)
     _assert_lock_matches_disk(chain.project)
+
+
+# -- adversarial journals for the two-writer case (#5098 cut hunt) ---------------------
+
+
+def _killed_two_writers(tmp_path: Path, binary: Path) -> tuple[Chain, dict[str, str]]:
+    chain = Chain(tmp_path / "two-writers", binary, dirs=(".claude",))
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    chain.write_manifest([], apm=["./pkg"], targets=["claude"], includes="auto")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    _write_package_hook(chain, "v2")
+    _write_root_hook(chain, "v2")
+    _kill_mid_refusal(chain, _SHARED_GATE.fault)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    return chain, before
+
+
+def test_a_journal_whose_token_is_forged_does_not_vouch_for_two_writers(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The records vouch only for the journal token they name: a header with another
+    token restores nothing, keeps the journal and names the shared config (#5051)."""
+    chain, _before = _killed_two_writers(tmp_path, apm_binary_path)
+    store = _abandoned(chain)
+    journal = _journal(store)
+    assert journal[0].get("token"), journal[0]
+    journal[0]["token"] = "0" * len(str(journal[0]["token"]))
+    _write_journal(store, journal)
+    settings = chain.project / _SETTINGS
+    held = settings.read_bytes()
+
+    _assert_kept_and_reported(chain, _SHARED_GATE, store, _SETTINGS)
+    assert settings.read_bytes() == held
+
+
+def test_a_cold_clone_without_the_journal_converges_on_the_next_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """With the abandoned journal and apm_modules gone (a fresh clone of the killed
+    tree), the next install has nothing to replay: it converges to the manifest, the
+    lockfile matches disk and ``audit --ci`` passes."""
+    chain, before = _killed_two_writers(tmp_path, apm_binary_path)
+    shutil.rmtree(_abandoned(chain))
+    shutil.rmtree(chain.project / "apm_modules", ignore_errors=True)
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "interrupted install" not in _text(result), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    _assert_lock_matches_disk(chain.project)
+    audit = chain.run("audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)
