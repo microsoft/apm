@@ -97,12 +97,16 @@ def test_install_stays_within_its_count_budget(journey: str, journey_runs) -> No
     assert not over, "count budget exceeded:\n" + "\n".join(over)
 
 
-def test_cold_install_clones_and_fetches_while_noop_spawns_no_git_fetch(journey_runs) -> None:
-    """The counters see the work: a cold install clones over HTTP, a no-op does not."""
+def test_cold_install_fetches_while_noop_fetches_nothing(journey_runs) -> None:
+    """The counters see the work: a cold install fetches over HTTP, a no-op does not.
+
+    A cold install may fetch in process (no ``git clone`` spawn), so the work
+    shows as HTTP requests; a no-op spawns no clone and sends no request.
+    """
     (cold_run, _, cold), (noop_run, _, noop) = (
         journey_runs["install-cold"],
         journey_runs["install-noop"],
     )
     assert (cold_run.returncode, noop_run.returncode) == (0, 0), (cold_run.stderr, noop_run.stderr)
-    assert cold.get("git.clone", 0) > 0 and cold["http.requests"] > 0, cold
+    assert cold["http.requests"] > 0, cold
     assert noop.get("git.clone", 0) == 0 and noop["http.requests"] == 0, noop

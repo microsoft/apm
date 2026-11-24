@@ -3,10 +3,10 @@
   "journeys": {
     "install-cold": {
       "fs.files_written": {
-        "budget": 1436,
-        "measured": 1367,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 1596,
+        "measured": 1520,
+        "reason": "re-measured after #5330 (in-process pinned fetch): its object writes and one git var now run in the counted apm process instead of an uncounted git clone; tree-10, offline mirror, rtt 0; CI run 45401098857",
+        "pr": "#5340"
       },
       "fs.hash_objects": {
         "budget": 1950,
@@ -87,10 +87,10 @@
         "pr": "#5338"
       },
       "git.var": {
-        "budget": 3,
-        "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 5,
+        "measured": 4,
+        "reason": "re-measured after #5330 (in-process pinned fetch): its object writes and one git var now run in the counted apm process instead of an uncounted git clone; tree-10, offline mirror, rtt 0; CI run 45401098857",
+        "pr": "#5340"
       },
       "http.connects": {
         "budget": 14,
