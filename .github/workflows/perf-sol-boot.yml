@@ -1,0 +1,59 @@
+name: Perf SoL boot floor (research)
+
+on:
+  push:
+    branches: [perf-research/arch-boot]
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    name: boot ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: false
+      - name: Install side CLI (as the bench does) and harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C harness worktree add --detach "$GITHUB_WORKSPACE/side" HEAD
+          (cd side && uv sync --frozen --no-editable --quiet)
+          (cd harness && uv sync --frozen --extra dev --quiet)
+      - name: Boot probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Windows ]; then PY=side/.venv/Scripts/python.exe; APM=side/.venv/Scripts/apm.exe; else PY=side/.venv/bin/python; APM=side/.venv/bin/apm; fi
+          mkdir -p out
+          echo "APM_ABS=$GITHUB_WORKSPACE/$APM" >> "$GITHUB_ENV"
+          cd harness
+          uv run --frozen python scripts/perf/boot_probe.py "$GITHUB_WORKSPACE/$PY" "$GITHUB_WORKSPACE/$APM" "$GITHUB_WORKSPACE/out/boot-${{ matrix.os }}.json" 21
+      - name: Install-cold t50 plain (CPU) then with importtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd harness
+          uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 0 --runs 3 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/plain" --work "$GITHUB_WORKSPACE/work"
+          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/importtime" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 0 --runs 2 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/itime" --work "$GITHUB_WORKSPACE/work"
+          uv run --frozen python scripts/perf/importtime_report.py "$GITHUB_WORKSPACE/out" > "$GITHUB_WORKSPACE/out/importtime-report-${{ matrix.os }}.md"
+          cat "$GITHUB_WORKSPACE/out/importtime-report-${{ matrix.os }}.md"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: boot-${{ matrix.os }}
+          path: out/

@@ -508,6 +508,9 @@ class Context:
             env["PYTHONPATH"] = str(_SPAWN_COUNTER_DIR)
             if self.count_fs:
                 env["APM_PERF_COUNT_FS"] = "1"
+        importtime_dir = os.environ.get("APM_BENCH_IMPORTTIME_DIR")
+        if importtime_dir:
+            env["PYTHONPROFILEIMPORTTIME"] = "1"
         with (
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
@@ -518,6 +521,13 @@ class Context:
             out.seek(0)
             err.seek(0)
             tail = out.read()[-3000:].decode(errors="replace") + "\n"
+            if importtime_dir:
+                data = err.read()
+                target = Path(importtime_dir)
+                target.mkdir(parents=True, exist_ok=True)
+                index = len(list(target.glob("importtime-*.txt")))
+                (target / f"importtime-{index:03d}.txt").write_bytes(data)
+                err.seek(0)
             tail += err.read()[-3000:].decode(errors="replace")
         return returncode, tail, cpu
 
