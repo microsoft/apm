@@ -16,6 +16,7 @@ before it, tests/lifecycle/generator/covering.py).
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -173,6 +174,36 @@ def test_a_plugin_bin_deploys_under_home_once_trusted(lifecycle_world) -> None:
     scenario.finish()
 
 
+_BIN_ONLINE = {**_USER, "OP": "install", "PRIM": "bin", "SRC": "git", "GATE": "none"}
+_BIN_STATES = {
+    "first": {**_FIRST, **_BIN_ONLINE, "LOCK": "absent"},
+    "converged": {**_BIN_ONLINE, "LOCK": "consistent", "DEPLOYED": "clean", "NET": "online"},
+    "no-policy": {**_BIN_ONLINE, "NOPOLICY": "on", "DEPLOYED": "clean", "NET": "online"},
+    "offline": {**_BIN_ONLINE, "NET": "offline", "DEPLOYED": "clean"},
+}
+
+
+def test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states(lifecycle_world) -> None:
+    """U-BIN pairs (#4097 T-3, #4104 T-6e, #4108 T-7b): the plugin's bin/ deploys under
+    HOME on the first install with no lockfile, then a converged install, a --no-policy
+    install and an offline install each keep its bytes unchanged."""
+    specs = {"p-native-claude-bin": lifecycle_world.packages["p-native-claude-bin:git"].spec}
+    scenario = Scenario(lifecycle_world, specs, scope="user", targets=("claude",))
+    binary = lifecycle_world.home / _PLUGIN_BIN
+    scenario.run("install --trust-bin p-native-claude-bin", credit=[_BIN_STATES["first"]])
+    assert binary.is_file()
+    deployed = binary.read_bytes()
+    scenario.run("install --trust-bin", credit=[_BIN_STATES["converged"]])
+    assert binary.read_bytes() == deployed
+    step = scenario.run("install --trust-bin --no-policy", credit=[_BIN_STATES["no-policy"]])
+    assert re.search(_NO_POLICY_SAYS, step.output), step.output
+    assert binary.read_bytes() == deployed
+    go_offline(lifecycle_world)
+    scenario.run("install --trust-bin", credit=[_BIN_STATES["offline"]])
+    assert binary.read_bytes() == deployed
+    scenario.finish()
+
+
 # -- target changes ------------------------------------------------------------------
 
 _TARGETS = {
@@ -316,6 +347,9 @@ CREDITS = credits(
         "test_a_plugin_bin_deploys_under_home_once_trusted": [
             {**_FIRST, "OP": "install", "PRIM": "bin", "GATE": "allowed", "SRC": "git"}
         ],
+        "test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states": list(
+            _BIN_STATES.values()
+        ),
         **{
             f"test_a_target_change_at_user_scope_redeploys_under_home[{change}]": [
                 {**_USER, "TGT": change, "PRIM": "skill"}
