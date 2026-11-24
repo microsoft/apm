@@ -32,6 +32,8 @@ import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
+import yaml
+
 from tests.lifecycle import driver
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
@@ -178,9 +180,9 @@ class GatePluginBin(StepRunner):
     def tripwire_bundle(self) -> None:
         """A consumer of the project's bundle gets nothing of the omitted plugin (#5253).
 
-        The bundle's embedded lock may still name the plugin's ``native_plugin`` row;
-        installing the bundle must deploy nothing under ``.agents/plugins`` and record
-        no such row, so the row stays inert.
+        The bundle's own lock names no ``native_plugin`` root it does not carry, and
+        installing the bundle deploys nothing under ``.agents/plugins`` and records no
+        such row.
         """
         if self.dry:
             return
@@ -195,6 +197,9 @@ class GatePluginBin(StepRunner):
         if ".claude-plugin" in added:
             shutil.rmtree(project / ".claude-plugin")
         (bundle,) = [path for path in out.iterdir() if path.is_dir()]
+        rows = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        carried = [row for row in rows.get("dependencies") or [] if "native_plugin" in row]
+        assert not carried, f"the bundle lock names a root it does not carry: {carried}"
         consumer = world.root / "tripwire-consumer"
         consumer.mkdir()
         manifest = "name: consumer\nversion: 1.0.0\ntargets: [claude]\ndependencies:\n  apm: []\n"
