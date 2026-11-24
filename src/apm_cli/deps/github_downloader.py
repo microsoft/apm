@@ -110,6 +110,9 @@ def _rmtree(path) -> None:
     Delegates to :func:`robust_rmtree` which retries with exponential backoff
     on transient lock errors (e.g. antivirus scanning on Windows).
     """
+    from apm_cli.utils.realpath import release_held
+
+    release_held(path)  # PERF PROTOTYPE (A7): no hold may block APM's own delete/rename
     from ..utils.file_ops import robust_rmtree
 
     robust_rmtree(path, ignore_errors=True)

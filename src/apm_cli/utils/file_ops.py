@@ -305,6 +305,9 @@ def robust_rmtree(
     max_retries:
         Maximum retry attempts for transient lock errors.
     """
+    from apm_cli.utils.realpath import release_held
+
+    release_held(path)  # PERF PROTOTYPE (A7): no hold may block APM's own delete/rename
     path_s = _without_trailing_separators(str(path))
 
     def _do_rmtree() -> None:
