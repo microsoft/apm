@@ -646,6 +646,8 @@ class InstructionIntegrator(BaseIntegrator):
         exact scope and body; until then its rule stays (#5343). Routed
         sources are recorded so install can ask for ``apm compile``. With
         *all_routed* (pack), every routed source is dropped, carried or not.
+        Drift replay keeps a carried rule the live root still has and the
+        lockfile records for this package, since only install retires it.
         User scope and projects with a blocking hand-authored root file keep
         every instruction in ``.claude/rules/``. Drift replay writes to a
         scratch root, so scope and the blocker come from the live root it replays.
@@ -699,11 +701,17 @@ class InstructionIntegrator(BaseIntegrator):
             if agents_md is None:
                 self.agents_md_stale.add(source.name)
                 continue
-            carried.add(source)
             stem = source.name.removesuffix(".instructions.md")
             rule = live_root / target.root_dir / mapping.subdir / f"{stem}{mapping.extension}"
-            if rule.is_file():
+            if frame is not None:
+                # Drift replay: retiring a recorded rule is install's step, so
+                # a compile in between is not drift (#5343).
+                recorded = getattr(package_info, "replay_recorded_files", frozenset())
+                if rule.is_file() and portable_relpath(rule, live_root) in recorded:
+                    continue
+            elif rule.is_file():
                 self.agents_md_carried[rule] = agents_md
+            carried.add(source)
         # Never drop without a replacement (#5343): a routed rule stays, in the
         # 0.37 layout, until a compiled AGENTS.md Claude loads carries it.
         return [source for source in instruction_files if source not in carried]
