@@ -163,10 +163,14 @@ class DeployStore:
     def _prepare(self, entry: Path, size: int) -> bool | None:
         """Create the bucket dirs; ``True`` if a same-size entry exists, ``None`` to refuse."""
         for directory in (self._root, entry.parent):
-            if not os.path.lexists(directory):
-                directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            # PERF PROTOTYPE (stat-cut): one lstat proves an existing directory;
+            # only a missing one is created and then proven.
             if not self._real_dir(directory):
-                return None
+                if os.path.lexists(directory):
+                    return None
+                directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if not self._real_dir(directory):
+                    return None
         try:
             existing = os.lstat(entry)
         except FileNotFoundError:
