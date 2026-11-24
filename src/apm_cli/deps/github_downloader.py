@@ -1488,6 +1488,8 @@ class GitHubPackageDownloader:
                         ref=ref,
                         is_commit_sha=bool(is_commit_sha),
                     )
+                    # Under the cache lock, before the bare is shared (#5199).
+                    self._require_commit_in_bare(bare_target, ref, dep_ref)
 
                 def _shared_bare_fetch_fn(existing_bare: Path, ref_or_sha: str) -> bool:
                     # get_or_clone passes `ref` here; for SHA pins it is the SHA.
@@ -1506,7 +1508,6 @@ class GitHubPackageDownloader:
                     )
                 except Exception as e:
                     raise RuntimeError(f"Failed to clone repository: {e}") from e
-                self._require_commit_in_bare(shared_bare_path, ref, dep_ref)
                 _perf_bare_elapsed_ms = int((time.monotonic() - _perf_t0_bare) * 1000)
                 if _perf_logger is not None:
                     _strategy = (

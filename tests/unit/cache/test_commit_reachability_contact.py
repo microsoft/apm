@@ -165,3 +165,54 @@ def test_a_non_ascii_or_reftable_clone_asks_git(tmp_path: Path) -> None:
     reftable = _clone_dir(tmp_path / "rt", f"{_HEADER}{_A} refs/heads/main\n", {})
     (reftable / "reftable").mkdir()
     assert _is_ref_tip(reftable, _A) is False
+
+
+class _FlakyResolver:
+    """A tiered, read-only-cache downloader whose default branch fails *failures* times."""
+
+    cache_read_only = True  # the real tip recorder runs and writes nothing
+
+    def __init__(self, failures: int, sha: str) -> None:
+        from types import SimpleNamespace
+
+        from apm_cli.models.dependency.types import GitReferenceType
+
+        self.failures = failures
+        self.calls = 0
+        self._resolved = SimpleNamespace(resolved_commit=sha, ref_type=GitReferenceType.BRANCH)
+        self._tiered_resolver = SimpleNamespace(remotely_resolved=lambda _dep, _sha: True)
+
+    def resolve_git_reference(self, _dep_ref):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise RuntimeError("transient resolver failure")
+        return self._resolved
+
+    def _build_repo_url(self, url: str, *, use_ssh: bool, dep_ref) -> str:
+        return f"https://github.com/{url}"
+
+    def _persistent_cache_remote(self, _dep_ref, url: str) -> str:
+        return url
+
+
+def test_a_default_branch_retry_is_fetched_by_its_admitted_commit() -> None:
+    """#5199: a retry's admitted commit is fetched, never the branch by name."""
+    from apm_cli.cache.commit_reachability import admit_fetch_ref
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    sha = "a" * 40
+    downloader = _FlakyResolver(1, sha)
+
+    fetched = admit_fetch_ref(downloader, DependencyReference.parse("o/pkg"), None)
+
+    assert fetched == sha
+    assert downloader.calls == 2
+
+
+def test_a_default_branch_that_never_resolves_is_refused() -> None:
+    """#5199: with the tiered resolver, an unresolvable default branch is never fetched by name."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_fetch_ref
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    with pytest.raises(CommitNotReachableError, match="default branch"):
+        admit_fetch_ref(_FlakyResolver(2, "a" * 40), DependencyReference.parse("o/pkg"), None)

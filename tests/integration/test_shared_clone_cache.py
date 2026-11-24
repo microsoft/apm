@@ -1202,8 +1202,12 @@ class TestInvalidSubdirErrorWording:
                 pytest.raises(RuntimeError) as failed,
             ):
                 downloader.download_subdirectory_package(dep, tmp_path / "out")
+            # Checked under the cache lock before publishing: a bare that lacks
+            # the admitted commit is never shared with another download.
+            published = [path for bares in cache._repo_bares.values() for _ref, path in bares]
 
         assert fetched == [admitted]
+        assert bool(published) is served, published
         message = str(failed.value)
         if served:
             assert "Subdirectory 'skills/DOES_NOT_EXIST_TYPO' not found" in message, message
