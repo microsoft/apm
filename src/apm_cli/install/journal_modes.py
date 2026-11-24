@@ -197,3 +197,101 @@ def with_recorded_mode(state: dict[str, Any], mode: int | dict[str, int]) -> dic
         for rel, fingerprint in state.get("dir", {}).items()
     }
     return {**state, "dir": entries, "mode": mode[""]}
+
+
+# -- the snapshot store is private to this user (#5134) ---------------------------------
+
+NOT_PRIVATE = "the snapshot store is not private to this user; nothing was restored"
+_MANIFEST = "journal.jsonl"
+
+
+def private_dir(path: Path) -> None:
+    """Create *path* (and its parents) without group or other write, narrowing it if needed.
+
+    APM_HOME, its parent, is created private too when APM creates it.
+    """
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, exist_ok=True)
+    if os.name != "nt":
+        st = os.stat(path)
+        if st.st_mode & 0o022 and st.st_uid == os.geteuid():
+            os.chmod(path, stat.S_IMODE(st.st_mode) & ~0o022)
+
+
+def append_private(path: Path, text: str) -> None:
+    """Append *text* to the journal file *path*, which is only ever this user's to write."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        if os.name != "nt" and os.fstat(fd).st_mode & 0o077:
+            os.fchmod(fd, 0o600)  # set explicitly, never left to the umask
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
+
+
+def require_private_store(store: Path) -> None:
+    """Raise ``ValueError`` unless the store chain is private to this user.
+
+    The install-snapshots directory and the store must each be a real directory and the
+    journal a regular file (never a link), on POSIX owned by this user with no group or
+    other write. APM_HOME may be a link (a dotfiles home): its target must be a directory
+    this user owns, which may be group writable (a user-private group's umask), never
+    other writable.
+    """
+    home = (store.parent.parent, os.stat, stat.S_ISDIR, 0o002)
+    dirs = [(path, os.lstat, stat.S_ISDIR, 0o022) for path in (store.parent, store)]
+    journal = (store / _MANIFEST, os.lstat, stat.S_ISREG, 0o022)
+    for path, read, is_kind, forbidden in (home, *dirs, journal):
+        try:
+            st = read(path)
+        except FileNotFoundError:
+            continue
+        if not is_kind(st.st_mode):
+            raise ValueError(NOT_PRIVATE)
+        if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & forbidden):
+            raise ValueError(NOT_PRIVATE)
+
+
+def read_private_journal(path: Path, *, first_line: bool = False) -> str:
+    """Read the journal *path* without following a link or blocking on a FIFO.
+
+    The opened file itself must be a regular file this user owns with no group or other
+    write; anything else raises ``ValueError(NOT_PRIVATE)`` before a byte is read.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags | getattr(os, "O_BINARY", 0))
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.EMLINK):  # a link (EMLINK on FreeBSD)
+            raise ValueError(NOT_PRIVATE) from None
+        raise
+    with os.fdopen(fd, "rb") as handle:
+        st = os.fstat(handle.fileno())
+        if not stat.S_ISREG(st.st_mode) or (
+            os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & 0o022)
+        ):
+            raise ValueError(NOT_PRIVATE)
+        data = handle.readline() if first_line else handle.read()
+    return data.decode("utf-8")
+
+
+def for_destination(path: Path, mode: int | dict[str, int], copy: Path) -> int | dict[str, int]:
+    """The mode to give a restore: each path recreated from absence is capped by the umask.
+
+    A directory that still exists may have lost children (a removal killed partway);
+    those children are recreated too, so each entry is judged on its own.
+    """
+    if os.name == "nt":
+        return mode
+    from apm_cli.cache.deploy_store import process_umask
+
+    umask = process_umask()  # the process's umask, read once
+    if isinstance(mode, int):
+        return mode if os.path.lexists(path) else mode & _NEW_FILE & ~umask
+    return {
+        rel: bits
+        if os.path.lexists(path / rel if rel else path)
+        else bits & (_NEW_DIR if not rel or (copy / rel).is_dir() else _NEW_FILE) & ~umask
+        for rel, bits in mode.items()
+    }

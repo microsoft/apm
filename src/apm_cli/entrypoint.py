@@ -25,9 +25,17 @@ def main() -> None:
         command.main(args=sys.argv[1:])
         return
 
-    from apm_cli.cli import main as cli_main
+    from apm_cli.install import verdict_record
 
-    cli_main()
+    argv = sys.argv[1:]
+    if verdict_record.replay(argv):
+        return
+    with verdict_record.recording(argv):
+        # Imported inside the record: TLS startup reads its settings at import, so
+        # the entry state precedes it and the reads are logged.
+        from apm_cli.cli import main as cli_main
+
+        cli_main()
 
 
 if __name__ == "__main__":
