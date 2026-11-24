@@ -373,3 +373,40 @@ def test_plugin_pack_without_lsp_warns_nothing_about_lsp(tmp_path: Path, capsys)
     assert "LSP" not in capsys.readouterr().out
     assert ".lsp.json" not in result.files
     assert not (result.bundle_path / ".lsp.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("deployed", "native", "gap", "named"),
+    [
+        # A plugin deployed whole is attested by its native_plugin record (#5253).
+        ((), True, False, True),
+        # Loose files recorded beside the record pack through deployed_files, so the
+        # cache is never consulted and the root is not named as left out.
+        ((".claude/skills/demo/SKILL.md",), True, True, False),
+        # No record and no deployed files: a stale or partial install, refused.
+        ((), False, True, False),
+    ],
+)
+def test_a_whole_native_plugin_is_named_not_a_provenance_gap(
+    tmp_path: Path, capsys, deployed, native, gap, named
+) -> None:
+    from apm_cli.bundle.plugin_exporter import (
+        _cache_would_contribute_primitives,
+        _warn_unpacked_dependency_config,
+    )
+    from apm_cli.native_plugins.record import NativePluginRecord
+
+    cache = tmp_path / "cache"
+    (cache / ".apm" / "skills" / "demo").mkdir(parents=True)
+    (cache / ".apm" / "skills" / "demo" / "SKILL.md").write_text("# demo\n")
+    record = NativePluginRecord("demo", "sha256:" + "0" * 64, "apm-p-0", "./.agents/plugins")
+    dep = LockedDependency(
+        repo_url="org/demo", deployed_files=list(deployed), native_plugin=record if native else None
+    )
+
+    assert _cache_would_contribute_primitives(cache, dep) is gap
+    _warn_unpacked_dependency_config(dep, cache, [])
+    printed = " ".join(capsys.readouterr().out.split())
+
+    line = "[!] dependency org/demo: the native plugin deployed whole under .agents/plugins/demo"
+    assert (line in printed) is named, printed

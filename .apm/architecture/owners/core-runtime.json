@@ -119,7 +119,8 @@
       "selectors": [
         "src/apm_cli/primitives/models.py",
         "src/apm_cli/primitives/parser.py",
-        "src/apm_cli/integration/agent_integrator.py"
+        "src/apm_cli/integration/agent_integrator.py",
+        "src/apm_cli/integration/claude_frontmatter.py"
       ],
       "guards": ["registry-delegation-user-invocable-resolution"]
     },

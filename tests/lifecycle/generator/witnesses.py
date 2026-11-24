@@ -199,12 +199,21 @@ def credits_dimension(node: str, cell: Mapping[str, str]) -> bool:
     return not (node == SOURCE_SPINE and step in SOURCE_SPINE_UNOBSERVED)
 
 
+# User bin spine gate levels at which bin/ is deployed when install --mcp runs
+# (tests/lifecycle/machines/_gate_bin.py replay_bin).
+_BIN_DEPLOYED_LEVELS = frozenset({"none", "allowed", "revoked-after-deploy"})
+
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "bundle": ("bundle-install", ()),
     "pack": ("pack", ()),
     "install": ("install", ()),
     "install-frozen": ("install", ("FROZEN",)),
+    "install-update": ("install", ("UPDATE",)),
+    "install-force": ("install", ("FORCE",)),
+    "install-dry-run": ("install", ("DRYRUN",)),
+    "install-select": ("install", ("SELECT",)),
+    "install-multi": ("install", ()),
     "update": ("update", ()),
     "lock": ("lock", ()),
     "audit": ("audit", ()),
@@ -282,7 +291,12 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
     from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
-    from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
+    from tests.lifecycle.machines._gate_plugin_bin import (
+        KNOWN_PLUGIN,
+        bin_context,
+        deploys_bin,
+        plugin_bin_cells,
+    )
     from tests.lifecycle.machines._source_bin import source_bin_cells
     from tests.lifecycle.machines._source_bundle import source_bundle_cells
     from tests.lifecycle.machines._source_kit import KNOWN_IDS, source_kit_cells
@@ -325,13 +339,25 @@ def machine_cells() -> list[MachineCell]:
             assignment = _gate_assignment(key)
             if witness == GATE_BUNDLE_SPINE:
                 assignment = {**assignment, "SRC": "local-bundle"}
-            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
+            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key) or KNOWN_PLUGIN.get(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
             if assignment["GATE"] == "denied-dependency":
                 # A refusal proves its GATE level only, never a success cell.
                 continue
-            if witness == GATE_PACK_SPINE:
-                # A real pack over the primitive also proves the OP x PRIM pair.
+            if (
+                witness == GATE_BIN_SPINE
+                and key.split("|")[1] == "mcp-install"
+                and assignment["GATE"] in _BIN_DEPLOYED_LEVELS
+            ):
+                # install --mcp over a deployed bin/ keeps it byte-identical (U7): the
+                # step's evidence names bin/ present, so it proves the OP x PRIM pair.
+                context = {"OP": "mcp-install", "PRIM": "bin"}
+                cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
+            if witness == GATE_PACK_SPINE or (
+                witness == GATE_PLUGIN_BIN_SPINE and assignment["OP"] == "pack"
+            ):
+                # A real pack over the primitive also proves the OP x PRIM pair; the
+                # plugin bin spine's pack runs over a deployed plugin bin/ (#5253).
                 context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
                 cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
             if witness == GATE_BUNDLE_SPINE and assignment["GATE"] in ("none", "allowed"):
@@ -341,7 +367,8 @@ def machine_cells() -> list[MachineCell]:
                 cells.append(MachineCell(key, witness, "T-1", source, tracking))
     for key in sorted(filter(deploys_bin, plugin_bin_cells())):
         # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
-        assignment = {"PRIM": "bin", "SCOPE": "project"}
+        # A context re-install also proves its modifier and context (#4095 lane T-1c).
+        assignment = {"PRIM": "bin", "SCOPE": "project", **(bin_context(key) or {})}
         cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
     for key in sorted(source_bin_cells()):
         # A whole plugin's bin/ declared by one form through one command (#4096).

@@ -74,9 +74,10 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             (
                 ("sub", "materialize_tracked_symlinks(", 1, "eq"),
                 # Defined once and listed once in the pins every shard
-                # persists and every cache hit requires (#3270).
+                # persists and every cache hit requires (#3270); the in-process
+                # fetch writes the same pins into the shards it lands.
                 ("sub", "_LINK_MATERIALIZATION_PIN", 2, "eq"),
-                ("sub", "_checkout_materialization_pins()", 3, "eq"),
+                ("sub", "_checkout_materialization_pins()", 4, "eq"),
             ),
             "git_cache checkouts must materialize links through the canonical owner",
         )

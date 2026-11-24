@@ -1,0 +1,14 @@
+{
+  "issue": 5258,
+  "fixed_in": "Unreleased",
+  "summary": "A Claude registry entry an uninstall could not remove kept its receipt, but once the project declared no dependency the next install returned before the marketplace sync, so the entry stayed; the registry publish also used its own temp-and-rename.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_known_marketplace_lifecycle.py::test_a_failed_uninstall_cleanup_converges_on_the_next_install"
+  ]
+}

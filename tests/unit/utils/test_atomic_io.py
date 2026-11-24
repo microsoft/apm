@@ -420,3 +420,19 @@ def test_a_failed_replacement_removes_a_read_only_staging_file(tmp_path: Path) -
 
     assert destination.read_bytes() == b"old\n"
     assert [p.name for p in deploy.iterdir()] == ["deployed.md"]
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_an_interrupted_publish_check_leaves_no_staged_file(tmp_path, interrupt) -> None:
+    """A cancellation inside before_publish propagates and removes the staged file."""
+    path = tmp_path / "config.json"
+    path.write_text("old\n", encoding="utf-8")
+
+    def cancel() -> bool:
+        raise interrupt
+
+    with pytest.raises(interrupt):
+        atomic_write_text(path, "new\n", before_publish=cancel)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json"]
+    assert path.read_text(encoding="utf-8") == "old\n"

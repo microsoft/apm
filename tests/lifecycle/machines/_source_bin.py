@@ -107,6 +107,7 @@ class SourceBin(StepRunner):
                     f"{cache}/{name}.json",
                     f"{cache}/{name}.meta.json",
                     f"{cache}/version-pins.json",
+                    f"{cache}/version-pins.lock",
                 )
                 fields["allowed"] = {"home": (*self.bench.allowed().get("home", ()), *home)}
             if op == "marketplace":
