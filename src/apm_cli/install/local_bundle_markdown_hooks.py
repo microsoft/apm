@@ -76,9 +76,7 @@ def record_bundle_markdown_hooks(
     from .local_bundle_paths import markdown_declares_hooks
 
     files = sorted(
-        value
-        for value in deployed
-        if value.lower().endswith(".md") and markdown_declares_hooks(_spelled(project_root, value))
+        value for value in deployed if markdown_declares_hooks(_spelled(project_root, value))
     )
     if not files:
         return
