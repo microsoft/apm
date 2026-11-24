@@ -79,10 +79,10 @@ class _World:
             self.project / "apm.yml",
         )
 
-    def apm(self, *args: str) -> str:
+    def apm(self, *args: str, expect: int = 0) -> str:
         result = self.runner.run(args, cwd=self.project, env=self.env)
         output = " ".join((result.stdout + result.stderr).split())
-        assert result.returncode == 0, f"apm {' '.join(args)} -> {result.returncode}: {output}"
+        assert result.returncode == expect, f"apm {' '.join(args)} -> {result.returncode}: {output}"
         return output
 
     def servers(self) -> dict:
@@ -140,3 +140,20 @@ def test_prune_keeps_a_surviving_package_and_a_user_lsp_entry(
     installed = world.apm("install")
     assert "stale LSP" not in installed, installed
     assert (world.project / _LSP).read_bytes() == settled
+
+
+def test_prune_keeps_an_unreadable_lsp_config_and_its_lock_records(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A config prune cannot parse is left as is, its records stay, and prune exits 1."""
+    world = _World(tmp_path, apm_binary_path, ("lsppkg",))
+    world.manifest(("lsppkg",))
+    world.apm("install")
+    world.manifest(())
+    (world.project / _LSP).write_text("{not json\n", encoding="ascii")
+
+    pruned = world.apm("prune", expect=1)
+
+    assert "Prune incomplete: package removal completed, but LSP cleanup failed" in pruned
+    assert (world.project / _LSP).read_text(encoding="ascii") == "{not json\n"
+    assert "lsppkg-server" in (world.lock().get("lsp_servers") or []), pruned
