@@ -250,3 +250,83 @@ def test_an_extra_header_added_mid_command_falls_back(frozen_world):
         config.write_text("[http]\n\textraHeader = Authorization: x\n", encoding="utf-8")
         with pytest.raises(fetch._Refuse, match="extraHeader"):
             fetch._effective(env)
+
+
+def _managed_env(scheme: str = "github-basic", token: str = "ghp_" + "t" * 36) -> dict[str, str]:
+    from apm_cli.core.auth import AuthResolver
+
+    if scheme == "github-basic":
+        return AuthResolver.build_public_github_authenticated_git_env(token, base_env={})
+    from apm_cli.utils.git_env import set_git_authorization_header
+
+    env: dict[str, str] = {}
+    set_git_authorization_header(env, "Bearer", token)
+    return env
+
+
+def test_only_apms_github_basic_header_is_taken_and_the_env_left_has_no_token() -> None:
+    token = "ghp_" + "t" * 36
+    header, env = fetch._split_managed_auth(_managed_env(token=token))
+
+    assert header is not None and header.startswith("Authorization: Basic ")
+    assert fetch._MANAGED_INTENT not in env
+    assert not any("Authorization" in value for value in env.values())
+    assert not any(token in value for value in env.values())
+
+
+def test_a_bearer_or_foreign_header_is_not_consumed() -> None:
+    with pytest.raises(fetch._Refuse):
+        fetch._split_managed_auth(_managed_env(scheme="bearer"))
+    env = _managed_env()
+    count = int(env["GIT_CONFIG_COUNT"])
+    env["GIT_CONFIG_COUNT"] = str(count + 1)
+    env[f"GIT_CONFIG_KEY_{count}"] = "http.extraheader"
+    env[f"GIT_CONFIG_VALUE_{count}"] = "X-Corp: 1"
+    header, left = fetch._split_managed_auth(env)
+    assert header is not None
+    assert "X-Corp: 1" in left.values()  # stays, so the gate sends the fetch to git
+    with pytest.raises(fetch._Refuse, match="extraheader"):
+        fetch._classify(
+            [
+                Entry(left[f"GIT_CONFIG_KEY_{i}"], left[f"GIT_CONFIG_VALUE_{i}"])
+                for i in range(int(left["GIT_CONFIG_COUNT"]))
+            ]
+        )
+
+
+def test_no_managed_auth_leaves_the_env_untouched() -> None:
+    env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "c"}
+
+    assert fetch._split_managed_auth(env) == (None, env)
+
+
+def test_the_header_is_sent_per_request_and_never_on_the_session(monkeypatch) -> None:
+    sent: dict = {}
+
+    class _Session:
+        def __init__(self) -> None:
+            self.headers: dict = {}
+
+    session = _Session()
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        sent.update(kwargs, session=session_arg)
+        yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+    monkeypatch.setattr(fetch, "_session", lambda trust: session)
+
+    with pytest.raises(fetch._Refuse, match="auth challenge"):
+        fetch._post(
+            "https://github.com/o/r/git-upload-pack",
+            None,
+            ("os", ""),
+            b"0000",
+            "Authorization: Basic eA==",
+        )
+
+    assert sent["headers"]["Authorization"] == "Basic eA=="
+    assert sent["max_hops"] == 0
+    assert sent["base_url"] == "https://github.com/o/r/git-upload-pack"
+    assert "Authorization" not in session.headers
