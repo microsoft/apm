@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
+from apm_cli.core.remediation import ORPHANED_PACKAGES
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 from scripts.lifecycle_ledger import read_ledger
@@ -63,7 +64,10 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
     ),
     "I2": OracleLaw("a converged operation repeats as a byte no-op", ("idempotency.byte_stable",)),
     "I3": OracleLaw(
-        "install --frozen succeeds iff audit --ci is clean",
+        "install --frozen succeeds iff audit --ci is clean "
+        "(I3-X1: frozen keeps packages apm.yml no longer declares, #3662: it may exit 0 "
+        "while audit --ci fails ONLY no-orphaned-packages, if frozen names the kept "
+        "packages with their remediation; it earns no I3 receipt)",
         ("outcome.status_matches_state", "lockfile.frozen_preserves_bytes"),
     ),
     "I4": OracleLaw(
@@ -555,6 +559,9 @@ def _i3_frozen_audit(
         return None
     audit, frozen = op.paired["audit"], result.returncode
     found = []
+    retained = _i3_frozen_retention(audit, frozen, op.paired_output.get("audit"), result)
+    if retained is not None:
+        return retained or None
     if (audit == 0) != (frozen == 0):
         found.append(
             Violation("I3", f"audit --ci exited {audit} but install --frozen exited {frozen}")
@@ -568,6 +575,46 @@ def _i3_frozen_audit(
         if code != 0 and text is not None and not _REMEDIATION.search(" ".join(text.split())):
             found.append(Violation("I3", f"{label} exited {code} without a remediation"))
     return found
+
+
+# I3-X1: install --frozen never rewrites apm.lock.yaml, so it keeps (and names)
+# packages apm.yml no longer declares (#3662) while audit --ci reports them orphaned.
+_FROZEN_KEPT = re.compile(
+    r"Kept packages no longer in apm\.yml because --frozen does not change apm\.lock\.yaml"
+)
+_ORPHAN_CHECK = "no-orphaned-packages"
+# A failed check in the rich table ("| [x] | name |") or the plain fallback ("  [x] name: ...").
+_FAILED_ROW = re.compile(r"^(?:\|\s*\[x\]\s*\|\s*([a-z0-9-]+)\s*\||\s+\[x\] ([a-z0-9-]+): )", re.M)
+
+
+def _audit_failed_checks(text: str) -> frozenset[str]:
+    """The names of the checks a text or JSON ``audit --ci`` report marks failed."""
+    start = text.find("{")
+    if start != -1:
+        try:
+            report, _end = json.JSONDecoder().raw_decode(text, start)
+        except ValueError:
+            report = None
+        if isinstance(report, dict) and isinstance(report.get("checks"), list):
+            return frozenset(c["name"] for c in report["checks"] if not c.get("passed"))
+    return frozenset(table or plain for table, plain in _FAILED_ROW.findall(text))
+
+
+def _i3_frozen_retention(
+    audit: int, frozen: int, audit_text: str | None, result
+) -> list[Violation] | None:
+    """I3-X1: ``None`` unless this is the #3662 frozen keep; then the audit side's
+    remediation violations (an empty list when it names its repair)."""
+    if frozen != 0 or audit == 0 or audit_text is None:
+        return None
+    frozen_text = " ".join((result.stdout + result.stderr).split())
+    if not _FROZEN_KEPT.search(frozen_text) or ORPHANED_PACKAGES.sentence() not in frozen_text:
+        return None
+    if _audit_failed_checks(audit_text) != {_ORPHAN_CHECK}:
+        return None
+    if _REMEDIATION.search(" ".join(audit_text.split())):
+        return []
+    return [Violation("I3", f"audit --ci exited {audit} without a remediation")]
 
 
 # A remediation names an apm command line ("run 'apm install'", "apm approve <pkg>")

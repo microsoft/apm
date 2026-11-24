@@ -842,3 +842,110 @@ def test_a_local_bundle_retire_killed_mid_delete_is_replayed(
     assert _tree_state(chain.project) == before, _evidence(result)
     assert _stores(chain) == [], _evidence(result)
     _assert_lock_matches_disk(chain.project)
+
+
+# -- adversarial journals for the two-writer case (#5098 cut hunt) ---------------------
+
+
+def _killed_two_writers(tmp_path: Path, binary: Path) -> tuple[Chain, dict[str, str]]:
+    chain = Chain(tmp_path / "two-writers", binary, dirs=(".claude",))
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    chain.write_manifest([], apm=["./pkg"], targets=["claude"], includes="auto")
+    chain.ok("install")
+    before = _tree_state(chain.project)
+    _write_package_hook(chain, "v2")
+    _write_root_hook(chain, "v2")
+    _kill_mid_refusal(chain, _SHARED_GATE.fault)
+    _write_package_hook(chain, "v1")
+    _write_root_hook(chain, "v1")
+    return chain, before
+
+
+def test_a_journal_whose_token_is_forged_does_not_vouch_for_two_writers(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The records vouch only for the journal token they name: a header with another
+    token restores nothing, keeps the journal and names the shared config (#5051)."""
+    chain, _before = _killed_two_writers(tmp_path, apm_binary_path)
+    store = _abandoned(chain)
+    journal = _journal(store)
+    assert journal[0].get("token"), journal[0]
+    journal[0]["token"] = "0" * len(str(journal[0]["token"]))
+    _write_journal(store, journal)
+    settings = chain.project / _SETTINGS
+    held = settings.read_bytes()
+
+    _assert_kept_and_reported(chain, _SHARED_GATE, store, _SETTINGS)
+    assert settings.read_bytes() == held
+
+
+def test_a_cold_clone_without_the_journal_converges_on_the_next_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A fresh clone of the killed tree on another machine: no abandoned journal, no
+    apm_modules, no deployment or config-file receipts and no download cache. The next
+    install has nothing to replay: it converges to the manifest, the lockfile matches
+    disk and ``audit --ci`` passes."""
+    chain, before = _killed_two_writers(tmp_path, apm_binary_path)
+    shutil.rmtree(_abandoned(chain))
+    shutil.rmtree(chain.project / "apm_modules", ignore_errors=True)
+    receipts = sorted(Path(chain.env["APM_HOME"]).glob("deployment-receipts*"))
+    assert receipts, sorted(Path(chain.env["APM_HOME"]).iterdir())
+    for machine_local in (*receipts, chain.isolated.cache_root):
+        shutil.rmtree(machine_local, ignore_errors=True)
+    chain.isolated.cache_root.mkdir(parents=True)
+
+    result = chain.run("install")
+
+    assert result.returncode == 0, _evidence(result)
+    assert "interrupted install" not in _text(result), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    _assert_lock_matches_disk(chain.project)
+    audit = chain.run("audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)
+
+
+def test_two_racing_installs_replay_an_abandoned_journal_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two installs started together after a two-writer kill: the lifecycle lock lets
+    exactly one replay the journal; both exit 0 and the project converges (#5051)."""
+    chain, before = _killed_two_writers(tmp_path, apm_binary_path)
+    racers = [
+        subprocess.Popen(
+            (str(apm_binary_path), "install"),
+            cwd=chain.project,
+            env=chain.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    outputs = []
+    try:
+        for racer in racers:
+            stdout, stderr = racer.communicate(timeout=240)
+            outputs.append((racer.returncode, stdout + stderr))
+    finally:
+        # A hung racer must not keep the lifecycle lock or write after the test.
+        for racer in racers:
+            if racer.poll() is None:
+                racer.kill()
+                racer.communicate()
+
+    evidence = repr(outputs)
+    assert [code for code, _text in outputs] == [0, 0], evidence
+    replayed = [" ".join(text.split()) for _code, text in outputs]
+    assert sum("interrupted install" in text for text in replayed) == 1, evidence
+    # The raw streams: normalizing whitespace first would hide non-ASCII spaces.
+    assert all(text.isascii() for _code, text in outputs), evidence
+    assert _stores(chain) == [], evidence
+    assert _tree_state(chain.project) == before, evidence
+    _assert_lock_matches_disk(chain.project)
+    audit = chain.run("audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)

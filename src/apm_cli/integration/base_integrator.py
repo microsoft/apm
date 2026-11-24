@@ -22,7 +22,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
-from apm_cli.utils.paths import stored_alias
+from apm_cli.utils.paths import is_within, relative_to, stored_alias
 
 if TYPE_CHECKING:
     from apm_cli.core.deployment_ledger import OverwriteGate
@@ -567,7 +567,7 @@ class BaseIntegrator:
         for directory, filenames in self.admitted_source_listing(source, ignore):
             for name in filenames:
                 source_file = Path(directory) / name
-                target_file = destination / source_file.relative_to(source)
+                target_file = destination / relative_to(source_file, source)
                 if has_symlink_component(destination.parent, target_file, raise_on_error=True):
                     raise PathTraversalError(
                         f"Skill destination {target_file} contains a symlink -- refusing to deploy"
@@ -1137,7 +1137,7 @@ class BaseIntegrator:
                 return False
             root = resolved_project_root or project_root.resolve()
             containment_target = target.parent if allow_final_symlink else target
-            if not containment_target.resolve().is_relative_to(root):
+            if not is_within(containment_target.resolve(), root):
                 return False
         except (ValueError, OSError):
             return False
@@ -1408,6 +1408,8 @@ class BaseIntegrator:
 
     def init_link_resolver(self, package_info, project_root: Path) -> None:
         """Initialise and register the link resolver for a package."""
+        from apm_cli.utils.realpath import resolve_path
+
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
             install_path = Path(package_info.install_path)
@@ -1426,7 +1428,7 @@ class BaseIntegrator:
             #   Generic patterns like ``**/*.instructions.md`` would
             #   otherwise traverse every file in the repo even when
             #   the user only has a handful of primitives under .apm/.
-            if install_path.resolve() == home_root.resolve():
+            if resolve_path(install_path) == resolve_path(home_root):
                 home_apm_root = install_path / ".apm"
                 scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
                 narrowed_local = False
@@ -1455,7 +1457,7 @@ class BaseIntegrator:
             # .apm/ and .github/. Skip only when scan_root was narrowed
             # to ~/.apm/ (user-scope $HOME) so we do not let asset links
             # escape the .apm/ boundary on $HOME packages.
-            if install_path.resolve() != home_root.resolve() and install_path.is_dir():
+            if resolve_path(install_path) != resolve_path(home_root) and install_path.is_dir():
                 if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
                     self.link_resolver.package_root = Path(install_path)
                     self.link_resolver.deployment_package_root = Path(
@@ -1604,6 +1606,8 @@ class BaseIntegrator:
         Returns:
             De-duplicated list of matching ``Path`` objects.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         results: list[Path] = []
         seen: set = set()
 
@@ -1632,7 +1636,7 @@ class BaseIntegrator:
                         continue
                 except OSError:
                     continue
-                resolved = f.resolve()
+                resolved = resolve_path(f)
                 # Defense-in-depth containment guard: skip files whose
                 # resolved path escapes the package root.  Belt-and-
                 # suspenders against any future regression in the
@@ -1640,8 +1644,8 @@ class BaseIntegrator:
                 # for the canonical predicate; we inline the check here to stay
                 # loop-fast and avoid raising on every malicious entry.
                 try:
-                    pkg_resolved = package_path.resolve()
-                    if not resolved.is_relative_to(pkg_resolved):
+                    pkg_resolved = resolve_path(package_path)
+                    if not is_within(resolved, pkg_resolved):
                         continue
                 except (ValueError, OSError):
                     continue

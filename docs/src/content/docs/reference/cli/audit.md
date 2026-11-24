@@ -336,7 +336,10 @@ create drift. The APM-owned sidecar is compared as JSON, ignoring object-key
 order and formatting while retaining every field and list order. Changed
 commands, ownership markers, or execution order still report `modified`, as
 do malformed JSON, duplicate keys, and non-JSON constants (`NaN`, `Infinity`,
-`-Infinity`). `unrecorded` findings fail
+`-Infinity`). Install writes APM's hook entries in one order, sorted by
+owning package in the slots they hold, whatever order the packages were
+added, so incremental `apm install <pkg>` runs match a full install; your
+own entries and events keep their places. `unrecorded` findings fail
 `--ci`; run `apm install`, then commit the regenerated `apm.lock.yaml`.
 
 Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.

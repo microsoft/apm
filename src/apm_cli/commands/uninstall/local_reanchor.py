@@ -26,9 +26,11 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import re
 import secrets
+import stat
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -800,14 +802,17 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
 
 
 def _manifest_declares_replacements(apm_yml_path) -> bool:
-    """Whether apm.yml declares a ``replace`` block; unreadable counts as declared."""
+    """Whether apm.yml declares a ``replace`` block.
+
+    An unreadable apm.yml, or one that is not a mapping, counts as declared (#5226).
+    """
     from ...utils.yaml_io import load_yaml
 
     try:
         data = load_yaml(Path(apm_yml_path))
     except Exception:
         return True
-    return bool(data.get("replace")) if isinstance(data, dict) else False
+    return bool(data.get("replace")) if isinstance(data, dict) else True
 
 
 def _refuse_unverifiable_local_survivors(
@@ -985,15 +990,16 @@ def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
     owners = {f"package:{key}" for key in plan.renames}
     if owners & set((getattr(lockfile, "lsp_config_provenance", None) or {}).values()):
         return "it supplies a language server"
-    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    for record in ledger.records.values():
         if len(record.owners) > 1 and any(owner in plan.renames for owner in record.owners):
             return f"it shares {DeploymentLedgerCodec.legacy_value(record.locator)} with another package"
-    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root)):
+    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root), ledger):
         return f"{linked} links into its apm_modules copy"
     return None
 
 
-def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
+def _links_into_moving_copy(lockfile, plan, project_root: Path, ledger=None) -> str | None:
     """A recorded deployed file that names a copy the re-anchor moves (#4999).
 
     Rendered links (a package's in-package assets, or the project's own skill
@@ -1001,7 +1007,6 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     leave them dangling until the next install rewrites them. Only paths the
     deploy-path gate accepts are read; any other claim refuses too.
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...utils.paths import portable_relpath
 
     spellings = set()
@@ -1016,14 +1021,146 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     )
     dirs = _moving_dirs(plan.moves)
 
-    def names(member: Path) -> bool:
-        data = member.read_bytes()
+    def names(member: Path, data: bytes | None = None) -> bool:
+        data = member.read_bytes() if data is None else data
         return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
 
-    for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
+    for deployed in sorted(_recorded_claims(lockfile, ledger)):
         if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
+    return _compiled_output_naming(project_root, names)
+
+
+def _recorded_claims(lockfile, ledger=None) -> set[str]:
+    """Every deployed path the lock records: the legacy view and canonical rows (#5097).
+
+    A canonical ``deployments`` row may have no legacy ``deployed_files`` entry;
+    its project-relative path is a deployed file all the same. *ledger* is the
+    caller's already decoded ledger, when it has one.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...core.deployment_state import LocatorKind
+
+    claims = set(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile))
+    ledger = ledger if ledger is not None else DeploymentLedgerCodec.from_lockfile(lockfile)
+    for record in ledger.records.values():
+        if record.locator.kind is LocatorKind.PROJECT_RELATIVE:
+            claims.add(record.locator.value)
+    return claims
+
+
+# Compiled outputs are not recorded claims; APM marks each one in its header.
+class _UnreadableDir(OSError):
+    """A directory the compiled-output walk cannot list: refuse, never skip it."""
+
+
+def _compiled_output_naming(project_root: Path, names) -> str | None:
+    """A compiled output (AGENTS.md and kin) that names the moving copy (#5097).
+
+    ``apm compile`` copies links verbatim into these files, so one that names
+    the copy keeps it in place like a deployed file. The walk covers compile's
+    own placement universe (``placement_prunes_dir``). Only regular files are
+    opened; a file's header is read, and its full content only when it carries
+    APM's generated marker. An unreadable directory or marked output refuses.
+    """
+    from ...compilation.context_optimizer import (
+        PLACEMENT_HIDDEN_TOOL_TREES,
+        hidden_tool_root,
+        placement_prunes_dir,
+    )
+    from ...compilation.root_context_protection import catalog_root_context_markers
+    from ...utils.paths import portable_relpath
+
+    # Compile's own catalog: each file name with the headers it accepts.
+    markers_by_name = catalog_root_context_markers()
+
+    root = Path(project_root)
+    section = _managed_section_start(root)
+
+    def refuse(error: OSError) -> None:
+        raise _UnreadableDir(error.filename or root)
+
+    try:
+        for directory, subdirs, files in os.walk(root, onerror=refuse):
+            here = Path(directory)
+            subdirs[:] = sorted(
+                name
+                for name in subdirs
+                if not placement_prunes_dir(
+                    name,
+                    outside_tool_roots=not hidden_tool_root(
+                        (here / name).relative_to(root).parts, PLACEMENT_HIDDEN_TOOL_TREES
+                    ),
+                )
+            )
+            for name in sorted(markers_by_name.keys() & set(files)):
+                path = here / name
+                try:
+                    data = _marked_regular_file(path, markers_by_name[name], section)
+                    if data is not None and names(path, data):
+                        return portable_relpath(path, root)
+                except (OSError, UnicodeDecodeError):
+                    # Unreadable or undecodable: named, never a crash or a skip.
+                    return portable_relpath(path, root)
+    except _UnreadableDir as unreadable:
+        return portable_relpath(Path(unreadable.args[0]), root)
     return None
+
+
+def _managed_section_start(project_root: Path) -> bytes:
+    """The managed-section begin marker the project's compile uses (#5097).
+
+    Read through compile's own config owner, so a custom marker is honored.
+    """
+    from ...compilation.agents_compiler import CompilationConfig
+
+    marker = CompilationConfig.from_apm_yml(project_root=project_root).agents_md_start_marker
+    return marker.encode("utf-8") if isinstance(marker, str) else b""
+
+
+def _marked_regular_file(path: Path, markers, section: bytes = b"") -> bytes | None:
+    """The bytes of *path* when it is an APM-written regular file, else ``None``.
+
+    APM-written means APM's header in the first 4 KiB, or a managed-section
+    begin marker (*section*) anywhere, streamed, since authored text may
+    precede the section. Opened without following a final link and without
+    blocking, then checked on the descriptor itself, so a link, FIFO or device
+    swapped in is never read (#5097). Windows has no ``O_NOFOLLOW``, so a link
+    is refused there before opening. An undecodable header raises.
+    """
+    from ...compilation.constants import decode_utf8_prefix, has_generated_marker_header
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow and not stat.S_ISREG(path.lstat().st_mode):
+        return None
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        if error.errno in (errno.ELOOP, errno.EMLINK):
+            return None  # a final link: never followed
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        head = os.read(fd, 4096)
+        found = has_generated_marker_header(decode_utf8_prefix(head), markers) or (
+            bool(section) and section in head
+        )
+        # Only a rolling tail is kept while searching; the content is read on a match.
+        tail = head[-len(section) :] if section else b""
+        while not found and section and (chunk := os.read(fd, 1 << 16)):
+            found = section in tail + chunk
+            tail = (tail + chunk)[-len(section) :]
+        if not found:
+            return None
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks = []
+        while chunk := os.read(fd, 1 << 16):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:

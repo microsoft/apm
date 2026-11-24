@@ -54,6 +54,8 @@ class VerdictStage:
         self._lock = threading.Lock()
         self._scratch: str | None = None
         self._memo: dict[str, object] = {}
+        # One origin listing per remote for this attempt (see branch_and_tag_refs).
+        self.listings: dict = {}
 
     def add(self, marker: Path, canonical: str) -> None:
         with self._lock:
@@ -84,6 +86,7 @@ class VerdictStage:
         """Write the staged verdicts (best effort: a missing one is re-checked)."""
         with self._lock:
             pending, self._pending = self._pending, {}
+            self.listings = {}
         for marker, canonical in pending.items():
             try:
                 _write_marker(marker, canonical)
@@ -94,6 +97,7 @@ class VerdictStage:
     def discard(self) -> None:
         with self._lock:
             self._pending = {}
+            self.listings = {}
         self._close()
 
     def _close(self) -> None:
@@ -103,6 +107,7 @@ class VerdictStage:
         with self._lock:
             scratch, self._scratch = self._scratch, None
             self._memo = {}
+            self.listings = {}
         if scratch is not None:
             shutil.rmtree(scratch, ignore_errors=True)
         with _stage_lock:
@@ -131,6 +136,25 @@ def _stage() -> VerdictStage | None:
 def _linked_dirs(path: Path, depth: int = 3) -> bool:
     """Whether any of the *depth* directories above *path* in the ref cache is a link."""
     return any(part.is_symlink() for part in list(path.parents)[:depth])
+
+
+_FRESH_LISTING = contextvars.ContextVar("apm_fresh_listing", default=False)
+
+
+@contextlib.contextmanager
+def _fresh_listing():
+    """Ask the origin again inside: a recheck after a failure needs its state now."""
+    token = _FRESH_LISTING.set(True)
+    try:
+        yield
+    finally:
+        _FRESH_LISTING.reset(token)
+
+
+def _attempt_listings() -> dict | None:
+    """The open install attempt's listing memo; None outside an attempt or when fresh."""
+    stage = _stage()
+    return None if stage is None or _FRESH_LISTING.get() else stage.listings
 
 
 def _write_marker(marker: Path, canonical: str) -> None:
@@ -292,7 +316,7 @@ def _require_at_origin(downloader, dep_ref, sha: str) -> None:
     )
 
 
-_CONTACTS: dict[tuple, str] = {}
+_REWRITES: dict[tuple, tuple[tuple[str, str], ...] | None] = {}
 
 
 def effective_contact(contact: str, env) -> str | None:
@@ -303,10 +327,10 @@ def effective_contact(contact: str, env) -> str | None:
     extra git process per package.
     """
     merged = {**os.environ, **(env or {})}
-    key = (contact, _rewrite_config(merged), _config_files_state(merged))
-    if key not in _CONTACTS:
-        _CONTACTS[key] = _effective_contact(contact, env)
-    return _CONTACTS[key]
+    key = (_rewrite_config(merged), _config_files_state(merged))
+    if key not in _REWRITES:
+        _REWRITES[key] = _probe_rewrites(env)
+    return _effective_contact(contact, _REWRITES[key])
 
 
 def _rewrite_config(env: dict[str, str]) -> tuple:
@@ -348,14 +372,26 @@ def _config_files_state(env: dict[str, str]) -> tuple:
     return tuple(state)
 
 
-def _effective_contact(contact: str, env) -> str | None:
-    from ..utils.git_env import effective_git_url
-    from .url_normalize import normalize_repo_url
+def _probe_rewrites(env) -> tuple[tuple[str, str], ...] | None:
+    """The rewrites git applies under *env* (one config probe), or None if unknown."""
+    from ..utils.git_env import git_url_rewrites
 
     try:
-        effective = effective_git_url(contact, env)
+        return git_url_rewrites(env)
     except Exception:
+        return None
+
+
+def _effective_contact(contact: str, rewrites) -> str | None:
+    from ..utils.git_env import resolve_git_url_rewrite
+    from .url_normalize import normalize_repo_url
+
+    if rewrites is None:
         # Unknown contact: callers neither trust nor record a verdict for it.
+        return None
+    try:
+        effective = resolve_git_url_rewrite(contact, rewrites) or contact
+    except Exception:
         return None
     try:
         return normalize_repo_url(effective)
@@ -417,7 +453,8 @@ def _url_only_env(env) -> dict[str, str]:
 
     scrubbed = {**os.environ, **(env or {}), "LC_ALL": "C", "LANGUAGE": "C"}
     clear_git_platform_token_env(scrubbed, remove=True)
-    clear_git_auth_env(scrubbed)
+    # A url rewrite carried in GIT_CONFIG_PARAMETERS still decides the server (#5246).
+    clear_git_auth_env(scrubbed, keep_url_rewrites=True)
     return scrubbed
 
 
@@ -568,7 +605,8 @@ def admitted_tip_name(url: str, ref: str, admitted: str, env) -> str | None:
         AdmittedCommitGoneError: *ref* no longer points at *admitted*.
     """
     try:
-        records = _branch_and_tag_records(url, env)
+        with _fresh_listing():
+            records = _branch_and_tag_records(url, env)
     except _Unverified:
         return None
     from ..deps.git_remote_ops import exact_branch_or_tag_sha
@@ -613,13 +651,14 @@ def _lost_admitted_commit(downloader, repo_ref, admitted) -> tuple[str, str, str
         from ..models.dependency.reference import DependencyReference
 
         dep_ref = DependencyReference.parse(repo_ref) if isinstance(repo_ref, str) else repo_ref
-        if _reachable_now(downloader, dep_ref, commit) is not False:
-            return None
-        found: list[str] = []
-        with contextlib.suppress(CommitNotReachableError):
-            _at_origin(
-                downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env))
-            )
+        with _fresh_listing():
+            if _reachable_now(downloader, dep_ref, commit) is not False:
+                return None
+            found: list[str] = []
+            with contextlib.suppress(CommitNotReachableError):
+                _at_origin(
+                    downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env))
+                )
     except Exception:
         return None
     return ref, commit, found[0][:12] if found else "no branch or tag"
@@ -833,19 +872,18 @@ def _branch_and_tag_records(url: str, env, *, probed: bool = False) -> list[tupl
 
     *env* is already the listing env when *probed*.
     """
-    from ..utils.git_env import git_remote_refs
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from .git_cache import _safe_git_args
 
     where = _sanitize_origin(url)
     listing_env = env if probed else _probed_listing_env(url, env)
     try:
-        listing = git_remote_refs(
+        listing = branch_and_tag_refs(
             url,
-            "refs/heads/*",
-            "refs/tags/*",
             env=listing_env,
             timeout=60,
             git_args=_safe_git_args(),
+            memo=_attempt_listings(),
         )
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
@@ -924,8 +962,8 @@ def require_reachable_commit(
             tag, or reachability cannot be verified (for example offline on
             the first install of this commit).
     """
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from ..deps.git_remote_ops import tag_commit_shas
-    from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args, _sanitize_url
 
     sha = sha.lower()
@@ -947,8 +985,8 @@ def require_reachable_commit(
     if canonical is not None and _recorded(marker, canonical):
         return
     try:
-        listing = git_remote_refs(
-            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
+        listing = branch_and_tag_refs(
+            url, env=env, timeout=60, git_args=_safe_git_args(), memo=_attempt_listings()
         )
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(unverifiable, exc) from exc
@@ -1003,6 +1041,7 @@ def _reached_by_refs(
         RuntimeError: The fetch failed.
     """
     from ..utils.file_ops import robust_rmtree
+    from ..utils.git_config_memo import invalidate as invalidate_git_config
     from ..utils.git_env import get_git_executable, git_network_env, run_git_text
     from .cached_repo import cached_repo_env, cached_repo_is_trusted, inert_git_args
     from .git_cache import _safe_git_args, _sanitize_url
@@ -1045,6 +1084,7 @@ def _reached_by_refs(
                 stdin=subprocess.DEVNULL,
                 check=True,
             )
+            invalidate_git_config(repo)
             run_git_text(
                 [*git, "fetch", "-q", "--filter=tree:0", "--prune", "origin", *_REACH_REFSPECS],
                 capture_output=True,
@@ -1054,6 +1094,7 @@ def _reached_by_refs(
                 check=True,
             )
             _drop_promisor(git, child_env)
+            invalidate_git_config(repo)
             # Only the current heads and tags may answer: never lazy-fetch.
             probe = run_git_text(
                 [

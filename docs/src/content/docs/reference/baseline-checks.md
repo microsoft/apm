@@ -45,6 +45,7 @@ first failure to skip expensive I/O.
 | `native-mcp-drift` | block | `ci_checks.py` | only when a recorded self-defined native MCP entry was edited |
 | `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it no longer deploys |
 | `content-integrity` | block | `ci_checks.py` | yes |
+| `local-bundle-hooks` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
 | `drift` | block | `_check_drift` in `ci_checks.py`, invoked from `commands/audit.py` | yes, unless `--no-drift` |
@@ -193,6 +194,17 @@ the [policy schema](../policy-schema/).
   2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against. Local bundle instructions staged for `apm compile` are checked the same way against `local_staged_file_hashes`; staged paths without a recorded hash (older lockfiles) are skipped.
 - **Fails when.** An applicable prompt contains critical Unicode, recognized content is unreadable or unsupported (incomplete coverage), a recorded hash differs, or a legacy hash lacks canonical ownership metadata. Missing files are reported by `deployed-files-present`; unrecorded files have no hash baseline. Existing path and symlink protections still apply.
 - **Remediation.** Review the reported format or access error for incomplete coverage. Use `apm audit --strip` only for supported regular prompt documents; structured/shared settings and external-root findings require manual review. Run `apm install` to restore hash-drifted files; for drifted staged bundle files, reinstall the bundle with `apm install <bundle> --force`. Discovery does not grant ownership or permission to rewrite user configuration.
+
+### `local-bundle-hooks`
+
+Fails when a local bundle's deployed hooks (or canvas extensions) are no longer
+admitted by the current executables trust, and when a bundle hook entry in a
+merged hook config was changed outside APM (for example a new `matcher`), or
+its ownership record (`apm-hooks.json` beside the config) is unreadable or
+missing: APM can no longer match the entry to its recorded content, so the check
+names it instead of losing track of the bundle's hooks. Restore the recorded entry first: `apm
+uninstall` refuses while an edited entry still runs the bundle's script. Keep
+your own changes in a separate hook entry.
 
 ### `hook-approval-pins`
 

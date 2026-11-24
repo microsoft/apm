@@ -912,8 +912,10 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/hook_integrator.py",
-            '                write_seam.write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
-            '                json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
+            "                with provenance.recorded_config_write(json_path):\n"
+            '                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
+            "                with provenance.recorded_config_write(json_path):\n"
+            '                    json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
             id="raw-write-text",
         ),
         pytest.param(
@@ -1450,6 +1452,21 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "src/apm_cli/install/local_bundle_hooks.py",
             "def _retire_bundle_hooks(",
             'def _marker(slug):\n    return "local-bundle::" + slug\n\n\ndef _retire_bundle_hooks(',
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_markdown_hooks.py",
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+            'def _hand_record(files):\n    return {"local-bundle-markdown-hooks": files}\n\n\n'
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_markdown_hooks.py",
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
+            "def _hand_write(root):\n"
+            '    (root / "apm-bundle-markdown-hooks.json").write_text("{}")\n\n\n'
+            "def _prefixes(target: Any) -> tuple[str, ...]:",
         ),
         (
             "install-deployment-bundle-user-scope-root",
@@ -3209,6 +3226,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
             "        registries_map[name] = url.strip()\n"
         ),
         intent="The default-contract registries parse accepts any URL without the scheme owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-remote-read-reuse",
+        rule_id="install-deployment-remote-read-reuse",
+        path="src/apm_cli/install/fast_output.py",
+        old="    policy_gate.run(gate)\n",
+        new=(
+            "    from apm_cli.policy._remote import reuse_remote_reads\n\n"
+            "    with reuse_remote_reads():\n"
+            "        policy_gate.run(gate)\n"
+        ),
+        intent="A second caller reuses a remote read outside the record's no-op render.",
     ),
     MutationCase(
         guard_id="install-deployment-request-defaults",
@@ -6700,7 +6729,13 @@ def test_version_rendering_guard_rejects_dropped_lazy_delegation() -> None:
     """entrypoint.py must preserve lazy delegation to apm_cli.cli.main."""
     path = "src/apm_cli/entrypoint.py"
     source = _source(path)
-    old = "from apm_cli.cli import main as cli_main\n\n    cli_main()"
+    old = (
+        "with verdict_record.recording(argv):\n"
+        "        # Imported inside the record: TLS startup reads its settings at import, so\n"
+        "        # the entry state precedes it and the reads are logged.\n"
+        "        from apm_cli.cli import main as cli_main\n\n"
+        "        cli_main()"
+    )
     new = "import apm_cli.commands.install  # bypass"
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)

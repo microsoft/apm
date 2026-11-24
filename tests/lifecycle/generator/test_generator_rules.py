@@ -39,18 +39,21 @@ from tests.lifecycle.generator.rules import (
     RETIRED_MCP_OWNERS,
     RULE_CELL_REFUSALS,
     RULES,
+    U_BIN_BUNDLE_PIN,
     U_BIN_PIN,
     U_USER_ORG_POLICY_PIN,
     UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
     Verdict,
     classify,
+    mapped_cell,
     refusal_cell,
 )
 from tests.lifecycle.generator.space import Entry, build_space, raw_cells
 from tests.lifecycle.generator.witnesses import (
     BIN_WITNESSES,
     FORM_SOURCES,
+    GATE_PLUGIN_BIN_SPINE,
     SOURCE_SPINE,
     SOURCE_SPINE_UNOBSERVED,
     credits,
@@ -571,6 +574,7 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U6", _u6),
         ("U8", lambda cell: _u8(cell) is not None),
         ("U-BIN-OPS", lambda cell: _u_bin_ops(cell)),
+        ("U-BIN-BUNDLE", lambda cell: _u_bin_bundle(cell)),
         ("U-MCPOWN-USER", _u_mcpown_user),
         ("U-USER-SCOPE-ORG-POLICY", lambda cell: _u_user_org_policy(cell)),
     ],
@@ -638,7 +642,12 @@ def test_executable_gate_levels_of_an_mcp_source_map_to_the_first_party_rule_cel
 def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     mapped = {key: entry for key, entry in data["mapped"].items() if entry["rules"][0] == "U8"}
-    named = {key for key, cell in _raw().items() if _u8_mapping(cell) is not None}
+    # U-BIN-BUNDLE removes install of a local bundle shipping bin/ before U8 maps it.
+    named = {
+        key
+        for key, cell in _raw().items()
+        if _u8_mapping(cell) is not None and key not in _removed_by("U-BIN-BUNDLE")
+    }
     assert set(mapped) == named, sorted(set(mapped) ^ named)[:10]
     clauses: dict[str, int] = {}
     for key, entry in mapped.items():
@@ -660,7 +669,7 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         else:
             assert entry["maps_to"] == UNINSTALL_MCP_REFUSALS[cell["SRC"]], key
     assert clauses == {
-        "install of a local bundle is bundle-install": 9,
+        "install of a local bundle is bundle-install": 8,
         "marketplace add of a source without a catalog": 43,
         "uninstall of a local bundle": 9,
         "update of a local bundle": 9,
@@ -724,6 +733,7 @@ def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     assert data["pins"] == {
         "U-BIN": U_BIN_PIN,
+        "U-BIN-BUNDLE": U_BIN_BUNDLE_PIN,
         "U-USER-SCOPE-ORG-POLICY": U_USER_ORG_POLICY_PIN,
     }
 
@@ -745,6 +755,51 @@ def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
     for key in cells:
         entry = data["obligations"][key]
         assert entry["status"] == "required" and entry["witness"].endswith(spine), (key, entry)
+
+
+# -- U-BIN-BUNDLE: a local bundle never deploys bin/ (#4095 lane T-1c) ----------
+
+
+def _u_bin_bundle(cell) -> bool:
+    """A PRIM=bin cell of a local bundle that no earlier rule removes and U8 maps to
+    no rule cell (install of a local bundle is bundle-install, so it goes too)."""
+    if cell.get("PRIM") != "bin" or not (
+        cell.get("OP") == "bundle-install" or cell.get("SRC") == "local-bundle"
+    ):
+        return False
+    if _u_bin_ops(cell) or _u6(cell) or _u8(cell) is not None:
+        return False
+    mapped = mapped_cell(cell)
+    return mapped is None or not isinstance(mapped[0], str)
+
+
+def test_u_bin_bundle_removes_the_bundle_bin_cells_and_keeps_the_deny_refusal() -> None:
+    """The ruled cells are removed; the bundle deny itself stays witnessed by the spine."""
+    removed = _removed_by("U-BIN-BUNDLE")
+    for key in (
+        "T1|OP=bundle-install|PRIM=bin|GATE=denied-dependency",
+        "pair|OP=bundle-install|PRIM=bin",
+        *(
+            f"T3|OP={op}|SRC=local-bundle|PRIM=bin"
+            for op in ("approve-deny", "audit", "bundle-install", "compile", "lock")
+        ),
+    ):
+        assert key in removed, key
+    assert bin_pin.bundle_bin_digest() == U_BIN_BUNDLE_PIN, (
+        "the bundle deploy routing changed: re-prove that a bundle deploys no bin/ "
+        "(test_u_bin_seam.py tripwire), then update U_BIN_BUNDLE_PIN"
+    )
+    kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    deny = kept["pair|OP=bundle-install|GATE=denied-dependency"]
+    assert deny["status"] == "required", deny
+
+
+def test_a_changed_bundle_routing_reinstates_the_bundle_bin_cells(monkeypatch) -> None:
+    cell = {"OP": "bundle-install", "PRIM": "bin", "GATE": "denied-dependency"}
+    assert classify("T1", cell) == Verdict("removed", ("U-BIN-BUNDLE",))
+    monkeypatch.setattr(bin_pin, "bundle_bin_digest", lambda *_: "0" * 64)
+    assert classify("T1", cell).rules == ("U-BIN-BUNDLE",)
+    assert classify("T1", cell).must_cover
 
 
 # -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
@@ -788,6 +843,26 @@ def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
             assert entry["status"] == "baseline", (op, entry)
 
 
+def test_a_local_path_bin_cell_maps_to_the_native_plugin_source_while_u_bin_holds(
+    monkeypatch,
+) -> None:
+    """U-BIN-SRC: a local directory that can deploy bin/ is a Claude plugin directory, the
+    native-plugin source; the mapping's targets are witnessed, and it lapses with U-BIN."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    mapped = {k: v for k, v in data["mapped"].items() if v["rules"] == ["U-BIN-SRC"]}
+    ops = ("approve-deny", "audit", "compile", "install", "lock", "prune", "uninstall", "update")
+    named = {f"T3|OP={op}|SRC=local-path|PRIM=bin" for op in ops} | {"pair|SRC=local-path|PRIM=bin"}
+    assert set(mapped) == named, sorted(set(mapped) ^ named)
+    for key, entry in mapped.items():
+        assert entry["maps_to"] == key.replace("SRC=local-path", "SRC=native-plugin"), entry
+        target = data["obligations"][entry["maps_to"]]
+        assert target["status"] == "required", (key, target)
+    cell = {"OP": "install", "SRC": "local-path", "PRIM": "bin"}
+    assert classify("T3", cell).rules == ("U-BIN-SRC",)
+    monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
+    assert classify("T3", cell) == Verdict("obligation", ())
+
+
 def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
     pins = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["pins"]
     assert pins["U-USER-SCOPE-ORG-POLICY"] == U_USER_ORG_POLICY_PIN, pins
@@ -827,9 +902,11 @@ def test_no_ungoverned_user_scope_step_credits_an_org_deny() -> None:
     ):
         assert rows[key]["status"] == "required", (key, rows[key])
         assert rows[key]["witness"].endswith("[project]"), (key, rows[key])
-    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell (#4981).
+    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell
+    # (#4981); the whole-plugin bin spine, whose bin/ deploys at project scope, does.
     bin_cell = "T1|OP=compile|PRIM=bin|GATE=denied-dependency"
-    assert rows[bin_cell]["status"] == "baseline", (bin_cell, rows[bin_cell])
+    assert rows[bin_cell]["witness"] == GATE_PLUGIN_BIN_SPINE, (bin_cell, rows[bin_cell])
+    assert rows[bin_cell]["credited_by"] == ["G1|compile|bin|denied-dependency|project|plugin"]
     for key, row in rows.items():
         user_only = row.get("credited_by") and all(
             cell.endswith("|denied-dependency|user") for cell in row["credited_by"]
@@ -915,7 +992,10 @@ def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive(
         assert f"def {name.split('[')[0]}(" in (root / path).read_text(encoding="utf-8"), node
     for op, src, prim in SOURCE_SPINE_UNOBSERVED:
         key = f"T3|OP={op}|SRC={src}|PRIM={prim}"
-        assert data["obligations"][key]["status"] == "baseline", data["obligations"][key]
+        entry = data["obligations"].get(key)
+        # Unobserved by the source spine: baseline, removed by a rule, or credited by
+        # another spine that does observe it (the registry kit spine, #4096).
+        assert entry is None or entry.get("witness") != SOURCE_SPINE, (key, entry)
     # A projected pair keeps no unexercised step among its credits (it names no OP).
     unexercised = {
         f"T3|{op}|{form}|{prim}"

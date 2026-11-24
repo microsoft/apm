@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.install.deployed_paths import deployed_path_entry
+from apm_cli.utils.path_security import SymlinkedDeployError
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I7")]
 
@@ -28,7 +29,7 @@ def test_a_symlinked_component_is_refused_with_the_standard_message(tmp_path: Pa
     except (OSError, NotImplementedError):
         pytest.skip("symbolic links are unavailable")
 
-    with pytest.raises(RuntimeError) as refused:
+    with pytest.raises(SymlinkedDeployError) as refused:
         deployed_path_entry(root / "skills" / "demo" / "SKILL.md", root, [])
 
     message = str(refused.value)
@@ -58,9 +59,29 @@ def test_the_message_names_the_first_linked_component_at_any_depth(tmp_path: Pat
     except (OSError, NotImplementedError):
         pytest.skip("symbolic links are unavailable")
 
-    with pytest.raises(RuntimeError) as refused:
+    with pytest.raises(SymlinkedDeployError) as refused:
         deployed_path_entry(root / "plain" / "linked" / "deeper" / "SKILL.md", root, [])
 
     assert str(refused.value).startswith(
         "Refusing deployment through a symlinked path component: plain/linked. "
+    )
+
+
+def test_a_linked_directory_name_with_an_escape_byte_is_rendered_inert(tmp_path: Path) -> None:
+    """#5215: the refusal never carries control bytes from a package's directory name."""
+    root, outside = tmp_path / "root", tmp_path / "outside"
+    root.mkdir()
+    (outside / "demo").mkdir(parents=True)
+    try:
+        (root / "sk\x1b[2Jills").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError, ValueError):
+        pytest.skip("symbolic links or control bytes in names are unavailable")
+
+    with pytest.raises(SymlinkedDeployError) as refused:
+        deployed_path_entry(root / "sk\x1b[2Jills" / "demo" / "SKILL.md", root, [])
+
+    message = str(refused.value)
+    assert "\x1b" not in message
+    assert message.startswith(
+        "Refusing deployment through a symlinked path component: sk?[2Jills. "
     )
