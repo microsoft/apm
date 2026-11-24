@@ -212,16 +212,16 @@ def test_a_receipt_that_cannot_be_written_publishes_no_entry(
     env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The receipt is recorded first: if it cannot be written, no entry is published."""
-    from apm_cli.native_plugins import claude_marketplaces
+    import os
 
-    real_write = claude_marketplaces.atomic_write_text
+    real_replace = os.replace
 
-    def write(path, text, *args, **kwargs):
-        if Path(path) == _receipt(tmp_path):
+    def replace(src, dst, *args, **kwargs):
+        if Path(dst) == _receipt(tmp_path):
             raise OSError("disk full")
-        return real_write(path, text, *args, **kwargs)
+        return real_replace(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(claude_marketplaces, "atomic_write_text", write)
+    monkeypatch.setattr(os, "replace", replace)
 
     warnings = _sync(env)
 
@@ -341,3 +341,51 @@ def test_trust_is_read_where_claude_config_dir_points(
     assert _NAME in json.loads(
         (home / ".claude/plugins/known_marketplaces.json").read_text("utf-8")
     )
+
+
+def test_an_entry_claude_adds_mid_merge_is_not_recorded_as_apms(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude writes the same entry between APM's reads: APM publishes nothing and keeps
+    no record, so uninstall leaves Claude's entry."""
+    registry = _registry(tmp_path)
+    claudes = {_NAME: {"source": {"source": "directory", "path": str(env)}, "installLocation": "c"}}
+    original = Path.read_bytes
+    seen = {"n": 0}
+
+    def read_bytes(path: Path) -> bytes:
+        if path == registry:
+            seen["n"] += 1
+            if seen["n"] == 2:
+                registry.parent.mkdir(parents=True, exist_ok=True)
+                registry.write_text(json.dumps(claudes), encoding="utf-8")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    assert _sync(env) == []
+    assert _sync(env, declared=False) == []
+
+    assert json.loads(registry.read_text("utf-8")) == claudes
+    assert not _receipt(tmp_path).exists()
+
+
+def test_installs_under_two_claude_profiles_each_keep_their_record(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile_b = tmp_path / "claude-b"
+    _trust(profile_b, tmp_path / "repo")
+    assert _sync(env) == []
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile_b))
+    assert _sync(env) == []
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+
+    assert _sync(env, declared=False) == []
+
+    assert _NAME not in json.loads(_registry(tmp_path).read_text("utf-8"))
+    b_registry = profile_b / "plugins" / "known_marketplaces.json"
+    assert _NAME in json.loads(b_registry.read_text("utf-8"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile_b))
+    assert _sync(env, declared=False) == []
+    assert _NAME not in json.loads(b_registry.read_text("utf-8"))
+    assert not _receipt(tmp_path).exists()

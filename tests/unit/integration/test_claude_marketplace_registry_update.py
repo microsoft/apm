@@ -63,3 +63,31 @@ def test_a_file_that_keeps_changing_keeps_the_other_writers_bytes(
         registry._merge(path, _add_apm)
 
     assert json.loads(path.read_text(encoding="utf-8")) == {"second": {}}
+
+
+def test_an_update_during_staging_is_never_overwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The comparison runs after the candidate is staged, right before the replace."""
+    import tempfile
+
+    path = tmp_path / "known_marketplaces.json"
+    path.write_text("{}", encoding="utf-8")
+    original = tempfile.mkstemp
+    edits = [{"during-staging": {}}]
+
+    def mkstemp(*args, **kwargs):
+        staged = original(*args, **kwargs)
+        if edits:
+            path.write_text(json.dumps(edits.pop(0)), encoding="utf-8")
+        return staged
+
+    monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
+
+    registry._merge(path, _add_apm)
+
+    assert set(json.loads(path.read_text(encoding="utf-8"))) == {
+        "during-staging",
+        "apm-p-0123abcd",
+    }
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["known_marketplaces.json"]

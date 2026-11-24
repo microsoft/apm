@@ -181,8 +181,9 @@ This is by design; use user scope or Claude's own trust setting.
 
 If the registry already lists the project's marketplace for another checkout
 (a second clone or worktree), cannot be parsed, or is reached through a
-symbolic link, APM leaves it unchanged and warns; the plugins then load from
-Claude Code's second session in that checkout.
+symbolic link, APM leaves it unchanged and warns, naming the issue to resolve
+before you re-run the command. An entry for another checkout can keep Claude
+Code loading that checkout's copy of the plugins.
 
 ### Claude Code and Copilot read each other's file
 

@@ -31,7 +31,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.diagnostics import printable_ascii_text
 
 _RECEIPT_NAME = "claude-known-marketplaces.json"
@@ -101,27 +100,53 @@ def _read(path: Path) -> tuple[bytes | None, dict[str, Any]]:
     return raw, data
 
 
-def _write(path: Path, data: dict[str, Any]) -> None:
+def _stage(path: Path, data: dict[str, Any]) -> Path:
+    """Write *data* to a temporary file beside *path*, ready to replace it."""
+    import tempfile
+
+    from apm_cli.utils.atomic_io import umask_file_mode
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = umask_file_mode(path)
+    descriptor, name = tempfile.mkstemp(prefix=".apm-", suffix=".tmp", dir=path.parent)
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write((json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if mode is not None:
+            os.chmod(staged, mode)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    return staged
 
 
-def _merge(path: Path, change: Callable[[dict[str, Any]], bool]) -> None:
-    """Apply *change* to the document at *path*, writing only if nothing raced it.
+def _merge(path: Path, change: Callable[[dict[str, Any]], bool]) -> bool:
+    """Apply *change* to the document at *path*; return whether APM published it.
 
-    *change* edits the object in place and returns whether it changed. The file
-    is re-read right before the write; if another writer (Claude Code) changed
-    it meanwhile, the merge is redone once on the new content, else skipped.
+    *change* edits the object in place and returns whether it changed. The
+    candidate is staged first and the file compared right before the atomic
+    replace; if another writer (Claude Code) changed it meanwhile, the merge is
+    redone once on the new content, else skipped and the staged file removed.
     """
     for _attempt in range(2):
         raw, data = _read(path)
         if not change(data):
-            return
+            return False
         if path.exists() and not os.access(path, os.W_OK):
             raise _Skip(f"{_text(path)} is read-only")
-        if _read(path)[0] == raw:
-            _write(path, data)
-            return
+        staged = _stage(path, data)
+        try:
+            if _read(path)[0] == raw:
+                os.replace(staged, path)
+                return True
+        finally:
+            staged.unlink(missing_ok=True)
     raise _Skip(f"{_text(path)} kept changing while APM updated it")
 
 
@@ -130,11 +155,15 @@ def _registered_path(entry: Any) -> Any:
     return source.get("path") if isinstance(source, dict) else None
 
 
+def _receipt_key(registry: Path, name: str) -> str:
+    return f"{name}@{registry.absolute()}"
+
+
 def _owned() -> dict[str, dict[str, str]]:
     """APM's receipt of the entries it wrote; ``_Skip`` when unreadable (never ``{}``).
 
-    Each record names the root and the absolute registry file APM wrote it in,
-    so only that registry's entry counts as APM's.
+    One record per registry file and marketplace name, naming the root, so
+    installs under several Claude profiles each keep their own record.
     """
     _raw, data = _read(_receipt_path())
     entries = data.get("entries", {})
@@ -143,11 +172,24 @@ def _owned() -> dict[str, dict[str, str]]:
     return {k: v for k, v in entries.items() if isinstance(v, dict)}
 
 
-def _record(owned: dict[str, dict[str, str]]) -> None:
+def _record(key: str, record: dict[str, str] | None) -> None:
+    """Add (or, with ``None``, drop) one receipt record, leaving every other one."""
     path = _receipt_path()
-    if owned:
-        _write(path, {"version": 2, "entries": owned})
-    elif path.exists():
+
+    def change(data: dict[str, Any]) -> bool:
+        entries = data.setdefault("entries", {})
+        data["version"] = 3
+        if not isinstance(entries, dict):
+            raise _Skip(f"{_text(path)} has no entries object")
+        if record is None:
+            return entries.pop(key, None) is not None
+        if entries.get(key) == record:
+            return False
+        entries[key] = record
+        return True
+
+    _merge(path, change)
+    if record is None and path.exists() and not _owned():
         path.unlink()
 
 
@@ -208,7 +250,7 @@ def register_project_marketplace(name: str, root: Path, logger: Any = None) -> N
             f"does not trust {_text(checkout)} yet. {CLAUDE_MARKETPLACE_TRUST.sentence()}",
         )
         return
-    owned = _owned()
+    _owned()  # an unreadable receipt refuses before anything is written
     target = _registry()
     known = _read(target)[1]
     if name in known:
@@ -233,14 +275,15 @@ def register_project_marketplace(name: str, root: Path, logger: Any = None) -> N
         }
         return True
 
-    _record({**owned, name: {"root": location, "registry": str(target.absolute())}})
+    key = _receipt_key(target, name)
+    _record(key, {"name": name, "root": location, "registry": str(target.absolute())})
     try:
-        _merge(target, add)
+        published = _merge(target, add)
     except BaseException:
-        _record(owned)
+        _record(key, None)
         raise
-    if _registered_path(_read(target)[1].get(name)) != location:
-        _record(owned)
+    if not published:
+        _record(key, None)  # an entry appeared meanwhile: it is not APM's
 
 
 def unregister_project_marketplace(name: str, root: Path, logger: Any = None) -> None:
@@ -252,11 +295,10 @@ def unregister_project_marketplace(name: str, root: Path, logger: Any = None) ->
     del logger
     location = str(Path(root).absolute())
     owned = _owned()
-    record = owned.get(name, {})
-    if record.get("root") != location:
-        return
     target = _registry()
-    if record.get("registry") != str(target.absolute()):
+    key = _receipt_key(target, name)
+    record = owned.get(key, {})
+    if record.get("root") != location or record.get("registry") != str(target.absolute()):
         return
 
     def remove(known: dict[str, Any]) -> bool:
@@ -266,8 +308,7 @@ def unregister_project_marketplace(name: str, root: Path, logger: Any = None) ->
         return True
 
     _merge(target, remove)
-    del owned[name]
-    _record(owned)
+    _record(key, None)
 
 
 def _warn(logger: Any, message: str) -> None:
@@ -300,8 +341,7 @@ def sync_project_marketplace(
         _warn(
             logger,
             f"APM did not update Claude Code's marketplace registry for '{_text(name)}': "
-            f"{_text(exc)}. Claude Code loads the plugins' skills and hooks from its second "
-            "session in this project.",
+            f"{_text(exc)}. Resolve that, then re-run the command.",
         )
     if claude_declared and _is_linked_worktree(Path(root).parents[1]):
         _warn(logger, WORKTREE_NOTICE)
