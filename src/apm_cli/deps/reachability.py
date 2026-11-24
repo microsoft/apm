@@ -1017,8 +1017,9 @@ def _anchor_reason(lockfile, walk, key, repo_url, nearest, identity_counts) -> s
 
     Re-parenting records the nearest surviving parent, ties to the lowest key;
     that parent must be the first one the walk saw, or spell the survivor's
-    path exactly as the first one does (its path and identity are then one
-    edge whichever is recorded, #5386), keep a lock row (an unlocked parent
+    path exactly as the first one does while that first edge's alias is the
+    locked one (path, identity and install directory are then one edge
+    whichever is recorded, #5386), keep a lock row (an unlocked parent
     leaves the survivor unresolvable) and spell the survivor by its own
     identity (an alias would re-key it).
     """
@@ -1027,7 +1028,12 @@ def _anchor_reason(lockfile, walk, key, repo_url, nearest, identity_counts) -> s
     parent = min(nearest)
     edges = walk.declaring_edges.get(key, {})
     first_path = (edges.get(nearest[0]) or (None, None))[1]
-    if parent != nearest[0] and (edges.get(parent) or (None, None))[1] != first_path:
+    first_alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))[1]
+    if parent != nearest[0] and (
+        (edges.get(parent) or (None, None))[1] != first_path
+        # Install keeps the first edge's alias: one the lock lacks would move the copy.
+        or first_alias != lockfile.dependencies[key].alias
+    ):
         # The repair would pair one parent's path with another's identity (#5126).
         return (
             f"{repo_url} still resolves through it, and several packages at the same "
