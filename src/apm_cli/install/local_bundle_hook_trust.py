@@ -31,12 +31,14 @@ from apm_cli.install.hook_script_refs import (
 )
 from apm_cli.install.local_bundle_hook_cwd import runs_through_cwd
 from apm_cli.install.local_bundle_hook_states import (
+    BundleHookStates,
     _merged_hook_documents,
-    _merged_hook_states,
     _MergedHookState,
     _modified_slugs,
+    _per_file_targets,
     _recorded_slugs,
     _sidecar_identities,
+    read_bundle_hook_states,
 )
 
 REASON_UNRECORDED = "no approval record"
@@ -58,18 +60,6 @@ class _BundleHookState:
     hook_files: set[str] = field(default_factory=set)
 
 
-def _per_file_targets(targets: Any) -> list[Any]:
-    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
-
-    return [
-        target
-        for target in targets or ()
-        if getattr(target, "name", None) not in _MERGE_HOOK_TARGETS
-        and callable(getattr(target, "supports", None))
-        and target.supports("hooks")
-    ]
-
-
 def _record_value(path: Path, project_root: Path) -> str:
     """Return the lockfile value for *path*: project-relative, else absolute."""
     if path.is_relative_to(project_root):
@@ -79,21 +69,14 @@ def _record_value(path: Path, project_root: Path) -> str:
 
 def _collect_per_file(
     project_root: Path,
-    targets: Any,
+    states: BundleHookStates,
     bundle_paths: Collection[str] | Callable[[], Collection[str]],
     found: dict[str, _BundleHookState],
 ) -> None:
-    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
-    from apm_cli.integration.hook_ownership import per_file_bundle_hook_keys
-
-    for target in _per_file_targets(targets):
-        target_root = Path(project_root) / target.root_dir
+    for per_file in states.per_file:
+        target_root = Path(project_root) / per_file.target.root_dir
         recorded: set[str] = set()
-        try:
-            records = per_file_bundle_hook_keys(target_root / _APM_HOOKS_SIDECAR)
-        except (OSError, ValueError, TypeError):
-            records = {}
-        for slug, (key, files) in records.items():
+        for slug, (key, files) in (per_file.records or {}).items():
             state = found.setdefault(slug, _BundleHookState())
             state.keys.add(key)
             state.hook_files.update(files)
@@ -121,19 +104,22 @@ def deployed_bundle_hook_keys(
     project_root: Path,
     targets: Any,
     bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
+    states: BundleHookStates | None = None,
 ) -> dict[str, _BundleHookState]:
     """Return each deployed local bundle slug with its recorded keys and hook files.
 
     *bundle_paths* are the lockfile's local-bundle deployed paths; they name
-    per-file hook files whose approval record is missing.
+    per-file hook files whose approval record is missing. *states*, when the
+    caller already read them, are used instead of reading every config again.
     """
     from apm_cli.integration.hook_ownership import (
         parse_local_bundle_hook_source,
         reinject_apm_source_from_sidecar,
     )
 
+    states = states or read_bundle_hook_states(project_root, targets)
     found: dict[str, _BundleHookState] = {}
-    for data, sidecar, container in _merged_hook_documents(project_root, targets):
+    for data, sidecar, container in _merged_hook_documents(project_root, targets, states.merged):
         if data is None:
             continue
         hooks = data.get(container)
@@ -150,7 +136,7 @@ def deployed_bundle_hook_keys(
                 )
                 if parsed is not None:
                     found.setdefault(parsed[0], _BundleHookState()).keys.add(parsed[1])
-    _collect_per_file(project_root, targets, bundle_paths, found)
+    _collect_per_file(project_root, states, bundle_paths, found)
     return found
 
 
@@ -159,6 +145,7 @@ def unadmitted_bundle_hooks(
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]]],
     bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
+    states: BundleHookStates | None = None,
 ) -> list[UnadmittedBundleHooks]:
     """Return deployed local-bundle hooks the current trust does not admit.
 
@@ -166,7 +153,7 @@ def unadmitted_bundle_hooks(
     only when a local bundle has deployed hooks. A gate-off map from the trust
     owner admits every hook, as installs do; a missing map admits none.
     """
-    deployed = deployed_bundle_hook_keys(project_root, targets, bundle_paths)
+    deployed = deployed_bundle_hook_keys(project_root, targets, bundle_paths, states)
     if not deployed:
         return []
     allow_map = allow_executables()
@@ -204,7 +191,10 @@ def _scripted_slugs(state: _MergedHookState, lock_paths: Collection[str], projec
 
 
 def bundle_hook_ownership(
-    project_root: Path, targets: Any, bundle_paths: Collection[str] = ()
+    project_root: Path,
+    targets: Any,
+    bundle_paths: Collection[str] = (),
+    states: BundleHookStates | None = None,
 ) -> list[str]:
     """Every bundle hook ownership problem, reading each config and sidecar once (#5078).
 
@@ -214,9 +204,15 @@ def bundle_hook_ownership(
     record names no entry for that bundle (a missing or stripped sidecar).
     Each would otherwise leave the bundle's entries silently unattributed.
     """
-    states = list(_merged_hook_states(project_root, targets))
-    problems: list[str] = []
-    for state in states:
+    states = states or read_bundle_hook_states(project_root, targets)
+    # A per-file record that cannot be read (#5144) is named, never read as "no record".
+    problems = [
+        f"{state.label}: the bundle hook ownership record cannot be read, "
+        "so bundle hooks there cannot be attributed"
+        for state in states.per_file
+        if state.records is None
+    ]
+    for state in states.merged:
         scripted = _scripted_slugs(state, bundle_paths, project_root)
         if state.sidecar_unreadable or (
             state.config_unreadable and (scripted or _recorded_slugs(state))

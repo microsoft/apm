@@ -8190,8 +8190,8 @@ def test_every_stale_deleter_consumes_the_skip_set(
         pytest.param(
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/policy/ci_checks.py",
-            "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
-            "[]",
+            "        canvas = unadmitted_bundle_canvas(\n",
+            "        canvas = (lambda *a, **k: [])(\n",
             id="audit-skips-bundle-canvas",
         ),
         pytest.param(

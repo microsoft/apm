@@ -805,10 +805,13 @@ _RECORD_KINDS = {
 
 
 def per_file_bundle_records(
-    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS
+    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS, read=read_hook_object
 ) -> list[dict[str, Any]]:
-    """Return the local-bundle approval records of *kind* a target sidecar holds."""
-    data = read_hook_object(sidecar_path)
+    """Return the local-bundle approval records of *kind* a target sidecar holds.
+
+    *read* reads the sidecar; an audit passes one that reads each file once (#5211).
+    """
+    data = read(sidecar_path)
     records = data.get(_RECORD_KINDS[kind][0], [])
     if not isinstance(records, list):
         raise TypeError(f"local-bundle {kind} records must be a list")
@@ -829,7 +832,7 @@ def per_file_bundle_file_hashes(
 
 
 def per_file_bundle_hook_keys(
-    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS
+    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS, read=read_hook_object
 ) -> dict[str, tuple[str | None, list[str]]]:
     """Return ``slug -> (approval_key, files)`` for the *kind* records of a sidecar.
 
@@ -839,7 +842,7 @@ def per_file_bundle_hook_keys(
     """
     files_key = _RECORD_KINDS[kind][1]
     found: dict[str, tuple[str | None, list[str]]] = {}
-    for record in per_file_bundle_records(sidecar_path, kind):
+    for record in per_file_bundle_records(sidecar_path, kind, read):
         parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
         files = record.get(files_key)
         if parsed is not None:
