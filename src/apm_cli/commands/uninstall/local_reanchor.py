@@ -187,15 +187,11 @@ def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
     """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem).
 
     Spellings are first matched by the canonical caseless key (NFD, case
-    folding, then NFC, as ``utils.paths.caseless``); the filesystem decides.
+    folding, then NFC; ``path_security._caseless``); the filesystem decides.
     """
-    import unicodedata
+    from ...utils.path_security import _caseless
 
-    def key(spelling: str) -> str:
-        # utils.paths.caseless: NFD, case folding, then NFC (#5167).
-        return unicodedata.normalize("NFC", unicodedata.normalize("NFD", spelling).casefold())
-
-    if declared is None or key(declared) != key(row.repo_url):
+    if declared is None or _caseless(Path(declared)) != _caseless(Path(row.repo_url)):
         return False
     ref = row.to_dependency_ref()
     try:
