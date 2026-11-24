@@ -773,10 +773,11 @@ def try_apply(
             if decide_only:
                 _trace("no-op (attested record)")
                 return True
-            _render_attested(
-                project_root, lock, fetch, targets, session, started, frozen_disposition
+            raise _AttestedCommitted(
+                _commit_attested(
+                    project_root, lock, fetch, targets, session, started, frozen_disposition
+                )
             )
-            return True
         packages = _plan_packages(project_root, lock)
         receipts = session.receipt_hashes()
         _refuse_orphans(project_root, lock, receipts)
@@ -822,6 +823,9 @@ def try_apply(
         return False
     except ApplyRestoreIncomplete:
         raise  # the tree is not the pre-run tree: never run the full pipeline on it
+    except _AttestedCommitted as committed:
+        # Committed: as below, the held output is printed outside the fallback.
+        return _release_attested(committed.args[0])
     except Exception as exc:
         _trace(f"full run (error: {type(exc).__name__})")
         return False
@@ -860,7 +864,11 @@ def _attested_gates(project_root: Path, lock: Any, fetch: Any) -> bool:
     return True
 
 
-def _render_attested(
+class _AttestedCommitted(Exception):
+    """An attested no-op committed its journal (``args[0]`` holds its output)."""
+
+
+def _commit_attested(
     project_root: Path,
     lock: Any,
     fetch: Any,
@@ -868,19 +876,24 @@ def _render_attested(
     session: Any,
     started: float,
     frozen_disposition: Any,
-) -> None:
-    """Print the no-op through the proven no-op's own path: an empty diff, journaled."""
+) -> Any:
+    """Render the no-op through the proven no-op's own path: an empty diff, journaled."""
 
     def render() -> None:
         _render(project_root, lock, [], [], [], started, frozen_disposition)
 
-    held = _commit(project_root, fetch, [], [], targets, session, False, render)
+    return _commit(project_root, fetch, [], [], targets, session, False, render)
+
+
+def _release_attested(held: Any) -> bool:
+    """Print a committed attested no-op; a failure propagates, never the full pipeline."""
     held.release()
     _trace("no-op (attested record)")
     from apm_cli.install import verdict_record
 
     # Provenance never upgrades (W3d A5): this run's output record stays attested.
     verdict_record.note_verified_noop(verdict_record.ATTESTED)
+    return True
 
 
 def _render(

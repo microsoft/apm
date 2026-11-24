@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -87,9 +88,17 @@ def _record_after(
     _write_at_entry(entry, argv, out_text, err_text, deployed, provenance=provenance)
 
 
+# Terminal styling (SGR) is stripped before a line is judged; any other escape
+# sequence is not understood, so the line counts as unsettled (W3d A2 allowlist).
+_SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _unsettled_line(text: str) -> str | None:
     """The first warning or error line that is not a live-rejudged notice (A2)."""
-    for line in text.splitlines():
+    for raw in text.splitlines():
+        line = _SGR.sub("", raw)
+        if "\x1b" in line:
+            return repr(raw)
         if vr._WARNING_LINE.match(line) and not any(p.match(line) for p in vr._LIVE_NOTICES):
             return line.strip()
     return None

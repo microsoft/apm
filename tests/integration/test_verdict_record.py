@@ -1319,3 +1319,78 @@ def _assert_attested_record(project: Path) -> None:
     """The durable attested record exists and run 2 matches it."""
     assert _stored(project)["kind"] == "attested"
     assert _attested_hit() is True
+
+
+def _fake_package(root: Path, body: str) -> Path:
+    package = root / "apm_cli"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").write_text(body, encoding="utf-8")
+    return package
+
+
+@pytest.mark.parametrize("layout", ["source", "installed"])
+def test_changed_apm_code_at_the_same_version_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    """Copilot #5383 (W3d A3): a pip or editable install runs under Python, so the
+    record keys the APM code itself: a source tree's files or the installed RECORD."""
+    import apm_cli
+
+    site = project.parent / "site"
+    package = _fake_package(site, "VERSION = 1\n")
+    if layout == "installed":
+        dist = site / "apm_cli-0.0.0.dist-info"
+        dist.mkdir()
+        (dist / "RECORD").write_text("apm_cli/__init__.py,sha256=old,12\n", encoding="utf-8")
+    monkeypatch.setattr(apm_cli, "__file__", str(package / "__init__.py"))
+    _record()
+    _assert_replays(True)  # the same code still hits: the key is stable
+    if layout == "installed":
+        (dist / "RECORD").write_text("apm_cli/__init__.py,sha256=new,12\n", encoding="utf-8")
+    else:
+        (package / "__init__.py").write_text("VERSION = 1  # patched\n", encoding="utf-8")
+
+    _assert_replays(False)
+
+
+def test_an_editable_install_keys_its_source_files(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An editable install's RECORD does not cover its source, so the source is keyed."""
+    import apm_cli
+
+    site = project.parent / "site"
+    package = _fake_package(site / "src", "VERSION = 1\n")
+    dist = site / "apm_cli-0.0.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "RECORD").write_text("apm_cli/__init__.py,sha256=x,12\n", encoding="utf-8")
+    (dist / "direct_url.json").write_text('{"dir_info": {"editable": true}}', encoding="utf-8")
+    monkeypatch.setattr(apm_cli, "__file__", str(package / "__init__.py"))
+    _record()
+    _assert_replays(True)
+    (package / "__init__.py").write_text("VERSION = 2\n", encoding="utf-8")
+
+    _assert_replays(False)
+
+
+@pytest.mark.parametrize(
+    ("printed", "attests"),
+    [
+        ("\x1b[33m[!] Kept .claude/skills/x: it changed after the install.\x1b[0m\n", False),
+        ("\x1b]8;;https://example.invalid\x07[!] Kept x\x1b]8;;\x07\n", False),
+        ("\x1b[33m  [!] Parked MCP server 'm' from transitive package o/p\x1b[0m\n", True),
+    ],
+    ids=["colored-kept", "unknown-escape", "colored-parked"],
+)
+def test_terminal_styling_never_hides_a_deferral_warning(
+    project: Path, printed: str, attests: bool
+) -> None:
+    """Copilot #5383 (A2): styling is stripped before a line is judged; an escape
+    the record does not understand blocks the attestation."""
+    _attest(project, printed=printed)
+
+    assert (_home(project) / "verdicts").exists() is attests
+
+
+def _assert_replays(expected: bool) -> None:
+    assert verdict_record.replay(["install"]) is expected

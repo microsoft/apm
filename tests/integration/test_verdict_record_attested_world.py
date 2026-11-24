@@ -12,6 +12,7 @@ edited after install #1 makes install #2 prove its verdict itself.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -53,11 +54,14 @@ def world_install():
             # The engine under test: the apm_cli this test imports, not another install.
             env["PYTHONPATH"] = str(Path(apm_cli.__file__).resolve().parents[1])
 
-            def install(*args: str) -> tuple[int, str, str]:
+            def install(*args: str, pythonpath: str = "") -> tuple[int, str, str]:
+                run_env = dict(env)
+                if pythonpath:
+                    run_env["PYTHONPATH"] = os.pathsep.join((pythonpath, env["PYTHONPATH"]))
                 done = subprocess.run(
                     [*_ENTRY, "install", *args],
                     cwd=project,
-                    env=env,
+                    env=run_env,
                     capture_output=True,
                     text=True,
                     timeout=600,
@@ -143,3 +147,36 @@ def _assert_same_no_op(attested, proved) -> None:
     assert proved[0] == attested[0] == 0
     assert "attested hit" not in _traces(proved[2]), proved[2]
     assert _normalized(attested[1]) == _normalized(proved[1])
+
+
+# Armed by a sentinel file next to it, so run 1 and run 2 share one PYTHONPATH (keyed).
+_BROKEN_RELEASE = """
+import os
+
+if os.path.exists(os.path.join(os.path.dirname(__file__), "armed")):
+    import apm_cli.install.fast_output as _held
+
+    def _broken(self):
+        raise OSError(32, "injected broken pipe while releasing held output")
+
+    _held.HeldOutput.release = _broken
+"""
+
+
+def test_an_attested_hit_whose_output_fails_never_runs_the_full_pipeline(
+    world_install, tmp_path
+) -> None:
+    """Copilot #5383: printing a committed attested no-op fails (a broken pipe): the
+    command exits non-zero and the full pipeline never starts on top of it."""
+    install, _project, _world = world_install
+    hook = tmp_path / "hook"
+    hook.mkdir()
+    (hook / "sitecustomize.py").write_text(_BROKEN_RELEASE, encoding="utf-8")
+    _assert_attested(install(pythonpath=str(hook)))
+    (hook / "armed").write_text("", encoding="ascii")
+
+    code, stdout, stderr = install(pythonpath=str(hook))
+
+    assert code != 0, stdout + stderr
+    assert "attested hit" in _traces(stderr), stderr
+    assert "Installing dependencies" not in stdout, stdout + stderr

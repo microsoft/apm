@@ -590,11 +590,46 @@ def _policy_identity(root: Path) -> Any:
 
 
 def _build_identity() -> bytes:
-    """The running build (W3d A3): the executable itself, so a rebuilt binary at the
-    same version never replays the old build's record."""
-    path = os.path.realpath(sys.executable)
-    info = os.stat(path)
-    return f"{path}|{info.st_size}|{info.st_mtime_ns}".encode("utf-8", "surrogateescape")
+    """The running APM implementation (W3d A3), so changed code never reuses a record:
+    a frozen binary's own stat; an installed package's dist-info RECORD (the hash of
+    every file it installed); a source or editable tree's per-file stat."""
+    if getattr(sys, "frozen", False):
+        path = os.path.realpath(sys.executable)
+        info = os.stat(path)
+        return f"frozen|{path}|{info.st_size}|{info.st_mtime_ns}".encode("utf-8", "surrogateescape")
+    package = os.path.dirname(os.path.realpath(sys.modules["apm_cli"].__file__ or ""))
+    record = _installed_record(package)
+    if record is not None:
+        return b"installed|" + hashlib.sha256(record).hexdigest().encode()
+    digest = hashlib.sha256()
+    for here, dirs, files in os.walk(package):
+        dirs[:] = sorted(name for name in dirs if name != "__pycache__")
+        for name in sorted(files):
+            info = os.lstat(os.path.join(here, name))
+            rel = os.path.relpath(os.path.join(here, name), package)
+            digest.update(
+                f"{rel}|{info.st_size}|{info.st_mtime_ns}\n".encode("utf-8", "surrogateescape")
+            )
+    return f"source|{package}|{digest.hexdigest()}".encode("utf-8", "surrogateescape")
+
+
+def _installed_record(package: str) -> bytes | None:
+    """The RECORD of the non-editable distribution that installed *package*, if any."""
+    site = os.path.dirname(package)
+    try:
+        names = [
+            n for n in os.listdir(site) if n.startswith("apm_cli-") and n.endswith(".dist-info")
+        ]
+    except OSError:
+        return None
+    if len(names) != 1:
+        return None
+    dist = os.path.join(site, names[0])
+    direct = _read_nofollow(os.path.join(dist, "direct_url.json")) or b""
+    record = _read_nofollow(os.path.join(dist, "RECORD"))
+    if b'"editable":true' in direct.replace(b" ", b"") or record is None:
+        return None  # an editable install's files are the source tree: stat them
+    return record if b"apm_cli/__init__.py," in record else None
 
 
 def _names(value: Any) -> bool:
