@@ -594,13 +594,13 @@ _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
 def _non_string_keys(text: str) -> str:
-    """Name the non-string keys of *text*'s frontmatter for a diagnostic."""
+    """Name the non-string keys of *text*'s frontmatter, or ``""`` when it has none."""
     metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
     data = _BOUNDED_FRONTMATTER_HANDLER.load(metadata)
     keys = [
         _key_label(k) for k in (data if isinstance(data, dict) else {}) if not isinstance(k, str)
     ]
-    return ", ".join(keys) or "unknown"
+    return ", ".join(keys)
 
 
 def _key_label(key: Any) -> str:
@@ -633,8 +633,12 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     except yaml.YAMLError:
         raise
     except TypeError as exc:
-        # Post(**metadata) refuses a non-string key such as ``1:`` (#4922, #5028).
-        raise yaml.YAMLError(f"non-string frontmatter key(s): {_non_string_keys(text)}") from exc
+        # Post(**metadata) refuses a non-string key such as ``1:`` (#4922, #5028);
+        # any other TypeError is not a frontmatter fault and surfaces unchanged.
+        keys = _non_string_keys(text)
+        if not keys:
+            raise
+        raise yaml.YAMLError(f"non-string frontmatter key(s): {keys}") from exc
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:

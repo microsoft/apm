@@ -116,3 +116,17 @@ def test_a_non_string_frontmatter_key_is_a_named_yaml_error(key: str, label: str
     """Every caller gets the loader's own YAMLError, never a bare TypeError (#5028)."""
     with pytest.raises(yaml.YAMLError, match=rf"^non-string frontmatter key\(s\): {label}$"):
         loads_frontmatter(f"---\n{key}\ndescription: d\n---\nbody\n")
+
+
+def test_an_unrelated_type_error_is_not_masked_as_a_frontmatter_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a non-string key becomes the named YAMLError; any other TypeError surfaces (#5028)."""
+    import frontmatter
+
+    def broken(*_args, **_kwargs):
+        raise TypeError("handler bug")
+
+    monkeypatch.setattr(frontmatter, "loads", broken)
+    with pytest.raises(TypeError, match=r"^handler bug$"):
+        loads_frontmatter("---\ndescription: d\n---\nbody\n")
