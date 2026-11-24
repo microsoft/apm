@@ -60,8 +60,8 @@ def _row(world: ReplayWorld, name: str) -> dict:
 
 def _world(tmp_path: Path, apm_binary_path: Path, packages, prod, dev) -> ReplayWorld:
     world = ReplayWorld.create(tmp_path, apm_binary_path)
-    for name, deps in packages:
-        _skill_package(world.project / "vendor" / name, name, deps)
+    for path, deps in packages:
+        _skill_package(world.project / "vendor" / path, path.rsplit("/", 1)[-1], deps)
     _manifest(world, prod, dev)
     (world.project / ".claude").mkdir()
     world.apm("install")
@@ -137,3 +137,44 @@ def test_prune_reparents_a_survivor_whose_declaring_parent_was_pruned(
     assert _row(world, "f").get("is_dev") is True
     assert (world.project / ".claude/skills/f-skill/SKILL.md").is_file()
     _assert_prune_converges(world)
+
+
+def test_prune_keeps_the_chain_when_the_new_parent_identity_is_ambiguous(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """f's only surviving parent is left/z, but right/z is also named z: f keeps e's chain.
+
+    Recording ``resolved_by: _local/z`` would match both z directories, so
+    prune keeps f's recorded parent chain and names it instead.
+    """
+    world = _world(
+        tmp_path,
+        apm_binary_path,
+        (
+            ("f", ()),
+            ("e", ("../f",)),
+            ("d", ("../e",)),
+            ("left/z", ("../../f",)),
+            ("a", ("../left/z",)),
+            ("right/z", ()),
+            ("b", ("../right/z",)),
+        ),
+        ["./vendor/d", "./vendor/a", "./vendor/b"],
+        [],
+    )
+    zs = [
+        row
+        for row in load_yaml(world.project / "apm.lock.yaml")["dependencies"]
+        if row.get("name") == "z"
+    ]
+    assert len(zs) == 2, zs
+    _manifest(world, ["./vendor/a", "./vendor/b"], [])
+
+    pruned = " ".join(world.apm("prune").stdout.split())
+
+    assert "Retained _local/e:" in pruned, pruned
+    assert _row(world, "f")["resolved_by"] == "_local/e"
+    assert (world.project / ".claude/skills/f-skill/SKILL.md").is_file()
+    after = lock_bytes(world.project)
+    world.apm("install", "--frozen")
+    assert lock_bytes(world.project) == after
