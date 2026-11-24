@@ -179,33 +179,74 @@ def test_a_401_challenge_falls_back_without_sending_credentials(monkeypatch) -> 
     assert sent["max_hops"] == 0
 
 
-def test_the_frozen_network_env_is_reused_only_while_config_files_are_unchanged(
-    tmp_path: Path, monkeypatch
-) -> None:
-    from apm_cli.core.invocation_memo import invocation_scope
-
-    config = tmp_path / "gitconfig"
-    config.write_text("[user]\n\tname = a\n", encoding="utf-8")
+def _frozen_from(config: Path):
+    """A stand-in for git_network_env: freezes the config file's entries into env."""
     built: list[str] = []
 
     def fake_network_env(url, env):
         built.append(url)
-        return {"GIT_CONFIG_NOSYSTEM": "1", "BUILT": str(len(built))}
+        frozen = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        section = ""
+        entries = []
+        for line in config.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                section = line.strip("[]").split()[0].lower()
+            elif "=" in line:
+                key, value = (part.strip() for part in line.split("=", 1))
+                entries.append((f"{section}.{key}", value))
+        frozen["GIT_CONFIG_COUNT"] = str(len(entries))
+        for index, (key, value) in enumerate(entries):
+            frozen[f"GIT_CONFIG_KEY_{index}"] = key
+            frozen[f"GIT_CONFIG_VALUE_{index}"] = value
+        return frozen
 
-    monkeypatch.setattr("apm_cli.utils.git_env.git_network_env", fake_network_env)
+    return built, fake_network_env
+
+
+@pytest.fixture
+def frozen_world(tmp_path: Path, monkeypatch):
+    config = tmp_path / "gitconfig"
+    config.write_text("[user]\n\tname = a\n", encoding="utf-8")
+    built, fake = _frozen_from(config)
+    monkeypatch.setattr("apm_cli.utils.git_env.git_network_env", fake)
     monkeypatch.setattr(fetch, "_config_paths", lambda env: (str(config),))
-    env = {"HOME": str(tmp_path)}
+    monkeypatch.setattr(fetch, "_binary_identity", lambda git: (git, 1, 2, 3, 4))
+    return config, built
+
+
+def test_the_frozen_network_env_is_reused_only_while_nothing_it_read_changed(frozen_world):
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    config, built = frozen_world
+    env = {"HOME": "/home/a"}
 
     with invocation_scope():
         first = fetch._network_env(env)
         assert fetch._network_env(env) == first
         assert len(built) == 1
 
-        config.write_text("[http]\n\textraHeader = x\n", encoding="utf-8")
-        fetch._network_env(env)
+        fetch._network_env({**env, "HOME": "/home/b"})
         assert len(built) == 2
+
+        config.write_text("[user]\n\tname = b\n", encoding="utf-8")
+        fetch._network_env(env)
+        assert len(built) == 3
 
         config.write_text("[include]\n\tpath = other\n", encoding="utf-8")
         fetch._network_env(env)
         fetch._network_env(env)
-        assert len(built) == 4
+        assert len(built) == 5
+
+
+def test_an_extra_header_added_mid_command_falls_back(frozen_world):
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    config, _built = frozen_world
+    env = {"HOME": "/home/a"}
+
+    with invocation_scope():
+        fetch._effective(env)
+        config.write_text("[http]\n\textraHeader = Authorization: x\n", encoding="utf-8")
+        with pytest.raises(fetch._Refuse, match="extraHeader"):
+            fetch._effective(env)

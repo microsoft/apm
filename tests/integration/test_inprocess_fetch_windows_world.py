@@ -101,3 +101,21 @@ def test_in_process_engages_and_lands_the_bytes_and_hash_git_lands(windows_like_
         assert _tree(fast) == _tree(slow), url
         assert compute_package_hash(fast) == compute_package_hash(slow), url
     assert len(pins) == len(fixture.packages) == 10
+
+
+def test_the_kept_network_env_equals_a_fresh_one(windows_like_world):
+    """G6: with and without the per-command memo, git children get the same env."""
+    from apm_cli.cache import inprocess_fetch
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.git_env import git_network_env
+
+    _fixture, world_env = windows_like_world
+    env = AuthResolver.build_public_github_anonymous_git_env(base_env=world_env)
+    fresh = git_network_env(inprocess_fetch._PROBE_URL, dict(env))
+
+    with invocation_scope():
+        first = inprocess_fetch._network_env(env)
+        kept = inprocess_fetch._network_env(env)
+
+    assert first == fresh
+    assert kept == fresh
