@@ -45,11 +45,11 @@ from typing import Any, Literal
 
 from apm_cli.install import journal_modes as _modes
 from apm_cli.install.deploy_state import ABSENT as _ABSENT
-from apm_cli.install.deploy_state import OTHER as _OTHER
 from apm_cli.install.deploy_state import ensure_listable as _ensure_listable
 from apm_cli.install.deploy_state import entry_state as _entry
 from apm_cli.install.deploy_state import path_state as _state
 from apm_cli.install.deploy_state import tree_hashes as _tree_hashes
+from apm_cli.install.deploy_state import valid_state as _valid_state
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
@@ -119,9 +119,12 @@ class DeployJournal:
         # With a deploy root every unit is also written to the store's
         # manifest, so the next install can replay a journal a kill abandoned.
         self.root = Path(os.path.abspath(root)) if root is not None else None
+        self.contain = self.root  # rollback-only containment; a fast apply sets its project
         # The metadata workspace (lockfile directory) whose ledger vouches for it.
         self.workspace = Path(os.path.abspath(workspace or root or store_parent))
         self.store: Path | None = None
+        # Names this journal in the config file records' first-touch digests (#5051).
+        self.token = secrets.token_hex(16)
         self._units: list[_Unit] = []
         self._recorded: dict[Path, int] = {}
         self._lock = threading.Lock()
@@ -145,6 +148,7 @@ class DeployJournal:
                     "version": _VERSION,
                     "root": str(self.root),
                     "workspace": str(self.workspace),
+                    "token": self.token,
                 }
                 self._append_line(header)
         return self.store
@@ -283,16 +287,28 @@ class DeployJournal:
         with self._lock:
             units = list(reversed(self._units))
         for unit in units:
+            if self._crosses_link(unit.path):
+                issues.append((unit.path, "kept: a parent directory is a symbolic link"))
+                continue
             try:
                 self._restore_unit(unit)
             except OSError as exc:
                 issues.append((unit.path, f"could not restore: {exc}"))
-        remove_empty_directories(a for unit in units for a in unit.absent_ancestors)
+        remove_empty_directories(
+            a for unit in units for a in unit.absent_ancestors if not self._crosses_link(a)
+        )
         if issues and self.store is not None:
             issues.append((self._retain(), "pre-install copies retained here for recovery"))
         else:
             self.discard()
         return issues
+
+    def _crosses_link(self, path: Path) -> bool:
+        """Whether a directory between *path* and its deploy root (or APM home) is a link."""
+        for base in (self.contain, self.store_parent.parent):
+            if base is not None and path.parent.is_relative_to(base):
+                return has_symlink_component(base, path.parent)
+        return False
 
     def _retain(self) -> Path:
         """Rename the store so no later install reaps the copies a user still needs."""
@@ -460,28 +476,6 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
     return units, events, commit
 
 
-def _valid_state(state: Any, *, entry: bool) -> bool:
-    """Whether *state* has the shape :func:`_state` (or :func:`_entry`) records."""
-    if entry:
-        return isinstance(state, str)
-    if not isinstance(state, dict):
-        return False
-    if state in (_ABSENT, _OTHER):
-        return True
-    if set(state) == {"link"}:
-        return isinstance(state["link"], str)
-    if set(state) == {"file", "mode"}:
-        return isinstance(state["file"], str) and type(state["mode"]) is int
-    if set(state) == {"dir", "mode"}:
-        entries = state["dir"]
-        return (
-            isinstance(entries, dict)
-            and all(isinstance(k, str) and isinstance(v, str) for k, v in entries.items())
-            and type(state["mode"]) is int
-        )
-    return False
-
-
 def _pending(line: dict[str, Any]) -> tuple[str, str | None, Any]:
     """A write APM began: ``("pending", <expected hash or None>, <last seal or None>)``."""
     expected = line.get("expected")
@@ -525,6 +519,7 @@ class _Bases:
 
     root: Path
     receipts: Path
+    journal: str | None = None  # the abandoned journal's token (#5051)
 
 
 class _Unproven(Exception):
@@ -578,7 +573,7 @@ def _validate_unit(
         try:
             _check_vouched(rel, kind, expected, ledger)
         except _Unproven:
-            if not _shared_config_vouched(rel, path, kind, copy, events, ledger):
+            if not _shared_config_vouched(rel, path, kind, copy, events, ledger, bases.journal):
                 raise
     mode = _modes.verified_mode(line.get("mode"), kind, copy)
     if mode is None:
@@ -605,6 +600,7 @@ def _shared_config_vouched(
     copy: Path,
     events: Mapping[str, Any] | None,
     ledger: Mapping[str, str | None],
+    journal: str | None = None,
 ) -> bool:
     """A file the ledger never claims, restorable from the config file records (#5009).
 
@@ -631,7 +627,7 @@ def _shared_config_vouched(
             prior = _read_no_follow(copy)
         except OSError:
             return False
-        return vouches_for_current_bytes(path, prior)
+        return vouches_for_current_bytes(path, prior, journal=journal)
     return True  # a later write: _decide keeps and names it, never replaces it
 
 
@@ -859,7 +855,8 @@ def _replay_store(
 ) -> ReplayOutcome:
     """Replay one abandoned store, or raise ``JournalReplayError`` after keeping it."""
     try:
-        lines, seals, commit = _parse(_read_manifest(store)[1])
+        header, body = _read_manifest(store)
+        lines, seals, commit = _parse(body)
     except ValueError as exc:
         raise JournalReplayError(_keep(store), [(str(store), str(exc))], applied=False) from None
     if commit is not None and commit == committed():
@@ -870,6 +867,8 @@ def _replay_store(
         vouched = ledger()
     except LedgerUnavailable as exc:
         raise JournalReplayError(_keep(store), [exc.issue], applied=False) from None
+    token = header.get("token")
+    bases = replace(bases, journal=token if isinstance(token, str) else None)
     units, issues = _validated(lines, seals, store, bases, vouched)
     if issues:
         raise JournalReplayError(_keep(store), issues, applied=False)

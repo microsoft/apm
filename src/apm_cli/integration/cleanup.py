@@ -554,7 +554,7 @@ class DeploymentEvidence:
         replaced by a link after preflight is kept too (#4815), and recorded as
         kept so the uninstall does not report it as a failure.
         """
-        if not (self._lockfile_consent and physical.is_symlink()):
+        if not _consent_keeps_link(physical, lockfile_consent=self._lockfile_consent):
             return False
         self._consent_refused[_claim_key(claim)] = None
         return True
@@ -1866,11 +1866,23 @@ def managed_hook_prefixes(targets=None) -> tuple[str, ...]:
     )
 
 
-def hook_sync_unlinks(rel_path: str, project_root: Path, *, recorded_hash: str | None) -> bool:
+def _consent_keeps_link(physical: Path, *, lockfile_consent: bool) -> bool:
+    """Whether ``--trust-lockfile`` consent keeps *physical* because it is a link (#4295, #5139)."""
+    return lockfile_consent and physical.is_symlink()
+
+
+def hook_sync_unlinks(
+    rel_path: str,
+    project_root: Path,
+    *,
+    recorded_hash: str | None,
+    lockfile_consent: bool = False,
+) -> bool:
     """Whether uninstall's hook sync removes a managed hook final symlink (#5035).
 
-    Read-only, through the same prefix, gate and link decisions the hook sync
-    applies with ``allow_final_symlink=True``.
+    Read-only, through the same prefix, gate, consent and link decisions the
+    hook sync applies with ``allow_final_symlink=True``. Audit's advice offers
+    an uninstall without ``--trust-lockfile``, so it passes no consent (#5139).
     """
     from .targets import KNOWN_TARGETS
 
@@ -1884,6 +1896,7 @@ def hook_sync_unlinks(rel_path: str, project_root: Path, *, recorded_hash: str |
             allow_final_symlink=True,
         )
         and (project_root / rel_path).is_symlink()
+        and not _consent_keeps_link(project_root / rel_path, lockfile_consent=lockfile_consent)
         and _managed_link_unlinkable(recorded_hash)
     )
 

@@ -56,6 +56,7 @@ from scripts.architecture_linter.checks.python_semantics import (
     direct_definitions,
     import_bound_name,
 )
+from scripts.architecture_linter.checks.registry_definition_index import _defining_files
 from scripts.architecture_linter.checks.registry_deprecation_catalog import (
     DEPRECATION_CATALOG,
     check_deprecation_catalog_text,
@@ -301,35 +302,6 @@ def _count_fixed_lines(facts: FileFacts, needle: str) -> int:
 def _has_fixed(facts: FileFacts, needle: str) -> bool:
     """Return whether any lexical line contains `needle` (``grep -q``)."""
     return needle in source_text(facts)
-
-
-def _defining_files(
-    provider: FactsProvider,
-    rule_id: str,
-    name: str,
-    *,
-    kinds: tuple[str, ...],
-) -> tuple[frozenset[str], tuple[Violation, ...]]:
-    """Return the set of source files defining `name`, failing closed on parse.
-
-    Scans every ``src/apm_cli`` Python module in the deterministic inventory
-    and reports which ones declare a top-level-or-nested definition named
-    `name` of one of the accepted `kinds`. A read/parse failure on any file
-    aborts the scan with a fail-closed violation, mirroring the original
-    bootstrap linter, which parsed every module and crashed on a bad tree.
-    """
-    definers: set[str] = set()
-    failures: list[Violation] = []
-    for path in _python_paths(provider, under=_SRC):
-        facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
-        if read_failures:
-            failures.extend(read_failures)
-            continue
-        if any(
-            definition.name == name and definition.kind in kinds for definition in facts.definitions
-        ):
-            definers.add(path)
-    return frozenset(definers), tuple(failures)
 
 
 def _check_runtime_descriptors(provider: FactsProvider) -> Iterable[Violation]:

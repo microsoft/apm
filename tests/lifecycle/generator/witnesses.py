@@ -121,6 +121,8 @@ BIN_WITNESSES: Mapping[str, str] = {
     },
     "tests/lifecycle/scenarios/test_user_scope.py::"
     "test_a_plugin_bin_deploys_under_home_once_trusted": "user",
+    "tests/lifecycle/scenarios/test_user_scope.py::"
+    "test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states": "user",
     "tests/lifecycle/scenarios/test_policy_pairs.py::"
     "test_a_denied_plugin_with_bin_is_refused_at_user_scope": "user",
     **{

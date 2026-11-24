@@ -1,0 +1,16 @@
+{
+  "issue": 5051,
+  "fixed_in": "Unreleased",
+  "summary": "When two packages changed the same shared config file in one install, the config file records held only the last write's prior digest while the deploy journal kept the bytes the install first found, so a kill after the second write was kept for manual recovery; the records now keep the first-touch digest per deploy journal token and replay checks it against the abandoned journal's token.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_after_two_writers_changed_one_shared_config_is_restored",
+    "tests/unit/integration/test_config_file_provenance.py::test_every_write_of_one_install_vouches_for_its_first_bytes",
+    "tests/unit/integration/test_config_file_provenance.py::test_the_next_install_starts_its_own_first_bytes"
+  ]
+}
