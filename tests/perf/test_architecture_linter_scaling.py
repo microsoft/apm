@@ -634,17 +634,38 @@ def test_definition_index_answers_every_real_query_like_the_direct_scan() -> Non
 
     queried: list[str] = []
     differing: list[str] = []
+    found: list[str] = []
 
     def compared(provider, rule_id, name, *, kinds):
         indexed = _defining_files(provider, rule_id, name, kinds=kinds)
         if indexed != _scan_defining_files(provider, rule_id, name, kinds=kinds):
             differing.append(name)
         queried.append(name)
+        if indexed[0]:
+            found.append(name)
         return indexed
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(guards, "_defining_files", compared)
         report = runner.run(Path(__file__).resolve().parents[2])
     assert report.failures == ()
-    assert queried, "no guard asked the index anything: the comparison proves nothing"
+    # The queries the registry guards make today; a new one is added here on purpose.
+    assert sorted(set(queried)) == [
+        "_create_minimal_apm_yml",
+        "_get_bootstrap_config",
+        "bootstrap_config",
+        "configured_user_root",
+        "get_apm_home",
+        "print_version",
+        "resolve_audit_target_decision",
+        "resolve_audit_targets",
+        "resolve_bootstrap_project_name",
+        "resolve_deployment_target_decision",
+        "resolve_user_invocable",
+        "resolve_user_root",
+        "validate_project_name",
+        "write_minimal_manifest",
+    ]
+    # Non-vacuous: real definers are found (an empty scan would agree with an empty index).
+    assert "get_apm_home" in found and len(set(found)) >= 10, sorted(set(found))
     assert differing == [], differing
