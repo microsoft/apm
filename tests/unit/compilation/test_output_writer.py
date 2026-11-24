@@ -227,3 +227,96 @@ def test_batch_still_refuses_a_link_below_an_already_checked_directory(tmp_path:
 
     assert not regular.exists()
     assert list(outside.iterdir()) == []
+
+
+def _record_checks(monkeypatch, project: Path) -> list[tuple[str, str]]:
+    import apm_cli.compilation.output_writer as ow
+
+    checked: list[tuple[str, str]] = []
+    real_check = ow.has_symlink_component
+
+    def recording_check(base: Path, path: Path, **kwargs):
+        checked.append((base.relative_to(project).as_posix(), path.relative_to(project).as_posix()))
+        return real_check(base, path, **kwargs)
+
+    monkeypatch.setattr(ow, "has_symlink_component", recording_check)
+    return checked
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_directory_swapped_for_a_link_during_the_batch_is_refused_at_write(
+    tmp_path: Path, monkeypatch
+):
+    import apm_cli.compilation.output_writer as ow
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    (project / "a" / "b").mkdir(parents=True)
+    (project / "a" / "c").mkdir()
+    first = project / "a" / "b" / "x.md"
+    swapped = project / "a" / "c" / "y.md"
+    real_write = ow.atomic_write_text
+
+    def write_then_swap(path, *args, **kwargs):
+        real_write(path, *args, **kwargs)
+        if path == first:
+            (project / "a" / "c").rmdir()
+            (project / "a" / "c").symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(ow, "atomic_write_text", write_then_swap)
+
+    with pytest.raises(OSError, match=r"symlinked path component: a/c/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many({first: "# x\n", swapped: "# y\n"})
+
+    assert first.read_text(encoding="utf-8") == "# x\n"
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+@pytest.mark.parametrize(
+    ("verified", "respelled"),
+    [
+        pytest.param("a", "A", id="case"),
+        pytest.param("caf\u00e9", "cafe\u0301", id="nfd"),
+    ],
+)
+def test_respelled_ancestor_misses_the_batch_cache(
+    tmp_path: Path, monkeypatch, verified: str, respelled: str
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    (project / verified / "b").mkdir(parents=True)
+    try:
+        (project / respelled).symlink_to(outside, target_is_directory=True)
+    except FileExistsError:
+        pytest.skip("filesystem folds this spelling onto the verified directory")
+    checked = _record_checks(monkeypatch, project)
+    outputs = {
+        project / verified / "b" / "x.md": "# x\n",
+        project / respelled / "b" / "y.md": "# y\n",
+    }
+
+    with pytest.raises(OSError, match="symlinked path component"):
+        CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert checked == [(".", f"{verified}/b"), (".", f"{respelled}/b")]
+    assert list(outside.iterdir()) == []
+    assert not (project / verified / "b" / "x.md").exists()
+
+
+def test_dotdot_directories_are_checked_in_full_and_not_cached(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    checked = _record_checks(monkeypatch, project)
+    outputs = {
+        project / "a" / "b" / "x.md": "# x\n",
+        project / "a" / "b" / ".." / "b" / "y.md": "# y\n",
+        project / "a" / "b" / ".." / "b" / "z.md": "# z\n",
+    }
+
+    CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert checked == [(".", "a/b"), (".", "a/b/../b"), (".", "a/b/../b")]
+    assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
