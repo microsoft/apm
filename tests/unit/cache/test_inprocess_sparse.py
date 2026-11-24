@@ -64,7 +64,7 @@ def _repo(tmp_path: Path, extra: dict[str, bytes] | None = None) -> tuple[Path, 
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
         # The attributes land after the files, so no attribute rewrites them on add.
-        _git(src, "add", "-A")
+        _git(src, "add", "--", *batch)
         _git(src, "commit", "-q", "-m", "c")
     return src, _git(src, "rev-parse", "HEAD").decode().strip()
 
