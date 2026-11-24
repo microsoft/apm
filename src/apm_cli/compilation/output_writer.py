@@ -137,6 +137,10 @@ class CompiledOutputWriter:
                 _reject_linked_parent(self._base_dir, path)
         prepared, verdict = self.prepare(outputs)
         for path, final in prepared.items():
+            if self._base_dir is not None:
+                # Re-checked right before the write: a directory replaced by a
+                # link after the batch preflight must still be refused.
+                _reject_linked_parent(self._base_dir, path)
             path.parent.mkdir(parents=True, exist_ok=True)
             preserve = (
                 preserve_line_endings.get(path, False)

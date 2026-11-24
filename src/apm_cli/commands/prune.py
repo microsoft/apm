@@ -52,8 +52,14 @@ from ._helpers import _scan_installed_packages
 from .uninstall.lockfile_state import lockfile_has_persisted_state
 
 
-def _orphan_decision(lockfile, apm_modules_dir: Path, declared_deps, project_root: Path):
-    """The orphan owner's prune decision for *lockfile* and what is installed now."""
+def _orphan_decision(
+    lockfile, apm_modules_dir: Path, declared_deps, project_root: Path, dev_refs=()
+):
+    """The orphan owner's prune decision for *lockfile* and what is installed now.
+
+    *dev_refs* are the dev-only declarations; the walk visits them after
+    production ones, so survivors take install's dev status (#5126).
+    """
     installed = _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
     return decide_orphan_removal(
         operation=OrphanOperation.PRUNE,
@@ -66,8 +72,12 @@ def _orphan_decision(lockfile, apm_modules_dir: Path, declared_deps, project_roo
         reachability=ReachabilityProbe(
             project_root=project_root,
             apm_modules_dir=apm_modules_dir,
-            direct_refs=tuple(declared_deps),
-            dev_refs=(),
+            direct_refs=tuple(
+                ref
+                for ref in declared_deps
+                if ref.get_unique_key() not in {dev.get_unique_key() for dev in dev_refs}
+            ),
+            dev_refs=tuple(dev_refs),
         ),
         deployment_claims=None,
     )
@@ -106,7 +116,9 @@ def _decide_before_any_change(apm_package, apm_modules_dir: Path, logger):
         before = lockfile_path.read_bytes() if lockfile_path.is_file() else None
         lockfile = LockFile.read(lockfile_path)
         declared = apm_package.get_all_apm_dependencies()
-        decision = _orphan_decision(lockfile, apm_modules_dir, declared, project_root)
+        decision = _orphan_decision(
+            lockfile, apm_modules_dir, declared, project_root, _dev_only_refs(apm_package)
+        )
     except (LockfileFormatError, MaterializationPathCollisionError) as exc:
         logger.error(str(exc))
         sys.exit(1)
@@ -261,7 +273,13 @@ def prune(ctx, dry_run):
             decision = (
                 early[1]
                 if unchanged
-                else _orphan_decision(lockfile, apm_modules_dir, declared_deps, project_root)
+                else _orphan_decision(
+                    lockfile,
+                    apm_modules_dir,
+                    declared_deps,
+                    project_root,
+                    _dev_only_refs(apm_package),
+                )
             )
         except MaterializationPathCollisionError as e:
             logger.error(str(e))
@@ -272,6 +290,7 @@ def prune(ctx, dry_run):
         orphaned_packages = list(decision.removed_paths)
         for package in decision.retained_paths:
             logger.progress(f"Retained {package}: required package content.")
+        _warn_retained_rows(decision, lockfile, logger)
         missing_orphaned_keys = list(decision.stale_keys)
         deployment_ledger = (
             DeploymentLedgerCodec.from_lockfile(lockfile) if lockfile is not None else None
@@ -413,6 +432,7 @@ def prune(ctx, dry_run):
 
         removed_count = 0
         failed_count = 0
+        lsp_cleanup_error = None
         removed_packages: list[str] = []
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
@@ -498,21 +518,18 @@ def prune(ctx, dry_run):
 
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
+            _reparent_survivors(lockfile, decision)
             lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
-            if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
-                from .uninstall.engine import _cleanup_stale_mcp
-
-                _cleanup_stale_mcp(
-                    apm_package,
-                    lockfile,
-                    lockfile_path,
-                    set(lockfile.mcp_servers),
-                    modules_dir=apm_modules_dir,
-                    project_root=project_root,
-                    scope=InstallScope.PROJECT,
-                    persist=False,
-                )
+            lsp_cleanup_error = _cleanup_stale_server_configs(
+                apm_package,
+                lockfile,
+                lockfile_path,
+                apm_modules_dir,
+                project_root,
+                logger,
+                pruned_keys,
+            )
             try:
                 if lockfile_has_persisted_state(lockfile):
                     lockfile.write(lockfile_path)
@@ -578,6 +595,8 @@ def prune(ctx, dry_run):
 
         hint_compile_after_removal(compile_inputs, apm_modules_dir, logger)
 
+        if lsp_cleanup_error is not None:
+            sys.exit(1)
         if failed_count:
             logger.error(
                 f"Prune incomplete: removed {removed_count} orphaned package(s); "
@@ -603,6 +622,101 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _cleanup_stale_server_configs(
+    apm_package, lockfile, lockfile_path, apm_modules_dir, project_root, logger, pruned_keys
+):
+    """Retire pruned packages' MCP and LSP servers through uninstall's owners.
+
+    Returns the LSP cleanup error, already reported, or None (#5250).
+    """
+    if not pruned_keys:
+        return None
+    if lockfile.mcp_servers or lockfile.mcp_target_servers:
+        from .uninstall.engine import _cleanup_stale_mcp
+
+        _cleanup_stale_mcp(
+            apm_package,
+            lockfile,
+            lockfile_path,
+            set(lockfile.mcp_servers),
+            modules_dir=apm_modules_dir,
+            project_root=project_root,
+            scope=InstallScope.PROJECT,
+            persist=False,
+        )
+    # Only lock-owned entries of packages no survivor declares go.
+    from .uninstall.cli import _cleanup_stale_lsp
+
+    _, error = _cleanup_stale_lsp(
+        apm_package=apm_package,
+        manifest_path=manifest_file(project_root),
+        lockfile=lockfile,
+        lockfile_path=lockfile_path,
+        modules_dir=apm_modules_dir,
+        deploy_root=project_root,
+        user_scope=False,
+        logger=logger,
+        command="Prune",
+    )
+    return error
+
+
+def _warn_retained_rows(decision, lockfile, logger) -> None:
+    """Name every row prune keeps because it cannot prove removal safe (#4989)."""
+
+    def name(dep_key: str) -> str:
+        locked = lockfile.dependencies.get(dep_key) if lockfile is not None else None
+        return locked.repo_url if locked is not None else dep_key
+
+    for dep_key, reason in decision.anchored_keys.items():
+        logger.warning(f"Retained {name(dep_key)}: {reason}.")
+    for dep_key, reason in decision.unverified_keys.items():
+        logger.warning(
+            f"Retained {name(dep_key)}: the dependency graph could not be read completely, "
+            f"so prune cannot prove no package still needs it ({reason}). Restore the "
+            "unreadable package, then prune again."
+        )
+
+
+def _dev_only_refs(apm_package):
+    """Dev declarations not also declared for production: install's is_dev roots."""
+    production = {ref.get_unique_key() for ref in apm_package.get_apm_dependencies()}
+    return [
+        ref
+        for ref in apm_package.get_dev_apm_dependencies()
+        if ref.get_unique_key() not in production
+    ]
+
+
+def _reparent_survivors(lockfile, decision) -> None:
+    """Record each survivor's parent, depth and dev status as install records them.
+
+    A survivor whose parent was pruned takes the parent install records
+    (#4989); every walked survivor takes the depth and dev status (#5126).
+    """
+    if decision.reachability is None:
+        return
+    for key, is_dev in decision.rescued_dev.items():
+        if key in lockfile.dependencies:
+            lockfile.dependencies[key].is_dev = is_dev
+    for key, depth in decision.rescued_depths.items():
+        if key in lockfile.dependencies:
+            lockfile.dependencies[key].depth = depth
+    if not decision.rescued_parents:
+        return
+    from .uninstall.local_reanchor import LocalReanchorPlan, apply_local_reanchor, reparent_rows
+
+    declaring, resolved = reparent_rows(
+        lockfile, decision.reachability, decision.rescued_parents, locked_identity=True
+    )
+    apply_local_reanchor(
+        lockfile, LocalReanchorPlan(declaring_parents=declaring, resolved_by=resolved)
+    )
+    for key, parent in resolved.items():
+        if key in lockfile.dependencies and parent is not None:
+            lockfile.dependencies[key].resolved_by = parent
 
 
 def _native_ownership(lockfile, lockfile_path):

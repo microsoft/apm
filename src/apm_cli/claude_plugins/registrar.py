@@ -25,6 +25,10 @@ from apm_cli.core.remediation import (
     kept_note,
 )
 from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
+from apm_cli.native_plugins.claude_marketplaces import (
+    release_project_marketplaces,
+    sync_project_marketplace,
+)
 from apm_cli.native_plugins.layout import (
     NativeLayoutError,
     attributes_enabled,
@@ -362,6 +366,8 @@ def reconcile_native_plugins(
                         legacy.finish(logger)
             else:
                 _keep_legacy(legacy, logger, "no native plugin is locked for it")
+            # No plugin is declared: an entry a failed uninstall left converges now (#5258).
+            release_project_marketplaces(root, user_scope=user_scope, logger=logger)
             return {}
         marketplace, path = scope_binding(
             user_scope=user_scope,
@@ -441,6 +447,15 @@ def reconcile_native_plugins(
     if legacy is not None:
         with contextlib.suppress(OSError):
             legacy.finish(logger)
+    # Claude loads a project plugin's skills and hooks in a first session only
+    # from a marketplace its user registry lists (#5176).
+    sync_project_marketplace(
+        marketplace,
+        root,
+        user_scope=user_scope,
+        claude_declared=any(CLAUDE in on for on in harnesses.values()),
+        logger=logger,
+    )
     retiring = sorted(prior_names - set(declared))
     fingerprints = {own.record.name: own.record.fingerprint for own in prior.values()}
     kept = [

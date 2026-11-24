@@ -1,0 +1,15 @@
+{
+  "issue": 5264,
+  "fixed_in": "Unreleased",
+  "summary": "After a consented marketplace alias rebind, apm update refused correctly but printed a restore command that was always refused: the alias was already registered and credential-bound to the new catalog, so the printed re-add never ran.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_enterprise_registry_lifecycle.py::test_origin_restore_hint_runs_as_printed",
+    "tests/unit/marketplace/test_catalog_origin.py::test_conflict_advice_restores_the_lock_first_and_renders_origins_as_ascii"
+  ]
+}

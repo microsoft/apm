@@ -788,6 +788,26 @@ def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
             assert entry["status"] == "baseline", (op, entry)
 
 
+def test_a_local_path_bin_cell_maps_to_the_native_plugin_source_while_u_bin_holds(
+    monkeypatch,
+) -> None:
+    """U-BIN-SRC: a local directory that can deploy bin/ is a Claude plugin directory, the
+    native-plugin source; the mapping's targets are witnessed, and it lapses with U-BIN."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    mapped = {k: v for k, v in data["mapped"].items() if v["rules"] == ["U-BIN-SRC"]}
+    ops = ("approve-deny", "audit", "compile", "install", "lock", "prune", "uninstall", "update")
+    named = {f"T3|OP={op}|SRC=local-path|PRIM=bin" for op in ops} | {"pair|SRC=local-path|PRIM=bin"}
+    assert set(mapped) == named, sorted(set(mapped) ^ named)
+    for key, entry in mapped.items():
+        assert entry["maps_to"] == key.replace("SRC=local-path", "SRC=native-plugin"), entry
+        target = data["obligations"][entry["maps_to"]]
+        assert target["status"] == "required", (key, target)
+    cell = {"OP": "install", "SRC": "local-path", "PRIM": "bin"}
+    assert classify("T3", cell).rules == ("U-BIN-SRC",)
+    monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
+    assert classify("T3", cell) == Verdict("obligation", ())
+
+
 def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
     pins = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["pins"]
     assert pins["U-USER-SCOPE-ORG-POLICY"] == U_USER_ORG_POLICY_PIN, pins
@@ -915,7 +935,10 @@ def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive(
         assert f"def {name.split('[')[0]}(" in (root / path).read_text(encoding="utf-8"), node
     for op, src, prim in SOURCE_SPINE_UNOBSERVED:
         key = f"T3|OP={op}|SRC={src}|PRIM={prim}"
-        assert data["obligations"][key]["status"] == "baseline", data["obligations"][key]
+        entry = data["obligations"].get(key)
+        # Unobserved by the source spine: baseline, removed by a rule, or credited by
+        # another spine that does observe it (the registry kit spine, #4096).
+        assert entry is None or entry.get("witness") != SOURCE_SPINE, (key, entry)
     # A projected pair keeps no unexercised step among its credits (it names no OP).
     unexercised = {
         f"T3|{op}|{form}|{prim}"

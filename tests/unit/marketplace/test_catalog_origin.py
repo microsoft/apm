@@ -96,7 +96,7 @@ def test_conflict_remediation_quotes_the_locked_origin() -> None:
 def test_conflict_advice_restores_the_lock_first_and_renders_origins_as_ascii() -> None:
     message = str(MarketplaceOriginConflictError("company", "plugin", _A, _B))
     restore = message.index("restore it from version control")
-    assert restore < message.index("verify that source first, then run 'apm marketplace add")
+    assert restore < message.index("verify that source first, then run 'apm marketplace remove")
     escaped = str(MarketplaceOriginConflictError("company", "plugin", "https://x/\x1b[31m", "\x07"))
     assert escaped.isascii() and "\x1b" not in escaped and "\x07" not in escaped
     assert "apm marketplace add https://x" not in escaped
@@ -118,6 +118,7 @@ _PROJECT_CONFLICT = (
     f"marketplace 'company' now points at {_B}, but apm.lock.yaml recorded 'plugin' "
     f"from {_A}. Nothing was changed. If apm.lock.yaml was not changed on purpose, "
     "restore it from version control. Otherwise, verify that source first, then run "
+    "'apm marketplace remove company --yes', then run "
     f"'apm marketplace add {_A} --name company' "
     "to keep the locked marketplace (add --ref or --path if the original "
     "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
@@ -130,7 +131,8 @@ _USER_CONFLICT = (
     "mistake, or to switch marketplaces on purpose, remove 'plugin' from "
     "~/.apm/apm.yml, then run 'apm install -g' to drop the plugin locked from the old "
     "marketplace, then add it back and run 'apm install -g' again. Otherwise, verify "
-    f"that source first, then run 'apm marketplace add {_A} --name company' to keep "
+    "that source first, then run 'apm marketplace remove company --yes', then run "
+    f"'apm marketplace add {_A} --name company' to keep "
     "the locked marketplace (add --ref or --path if the original registration used them)."
 )
 

@@ -25,6 +25,8 @@ from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
 from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
+from .local_bundle_markdown_hooks import record_bundle_markdown_hooks as _record_md_hooks
+from .local_bundle_markdown_hooks import retire_before_bundle_install as _retire_md_hooks
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
@@ -871,6 +873,9 @@ def integrate_local_bundle(
 
     bundle_dir: Path = bundle_info.source_dir
     pack_files = _deployable_pack_files(bundle_info)
+    _retire_md_hooks(
+        scope, project_root, targets, allow_executables, logger=logger, dry_run=dry_run
+    )
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
@@ -983,6 +988,7 @@ def integrate_local_bundle(
                 hooks_approved=_hooks_approved_bundle,
                 canvas_approved=_canvas_ok,
                 rendering_extension=_renderings.get(_rel_norm),
+                source=src,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -992,6 +998,7 @@ def integrate_local_bundle(
                     target=target,
                     hooks_approved=_hooks_approved_bundle,
                     canvas_approved=_canvas_ok,
+                    source=src,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))
@@ -1150,6 +1157,8 @@ def integrate_local_bundle(
             project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope
         )
 
+    _record_md_hooks(scope, project_root, targets, str(slug), approval_key, deployed_files, dry_run)
+    from .local_bundle_hooks import hooks_denied_bundle as _hooks_denied_bundle
     from .local_bundle_hooks import integrate_local_bundle_hooks
 
     hook_result = integrate_local_bundle_hooks(
@@ -1191,13 +1200,3 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
-
-
-def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
-    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
-    if approval_key is None:
-        return False
-    from ..security.executables import EXEC_TYPE_HOOKS
-    from .local_bundle_handler import bundle_type_denied
-
-    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)

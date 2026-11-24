@@ -1380,9 +1380,10 @@ def _fetch_github_contents(
 
 def _policy_auth_resolver():
     """Return the AuthResolver every policy repository fetch routes through."""
-    from ..core.auth import AuthResolver
+    from ..core import auth, policy_fetch_ledger
 
-    return AuthResolver()
+    policy_fetch_ledger.note_fetch_attempt("repository")  # before any credential lookup
+    return auth.AuthResolver()
 
 
 # ---------------------------------------------------------------------------

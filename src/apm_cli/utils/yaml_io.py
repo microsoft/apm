@@ -15,6 +15,7 @@ Public API::
 """
 
 import copy
+import threading
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -427,6 +428,12 @@ def copy_plain_tree(node: Any) -> Any:
     return copy.deepcopy(node)
 
 
+def machine_yaml_admits(text: str) -> bool:
+    """Whether *text* is within the machine-YAML budget: the one admission gate
+    shared by ``load_machine_yaml_str`` and anything that seeds its parse."""
+    return len(text) <= _MAX_MACHINE_YAML_CHARS
+
+
 def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
     """``load_yaml_str`` for APM-written documents (``apm.lock.yaml``), parsed by libyaml.
 
@@ -434,7 +441,7 @@ def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
     and parsing run in C (pure Python when libyaml is absent). Called only by
     ``deps/lockfile_container.parse_lockfile_text`` (guarded).
     """
-    if len(text) > _MAX_MACHINE_YAML_CHARS:
+    if not machine_yaml_admits(text):
         raise yaml.YAMLError(
             f"YAML document of {len(text)} characters exceeds the {_MAX_MACHINE_YAML_CHARS} "
             "character budget"
@@ -442,7 +449,26 @@ def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
     return _bounded_load(text, _BoundedCSafeLoader)
 
 
+_TOP_LEVEL_LIMIT = 4
+_top_level_values: dict[tuple[str, str], list[str | None] | None] = {}
+_top_level_lock = threading.Lock()
+
+
 def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
+    """Memoized :func:`_top_level_scalar_values`: a pure function of *text*."""
+    with _top_level_lock:
+        if (text, key) in _top_level_values:
+            values = _top_level_values[(text, key)]
+            return None if values is None else list(values)
+    values = _top_level_scalar_values(text, key)
+    with _top_level_lock:
+        _top_level_values[(text, key)] = values
+        while len(_top_level_values) > _TOP_LEVEL_LIMIT:
+            _top_level_values.pop(next(iter(_top_level_values)))
+    return None if values is None else list(values)
+
+
+def _top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
     """Return every top-level *key* occurrence's scalar text, in document order.
 
     Works on the composed node graph (no object construction, so no merge-key
@@ -593,6 +619,59 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+def _non_string_keys(text: str) -> str:
+    """Name the non-string keys of *text*'s frontmatter, or ``""`` when it has none."""
+    metadata, _body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+    data = _BOUNDED_FRONTMATTER_HANDLER.load(metadata)
+    keys = [
+        _key_label(k) for k in (data if isinstance(data, dict) else {}) if not isinstance(k, str)
+    ]
+    return ", ".join(keys)
+
+
+def _key_label(key: Any) -> str:
+    """Name one repository-controlled key safely: printable ASCII, never a failing render."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    try:
+        text = repr(key)
+    except ValueError:  # an int past Python's digit limit
+        return f"<{type(key).__name__}>"
+    return printable_ascii_text(text) if len(text) <= 40 else f"<{type(key).__name__}>"
+
+
+def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
+    """Return *path*'s BOM-stripped frontmatter block, through its closing fence.
+
+    Only a *prefix_bytes* prefix is read, unless the fence is still open at
+    its end; then the whole file is. Bytes after the closing fence are never
+    decoded strictly. A file without frontmatter yields ``""``. Raises
+    ``OSError`` when the file cannot be read or is not a regular file (a FIFO
+    or a link is never read) and ``UnicodeError`` when the block is not UTF-8.
+    """
+    from .path_security import open_regular_file
+
+    boundary = _BOUNDED_FRONTMATTER_HANDLER.FM_BOUNDARY
+    # Never a FIFO, device or final link: a packed name cannot block or redirect the read.
+    with open_regular_file(Path(path)) as handle:
+        data = handle.read(prefix_bytes)
+        complete = len(data) < prefix_bytes
+        while True:
+            text = data.decode("utf-8", errors="surrogateescape").removeprefix("\ufeff")
+            if not boundary.match(text):
+                return ""
+            fences = boundary.finditer(text)
+            next(fences)
+            closing = next(fences, None)
+            if complete or (closing is not None and closing.end() < len(text)):
+                break
+            data += handle.read()
+            complete = True
+    block = text[: closing.end()] if closing is not None else text
+    block.encode("utf-8")  # an undecodable block raises UnicodeEncodeError
+    return block
+
+
 def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     """Parse Markdown text through the bounded handler.
 
@@ -611,6 +690,13 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
     except yaml.YAMLError:
         raise
+    except TypeError as exc:
+        # Post(**metadata) refuses a non-string key such as ``1:`` (#4922, #5028);
+        # any other TypeError is not a frontmatter fault and surfaces unchanged.
+        keys = _non_string_keys(text)
+        if not keys:
+            raise
+        raise yaml.YAMLError(f"non-string frontmatter key(s): {keys}") from exc
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:

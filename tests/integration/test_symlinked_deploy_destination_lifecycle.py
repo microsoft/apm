@@ -72,6 +72,8 @@ def test_install_refuses_a_broken_project_skills_link_before_any_write(
     kind: str, tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world, outside = _project(tmp_path, apm_binary_path, kind)
+    link = world.project / ".claude" / "skills"
+    target = os.readlink(link)
     before = tree_digest(world.project)
 
     result = world.apm("install", expect=None)
@@ -83,6 +85,8 @@ def test_install_refuses_a_broken_project_skills_link_before_any_write(
     assert not outside.exists(), "wrote through the link"
     assert not (world.project / "apm.lock.yaml").exists()
     assert tree_digest(world.project) == before
+    # tree_digest skips links: the refused link itself must survive unchanged.
+    assert link.is_symlink() and os.readlink(link) == target
 
 
 @pytest.mark.parametrize("kind", ["dangling", "loop"])
@@ -90,6 +94,7 @@ def test_install_g_refuses_a_broken_skills_link_before_any_write(
     kind: str, tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world, outside = _user(tmp_path, apm_binary_path, kind)
+    target = os.readlink(world.home / "skills")
     before = world.state()
 
     result = world.install()
@@ -101,6 +106,7 @@ def test_install_g_refuses_a_broken_skills_link_before_any_write(
         assert f"Refusing deployment through a symlinked path component: skills. {_REMEDY}" in text
     assert world.state() == before, text
     assert (world.home / "skills").is_symlink() and not outside.exists()
+    assert os.readlink(world.home / "skills") == target
     assert not (world.manifest.parent / "apm.lock.yaml").exists()
 
 

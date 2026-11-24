@@ -98,6 +98,17 @@ GATE_PLUGIN_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::"
     "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
 )
+SOURCE_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
+)
+SOURCE_KIT_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::"
+    "test_source_kit_spine_credits_registry_executable_cells"
+)
+SOURCE_BUNDLE_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::"
+    "test_source_bundle_spine_credits_bundle_executable_cells"
+)
 _OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
 # Witnesses whose package can deploy a bin/ artifact, with the scope it lands at
 # (#4981). Loose bin/ deploys only for a user-scope marketplace plugin with a
@@ -107,6 +118,7 @@ _OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
 BIN_WITNESSES: Mapping[str, str] = {
     GATE_BIN_SPINE: "user",
     GATE_PLUGIN_BIN_SPINE: "project",
+    SOURCE_BIN_SPINE: "project",
     **{
         _OWNERSHIP + name: "user"
         for name in (
@@ -117,6 +129,8 @@ BIN_WITNESSES: Mapping[str, str] = {
     },
     "tests/lifecycle/scenarios/test_user_scope.py::"
     "test_a_plugin_bin_deploys_under_home_once_trusted": "user",
+    "tests/lifecycle/scenarios/test_user_scope.py::"
+    "test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states": "user",
     "tests/lifecycle/scenarios/test_policy_pairs.py::"
     "test_a_denied_plugin_with_bin_is_refused_at_user_scope": "user",
     **{
@@ -269,6 +283,9 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
+    from tests.lifecycle.machines._source_bin import source_bin_cells
+    from tests.lifecycle.machines._source_bundle import source_bundle_cells
+    from tests.lifecycle.machines._source_kit import KNOWN_IDS, source_kit_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
@@ -326,6 +343,21 @@ def machine_cells() -> list[MachineCell]:
         # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
         assignment = {"PRIM": "bin", "SCOPE": "project"}
         cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
+    for key in sorted(source_bin_cells()):
+        # A whole plugin's bin/ declared by one form through one command (#4096).
+        _, op, form = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": "bin"}
+        cells.append(MachineCell(key, SOURCE_BIN_SPINE, "T-2", assignment))
+    for key in sorted(source_kit_cells()):
+        # A registry package's executable observed through one command (#4096).
+        _, op, form, prim = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": prim}
+        cells.append(MachineCell(key, SOURCE_KIT_SPINE, "T-2", assignment, KNOWN_IDS.get(key)))
+    for key in sorted(source_bundle_cells()):
+        # A local bundle's executable observed through one command (#4096).
+        _, op, form, prim = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": prim}
+        cells.append(MachineCell(key, SOURCE_BUNDLE_SPINE, "T-2", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)

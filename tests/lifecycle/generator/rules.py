@@ -335,6 +335,33 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/install/exec_gate.py", "plugin_bin_deployable", "InstallScope.USER"),
         ),
     ),
+    "U-BIN-SRC": (
+        "a local path whose package can deploy bin/ is a Claude plugin directory, which is "
+        "the native-plugin source: bin/ deploys only for a MARKETPLACE_PLUGIN package, "
+        "loose at user scope (exec_gate.plugin_bin_deployable) or whole at project scope "
+        "(admission.plan_native_claude_plugin), and a local directory with an eligible "
+        "apm.yml is an APM package (format_detection.NormalizationPlanner.plan), never a "
+        "marketplace plugin. So OP x SRC=local-path x PRIM=bin maps to the same cell with "
+        "SRC=native-plugin, which the M-SOURCE bin spine witnesses. Self-reinstating: the "
+        "mapping holds only while the U-BIN pin holds (generator/bin_pin.py)",
+        (
+            Ev(
+                "src/apm_cli/install/exec_gate.py",
+                "plugin_bin_deployable",
+                "PackageType.MARKETPLACE_PLUGIN",
+            ),
+            Ev(
+                "src/apm_cli/claude_plugins/admission.py",
+                "plan_native_claude_plugin",
+                "package_type is not PackageType.MARKETPLACE_PLUGIN",
+            ),
+            Ev(
+                "src/apm_cli/models/format_detection.py",
+                "NormalizationPlanner.plan",
+                "return PackageType.APM_PACKAGE, None",
+            ),
+        ),
+    ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
         (
@@ -749,6 +776,8 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     source = _source_mapping(cell)
     if source is not None:
         return source
+    if prim == "bin" and cell.get("SRC") == "local-path" and u_bin_pinned():
+        return {**cell, "SRC": "native-plugin"}, "U-BIN-SRC"
     rule_target = _rule_cell_target(cell)
     if rule_target is not None:
         return rule_target
