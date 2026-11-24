@@ -1847,7 +1847,7 @@ class HookIntegrator(BaseIntegrator):
                 return
             if native_modified:
                 if not remove_emptied_hook_file(json_path, data, defaults or {}, root):
-                    with provenance.recorded_config_write(json_path):
+                    with provenance.recorded_config_write(json_path, skeleton=defaults or {}):
                         write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
@@ -2087,7 +2087,7 @@ class HookIntegrator(BaseIntegrator):
             if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root):
                 stats["files_removed"] += 1
             elif modified:
-                with provenance.recorded_config_write(json_path):
+                with provenance.recorded_config_write(json_path, skeleton=defaults or {}):
                     write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if kept:
