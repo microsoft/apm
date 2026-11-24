@@ -1017,6 +1017,18 @@ def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
             f"{repo_url} still resolves through it, and the package that now declares "
             f"{repo_url} is not in apm.lock.yaml"
         )
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    identity = lockfile_parent_identity(lockfile.dependencies[parent], lockfile.replacements)
+    if any(
+        other != parent and lockfile_parent_identity(row, lockfile.replacements) == identity
+        for other, row in lockfile.dependencies.items()
+    ):
+        # Recording a parent identity two rows share leaves the survivor ambiguous.
+        return (
+            f"{repo_url} still resolves through it, and the package that now declares "
+            f"{repo_url} shares its identity {identity} with another package"
+        )
     declared = walk.local_edge_repos.get((key, parent), (None, None))[0]
     if declared in (None, repo_url):
         return None
