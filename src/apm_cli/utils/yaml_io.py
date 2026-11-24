@@ -605,6 +605,17 @@ def _reserved_keys(text: str) -> str:
     return ", ".join(repr(key) for key in _RESERVED_FRONTMATTER_KEYS if key in present)
 
 
+def _located_problem(exc: yaml.MarkedYAMLError) -> str:
+    """One line naming where the frontmatter breaks and why (#5216)."""
+    # The context mark is where the broken construct starts; the problem mark
+    # may only be where the parser gave up (often the end of the block).
+    mark = exc.context_mark or exc.problem_mark
+    problem = ", ".join(part for part in (exc.context, exc.problem) if part) or "malformed YAML"
+    if mark is None:
+        return f"malformed frontmatter: {problem}"
+    return f"frontmatter line {mark.line + 1}, column {mark.column + 1}: {problem}"
+
+
 def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
     """Return *path*'s BOM-stripped frontmatter block, through its closing fence.
 
@@ -650,6 +661,8 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     try:
         _BOUNDED_FRONTMATTER_HANDLER.split(text)
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    except yaml.MarkedYAMLError as exc:
+        raise yaml.YAMLError(_located_problem(exc)) from exc
     except yaml.YAMLError:
         raise
     except TypeError as exc:
