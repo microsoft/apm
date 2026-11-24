@@ -19,7 +19,7 @@ from apm_cli.cache.pack_objects import materialize_tree
 from apm_cli.core.invocation_memo import invocation_scope
 from apm_cli.utils.git_env import reset_git_cache
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-git-transport-selection")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-transport-selection")]
 
 _FILES = {
     "a.txt": b"alpha\n",
