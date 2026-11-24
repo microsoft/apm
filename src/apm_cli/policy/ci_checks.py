@@ -23,7 +23,7 @@ from ..core import remediation
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from ..core.remediation import DEPLOYED_FILES_MISSING, LOCKFILE_MISSING, ORPHANED_PACKAGES
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
-from .claude_instructions_check import check_claude_instructions_compiled
+from .claude_instructions_check import claude_instructions_result
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
@@ -2075,22 +2075,11 @@ def run_baseline_checks(
                 policy_provider=policy_provider,
             )
         )
-        # 8e: an instruction routed to AGENTS.md has a compiled copy Claude loads
-        # (#5344); project scope only, so a user-scope audit does not list it.
+        # 8e: routed Claude instructions are compiled (#5344); project scope only.
         or (
             not user_scope
             and _run(
-                check_claude_instructions_compiled(
-                    project_root,
-                    resolved_targets,
-                    user_scope=user_scope,
-                    modules_root=(
-                        prepared_replay.modules_root
-                        if prepared_replay is not None
-                        else project_root / APM_MODULES_DIR
-                    ),
-                    lock=lock,
-                )
+                claude_instructions_result(project_root, resolved_targets, prepared_replay, lock)
             )
         )
     ):

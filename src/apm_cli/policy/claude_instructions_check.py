@@ -64,3 +64,19 @@ def check_claude_instructions_compiled(
         message=f"{len(names)} instruction(s) routed to AGENTS.md are not compiled",
         details=[uncompiled_instructions_warning(names)],
     )
+
+
+def claude_instructions_result(
+    project_root: Path, targets: Sequence[Any], prepared_replay: Any, lock: Any
+) -> CheckResult:
+    """The baseline batch's project-scope entry point: modules from the replay if any."""
+    from ..constants import APM_MODULES_DIR
+
+    modules_root = (
+        prepared_replay.modules_root
+        if prepared_replay is not None
+        else Path(project_root) / APM_MODULES_DIR
+    )
+    return check_claude_instructions_compiled(
+        project_root, targets, user_scope=False, modules_root=modules_root, lock=lock
+    )
