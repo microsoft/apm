@@ -1061,3 +1061,32 @@ def test_a_busy_apm_home_names_the_other_apm_and_leaves_the_users_file(
 
     assert "remove the config file records" not in str(refused.value)
     assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_a_journal_first_touch_entry_survives_migration_to_record_files(tmp_path, apm_home) -> None:
+    """#5051 x #5037: a layout 1 store's {"prior", "journal"} history entry is carried into
+    the record files, so replay of that journal still vouches for its first bytes."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(_WITH_ENTRY.encode("utf-8"))
+    first = b'{"mcpServers": {}}\n'
+    key = config_file_key(config)
+    v1 = {
+        "version": 1,
+        "files": [{"path": key, "origin": "created", "hash": _sha(_WITH_ENTRY)}],
+        "history": {
+            key: {
+                "prior": _sha(first.decode("utf-8")),
+                "journal": "install-1",
+            }
+        },
+    }
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    store.write_text(json.dumps(v1), encoding="utf-8")
+
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)  # migrates the store
+
+    assert json.loads(store.read_text(encoding="utf-8"))["version"] == 2
+    assert vouches_for_current_bytes(config, first, journal="install-1") is True
+    assert vouches_for_current_bytes(config, first, journal="install-2") is False
