@@ -631,6 +631,7 @@ def legacy_source_marker_is_unambiguous(
 # deploys are recorded beside its hooks, with the same marker.
 PER_FILE_BUNDLE_RECORDS = "local-bundle-hooks"
 _RECORD_HOOK_FILES = "hook_files"
+_RECORD_FILE_HASHES = "file_hashes"
 BUNDLE_RECORD_HOOKS = "hooks"
 BUNDLE_RECORD_CANVAS = "canvas"
 # Bundle Markdown with frontmatter hooks is recorded in its own committed file
@@ -653,6 +654,19 @@ def per_file_bundle_records(
     if not isinstance(records, list):
         raise TypeError(f"local-bundle {kind} records must be a list")
     return [record for record in records if isinstance(record, dict)]
+
+
+def per_file_bundle_file_hashes(
+    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS
+) -> dict[str, dict[str, str]]:
+    """Return ``slug -> {file: content hash}`` the *kind* records of a sidecar bind."""
+    found: dict[str, dict[str, str]] = {}
+    for record in per_file_bundle_records(sidecar_path, kind):
+        parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
+        hashes = record.get(_RECORD_FILE_HASHES)
+        if parsed is not None and isinstance(hashes, dict):
+            found[parsed[0]] = {str(k): str(v) for k, v in hashes.items()}
+    return found
 
 
 def per_file_bundle_hook_keys(
@@ -680,11 +694,13 @@ def write_per_file_bundle_record(
     kind: str = BUNDLE_RECORD_HOOKS,
     project_root: Path | None = None,
     user_scope: bool = False,
+    file_hashes: dict[str, str] | None = None,
 ) -> None:
     """Record (or, with no *hook_files*, drop) one bundle's *kind* approval record.
 
     The sidecar is written through :func:`write_hook_sidecar` (#5039);
-    *project_root* marks an install write, as there.
+    *project_root* marks an install write, as there. *file_hashes* binds each
+    file to the content the key admitted (#5254).
     """
     records_key, files_key = _RECORD_KINDS[kind]
     kept = [
@@ -693,12 +709,15 @@ def write_per_file_bundle_record(
         if record.get("_apm_source") not in LocalBundleMarkers(bundle_id)
     ]
     if hook_files:
-        kept.append(
-            {
-                "_apm_source": local_bundle_hook_source_marker(bundle_id, approval_key),
-                files_key: sorted(hook_files),
+        record: dict[str, Any] = {
+            "_apm_source": local_bundle_hook_source_marker(bundle_id, approval_key),
+            files_key: sorted(hook_files),
+        }
+        if file_hashes:
+            record[_RECORD_FILE_HASHES] = {
+                path: file_hashes[path] for path in sorted(hook_files) if path in file_hashes
             }
-        )
+        kept.append(record)
     data = read_hook_object(sidecar_path) if sidecar_path.exists() else {}
     if kept:
         data[records_key] = kept

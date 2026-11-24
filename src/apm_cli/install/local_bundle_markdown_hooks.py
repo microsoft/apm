@@ -4,9 +4,10 @@ An approved local bundle may deploy Markdown files (a command ``.md``, a
 ``SKILL.md``) whose frontmatter declares ``hooks`` (#5248). As for canvas
 extensions, the lockfile's local-bundle rows are the source of truth: every
 row whose deployed file declares frontmatter hooks must be admitted by a
-committed approval record (``apm-bundle-markdown-hooks.json`` at the target
-root) whose key current trust still grants. Every install, update and prune
-retires the rest; a row no record names fails closed.
+committed approval record (``apm-bundle-markdown-hooks.json`` at a target
+root) whose key current trust still grants and whose recorded content hash
+matches the row. Every install, update and prune retires the rest, across
+every known target root of the scope; a row no record admits fails closed.
 """
 
 from __future__ import annotations
@@ -28,23 +29,13 @@ class _Holding:
     files: set[str] = field(default_factory=set)
 
 
-def _record_path(project_root: Path, target: Any) -> Path:
-    from ..integration.hook_ownership import BUNDLE_MARKDOWN_RECORD_FILE
+@dataclass
+class _Record:
+    """One bundle's recorded keys, files and admitted content hashes."""
 
-    return Path(project_root) / target.root_dir / BUNDLE_MARKDOWN_RECORD_FILE
-
-
-def _prefix(target: Any) -> str:
-    return Path(target.root_dir).as_posix().rstrip("/") + "/"
-
-
-def _package_id(approval_key: str) -> str:
-    """Return the package id an exact-content bundle key names (``<id>#<ver>@<digest>``)."""
-    return approval_key.split("#", 1)[0]
-
-
-def _key_names_bundle(slug: str, approval_key: str | None) -> bool:
-    return bool(approval_key) and _package_id(str(approval_key)) == slug
+    keys: set = field(default_factory=set)
+    files: set[str] = field(default_factory=set)
+    hashes: dict[str, str] = field(default_factory=dict)
 
 
 class BundleMarkdownRecordUnreadable(RuntimeError):
@@ -57,22 +48,87 @@ class BundleMarkdownRecordUnreadable(RuntimeError):
         )
 
 
-def _read_records(project_root: Path, targets: Any) -> dict[Path, dict]:
+def _record_path(project_root: Path, target: Any) -> Path:
+    from ..integration.hook_ownership import BUNDLE_MARKDOWN_RECORD_FILE
+
+    return Path(project_root) / target.root_dir / BUNDLE_MARKDOWN_RECORD_FILE
+
+
+def _prefixes(target: Any) -> tuple[str, ...]:
+    """Return the target root and every primitive ``deploy_root`` it deploys under."""
+    prefixes = [Path(target.root_dir).as_posix().rstrip("/") + "/"]
+    for mapping in (getattr(target, "primitives", None) or {}).values():
+        deploy_root = getattr(mapping, "deploy_root", None)
+        if deploy_root:
+            prefix = Path(deploy_root, mapping.subdir or "").as_posix().rstrip("/") + "/"
+            if prefix not in prefixes:
+                prefixes.append(prefix)
+    return tuple(prefixes)
+
+
+def _scan_targets(targets: Any, *, user_scope: bool) -> list[Any]:
+    """Return *targets* plus every known target of the scope.
+
+    A bundle file deployed for a target the manifest no longer names is still
+    re-checked against its record.
+    """
+    from ..integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+    found = {target.name: target for target in targets or ()}
+    for profile in KNOWN_TARGETS.values():
+        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
+        if scoped is not None and scoped.name not in found:
+            found[scoped.name] = scoped
+    return list(found.values())
+
+
+def _package_id(approval_key: str) -> str:
+    """Return the package id an exact-content bundle key names (``<id>#<ver>@<digest>``)."""
+    return approval_key.split("#", 1)[0]
+
+
+def _key_names_bundle(slug: str, approval_key: str | None) -> bool:
+    return bool(approval_key) and _package_id(str(approval_key)) == slug
+
+
+def _hash_or_none(path: Path) -> str | None:
+    """Return the file's content hash, or ``None`` when it cannot be read."""
+    from ..utils.content_hash import compute_file_hash
+
+    try:
+        return compute_file_hash(path) if path.is_file() else None
+    except OSError:
+        return None
+
+
+def _read_records(project_root: Path, targets: Any) -> list[tuple[dict, dict]]:
     """Read every target's committed record before anything changes.
 
+    Returns ``(slug -> (key, files), slug -> {file: hash})`` per record file.
     Raises :class:`BundleMarkdownRecordUnreadable` naming the first record
     that cannot be read, so a retirement never stops half done.
     """
-    from ..integration.hook_ownership import BUNDLE_RECORD_MARKDOWN, per_file_bundle_hook_keys
+    from ..integration.hook_ownership import (
+        BUNDLE_RECORD_MARKDOWN,
+        per_file_bundle_file_hashes,
+        per_file_bundle_hook_keys,
+    )
     from .local_bundle_hook_trust import _relative_value
 
-    found: dict[Path, dict] = {}
+    found: list[tuple[dict, dict]] = []
+    seen: set[Path] = set()
     for target in targets or ():
         path = _record_path(project_root, target)
-        if not path.exists() and not path.is_symlink():
+        if path in seen or (not path.exists() and not path.is_symlink()):
             continue
+        seen.add(path)
         try:
-            found[path] = per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN)
+            found.append(
+                (
+                    per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN),
+                    per_file_bundle_file_hashes(path, BUNDLE_RECORD_MARKDOWN),
+                )
+            )
         except (OSError, ValueError, TypeError) as exc:
             raise BundleMarkdownRecordUnreadable(
                 _relative_value(str(path), Path(project_root)), exc
@@ -80,22 +136,26 @@ def _read_records(project_root: Path, targets: Any) -> dict[Path, dict]:
     return found
 
 
-def _records(project_root: Path, targets: Any) -> dict[str, tuple[set, set[str]]]:
-    """Return ``slug -> (keys, files)`` from every target's committed record.
+def _records(project_root: Path, targets: Any) -> dict[str, _Record]:
+    """Return each bundle's merged record across every target root.
 
     A record whose key names another bundle than its slug grants nothing, so
     its rows fail closed.
     """
     from .local_bundle_hook_trust import _relative_value
 
-    found: dict[str, tuple[set, set[str]]] = {}
-    for records in _read_records(project_root, targets).values():
-        for slug, (key, files) in records.items():
+    root = Path(project_root)
+    found: dict[str, _Record] = {}
+    for keyed, hashed in _read_records(root, targets):
+        for slug, (key, files) in keyed.items():
             if not _key_names_bundle(slug, key):
                 continue  # a record borrowing another bundle's key grants nothing
-            keys, held = found.setdefault(slug, (set(), set()))
-            keys.add(key)
-            held.update(_relative_value(value, Path(project_root)) for value in files)
+            record = found.setdefault(slug, _Record())
+            record.keys.add(key)
+            record.files.update(_relative_value(value, root) for value in files)
+            record.hashes.update(
+                {_relative_value(k, root): v for k, v in hashed.get(slug, {}).items()}
+            )
     return found
 
 
@@ -108,7 +168,7 @@ def record_bundle_markdown_hooks(
     deployed: Collection[str],
     dry_run: bool,
 ) -> None:
-    """Record the hooked Markdown this install of *slug* deployed, with its key.
+    """Record the hooked Markdown this install deployed, with its key and content hash.
 
     Hooked Markdown deploys only under an approved key (#5248), so any it
     deployed was admitted by *approval_key*. A target where this install
@@ -124,13 +184,14 @@ def record_bundle_markdown_hooks(
     from .local_bundle_paths import markdown_declares_hooks
 
     root = Path(project_root)
-    hooked = {
-        _relative_value(value, root)
-        for value in deployed
-        if markdown_declares_hooks(Path(value) if Path(value).is_absolute() else root / value)
-    }
+    hooked: dict[str, str] = {}
+    for value in deployed:
+        path = Path(value) if Path(value).is_absolute() else root / value
+        digest = _hash_or_none(path)
+        if digest is not None and markdown_declares_hooks(path):
+            hooked[_relative_value(value, root)] = digest
     for target in targets or ():
-        files = sorted(value for value in hooked if value.startswith(_prefix(target)))
+        files = sorted(value for value in hooked if value.startswith(_prefixes(target)))
         if files:
             write_per_file_bundle_record(
                 _record_path(root, target),
@@ -140,6 +201,7 @@ def record_bundle_markdown_hooks(
                 kind=BUNDLE_RECORD_MARKDOWN,
                 project_root=root,
                 user_scope=scope == InstallScope.USER,
+                file_hashes={value: hooked[value] for value in files},
             )
 
 
@@ -148,7 +210,7 @@ def _hooked_rows(project_root: Path, targets: Any, lock_paths: Collection[str]) 
     from .local_bundle_hook_trust import _relative_value, contained_bundle_path
     from .local_bundle_paths import markdown_declares_hooks
 
-    prefixes = tuple(_prefix(target) for target in targets or ())
+    prefixes = tuple(prefix for target in targets or () for prefix in _prefixes(target))
     rows: set[str] = set()
     for value in lock_paths:
         path = contained_bundle_path(project_root, value, prefixes)
@@ -157,15 +219,15 @@ def _hooked_rows(project_root: Path, targets: Any, lock_paths: Collection[str]) 
     return rows
 
 
-def _denied_slugs(records: dict[str, tuple[set, set[str]]], allow_map: Any) -> set[str]:
+def _denied_slugs(records: dict[str, _Record], allow_map: Any) -> set[str]:
     """Return the slugs whose recorded key the current trust explicitly denies."""
     from ..security.executables import EXEC_TYPE_HOOKS
     from .local_bundle_handler import bundle_type_denied
 
     return {
         slug
-        for slug, (keys, _files) in records.items()
-        if any(bundle_type_denied(allow_map, key, EXEC_TYPE_HOOKS) for key in keys)
+        for slug, record in records.items()
+        if any(bundle_type_denied(allow_map, key, EXEC_TYPE_HOOKS) for key in record.keys)
     }
 
 
@@ -174,6 +236,7 @@ def _unadmitted(
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]]],
     lock_paths: Collection[str],
+    lock_hashes: dict[str, str] | None = None,
 ) -> list[_Holding]:
     rows = _hooked_rows(project_root, targets, lock_paths)
     if not rows:
@@ -190,17 +253,27 @@ def _unadmitted(
     records = _records(project_root, targets)
     granted = {
         slug
-        for slug, (keys, _files) in records.items()
-        if all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys)
+        for slug, record in records.items()
+        if all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in record.keys)
     }
     denied = _denied_slugs(records, allow_map)
     holdings: dict[tuple[str | None, str], _Holding] = {}
     for row in sorted(rows):
-        owners = sorted(slug for slug, (_keys, files) in records.items() if row in files)
+        owners = sorted(slug for slug, record in records.items() if row in record.files)
         refusing = [slug for slug in owners if slug in denied]
-        if not refusing and any(slug in granted for slug in owners):
-            continue  # another still-granted bundle admits this path; a deny wins
-        slug = (refusing or owners or [None])[0]
+        current = _hash_or_none(Path(project_root) / row)
+        admitting = [
+            slug
+            for slug in owners
+            if slug in granted
+            and current is not None
+            and records[slug].hashes.get(row) == current == (lock_hashes or {}).get(row)
+        ]
+        if admitting and not refusing:
+            continue  # a granted record admits these exact bytes; a deny wins
+        # Name the bundle whose recorded bytes are on disk, the deployer.
+        deployer = [slug for slug in owners if records[slug].hashes.get(row) == current]
+        slug = (refusing or deployer or owners or [None])[0]
         reason = REASON_NOT_GRANTED if owners else REASON_UNRECORDED
         holdings.setdefault((slug, reason), _Holding(slug, reason)).files.add(row)
     return list(holdings.values())
@@ -209,17 +282,16 @@ def _unadmitted(
 def _remove_exact(project_root: Path, files: Collection[str], recorded: dict[str, str]):
     """Remove each file whose bytes match its lock hash exactly; return ``(removed, kept)``.
 
-    A file with no lock hash, or edited outside APM, is kept.
+    A file with no lock hash, edited outside APM, or unreadable is kept.
     """
     from ..integration import write_seam
-    from ..utils.content_hash import compute_file_hash
 
     removed: set[str] = set()
     kept: set[str] = set()
     for value in files:
         path = Path(project_root) / value
         digest = recorded.get(value)
-        if digest is None or digest != compute_file_hash(path):
+        if digest is None or digest != _hash_or_none(path):
             kept.add(value)
             continue
         try:
@@ -236,6 +308,7 @@ def _forget(project_root: Path, targets: Any, slug: str, removed: set[str], scop
     from ..core.scope import InstallScope
     from ..integration.hook_ownership import (
         BUNDLE_RECORD_MARKDOWN,
+        per_file_bundle_file_hashes,
         per_file_bundle_hook_keys,
         write_per_file_bundle_record,
     )
@@ -248,6 +321,7 @@ def _forget(project_root: Path, targets: Any, slug: str, removed: set[str], scop
         if slug not in records:
             continue
         key, files = records[slug]
+        hashes = per_file_bundle_file_hashes(path, BUNDLE_RECORD_MARKDOWN).get(slug, {})
         write_per_file_bundle_record(
             path,
             slug,
@@ -256,7 +330,20 @@ def _forget(project_root: Path, targets: Any, slug: str, removed: set[str], scop
             kind=BUNDLE_RECORD_MARKDOWN,
             project_root=Path(project_root),
             user_scope=scope == InstallScope.USER,
+            file_hashes=hashes,
         )
+
+
+def preflight_bundle_markdown_records(project_root: Path, targets: Any, *, scope: Any) -> None:
+    """Read every record the re-check will use before any retirement starts.
+
+    Raises :class:`BundleMarkdownRecordUnreadable` so install, update and
+    prune stop before the first hook, canvas or Markdown file is removed.
+    """
+    from ..core.scope import is_user_scope
+
+    user_scope = scope is not None and is_user_scope(scope)
+    _read_records(Path(project_root), _scan_targets(targets, user_scope=user_scope))
 
 
 def retire_unadmitted_bundle_markdown(
@@ -271,26 +358,28 @@ def retire_unadmitted_bundle_markdown(
 ) -> list[str]:
     """Retire hooked bundle Markdown current trust no longer admits; return its paths.
 
-    A file is removed only when its bytes match its lock hash exactly; a file
-    with no hash or edited outside APM is kept and named.
+    Every known target root of the scope is scanned. A file is removed only
+    when its bytes match its lock hash exactly; a file with no hash, edited
+    outside APM, or unreadable is kept and named.
     """
     from ..core.remediation import BUNDLE_HOOKS_RETIRED
+    from ..core.scope import is_user_scope
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from .local_bundle_hook_trust import _drop_lock_rows, local_bundle_paths
+    from .local_bundle_hook_trust import _drop_lock_rows, _relative_value, local_bundle_paths
 
     root = Path(project_root)
-    holdings = _unadmitted(root, targets, allow_executables, local_bundle_paths(lock_dir))
-    if not holdings:
-        return []
+    scanned = _scan_targets(targets, user_scope=scope is not None and is_user_scope(scope))
     lockfile = LockFile.read(get_lockfile_path(lock_dir))
     recorded = {}
     if lockfile is not None:
-        from .local_bundle_hook_trust import _relative_value
-
         recorded = {
             _relative_value(value, root): digest
             for value, digest in lockfile.local_deployed_file_hashes.items()
         }
+    lock_paths = local_bundle_paths(lock_dir)
+    holdings = _unadmitted(root, scanned, allow_executables, lock_paths, recorded)
+    if not holdings:
+        return []
     retired: list[str] = []
     for holding in holdings:
         label = f"local bundle '{holding.slug}'" if holding.slug else "a local bundle"
@@ -304,10 +393,10 @@ def retire_unadmitted_bundle_markdown(
         removed, kept = _remove_exact(root, holding.files, recorded)
         if removed:
             _drop_lock_rows(
-                lock_dir, {v for v in local_bundle_paths(lock_dir) if _rel(v, root) in removed}
+                lock_dir, {v for v in lock_paths if _relative_value(v, root) in removed}
             )
             if holding.slug:
-                _forget(root, targets, holding.slug, removed, scope)
+                _forget(root, scanned, holding.slug, removed, scope)
         retired.extend(sorted(removed))
         if logger is not None:
             message = (
@@ -316,14 +405,8 @@ def retire_unadmitted_bundle_markdown(
             )
             if kept:
                 message += (
-                    " Kept, as they are edited or have no recorded hash; review and "
-                    f"remove them by hand: {', '.join(sorted(kept))}."
+                    " Kept, as they are edited, unreadable or have no recorded hash; review "
+                    f"and remove them by hand: {', '.join(sorted(kept))}."
                 )
             logger.warning(message)
     return retired
-
-
-def _rel(value: str, root: Path) -> str:
-    from .local_bundle_hook_trust import _relative_value
-
-    return _relative_value(value, root)

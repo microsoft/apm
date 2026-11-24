@@ -274,16 +274,16 @@ def _assert_block_rows(actual: set, expected: set) -> None:
 
 def test_an_unreadable_hooked_file_is_kept(tmp_path: Path, monkeypatch) -> None:
     """#5254 T5: a hash read failure keeps and names the file instead of aborting."""
-    from apm_cli.install import local_bundle_markdown_hooks as module
+    from apm_cli.install.local_bundle_markdown_hooks import _remove_exact
 
     (tmp_path / "a.md").write_bytes(b"---\nhooks: {}\n---\n")
-    from apm_cli.utils import content_hash
 
-    def unreadable(path):
-        raise PermissionError(f"denied: {path}")
+    def unreadable(self):
+        raise PermissionError(f"denied: {self}")
 
-    monkeypatch.setattr(content_hash, "compute_file_hash", unreadable)
+    monkeypatch.setattr(Path, "read_bytes", unreadable)
 
-    removed, kept = module._remove_exact(tmp_path, ["a.md"], {"a.md": "sha256:" + "0" * 64})
+    removed, kept = _remove_exact(tmp_path, ["a.md"], {"a.md": "sha256:" + "0" * 64})
 
+    monkeypatch.undo()
     _assert_partition(tmp_path, removed, kept, set(), {"a.md"})
