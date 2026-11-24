@@ -89,7 +89,12 @@ def _mentions(command: str, pattern: re.Pattern[str]) -> bool:
 
 
 def runs_script(
-    command: str, refs: tuple[frozenset, frozenset], bases: Collection[Path], project_root: Path
+    command: str,
+    refs: tuple[frozenset, frozenset],
+    bases: Collection[Path],
+    project_root: Path,
+    *,
+    from_cwd: bool = False,
 ) -> bool:
     """Whether *command* may run a bundle script, in any target and spelling (#5106).
 
@@ -98,7 +103,9 @@ def runs_script(
     separator) that certainly resolves elsewhere. An absolute path resolves
     as written; a relative one from every base in *bases*, and only when the
     command never changes directory. ``${CLAUDE_PROJECT_DIR}`` and ``$HOME``
-    count as plain anchors unless the command assigns them.
+    count as plain anchors unless the command assigns them. With *from_cwd*
+    the bases are the handler's declared working directory, so ``./name``
+    resolves from it (#5332); otherwise a bare name may be any directory's.
     """
     names, paths = refs
     pattern = _name_pattern(names)
@@ -117,11 +124,17 @@ def runs_script(
         return True
     if not _mentions(command, pattern):
         return False
-    return _runs(text, pattern, paths, tuple(bases), moved=False)
+    return _runs(text, pattern, paths, tuple(bases), moved=False, from_cwd=from_cwd)
 
 
 def _runs(
-    text: str, pattern: re.Pattern[str], paths: frozenset, bases: tuple, *, moved: bool
+    text: str,
+    pattern: re.Pattern[str],
+    paths: frozenset,
+    bases: tuple,
+    *,
+    moved: bool,
+    from_cwd: bool = False,
 ) -> bool:
     if "$(" in text or "`" in text:
         return True  # a command substitution may build the path around the name
@@ -139,10 +152,10 @@ def _runs(
         if nested and any(space in word for space in " \t"):
             # The intact word may itself be a script path with a space in it.
             if _names_a_script(word, paths, bases, moved) or _runs(
-                word, pattern, paths, bases, moved=moved
+                word, pattern, paths, bases, moved=moved, from_cwd=from_cwd
             ):
                 return True
-        elif not _certainly_elsewhere(word, paths, bases, moved):
+        elif not _certainly_elsewhere(word, paths, bases, moved, from_cwd):
             return True
     return False
 
@@ -157,14 +170,17 @@ def _names_a_script(word: str, paths: frozenset, bases: tuple, moved: bool) -> b
     )
 
 
-def _certainly_elsewhere(word: str, paths: frozenset, bases: tuple, moved: bool) -> bool:
+def _certainly_elsewhere(
+    word: str, paths: frozenset, bases: tuple, moved: bool, from_cwd: bool = False
+) -> bool:
     """Whether *word* is a plain path that resolves, with certainty, to no script."""
     if _NOT_PLAIN.search(word.replace(" ", "")):
         return False
     if word.startswith("/") or _DRIVE.match(word):
         return _normalized(word) not in paths
     relative = posixpath.normpath(word)
-    if moved or "/" not in relative or relative.startswith(".."):
+    qualified = "/" in relative or (from_cwd and word.startswith("./"))
+    if moved or not qualified or relative.startswith(".."):
         return False  # a bare name, or a directory that is not certain
     return all(_normalized(f"{base.as_posix()}/{relative}") not in paths for base in bases)
 
