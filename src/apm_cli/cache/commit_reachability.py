@@ -395,8 +395,16 @@ def _record_tip(downloader, dep_ref, sha: str) -> None:
     root, origin = _origin(downloader, dep_ref)
     ssh = not dep_ref.artifactory_prefix and initial_transport_scheme(dep_ref) == "ssh"
     contact = downloader._build_repo_url(dep_ref.repo_url, use_ssh=ssh, dep_ref=dep_ref)
-    key = _verdict_key(origin, contact, getattr(downloader, "git_env", None))
-    if key is None or not _persists(downloader):
+    if not _persists(downloader):
+        return
+    # Keyed under the env a listing or clone of *contact* gets, as _listed_tip
+    # records: a tip a remote-activated mirror served names that mirror.
+    try:
+        env = _probed_listing_env(contact, getattr(downloader, "git_env", None))
+    except _Unverified:
+        return
+    key = _verdict_key(origin, contact, env)
+    if key is None:
         return
     _record(_marker(root, cache_shard_key(origin), sha.lower()), key)
 

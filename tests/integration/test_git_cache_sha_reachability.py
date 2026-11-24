@@ -1066,3 +1066,42 @@ def test_a_tip_a_mirror_listed_is_not_trusted_for_the_origin_once_the_rewrite_is
     assert len(downloader.contacted) > contacted, "the origin was never checked"
     [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
     assert marker.name == origin.m2
+
+
+class _RemotelyResolved:
+    """A tiered resolver whose resolution came from the origin (e.g. its legacy clone)."""
+
+    @staticmethod
+    def remotely_resolved(_dep_ref, _sha) -> bool:
+        return True
+
+
+def test_a_resolved_tip_a_mirror_served_is_not_trusted_for_the_origin_without_the_rewrite(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: a remotely resolved tip is recorded for the mirror its clone reached."""
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_pinned_commit
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    remote = "https://origin.invalid/acme/repo.git"
+    mirror = tmp_path / "mirror.gitconfig"
+    mirror.write_text(f'[url "{origin.url}"]\n\tinsteadOf = {remote}\n', encoding="ascii")
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{remote}"]\n\tpath = {mirror.as_posix()}\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    downloader = _RefDownloader(tmp_path / "cache", [remote], predicted=remote)
+    downloader._tiered_resolver = _RemotelyResolved()
+    resolved = ResolvedReference("main", GitReferenceType.BRANCH, origin.m2, "main")
+    admit_pinned_commit(downloader, _ref("main"), "main", resolved=resolved)
+    config.write_text("[core]\n\tbare = false\n", encoding="ascii")
+    contacted = len(downloader.contacted)
+
+    with pytest.raises(CommitNotReachableError):
+        admit_pinned_commit(downloader, _ref(origin.m2), origin.m2)
+
+    assert len(downloader.contacted) > contacted, "the origin was never checked"
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified-v2/*")
+    assert marker.name == origin.m2
