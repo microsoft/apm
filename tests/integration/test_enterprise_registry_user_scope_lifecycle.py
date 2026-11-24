@@ -20,6 +20,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -127,12 +128,18 @@ class _Home:
         )
 
 
-def _assert_registry_row(locked, version: str) -> None:
+def _assert_registry_row(locked, gateway: RegistryGateway, version: str) -> None:
+    """The row pins the selected version's download endpoint and the seeded archive digest."""
     assert locked is not None
     assert locked.source == "registry"
     assert locked.version == version
-    assert locked.resolved_url and locked.resolved_url.startswith(_REGISTRY_URL + "/")
-    assert locked.resolved_hash and locked.resolved_hash.startswith("sha256:")
+    url = urlparse(locked.resolved_url or "")
+    assert (url.scheme, url.hostname, url.path) == (
+        "https",
+        REGISTRY_HOST,
+        gateway.registry.download_path(_PACKAGE, version),
+    ), locked.resolved_url
+    assert locked.resolved_hash == gateway.registry.artifact(_PACKAGE, version).digest
     assert not locked.resolved_commit
     assert locked.discovered_via == _CATALOG
     assert locked.marketplace_plugin_name == _PLUGIN
@@ -176,7 +183,7 @@ def test_user_scope_catalog_registry_install_replays_cold_and_updates(
         _registry_only(proxy, baseline)
         declared = load_yaml(employee.manifest)["dependencies"]["apm"]
         assert declared == [{"id": _PACKAGE, "registry": _REGISTRY, "version": "^1.0.0"}]
-        _assert_registry_row(employee.locked(), "1.0.0")
+        _assert_registry_row(employee.locked(), gateway, "1.0.0")
         assert employee.skill.read_text(encoding="utf-8") == _skill("1.0.0")
         employee.assert_cwd_untouched()
 
@@ -204,7 +211,7 @@ def test_user_scope_catalog_registry_install_replays_cold_and_updates(
         baseline = len(proxy.observations)
         employee.ok(env, "update", "-g", "--yes", step="3-update-g")
         _registry_only(proxy, baseline)
-        _assert_registry_row(employee.locked(), "1.1.0")
+        _assert_registry_row(employee.locked(), gateway, "1.1.0")
         assert employee.skill.read_text(encoding="utf-8") == _skill("1.1.0")
         assert load_yaml(employee.manifest)["dependencies"]["apm"] == declared
         employee.assert_cwd_untouched()
