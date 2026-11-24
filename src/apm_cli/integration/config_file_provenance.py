@@ -306,6 +306,31 @@ class _Store:
                 continue
         return None
 
+    def identity_recorded(self, path: Path) -> bool:
+        """Whether a record carries *path*'s device and inode and its current bytes (#5189).
+
+        Consulted only on a lookup miss, and only ever to keep a file. The
+        bytes APM last wrote must still be there too, so an inode a deleted
+        file freed and another file reused does not match.
+        """
+        if self.indexed:
+            try:
+                self._load_all()  # an identity can sit in any directory's record file
+            except _UnreadableStore:
+                return True  # a record elsewhere cannot be ruled out: keep the file
+        try:
+            info = os.stat(path)
+            current = _regular_bytes(path)
+        except OSError:
+            return True  # an identity that cannot be read keeps the file
+        if current is None:
+            return True
+        identity, digest = [info.st_dev, info.st_ino], _digest(current)
+        return any(
+            row.get("identity") == identity and row.get("hash") == digest
+            for row in self.files.values()
+        )
+
     def local(self) -> bool:
         """(c): the store is reached through no link below ``$APM_HOME`` and no ancestor
         of it, as spelled or as resolved, is a VCS working tree."""
@@ -633,7 +658,14 @@ def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None)
     if origin is Origin.LEGACY and recorded is None and not _holds_entries(after):
         return  # a new legacy record never claims a bare skeleton (#5038)
     key = config_file_key(path)
-    store.files[key] = {"origin": origin.value, "hash": _digest(after)}
+    row: dict[str, Any] = {"origin": origin.value, "hash": _digest(after)}
+    try:
+        # The file's identity, so another path to it still finds this record (#5189).
+        info = os.stat(path)
+        row["identity"] = [info.st_dev, info.st_ino]
+    except OSError:
+        pass
+    store.files[key] = row
     from apm_cli.integration.write_seam import active_journal
 
     journal = active_journal()
@@ -774,8 +806,10 @@ def delete_emptied_config(
         _log.debug("Unreadable config file records; keeping %s", path, exc_info=True)
         return False
     origin = _origin(row)
-    if row is not None and origin is None:
-        return False  # a record APM cannot read proves nothing either way
+    if (row is not None and origin is None) or (row is None and store.identity_recorded(path)):
+        # A record APM cannot read proves nothing either way; one under another path
+        # (a second mount) means the unrecorded fallback never applies (#5189).
+        return False
     if origin is Origin.PREEXISTING:
         return False
     if origin is Origin.CREATED:

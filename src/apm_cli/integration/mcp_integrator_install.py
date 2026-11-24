@@ -591,7 +591,8 @@ def _skip_unsupported_remote_transport(
     transport = unsupported_remote_transport(client, server_info)
     if transport is None:
         if is_frozen_unrecorded_mcp_pair(name, runtime):
-            from apm_cli.install.service import frozen_services_error, frozen_unrecorded_reason
+            from apm_cli.install.errors import frozen_unrecorded_reason
+            from apm_cli.install.service import frozen_services_error
 
             raise frozen_services_error([frozen_unrecorded_reason("MCP", name, runtime)])
         return False
@@ -664,8 +665,9 @@ def _resolve_frozen_deferred_pairs(
     """
     from apm_cli.adapters.client._remote_shapes import unsupported_remote_transport
     from apm_cli.factory import ClientFactory
+    from apm_cli.install.errors import frozen_unrecorded_reason
     from apm_cli.install.mcp.ownership import current_frozen_unrecorded_mcp_pairs
-    from apm_cli.install.service import frozen_services_error, frozen_unrecorded_reason
+    from apm_cli.install.service import frozen_services_error
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.registry.operations import MCPServerOperations
 

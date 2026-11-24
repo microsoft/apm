@@ -498,6 +498,7 @@
       "selectors": [
         "src/apm_cli/install/local_bundle_hook_trust.py",
         "src/apm_cli/install/hook_script_refs.py",
+        "src/apm_cli/install/local_bundle_markdown_hooks.py",
         "src/apm_cli/install/local_bundle_canvas.py",
         "src/apm_cli/commands/uninstall/local_bundle.py"
       ],

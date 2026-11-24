@@ -1,0 +1,16 @@
+{
+  "issue": 5246,
+  "fixed_in": "Unreleased",
+  "summary": "The URL-only probe env dropped GIT_CONFIG_PARAMETERS wholesale, so a url insteadOf carried there was missing and a tip a mirror served could be keyed as the origin's verdict; the probe now keeps only the url rewrites, without credentials, headers or userinfo.",
+  "failure_modes": [
+    "auth",
+    "cache"
+  ],
+  "properties": [
+    "auth.credentials_isolated",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_git_cache_sha_reachability.py::test_a_rewrite_in_git_config_parameters_keys_the_tip_to_the_mirror"
+  ]
+}

@@ -646,11 +646,14 @@ def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
     Only a *prefix_bytes* prefix is read, unless the fence is still open at
     its end; then the whole file is. Bytes after the closing fence are never
     decoded strictly. A file without frontmatter yields ``""``. Raises
-    ``OSError`` when the file cannot be read and ``UnicodeError`` when the
-    block is not UTF-8.
+    ``OSError`` when the file cannot be read or is not a regular file (a FIFO
+    or a link is never read) and ``UnicodeError`` when the block is not UTF-8.
     """
+    from .path_security import open_regular_file
+
     boundary = _BOUNDED_FRONTMATTER_HANDLER.FM_BOUNDARY
-    with Path(path).open("rb") as handle:
+    # Never a FIFO, device or final link: a packed name cannot block or redirect the read.
+    with open_regular_file(Path(path)) as handle:
         data = handle.read(prefix_bytes)
         complete = len(data) < prefix_bytes
         while True:
