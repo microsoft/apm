@@ -249,18 +249,19 @@ def _pins_mutation(pins_dir: str | None, *, strict: bool = False) -> Iterator[bo
         lock.release()
 
 
-def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = False) -> None:
+def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = False) -> bool:
     """Persist *pins* to disk atomically.
 
     Writes to a temporary file first, then uses ``os.replace`` to move
     it into place so readers never see a partial write.  Errors are
     logged and swallowed (advisory system), unless *strict*, which raises
-    :class:`RefPinWriteError`. A preview writes nothing.
+    :class:`RefPinWriteError`. A preview writes nothing. Returns whether the
+    pins were written.
     """
     from apm_cli.config import user_state_writes_suppressed
 
     if user_state_writes_suppressed():
-        return
+        return False
     path = _pins_path(pins_dir)
     tmp_path = path + ".tmp"
     try:
@@ -272,6 +273,8 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = Fal
         if strict:
             raise RefPinWriteError(path, type(exc).__name__) from exc
         logger.debug("Failed to save version-pins: %s", exc)
+        return False
+    return True
 
 
 # ------------------------------------------------------------------
@@ -485,11 +488,18 @@ class RefPinStage:
                 self._repairs.pop(key, None)
 
     def commit(self, pins_dir: str | None = None) -> None:
-        """Write every staged pin in one save and close this stage."""
+        """Write every staged pin in one save and close this stage.
+
+        Records which staged repairs the save actually persisted, so a
+        skipped or failed advisory write is never reported as a repair.
+        """
+        global _committed_repairs
         with self._lock:
             staged, self._pins = self._pins, {}
+            repairs = tuple(self._repairs.values())
             self._repairs.clear()
         self._close()
+        _committed_repairs = ()
         if not staged:
             return
         with _pins_mutation(pins_dir) as held:
@@ -498,7 +508,8 @@ class RefPinStage:
             pins = load_ref_pins(pins_dir)
             for (marketplace_name, plugin_name, version), (ref, catalog) in staged.items():
                 _put(pins, marketplace_name, plugin_name, version, catalog, ref)
-            save_ref_pins(pins, pins_dir)
+            if save_ref_pins(pins, pins_dir):
+                _committed_repairs = repairs
 
     def discard(self) -> None:
         """Drop every staged pin and close this stage."""
@@ -518,9 +529,19 @@ _stage_lock = threading.Lock()
 _active_stage: RefPinStage | None = None
 
 
+# Repairs the last committed stage actually wrote (#5243).
+_committed_repairs: tuple[StagedPinRepair, ...] = ()
+
+
+def committed_ref_pin_repairs() -> tuple[StagedPinRepair, ...]:
+    """Return the staged repairs the last commit persisted to the pins file."""
+    return _committed_repairs
+
+
 def open_ref_pin_stage() -> RefPinStage:
     """Open the stage that receives pins resolved by this install attempt."""
-    global _active_stage
+    global _active_stage, _committed_repairs
+    _committed_repairs = ()
     stage = RefPinStage()
     with _stage_lock:
         _active_stage = stage

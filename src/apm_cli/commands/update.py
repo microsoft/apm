@@ -159,18 +159,31 @@ def _render_update_completion_summary(
         noun = "pin" if count == 1 else "pins"
         _rich_success(f"Updated {count} revision {noun} in apm.yml.")
     elif plan_state.pin_repairs:
-        count = len(plan_state.pin_repairs)
-        noun = "pin" if count == 1 else "pins"
-        _rich_success(
-            f"Repaired {count} marketplace ref {noun}. No dependency changes were applied."
-        )
+        _report_pin_repairs(plan_state.pin_repairs, " No dependency changes were applied.")
     else:
         _rich_success("No dependency changes were applied.")
 
     if applied and plan_state.pin_repairs:
-        count = len(plan_state.pin_repairs)
-        noun = "pin" if count == 1 else "pins"
-        _rich_success(f"Repaired {count} marketplace ref {noun}.")
+        _report_pin_repairs(plan_state.pin_repairs, "")
+
+
+def _report_pin_repairs(staged: tuple[Any, ...], suffix: str) -> None:
+    """Report the pin repairs the commit actually saved, and any it could not."""
+    from apm_cli.marketplace.version_pins import committed_ref_pin_repairs
+
+    saved = len(committed_ref_pin_repairs())
+    failed = len(staged) - saved
+    if saved:
+        noun = "pin" if saved == 1 else "pins"
+        _rich_success(f"Repaired {saved} marketplace ref {noun}.{suffix}")
+    if failed > 0:
+        noun = "repair" if failed == 1 else "repairs"
+        _rich_warning(
+            f"Could not save {failed} marketplace ref pin {noun}; the conflicting pins are "
+            "unchanged. Re-run 'apm update --yes' to retry."
+        )
+        if suffix:
+            _rich_success(suffix.strip())
 
 
 def _render_pin_repairs_plan(repairs: tuple[Any, ...]) -> str:
@@ -1273,7 +1286,13 @@ def _run_dep_update_locked(
         return
 
     target_decision = getattr(result, "target_decision", None)
-    reconcile_noop = not dry_run and not plan.has_changes and not revision_pin_updates
+    # A declined pin repair is a refusal, never a no-op that may still write.
+    reconcile_noop = (
+        not dry_run
+        and not plan.has_changes
+        and not revision_pin_updates
+        and not plan_state.pin_repairs
+    )
     if plan_state.proceeded or reconcile_noop:
         from apm_cli.install.manifest_reconcile import reconcile_project_deployed_state
 
