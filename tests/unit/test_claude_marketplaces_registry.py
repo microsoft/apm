@@ -389,3 +389,62 @@ def test_installs_under_two_claude_profiles_each_keep_their_record(
     assert _sync(env, declared=False) == []
     assert _NAME not in json.loads(b_registry.read_text("utf-8"))
     assert not _receipt(tmp_path).exists()
+
+
+def test_a_plugins_dir_linked_during_staging_is_never_published_to(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The link check runs again after staging, right before the replace."""
+    import shutil
+    import tempfile
+
+    plugins = tmp_path / "claude" / "plugins"
+    _seed(plugins / "known_marketplaces.json", "{}\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "known_marketplaces.json").write_text("{}\n", encoding="utf-8")
+    original = tempfile.mkstemp
+    swapped = {"done": False}
+
+    def mkstemp(*args, **kwargs):
+        if not swapped["done"] and Path(kwargs.get("dir", "")) == plugins:
+            swapped["done"] = True
+            shutil.rmtree(plugins)
+            plugins.symlink_to(outside, target_is_directory=True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
+
+    warnings = _sync(env)
+
+    assert swapped["done"]
+    assert (outside / "known_marketplaces.json").read_text("utf-8") == "{}\n"
+    assert sorted(p.name for p in outside.iterdir()) == ["known_marketplaces.json"]
+    assert not _receipt(tmp_path).exists()
+    assert len(warnings) == 1 and "symbolic link" in warnings[0]
+
+
+def test_a_conflicting_entry_added_mid_merge_is_named(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = _registry(tmp_path)
+    other = tmp_path / "other-clone" / ".agents" / "plugins"
+    theirs = {_NAME: {"source": {"source": "directory", "path": str(other)}}}
+    original = Path.read_bytes
+    seen = {"n": 0}
+
+    def read_bytes(path: Path) -> bytes:
+        if path == registry:
+            seen["n"] += 1
+            if seen["n"] == 2:
+                registry.parent.mkdir(parents=True, exist_ok=True)
+                registry.write_text(json.dumps(theirs), encoding="utf-8")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    warnings = _sync(env)
+
+    assert json.loads(registry.read_text("utf-8")) == theirs
+    assert not _receipt(tmp_path).exists()
+    assert len(warnings) == 1 and "only overwrites an entry it owns" in warnings[0]

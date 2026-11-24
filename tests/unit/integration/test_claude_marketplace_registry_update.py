@@ -47,7 +47,7 @@ def test_a_change_between_read_and_write_is_merged_on_retry(
     path.write_text("{}", encoding="utf-8")
     _racing(monkeypatch, path, [{"user": {"source": {"source": "github"}}}])
 
-    registry._merge(path, _add_apm)
+    registry._merge(path, _add_apm, root=tmp_path)
 
     assert set(json.loads(path.read_text(encoding="utf-8"))) == {"user", "apm-p-0123abcd"}
 
@@ -60,7 +60,7 @@ def test_a_file_that_keeps_changing_keeps_the_other_writers_bytes(
     _racing(monkeypatch, path, [{"first": {}}, {"second": {}}])
 
     with pytest.raises(registry._Skip, match="kept changing while APM updated it"):
-        registry._merge(path, _add_apm)
+        registry._merge(path, _add_apm, root=tmp_path)
 
     assert json.loads(path.read_text(encoding="utf-8")) == {"second": {}}
 
@@ -84,7 +84,7 @@ def test_an_update_during_staging_is_never_overwritten(
 
     monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
 
-    registry._merge(path, _add_apm)
+    registry._merge(path, _add_apm, root=tmp_path)
 
     assert set(json.loads(path.read_text(encoding="utf-8"))) == {
         "during-staging",

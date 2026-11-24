@@ -64,12 +64,8 @@ def known_marketplaces_path() -> Path:
 
 def _registry() -> Path:
     """The registry path to write, refusing any linked component (the MCP user-config policy)."""
-    from apm_cli.utils.path_security import user_config_crosses_link
-
-    root = _claude_root()
-    path = root / "plugins" / "known_marketplaces.json"
-    if user_config_crosses_link(path, root):
-        raise _Skip(f"{_text(path)} is, or is reached through, a symbolic link")
+    path = _claude_root() / "plugins" / "known_marketplaces.json"
+    _refuse_linked(path, path.parents[1])
     return path
 
 
@@ -126,7 +122,14 @@ def _stage(path: Path, data: dict[str, Any]) -> Path:
     return staged
 
 
-def _merge(path: Path, change: Callable[[dict[str, Any]], bool]) -> bool:
+def _refuse_linked(path: Path, root: Path) -> None:
+    from apm_cli.utils.path_security import user_config_crosses_link
+
+    if user_config_crosses_link(path, root):
+        raise _Skip(f"{_text(path)} is, or is reached through, a symbolic link")
+
+
+def _merge(path: Path, change: Callable[[dict[str, Any]], bool], *, root: Path) -> bool:
     """Apply *change* to the document at *path*; return whether APM published it.
 
     *change* edits the object in place and returns whether it changed. The
@@ -142,6 +145,8 @@ def _merge(path: Path, change: Callable[[dict[str, Any]], bool]) -> bool:
             raise _Skip(f"{_text(path)} is read-only")
         staged = _stage(path, data)
         try:
+            # Checked again after staging: a directory linked meanwhile is never published to.
+            _refuse_linked(path, root)
             if _read(path)[0] == raw:
                 os.replace(staged, path)
                 return True
@@ -188,7 +193,7 @@ def _record(key: str, record: dict[str, str] | None) -> None:
         entries[key] = record
         return True
 
-    _merge(path, change)
+    _merge(path, change, root=path.parent)
     if record is None and path.exists() and not _owned():
         path.unlink()
 
@@ -252,16 +257,19 @@ def register_project_marketplace(name: str, root: Path, logger: Any = None) -> N
         return
     _owned()  # an unreadable receipt refuses before anything is written
     target = _registry()
-    known = _read(target)[1]
-    if name in known:
-        existing = _registered_path(known[name])
-        if existing != location:
+
+    def warn_if_elsewhere() -> None:
+        existing = _registered_path(_read(target)[1].get(name))
+        if existing is not None and existing != location:
             _warn(
                 logger,
                 f"{_text(target)} already lists marketplace '{_text(name)}' at "
                 f"{_text(existing)}; APM only overwrites an entry it owns for this checkout, "
                 "so Claude Code may load this project's plugins from there.",
             )
+
+    if name in _read(target)[1]:
+        warn_if_elsewhere()
         return
 
     def add(known: dict[str, Any]) -> bool:
@@ -278,12 +286,13 @@ def register_project_marketplace(name: str, root: Path, logger: Any = None) -> N
     key = _receipt_key(target, name)
     _record(key, {"name": name, "root": location, "registry": str(target.absolute())})
     try:
-        published = _merge(target, add)
+        published = _merge(target, add, root=target.parents[1])
     except BaseException:
         _record(key, None)
         raise
     if not published:
         _record(key, None)  # an entry appeared meanwhile: it is not APM's
+        warn_if_elsewhere()
 
 
 def unregister_project_marketplace(name: str, root: Path, logger: Any = None) -> None:
@@ -307,7 +316,7 @@ def unregister_project_marketplace(name: str, root: Path, logger: Any = None) ->
         del known[name]
         return True
 
-    _merge(target, remove)
+    _merge(target, remove, root=target.parents[1])
     _record(key, None)
 
 
