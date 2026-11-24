@@ -331,7 +331,8 @@ class TestPluginIntegration:
 
         assert result.exit_code != 0
         assert "Dependency resolution failed" in result.output
-        assert "missing-plugin" in result.output
+        # The resolution error and its remedy print once, not again in the summary (#5272).
+        assert result.output.count("Plugin 'missing-plugin' not found") == 1, result.output
 
     def test_plugin_with_mixed_dependencies(self, tmp_path):
         """Test plugin with both string and marketplace dependencies."""

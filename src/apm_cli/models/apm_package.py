@@ -295,8 +295,12 @@ def routes_unscoped_to_registry(dep: Any) -> bool:
     cannot drift apart.
 
     Objects that lack an ``is_local`` attribute are treated as local (returns
-    False) -- fail-closed for unknown dep types.
+    False) -- fail-closed for unknown dep types. A marketplace declaration
+    (``{name, marketplace}``) resolves through its catalog, which names its
+    own registry and version, so the default registry never claims it (#5256).
     """
+    if getattr(dep, "is_marketplace", False) is True:
+        return False
     return getattr(dep, "source", None) not in {"git", "registry"} and not getattr(
         dep, "is_local", True
     )
