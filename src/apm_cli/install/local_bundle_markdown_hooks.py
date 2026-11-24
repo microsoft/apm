@@ -33,9 +33,10 @@ class _Holding:
 
 @dataclass
 class _Record:
-    """One bundle's recorded keys, files and admitted content hashes."""
+    """One record entry: a bundle's key, its files and their admitted content hashes."""
 
-    keys: set = field(default_factory=set)
+    slug: str
+    key: str
     files: set[str] = field(default_factory=set)
     hashes: dict[str, str] = field(default_factory=dict)
 
@@ -68,18 +69,31 @@ def _prefixes(target: Any) -> tuple[str, ...]:
     return tuple(prefixes)
 
 
-def _scan_targets(targets: Any, *, user_scope: bool) -> list[Any]:
+def _scan_targets(targets: Any, *, user_scope: bool, logger: Any = None) -> list[Any]:
     """Return *targets* plus every known target of the scope.
 
     A bundle file deployed for a target the manifest no longer names is still
     re-checked against its record.
     """
+    from ..integration.copilot_cowork_paths import CoworkResolutionError
     from ..integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+    from ..utils.path_security import PathTraversalError
 
     found = {target.name: target for target in targets or ()}
     for profile in KNOWN_TARGETS.values():
-        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
-        if scoped is not None and scoped.name not in found:
+        if profile.name in found:
+            continue
+        try:
+            scoped = scoped_profile_or_none(profile, user_scope=user_scope)
+        except (CoworkResolutionError, PathTraversalError, OSError, ValueError) as exc:
+            # A root this scope cannot resolve never received a deploy.
+            if logger is not None:
+                logger.verbose_detail(
+                    f"Skipped target {profile.name} for the bundle Markdown hook re-check: "
+                    f"its root cannot be resolved ({exc})"
+                )
+            continue
+        if scoped is not None:
             found[scoped.name] = scoped
     return list(found.values())
 
@@ -138,25 +152,28 @@ def _read_records(project_root: Path, targets: Any) -> list[tuple[dict, dict]]:
     return found
 
 
-def _records(project_root: Path, targets: Any) -> dict[str, _Record]:
-    """Return each bundle's merged record across every target root.
+def _records(project_root: Path, targets: Any) -> list[_Record]:
+    """Return every record entry across every target root, each with its own key.
 
-    A record whose key names another bundle than its slug grants nothing, so
-    its rows fail closed.
+    Entries are never merged across targets, so one version's withdrawn key
+    never judges another version's files. An entry whose key names another
+    bundle than its slug grants nothing, so its rows fail closed.
     """
     from .local_bundle_hook_trust import _relative_value
 
     root = Path(project_root)
-    found: dict[str, _Record] = {}
+    found: list[_Record] = []
     for keyed, hashed in _read_records(root, targets):
         for slug, (key, files) in keyed.items():
             if not _key_names_bundle(slug, key):
                 continue  # a record borrowing another bundle's key grants nothing
-            record = found.setdefault(slug, _Record())
-            record.keys.add(key)
-            record.files.update(_relative_value(value, root) for value in files)
-            record.hashes.update(
-                {_relative_value(k, root): v for k, v in hashed.get(slug, {}).items()}
+            found.append(
+                _Record(
+                    slug,
+                    str(key),
+                    {_relative_value(value, root) for value in files},
+                    {_relative_value(k, root): v for k, v in hashed.get(slug, {}).items()},
+                )
             )
     return found
 
@@ -221,15 +238,15 @@ def _hooked_rows(project_root: Path, targets: Any, lock_paths: Collection[str]) 
     return rows
 
 
-def _denied_slugs(records: dict[str, _Record], allow_map: Any) -> set[str]:
-    """Return the slugs whose recorded key the current trust explicitly denies."""
+def _denied(entries: list[_Record], allow_map: Any) -> set[int]:
+    """Return the indexes of entries whose key the current trust explicitly denies."""
     from ..security.executables import EXEC_TYPE_HOOKS
     from .local_bundle_handler import bundle_type_denied
 
     return {
-        slug
-        for slug, record in records.items()
-        if any(bundle_type_denied(allow_map, key, EXEC_TYPE_HOOKS) for key in record.keys)
+        index
+        for index, entry in enumerate(entries)
+        if bundle_type_denied(allow_map, entry.key, EXEC_TYPE_HOOKS)
     }
 
 
@@ -252,33 +269,35 @@ def _unadmitted(
 
     if exec_map_authorizes_all(allow_map):
         return []
-    records = _records(project_root, targets)
+    entries = _records(project_root, targets)
     granted = {
-        slug
-        for slug, record in records.items()
-        if all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in record.keys)
+        index
+        for index, entry in enumerate(entries)
+        if package_type_approved(allow_map, (entry.key,), EXEC_TYPE_HOOKS)
     }
-    denied = _denied_slugs(records, allow_map)
+    denied = _denied(entries, allow_map)
+    expected = lock_hashes or {}
     holdings: dict[tuple[str | None, str], _Holding] = {}
     for row in sorted(rows):
-        owners = sorted(slug for slug, record in records.items() if row in record.files)
-        refusing = [slug for slug in owners if slug in denied]
+        owners = [index for index, entry in enumerate(entries) if row in entry.files]
         current = _hash_or_none(Path(project_root) / row)
+        refusing = [index for index in owners if index in denied]
         admitting = [
-            slug
-            for slug in owners
-            if slug in granted
+            index
+            for index in owners
+            if index in granted
             and current is not None
-            and records[slug].hashes.get(row) == current == (lock_hashes or {}).get(row)
+            and entries[index].hashes.get(row) == current == expected.get(row)
         ]
         if admitting and not refusing:
-            continue  # a granted record admits these exact bytes; a deny wins
+            continue  # a granted entry admits these exact bytes; a deny wins
         # Name the bundle whose recorded bytes are on disk, the deployer.
-        deployer = [slug for slug in owners if records[slug].hashes.get(row) == current]
-        slug = (refusing or deployer or owners or [None])[0]
+        deployer = [index for index in owners if entries[index].hashes.get(row) == current]
+        chosen = (refusing or deployer or owners or [None])[0]
+        slug = entries[chosen].slug if chosen is not None else None
         if not owners:
             reason = REASON_UNRECORDED
-        elif not refusing and not deployer and any(owner in granted for owner in owners):
+        elif not refusing and not deployer and any(index in granted for index in owners):
             reason = _REASON_CHANGED  # still approved, but not these bytes
         else:
             reason = REASON_NOT_GRANTED
@@ -341,7 +360,9 @@ def _forget(project_root: Path, targets: Any, slug: str, removed: set[str], scop
         )
 
 
-def preflight_bundle_markdown_records(project_root: Path, targets: Any, *, scope: Any) -> None:
+def preflight_bundle_markdown_records(
+    project_root: Path, targets: Any, *, scope: Any, logger: Any = None
+) -> None:
     """Read every record the re-check will use before any retirement starts.
 
     Raises :class:`BundleMarkdownRecordUnreadable` so install, update and
@@ -350,7 +371,7 @@ def preflight_bundle_markdown_records(project_root: Path, targets: Any, *, scope
     from ..core.scope import is_user_scope
 
     user_scope = scope is not None and is_user_scope(scope)
-    _read_records(Path(project_root), _scan_targets(targets, user_scope=user_scope))
+    _read_records(Path(project_root), _scan_targets(targets, user_scope=user_scope, logger=logger))
 
 
 def retire_unadmitted_bundle_markdown(
@@ -375,8 +396,11 @@ def retire_unadmitted_bundle_markdown(
     from .local_bundle_hook_trust import _drop_lock_rows, _relative_value, local_bundle_paths
 
     root = Path(project_root)
+    lock_path = get_lockfile_path(lock_dir)
+    if lock_path.is_symlink() or not lock_path.is_file():
+        return []  # the lockfile owner reports a missing or linked lockfile
     scanned = _scan_targets(targets, user_scope=scope is not None and is_user_scope(scope))
-    lockfile = LockFile.read(get_lockfile_path(lock_dir))
+    lockfile = LockFile.read(lock_path)
     recorded = {}
     if lockfile is not None:
         recorded = {
