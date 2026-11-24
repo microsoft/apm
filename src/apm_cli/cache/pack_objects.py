@@ -418,9 +418,10 @@ def _require_inert_conditional_attributes(env: dict[str, str], repo: Path) -> No
     from .cached_repo import cached_repo_env
     from .inprocess_fetch import _require_inert_attributes
 
-    checkout_env = cached_repo_env(git_subprocess_env(dict(env)), Path(repo))
-    entries = _read_effective_git_config(checkout_env).entries
+    # The gate's own (memoized) read: no spawn unless a conditional include exists.
+    entries = _read_effective_git_config(cached_repo_env(git_subprocess_env(dict(env)))).entries
     if any(entry.key.startswith("includeif.") for entry in entries):
+        checkout_env = cached_repo_env(git_subprocess_env(dict(env)), Path(repo))
         staged = _read_effective_git_config(checkout_env, worktree=Path(repo)).entries
         _require_inert_attributes(checkout_env, staged)
 
