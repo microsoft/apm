@@ -347,9 +347,10 @@ def _frontmatter_text(path: Path) -> str:
 def markdown_declares_hooks(path: Path, *, unreadable: bool = True) -> bool:
     """Whether a packed Markdown file's frontmatter declares ``hooks``.
 
-    Frontmatter that cannot be read or parsed returns *unreadable*: by default
-    it counts as declaring hooks, so it never deploys without the bundle hook
-    approval.
+    Frontmatter that cannot be read or decoded always counts as declaring
+    hooks. Frontmatter that is not valid YAML returns *unreadable*: by default
+    it counts as declaring hooks too, so it never deploys without the bundle
+    hook approval; a converter that judges YAML itself passes ``False``.
     """
     if path.suffix.lower() != ".md":
         return False
@@ -358,8 +359,12 @@ def markdown_declares_hooks(path: Path, *, unreadable: bool = True) -> bool:
     from ..utils.yaml_io import loads_frontmatter
 
     try:
-        metadata = loads_frontmatter(_frontmatter_text(path)).metadata
-    except (OSError, ValueError, yaml.YAMLError):
+        text = _frontmatter_text(path)
+    except (OSError, UnicodeError):
+        return True
+    try:
+        metadata = loads_frontmatter(text).metadata
+    except (ValueError, yaml.YAMLError):
         return unreadable
     return not isinstance(metadata, dict) or "hooks" in metadata
 
@@ -380,7 +385,7 @@ def _declares_unapproved_hooks(
         bundle_rule_format_id(rel_path, allowed_prefixes, known_deploy_prefixes, target=target)
         or bundle_render_format_id(rel_path, allowed_prefixes, known_deploy_prefixes, target=target)
     )
-    # A converted file that cannot be parsed is skipped by its converter, with the reason.
+    # Invalid YAML in a converted file is skipped by its converter, with the reason.
     return markdown_declares_hooks(source, unreadable=not converted)
 
 
