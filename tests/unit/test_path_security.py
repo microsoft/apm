@@ -6,6 +6,7 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
+import os
 import shutil  # noqa: F401
 from urllib.parse import urlparse
 
@@ -393,3 +394,94 @@ def test_the_refusal_names_a_link_as_printable_ascii() -> None:
 
     assert message.isascii() and message.isprintable()
     assert "\x1b" not in message and "\u202e" not in message
+
+
+# ---------------------------------------------------------------------------
+# has_symlink_component(): a Windows junction below the base is a link (#5229)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junction_below_the_base_counts_as_a_link(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    base.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _winapi.CreateJunction(str(outside), str(base / "agents"))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is True
+    assert has_symlink_component(base, base / "agents" / ".." / "a.md") is True
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junctioned_base_itself_is_not_flagged(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    real = tmp_path / "real"
+    (real / "agents").mkdir(parents=True)
+    base = tmp_path / "junction-base"
+    _winapi.CreateJunction(str(real), str(base))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is False
+
+
+def _reparse_stat(tag: int):
+    """A directory lstat result carrying a reparse point with *tag* (Windows fields)."""
+    import stat
+    from types import SimpleNamespace
+
+    return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400, st_reparse_tag=tag)
+
+
+@pytest.mark.parametrize(
+    ("tag", "linked"),
+    [(0xA000001D, True), (0xA0000003, True), (0x9000001A, False)],
+    ids=["lx-symlink", "junction", "data-only-cloud-file"],
+)
+def test_a_name_surrogate_reparse_point_below_the_base_counts_as_a_link(
+    tmp_path, monkeypatch, tag: int, linked: bool
+) -> None:
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(tag) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / "a.md") is linked
+
+
+def test_stepping_back_over_a_name_surrogate_reparse_point_counts_as_a_link(
+    tmp_path, monkeypatch
+) -> None:
+    """``..`` after a junction is judged like ``..`` after a symbolic link."""
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(0xA0000003) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / ".." / "a.md") is True

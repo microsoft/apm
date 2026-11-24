@@ -22,10 +22,12 @@ Design
 
 from __future__ import annotations
 
+import errno
 import os
 import urllib.parse as _up
 from pathlib import Path
-from stat import S_ISLNK
+from stat import S_ISLNK, S_ISREG
+from typing import BinaryIO
 
 from .file_ops import robust_rmtree
 from .paths import is_within, relative_posix, relative_to
@@ -319,12 +321,36 @@ def _collapse_relative_parts(base_dir: Path, parts: tuple[str, ...]) -> list[str
     kept: list[str] = []
     for part in parts:
         if part == "..":
-            if not kept or base_dir.joinpath(*kept).is_symlink():
+            if not kept or _existing_link(base_dir.joinpath(*kept)):
                 return None
             kept.pop()
         elif part != ".":
             kept.append(part)
     return kept
+
+
+# A reparse point whose tag is a name surrogate (a symbolic link, a directory junction,
+# a WSL symlink) names another path; data-only tags (cloud files) do not.
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_IO_REPARSE_TAG_NAME_SURROGATE = 0x20000000
+
+
+def _is_link(path: Path) -> bool:
+    """Whether *path* is a link of any kind (never its target), from one ``lstat``."""
+    info = path.lstat()
+    if S_ISLNK(info.st_mode):
+        return True
+    attributes = getattr(info, "st_file_attributes", 0)
+    tag = getattr(info, "st_reparse_tag", 0)
+    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT and tag & _IO_REPARSE_TAG_NAME_SURROGATE)
+
+
+def _existing_link(path: Path) -> bool:
+    """:func:`_is_link`, with a missing path counting as no link."""
+    try:
+        return _is_link(path)
+    except FileNotFoundError:
+        return False
 
 
 def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
@@ -342,7 +368,7 @@ def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
     for part in parts:
         current /= part
         try:
-            linked = S_ISLNK(current.lstat().st_mode)
+            linked = _is_link(current)
         except FileNotFoundError:
             return None
         if linked:
@@ -350,8 +376,36 @@ def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
     return None
 
 
+def open_regular_file(path: Path) -> BinaryIO:
+    """Open *path* for binary reading only as a regular file.
+
+    Never through a final-component link and never blocking: the file is
+    opened non-blocking, then judged on the opened descriptor, so a FIFO or
+    device raises ``OSError`` instead of waiting for a writer. Where
+    ``O_NOFOLLOW`` is unavailable (Windows) a link is refused by ``lstat``
+    first.
+    """
+    if not hasattr(os, "O_NOFOLLOW") and _existing_link(Path(path)):
+        raise OSError(errno.ELOOP, "refusing to read through a link", str(path))
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        if not S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
-    """Reject linked components, optionally preserving access errors for diagnostics.
+    """Reject linked components (symbolic links and Windows junctions) below *base_dir*,
+    optionally preserving access errors for diagnostics.
 
     ``..`` is collapsed first, so a missing directory followed by ``..``
     cannot hide a linked component after it.

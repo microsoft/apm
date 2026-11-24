@@ -65,3 +65,23 @@ def test_the_message_names_the_first_linked_component_at_any_depth(tmp_path: Pat
     assert str(refused.value).startswith(
         "Refusing deployment through a symlinked path component: plain/linked. "
     )
+
+
+def test_a_linked_directory_name_with_an_escape_byte_is_rendered_inert(tmp_path: Path) -> None:
+    """#5215: the refusal never carries control bytes from a package's directory name."""
+    root, outside = tmp_path / "root", tmp_path / "outside"
+    root.mkdir()
+    (outside / "demo").mkdir(parents=True)
+    try:
+        (root / "sk\x1b[2Jills").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError, ValueError):
+        pytest.skip("symbolic links or control bytes in names are unavailable")
+
+    with pytest.raises(RuntimeError) as refused:
+        deployed_path_entry(root / "sk\x1b[2Jills" / "demo" / "SKILL.md", root, [])
+
+    message = str(refused.value)
+    assert "\x1b" not in message
+    assert message.startswith(
+        "Refusing deployment through a symlinked path component: sk?[2Jills. "
+    )

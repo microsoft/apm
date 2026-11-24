@@ -206,3 +206,208 @@ def test_a_special_file_refusal_names_the_path_as_printable_ascii(tmp_path: Path
     assert message.isascii() and message.isprintable(), message
     assert "\x1b" not in message and "\n" not in message
     assert fifo.is_fifo()
+
+
+def test_each_output_is_checked_in_the_preflight_and_again_before_its_write(
+    tmp_path: Path, monkeypatch
+):
+    import apm_cli.compilation.output_writer as ow
+
+    project = tmp_path / "project"
+    project.mkdir()
+    outputs = {
+        project / "AGENTS.md": "# root\n",
+        project / "a" / "b" / "x.md": "# x\n",
+        project / "a" / "b" / "y.md": "# y\n",
+        project / "a" / "c" / "z.md": "# z\n",
+    }
+    checked: list[tuple[str, str]] = []
+    real_check = ow.has_symlink_component
+
+    def recording_check(base: Path, path: Path, **kwargs):
+        checked.append((base.relative_to(project).as_posix(), path.relative_to(project).as_posix()))
+        return real_check(base, path, **kwargs)
+
+    monkeypatch.setattr(ow, "has_symlink_component", recording_check)
+
+    CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    per_output = [(".", "."), (".", "a/b"), (".", "a/b"), (".", "a/c")]
+    assert checked == per_output + per_output
+    assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_batch_still_refuses_a_link_below_an_already_checked_directory(tmp_path: Path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    (project / "a" / "b").mkdir(parents=True)
+    (project / "a" / "link").symlink_to(outside, target_is_directory=True)
+    regular = project / "a" / "b" / "x.md"
+    linked = project / "a" / "link" / "y.md"
+
+    with pytest.raises(OSError, match=r"symlinked path component: a/link/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many({regular: "# x\n", linked: "# y\n"})
+
+    assert not regular.exists()
+    assert list(outside.iterdir()) == []
+
+
+def _record_checks(monkeypatch, project: Path) -> list[tuple[str, str]]:
+    import apm_cli.compilation.output_writer as ow
+
+    checked: list[tuple[str, str]] = []
+    real_check = ow.has_symlink_component
+
+    def recording_check(base: Path, path: Path, **kwargs):
+        checked.append((base.relative_to(project).as_posix(), path.relative_to(project).as_posix()))
+        return real_check(base, path, **kwargs)
+
+    monkeypatch.setattr(ow, "has_symlink_component", recording_check)
+    return checked
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_directory_swapped_for_a_link_during_the_batch_is_refused_at_write(
+    tmp_path: Path, monkeypatch
+):
+    import apm_cli.compilation.output_writer as ow
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    (project / "a" / "b").mkdir(parents=True)
+    (project / "a" / "c").mkdir()
+    first = project / "a" / "b" / "x.md"
+    swapped = project / "a" / "c" / "y.md"
+    real_write = ow.atomic_write_text
+
+    def write_then_swap(path, *args, **kwargs):
+        real_write(path, *args, **kwargs)
+        if path == first:
+            (project / "a" / "c").rmdir()
+            (project / "a" / "c").symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(ow, "atomic_write_text", write_then_swap)
+
+    with pytest.raises(OSError, match=r"symlinked path component: a/c/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many({first: "# x\n", swapped: "# y\n"})
+
+    assert first.read_text(encoding="utf-8") == "# x\n"
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+@pytest.mark.parametrize(
+    ("verified", "respelled"),
+    [
+        pytest.param("a", "A", id="case"),
+        pytest.param("caf\u00e9", "cafe\u0301", id="nfd"),
+    ],
+)
+def test_respelled_ancestor_misses_the_batch_cache(
+    tmp_path: Path, monkeypatch, verified: str, respelled: str
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    (project / verified / "b").mkdir(parents=True)
+    try:
+        (project / respelled).symlink_to(outside, target_is_directory=True)
+    except FileExistsError:
+        pytest.skip("filesystem folds this spelling onto the verified directory")
+    checked = _record_checks(monkeypatch, project)
+    outputs = {
+        project / verified / "b" / "x.md": "# x\n",
+        project / respelled / "b" / "y.md": "# y\n",
+    }
+
+    with pytest.raises(OSError, match="symlinked path component"):
+        CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert checked == [(".", f"{verified}/b"), (".", f"{respelled}/b")]
+    assert list(outside.iterdir()) == []
+    assert not (project / verified / "b" / "x.md").exists()
+
+
+def test_dotdot_directories_are_checked_in_full_and_not_cached(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    checked = _record_checks(monkeypatch, project)
+    outputs = {
+        project / "a" / "b" / "x.md": "# x\n",
+        project / "a" / "b" / ".." / "b" / "y.md": "# y\n",
+        project / "a" / "b" / ".." / "b" / "z.md": "# z\n",
+    }
+
+    CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    full_checks = [(".", "a/b"), (".", "a/b/../b"), (".", "a/b/../b")]
+    assert checked == full_checks + full_checks
+    assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_differently_cased_root_aliases_are_resolved_separately(tmp_path: Path):
+    outside = tmp_path / "outside"
+    (outside / "elsewhere").mkdir(parents=True)
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".github").symlink_to(linked, target_is_directory=True)
+    try:
+        (tmp_path / "alias").symlink_to(outside, target_is_directory=True)
+        (tmp_path / "ALIAS").symlink_to(project, target_is_directory=True)
+    except FileExistsError:
+        pytest.skip("filesystem folds differently cased names")
+    outputs = {
+        tmp_path / "alias" / "elsewhere" / "x.md": "# x\n",
+        tmp_path / "ALIAS" / ".github" / "y.md": "# y\n",
+    }
+
+    with pytest.raises(OSError, match=r"symlinked path component: \.github/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert list(linked.iterdir()) == []
+    assert list((outside / "elsewhere").iterdir()) == []
+
+
+@pytest.mark.windows_compat
+def test_root_alias_ancestor_is_resolved_afresh_for_each_output(tmp_path: Path, monkeypatch):
+    """A resolution reused across outputs could skip the check for a distinct alias.
+
+    On Windows, ``alias`` and ``ALIAS`` are equal Path keys while able to name
+    different links. The same reuse is simulated here hermetically: one alias
+    spelling resolves outside the project first, then into it.
+    """
+    import apm_cli.compilation.output_writer as ow
+
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    alias = tmp_path / "alias"
+    answers = iter((outside, project.resolve()))
+    real_resolve = Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if self == alias:
+            return next(answers)
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    checked: list[Path] = []
+
+    def linked(base: Path, path: Path, **kwargs):
+        checked.append(path)
+        return True
+
+    monkeypatch.setattr(ow, "has_symlink_component", linked)
+    outputs = {alias / "elsewhere" / "x.md": "# x\n", alias / ".github" / "y.md": "# y\n"}
+
+    with pytest.raises(OSError, match=r"symlinked path component: \.github/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert checked == [alias / ".github"]
+    assert not alias.exists()

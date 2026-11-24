@@ -15,6 +15,10 @@ A control without the offending input installs.
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import stat
 import subprocess
 from pathlib import Path
 
@@ -22,6 +26,7 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.world import World
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.lifecycle.world.fixtures import (  # noqa: F401
@@ -641,3 +646,169 @@ def test_warn_policy_at_the_root_destination_warns_on_an_mcp_install(
     assert _HAND_WRITTEN in text, text
     assert path.read_text(encoding="utf-8") == "# hand written\n"
     assert (target / ".mcp.json").is_file()
+
+
+def _approved_hook_bundle_install(world: World, target: str) -> None:
+    """Install ``p-exec`` for *target*, approve its exact key, and install it again."""
+    bundle = world.packages["p-exec:bundle"].spec
+    parked = _assert_ok(world, "install", "--target", target, bundle)
+    key = re.search(r"apm approve '([^']+)'", _text(parked))
+    assert key is not None, _evidence(parked)
+    _assert_ok(world, "approve", key.group(1))
+    _assert_ok(world, "install", "--target", target, bundle)
+
+
+def test_unmanaged_files_deny_passes_audit_after_an_approved_copilot_hook_bundle(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "copilot")
+    assert (world.project / ".github" / "hooks" / "p-exec-hooks.json").is_file()
+    audit = _assert_ok(world, "audit", "--ci")
+    assert "No unmanaged files in governance directories" in _text(audit), _evidence(audit)
+
+
+def test_unmanaged_files_deny_counts_apm_owned_claude_hook_files(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "claude")
+    assert (world.project / ".claude" / "apm-hooks.json").is_file()
+    audit = _apm(world, "audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)
+
+
+def _edit_sidecar_entry(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    sidecar.write_text(sidecar.read_text(encoding="utf-8").replace("echo p-exec", "echo other"))
+
+
+def _drop_settings_hooks(claude: Path) -> None:
+    (claude / "settings.json").write_text('{"hooks": {}}\n', encoding="utf-8")
+
+
+def _truncate_sidecar(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    sidecar.write_bytes(sidecar.read_bytes()[:-3])
+
+
+def _link_sidecar(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    real = claude.parent / "apm-hooks.real.json"
+    sidecar.replace(real)
+    sidecar.symlink_to(real)
+
+
+def _fifo_sidecar(claude: Path) -> None:
+    sidecar = claude / "apm-hooks.json"
+    sidecar.unlink()
+    os.mkfifo(sidecar)
+
+
+_USER_HOOK = {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}]}
+
+
+def _user_hook(claude: Path, event: str) -> None:
+    settings = claude / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["hooks"].setdefault(event, []).append(_USER_HOOK)
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _user_hook_in_owned_event(claude: Path) -> None:
+    _user_hook(claude, "SessionStart")
+
+
+def _user_hook_in_another_event(claude: Path) -> None:
+    _user_hook(claude, "PreToolUse")
+
+
+def _forged_bundle_marker(claude: Path) -> None:
+    """A hand-written hook mirrored into the sidecar under an unapproved bundle key."""
+    _user_hook(claude, "PreToolUse")
+    sidecar = claude / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    data["PreToolUse"] = [{**_USER_HOOK, "_apm_source": "local-bundle::x::y"}]
+    sidecar.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _fingerprint(path: Path) -> object:
+    """Bytes of a regular file; the file type of anything else (a FIFO is never read)."""
+    mode = path.lstat().st_mode
+    return path.read_bytes() if stat.S_ISREG(mode) else stat.S_IFMT(mode)
+
+
+# Main's local-bundle-hooks check reads the sidecar with a blocking read (#5328).
+_FIFO_SIDECAR_HANGS = KnownFailure(
+    "#5328",
+    "audit --ci blocks on a FIFO hook sidecar in the local-bundle-hooks check",
+    r"'audit', '--ci'",
+    raises=subprocess.TimeoutExpired,
+)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(_edit_sidecar_entry, id="sidecar-entry-edited"),
+        pytest.param(_drop_settings_hooks, id="settings-hooks-removed"),
+        pytest.param(_truncate_sidecar, id="sidecar-unparsable"),
+        pytest.param(_link_sidecar, id="sidecar-symlinked"),
+        pytest.param(_fifo_sidecar, id="sidecar-fifo", marks=_FIFO_SIDECAR_HANGS.mark()),
+        pytest.param(_user_hook_in_owned_event, id="user-hook-in-owned-event"),
+        pytest.param(_user_hook_in_another_event, id="user-hook-in-another-event"),
+        pytest.param(_forged_bundle_marker, id="forged-bundle-marker"),
+    ],
+)
+def test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_verify(
+    lifecycle_world: World,  # noqa: F811
+    tamper,
+) -> None:
+    """#5277: APM's hook files count as managed only while their ownership verifies."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "claude")
+    claude = world.project / ".claude"
+    try:
+        tamper(claude)
+    except (AttributeError, OSError):
+        pytest.skip("symlinks or named pipes are unavailable")
+    before = {name: _fingerprint(claude / name) for name in ("apm-hooks.json", "settings.json")}
+
+    audit = _apm(world, "audit", "--ci")
+    text = _text(audit)
+
+    assert audit.returncode == 1, _evidence(audit)
+    if tamper is _forged_bundle_marker and "local-bundle-hooks details:" in text:
+        # The local-bundle-hooks check refuses the forged marker first: still fail-closed.
+        assert "- x: approval no longer granted" in text, _evidence(audit)
+    else:
+        assert "2 unmanaged file(s) in governance directories" in text, _evidence(audit)
+        assert ".claude/apm-hooks.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+        assert ".claude/settings.json -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+    assert {name: _fingerprint(claude / name) for name in before} == before
+
+
+def test_unmanaged_files_deny_still_flags_a_user_file_beside_verified_hook_files(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """#5277: verified hook ownership never covers a user-authored file in the same directory."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approved_hook_bundle_install(world, "claude")
+    (world.project / ".claude" / "notes.md").write_text("# mine\n", encoding="utf-8")
+
+    audit = _apm(world, "audit", "--ci")
+    text = _text(audit)
+
+    assert audit.returncode == 1, _evidence(audit)
+    assert "1 unmanaged file(s) in governance directories" in text, _evidence(audit)
+    assert ".claude/notes.md -- not tracked in apm.lock.yaml" in text, _evidence(audit)
+    assert ".claude/settings.json" not in text, _evidence(audit)
+    assert ".claude/apm-hooks.json" not in text, _evidence(audit)
