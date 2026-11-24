@@ -1854,6 +1854,12 @@ class APMDependencyResolver:
             raise DownloadedPackageError(dependency_marketplaces_error(package.name))
         if downloaded_candidate is None or self._activation_callback is None:
             return package
+        from apm_cli.utils.realpath import release_held
+
+        # PERF PROTOTYPE (A7): activation renames inside apm_modules; drop holds there first.
+        parts = downloaded_candidate.parts
+        if "apm_modules" in parts:
+            release_held(Path(*parts[: parts.index("apm_modules") + 1]))
         try:
             live_path = self._activation_callback(downloaded_candidate)
         except Exception as exc:

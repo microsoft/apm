@@ -104,6 +104,9 @@ def atomic_land(staged: Path, final: Path, lock: FileLock) -> bool:
         filelock.Timeout: If the lock cannot be acquired within its
             configured timeout.
     """
+    from apm_cli.utils.realpath import release_held
+
+    release_held(final)  # PERF PROTOTYPE (A7): no hold may block APM's own delete/rename
     try:
         with lock:
             if final.exists():
