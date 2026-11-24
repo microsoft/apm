@@ -38,24 +38,61 @@ def _prefix(target: Any) -> str:
     return Path(target.root_dir).as_posix().rstrip("/") + "/"
 
 
-def _records(project_root: Path, targets: Any) -> dict[str, tuple[set, set[str]]]:
-    """Return ``slug -> (keys, files)`` from every target's committed record.
+def _package_id(approval_key: str) -> str:
+    """Return the package id an exact-content bundle key names (``<id>#<ver>@<digest>``)."""
+    return approval_key.split("#", 1)[0]
 
-    An unreadable record grants nothing, so its rows fail closed.
+
+def _key_names_bundle(slug: str, approval_key: str | None) -> bool:
+    return bool(approval_key) and _package_id(str(approval_key)) == slug
+
+
+class BundleMarkdownRecordUnreadable(RuntimeError):
+    """A committed bundle Markdown hook record cannot be read; nothing was retired."""
+
+    def __init__(self, record: str, reason: object):
+        super().__init__(
+            f"Cannot read the local bundle Markdown hook record {record} ({reason}). "
+            "Nothing was retired; repair or remove that file, then re-run the command."
+        )
+
+
+def _read_records(project_root: Path, targets: Any) -> dict[Path, dict]:
+    """Read every target's committed record before anything changes.
+
+    Raises :class:`BundleMarkdownRecordUnreadable` naming the first record
+    that cannot be read, so a retirement never stops half done.
     """
     from ..integration.hook_ownership import BUNDLE_RECORD_MARKDOWN, per_file_bundle_hook_keys
     from .local_bundle_hook_trust import _relative_value
 
-    found: dict[str, tuple[set, set[str]]] = {}
+    found: dict[Path, dict] = {}
     for target in targets or ():
         path = _record_path(project_root, target)
-        if not path.is_file():
+        if not path.exists() and not path.is_symlink():
             continue
         try:
-            records = per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN)
-        except (OSError, ValueError, TypeError):
-            continue
+            found[path] = per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN)
+        except (OSError, ValueError, TypeError) as exc:
+            raise BundleMarkdownRecordUnreadable(
+                _relative_value(str(path), Path(project_root)), exc
+            ) from exc
+    return found
+
+
+def _records(project_root: Path, targets: Any) -> dict[str, tuple[set, set[str]]]:
+    """Return ``slug -> (keys, files)`` from every target's committed record.
+
+    A record whose key names another bundle than its slug grants nothing, so
+    its rows fail closed.
+    """
+    from .local_bundle_hook_trust import _relative_value
+
+    found: dict[str, tuple[set, set[str]]] = {}
+    for records in _read_records(project_root, targets).values():
         for slug, (key, files) in records.items():
+            if not _key_names_bundle(slug, key):
+                continue  # a record borrowing another bundle's key grants nothing
             keys, held = found.setdefault(slug, (set(), set()))
             keys.add(key)
             held.update(_relative_value(value, Path(project_root)) for value in files)
@@ -79,6 +116,8 @@ def record_bundle_markdown_hooks(
     """
     if dry_run or not approval_key:
         return
+    # Recorded under the package the key names, so the record binds to its key.
+    slug = _package_id(approval_key)
     from ..core.scope import InstallScope
     from ..integration.hook_ownership import BUNDLE_RECORD_MARKDOWN, write_per_file_bundle_record
     from .local_bundle_hook_trust import _relative_value
@@ -118,6 +157,18 @@ def _hooked_rows(project_root: Path, targets: Any, lock_paths: Collection[str]) 
     return rows
 
 
+def _denied_slugs(records: dict[str, tuple[set, set[str]]], allow_map: Any) -> set[str]:
+    """Return the slugs whose recorded key the current trust explicitly denies."""
+    from ..security.executables import EXEC_TYPE_HOOKS
+    from .local_bundle_handler import bundle_type_denied
+
+    return {
+        slug
+        for slug, (keys, _files) in records.items()
+        if any(bundle_type_denied(allow_map, key, EXEC_TYPE_HOOKS) for key in keys)
+    }
+
+
 def _unadmitted(
     project_root: Path,
     targets: Any,
@@ -140,16 +191,16 @@ def _unadmitted(
     granted = {
         slug
         for slug, (keys, _files) in records.items()
-        if keys
-        and None not in keys
-        and all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys)
+        if all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys)
     }
+    denied = _denied_slugs(records, allow_map)
     holdings: dict[tuple[str | None, str], _Holding] = {}
     for row in sorted(rows):
-        owners = [slug for slug, (_keys, files) in records.items() if row in files]
-        if any(slug in granted for slug in owners):
-            continue  # another still-granted bundle admits this path
-        slug = owners[0] if owners else None
+        owners = sorted(slug for slug, (_keys, files) in records.items() if row in files)
+        refusing = [slug for slug in owners if slug in denied]
+        if not refusing and any(slug in granted for slug in owners):
+            continue  # another still-granted bundle admits this path; a deny wins
+        slug = (refusing or owners or [None])[0]
         reason = REASON_NOT_GRANTED if owners else REASON_UNRECORDED
         holdings.setdefault((slug, reason), _Holding(slug, reason)).files.add(row)
     return list(holdings.values())
