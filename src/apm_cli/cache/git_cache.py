@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
@@ -463,7 +464,7 @@ class GitCache:
                 url, ref, locked_sha=locked_sha, env=env, sparse_paths=sparse_paths
             )
             sha = checkout.parent.name
-            if not sparse_paths and inprocess_verified(checkout, sha, use="verify"):
+            if inprocess_verified(checkout, sha, use="verify"):
                 # The fresh landing: every byte was hashed to its object id as written.
                 return checkout
             verify_env = git_subprocess_env(env)
@@ -561,6 +562,10 @@ class GitCache:
             landed = self._inprocess_checkout(url, shard_key, sha, env=env)
             if landed is not None:
                 return landed
+        if use_partial and not self._refresh:
+            landed = self._inprocess_sparse_checkout(url, shard_key, sha, sparse_paths, env=env)
+            if landed is not None:
+                return landed
         self._ensure_bare_repo(url, shard_key, sha, env=env, partial=use_partial)
         return self._create_checkout(
             url,
@@ -571,19 +576,60 @@ class GitCache:
             promisor_url=url if use_partial else None,
         )
 
+    def _inprocess_sparse_checkout(
+        self,
+        url: str,
+        shard_key: str,
+        sha: str,
+        sparse_paths: list[str],
+        *,
+        env: dict[str, str] | None,
+    ) -> Path | None:
+        """Land a sparse checkout fetched in-process (pin trees + the cone's blobs), or ``None``."""
+        from .inprocess_fetch import fetch_sparse_worktree
+
+        cones = tuple(sorted({p.strip("/") for p in sparse_paths if p.strip("/")}))
+        return self._land_inprocess(
+            shard_key,
+            sha,
+            sparse_paths,
+            lambda staged: fetch_sparse_worktree(
+                url, sha, staged, env, _checkout_materialization_pins(), cones
+            ),
+            f"In-process sparse fetch: {_sanitize_url(url)} @ {sha[:12]}",
+        )
+
     def _inprocess_checkout(
         self, url: str, shard_key: str, sha: str, *, env: dict[str, str] | None
     ) -> Path | None:
         """Land a full checkout fetched in-process, or ``None`` to run git."""
+        from .inprocess_fetch import fetch_worktree
+
+        return self._land_inprocess(
+            shard_key,
+            sha,
+            None,
+            lambda staged: fetch_worktree(url, sha, staged, env, _checkout_materialization_pins()),
+            f"In-process fetch: {_sanitize_url(url)} @ {sha[:12]}",
+        )
+
+    def _land_inprocess(
+        self,
+        shard_key: str,
+        sha: str,
+        sparse_paths: list[str] | None,
+        fetch: Callable[[Path], dict[str, tuple[str, bool]] | None],
+        note: str,
+    ) -> Path | None:
+        """Stage, fetch in process and land one checkout variant; ``None`` means run git."""
         from ..utils.file_ops import robust_rmtree
         from .checkout_verify import register_inprocess_manifest
-        from .inprocess_fetch import fetch_worktree
 
         sha_parent = self._checkouts_root / shard_key / sha
         ensure_path_within(sha_parent, self._checkouts_root)
         sha_parent.mkdir(parents=True, exist_ok=True)
         os.chmod(str(sha_parent), 0o700)
-        final_dir = sha_parent / _variant_key(None)
+        final_dir = sha_parent / _variant_key(sparse_paths)
         lock = shard_lock(final_dir)
         with lock:
             if final_dir.exists():
@@ -592,12 +638,12 @@ class GitCache:
             ensure_path_within(staged, self._checkouts_root)
             staged.mkdir(parents=True, exist_ok=True)
             os.chmod(str(staged), 0o700)
-            files = fetch_worktree(url, sha, staged, env, _checkout_materialization_pins())
+            files = fetch(staged)
             if files is None or not atomic_land(staged, final_dir, lock):
                 robust_rmtree(staged, ignore_errors=True)
                 return None
         register_inprocess_manifest(final_dir, sha, files)
-        _log.debug("In-process fetch: %s @ %s", _sanitize_url(url), sha[:12])
+        _log.debug("%s", note)
         return self._record_checkout_access(final_dir)
 
     def _read_only_checkout(
