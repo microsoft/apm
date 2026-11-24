@@ -69,6 +69,15 @@ class TestCheckClaudeTools:
         check = check_claude_tools({"tools": ["bash", "view", "edit"]})
         assert check.resolves_to_nothing
 
+    @pytest.mark.parametrize(
+        "tools", ["Agent(worker, reviewer)", ["Agent(worker, reviewer)"]], ids=["string", "list"]
+    )
+    def test_a_comma_inside_a_permission_specifier_stays_one_entry(self, tools):
+        check = check_claude_tools({"tools": tools})
+        assert check.recognized == ("Agent(worker, reviewer)",)
+        assert check.unrecognized == ()
+        assert claude_tools_messages(check, "a.md") is None
+
     def test_non_list_shape_is_malformed(self):
         assert check_claude_tools({"tools": {"Read": True}}).malformed
         assert check_claude_tools({"tools": 7}).malformed

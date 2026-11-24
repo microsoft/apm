@@ -111,9 +111,24 @@ def is_claude_tool(entry: str) -> bool:
     return bool(specifier and specifier.group(1) in CLAUDE_BUILTIN_TOOLS)
 
 
+def _top_level_split(text: str) -> list[str]:
+    """Split *text* on commas outside parentheses: ``Agent(a, b)`` stays one entry."""
+    parts, depth, start = [], 0, 0
+    for index, char in enumerate(text):
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+        elif char == "," and not depth:
+            parts.append(text[start:index])
+            start = index + 1
+    parts.append(text[start:])
+    return parts
+
+
 def _entries(raw: object) -> list[str] | None:
     if isinstance(raw, str):
-        return [part.strip() for part in raw.split(",") if part.strip()]
+        return [part.strip() for part in _top_level_split(raw) if part.strip()]
     if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
         return [item.strip() for item in raw if item.strip()]
     return None
