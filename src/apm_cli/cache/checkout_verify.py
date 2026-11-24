@@ -524,22 +524,21 @@ class _PackSource:
 
 
 def _verify_with(repo, sha, scope, cone, algorithm, objects) -> _Manifest:
-    if True:
-        commit = objects.read(sha, "commit")
-        first = commit.split(b"\n", 1)[0]
-        if not first.startswith(b"tree "):
-            raise CheckoutVerificationError(f"commit {sha[:12]} names no tree")
-        tree = _Tree(objects, first[5:].decode("ascii"), 32 if algorithm == "sha256" else 20)
-        run = _Run(algorithm, objects, tree, _Attributes(tree, objects))
-        expected = _expected(tree, objects, scope, cone)
-        accepted: dict[str, tuple[str, bool]] = {}
-        for rel, path in _worktree_files(repo):
-            want = expected.get(rel) or _lookup(run, rel, scope, cone)
-            accepted[rel] = (_accept_file(run, rel, path, want), want.executable)
-        missing = sorted(set(expected) - set(accepted))
-        if missing:
-            raise CheckoutVerificationError(f"{missing[0]} is missing from the checkout")
-        return _Manifest(algorithm, accepted)
+    commit = objects.read(sha, "commit")
+    first = commit.split(b"\n", 1)[0]
+    if not first.startswith(b"tree "):
+        raise CheckoutVerificationError(f"commit {sha[:12]} names no tree")
+    tree = _Tree(objects, first[5:].decode("ascii"), 32 if algorithm == "sha256" else 20)
+    run = _Run(algorithm, objects, tree, _Attributes(tree, objects))
+    expected = _expected(tree, objects, scope, cone)
+    accepted: dict[str, tuple[str, bool]] = {}
+    for rel, path in _worktree_files(repo):
+        want = expected.get(rel) or _lookup(run, rel, scope, cone)
+        accepted[rel] = (_accept_file(run, rel, path, want), want.executable)
+    missing = sorted(set(expected) - set(accepted))
+    if missing:
+        raise CheckoutVerificationError(f"{missing[0]} is missing from the checkout")
+    return _Manifest(algorithm, accepted)
 
 
 def _key(repo: Path, sha: str) -> tuple[str, str]:

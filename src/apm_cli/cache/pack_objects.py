@@ -22,6 +22,7 @@ from pathlib import Path
 from .inprocess_fetch import (
     _MAX_DELTA_DEPTH,
     _MAX_INFLATED,
+    _TRUE,
     _TYPES,
     _apply_delta,
     _inflate,
@@ -30,6 +31,11 @@ from .inprocess_fetch import (
 
 _IDX_MAGIC = b"\xfftOc"
 _BASE_CACHE_BYTES = 32 * 1024 * 1024
+
+
+def _switched_off(name: str) -> bool:
+    """A kill switch reads like ``APM_NO_INPROCESS_FETCH``: 1, true, yes or on."""
+    return (os.environ.get(name) or "").lower() in _TRUE
 
 
 class _Unsupported(Exception):
@@ -145,7 +151,7 @@ class PackObjects:
 
     def __init__(self, repo: Path, algorithm: str) -> None:
         self._packs: list[_Pack] | None = None
-        if algorithm != "sha1" or os.environ.get("APM_NO_INPROCESS_VERIFY"):
+        if algorithm != "sha1" or _switched_off("APM_NO_INPROCESS_VERIFY"):
             return
         packs: list[_Pack] = []
         try:
@@ -256,7 +262,7 @@ def materialize_tree(
     )
     from .inprocess_fetch import _tree_entries as entries_of
 
-    if os.environ.get("APM_NO_INPROCESS_CHECKOUT"):
+    if _switched_off("APM_NO_INPROCESS_CHECKOUT"):
         return None
     from ..utils.git_env import _read_effective_git_config
     from .inprocess_fetch import _frozen_entries, _network_env, _require_inert_attributes
