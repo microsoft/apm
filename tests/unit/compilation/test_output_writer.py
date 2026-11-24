@@ -184,3 +184,46 @@ def test_refuses_batch_when_missing_directory_and_dotdot_reach_a_linked_director
     assert not regular.exists()
     assert not (project / "new").exists()
     assert list(outside.iterdir()) == []
+
+
+def test_batch_checks_each_directory_once(tmp_path: Path, monkeypatch):
+    import apm_cli.compilation.output_writer as ow
+
+    project = tmp_path / "project"
+    project.mkdir()
+    outputs = {
+        project / "AGENTS.md": "# root\n",
+        project / "a" / "b" / "x.md": "# x\n",
+        project / "a" / "b" / "y.md": "# y\n",
+        project / "a" / "c" / "z.md": "# z\n",
+    }
+    checked: list[tuple[str, str]] = []
+    real_check = ow.has_symlink_component
+
+    def recording_check(base: Path, path: Path, **kwargs):
+        checked.append((base.relative_to(project).as_posix(), path.relative_to(project).as_posix()))
+        return real_check(base, path, **kwargs)
+
+    monkeypatch.setattr(ow, "has_symlink_component", recording_check)
+
+    CompiledOutputWriter(base_dir=project).write_many(outputs)
+
+    assert checked == [(".", "a/b"), ("a", "a/c")]
+    assert {path: path.read_text(encoding="utf-8") for path in outputs} == outputs
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_batch_still_refuses_a_link_below_an_already_checked_directory(tmp_path: Path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    (project / "a" / "b").mkdir(parents=True)
+    (project / "a" / "link").symlink_to(outside, target_is_directory=True)
+    regular = project / "a" / "b" / "x.md"
+    linked = project / "a" / "link" / "y.md"
+
+    with pytest.raises(OSError, match=r"symlinked path component: a/link/y\.md"):
+        CompiledOutputWriter(base_dir=project).write_many({regular: "# x\n", linked: "# y\n"})
+
+    assert not regular.exists()
+    assert list(outside.iterdir()) == []
