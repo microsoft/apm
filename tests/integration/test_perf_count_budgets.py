@@ -50,12 +50,12 @@ class TightenNote(UserWarning):
 
 
 @pytest.fixture(scope="module")
-def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, int]]:
+def journey_runs(tmp_path_factory, apm_engine_command) -> dict[str, tuple]:
     """Run install cold, no-op and warm once; each journey's flattened counters."""
     work = tmp_path_factory.mktemp("perf-count-budgets")
     tree = build_tree(TREE_RECIPES[_TREE], work / "tree")
     apm = list(apm_engine_command)
-    observed: dict[str, dict[str, int]] = {}
+    runs: dict[str, tuple] = {}
     with serve_offline(tree, work / "world") as world:
         project = work / "project"
 
@@ -69,11 +69,8 @@ def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, 
             result, counts = run_counted(
                 [*apm, "install"], cwd=project, env=world.env, log=work / f"{journey}.jsonl"
             )
-            assert result.returncode == 0, (
-                f"{journey}: {result.stdout[-3000:]}\n{result.stderr[-3000:]}"
-            )
-            assert (project / "apm.lock.yaml").is_file(), f"{journey} wrote no lockfile"
-            observed[journey] = flatten(counts, world.traffic().as_dict())
+            locked = (project / "apm.lock.yaml").is_file()
+            runs[journey] = (result, locked, flatten(counts, world.traffic().as_dict()))
 
         world.clear_cache()
         checkout()
@@ -81,12 +78,15 @@ def journey_counts(tmp_path_factory, apm_engine_command) -> dict[str, dict[str, 
         install("install-noop")
         checkout()
         install("install-warm")
-    return observed
+    return runs
 
 
 @pytest.mark.parametrize("journey", JOURNEYS)
-def test_install_stays_within_its_count_budget(journey: str, journey_counts) -> None:
-    observed = journey_counts[journey]
+def test_install_stays_within_its_count_budget(journey: str, journey_runs) -> None:
+    result, locked, observed = journey_runs[journey]
+    output = f"{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
+    assert result.returncode == 0, f"{journey} exited {result.returncode}:\n{output}"
+    assert locked, f"{journey} left no apm.lock.yaml:\n{output}"
     # Every journey talks to git and deploys from the lockfile it wrote.
     assert observed.get("fs.lockfile_reads", 0) > 0, observed
     if _MEASURE:
@@ -97,8 +97,12 @@ def test_install_stays_within_its_count_budget(journey: str, journey_counts) -> 
     assert not over, "count budget exceeded:\n" + "\n".join(over)
 
 
-def test_cold_install_clones_and_fetches_while_noop_spawns_no_git_fetch(journey_counts) -> None:
+def test_cold_install_clones_and_fetches_while_noop_spawns_no_git_fetch(journey_runs) -> None:
     """The counters see the work: a cold install clones over HTTP, a no-op does not."""
-    cold, noop = journey_counts["install-cold"], journey_counts["install-noop"]
+    (cold_run, _, cold), (noop_run, _, noop) = (
+        journey_runs["install-cold"],
+        journey_runs["install-noop"],
+    )
+    assert (cold_run.returncode, noop_run.returncode) == (0, 0), (cold_run.stderr, noop_run.stderr)
     assert cold.get("git.clone", 0) > 0 and cold["http.requests"] > 0, cold
     assert noop.get("git.clone", 0) == 0 and noop["http.requests"] == 0, noop
