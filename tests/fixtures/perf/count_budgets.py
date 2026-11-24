@@ -80,7 +80,7 @@ def compare(
 
 def row_problems(journeys: Mapping[str, Mapping[str, Mapping[str, object]]]) -> list[str]:
     """Every reason the budget table is malformed (missing journey, reason, pr or slack)."""
-    problems = [f"journey {name} has no budget rows" for name in JOURNEYS if name not in journeys]
+    problems = [f"journey {name} has no budget rows" for name in JOURNEYS if not journeys.get(name)]
     problems += [
         f"journey {name} is not budgeted by any check" for name in journeys if name not in JOURNEYS
     ]
