@@ -212,7 +212,7 @@ def _modes(world: World) -> dict[str, str]:
     skips = {
         "project": (".git", ".apm-local"),
         "home": (*HOME_CACHES, ".apm/cache"),
-        "apm_home": ("cache", "logs"),
+        "apm_home": ("cache", "logs", "verdicts", "verdict.key"),
     }
     for name, root in roots.items():
         skip = skips[name]
