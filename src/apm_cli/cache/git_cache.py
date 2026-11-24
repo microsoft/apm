@@ -1171,6 +1171,7 @@ class GitCache:
                     robust_rmtree(staged, ignore_errors=True)
                     raise RuntimeError(f"Race landing {_sanitize_url(url)} @ {sha[:12]}")
                 register_inprocess_manifest(final_dir, sha, inprocess_files)
+                _log.debug("In-process checkout: %s @ %s", _sanitize_url(url), sha[:12])
                 return final_dir
             try:
                 # Checkout the specific SHA.

@@ -312,13 +312,78 @@ def materialize_tree(
     finally:
         objects.close()
     root = str(repo)
-    for path in sorted(dirs):
-        os.mkdir(os.path.join(root, *path.split("/")), 0o755)
     manifest: dict[str, tuple[str, bool]] = {}
-    for path, oid, executable in files:
-        _write_file(os.path.join(root, *path.split("/")), blobs[oid], executable)
-        manifest[path] = (oid, executable)
-    head = os.path.join(root, ".git", "HEAD")
-    with open(head, "w", encoding="ascii", newline="\n") as handle:
-        handle.write(sha + "\n")
+    try:
+        # C8: the staged root holds only .git, so mkdir (never exist_ok) and
+        # O_EXCL|O_NOFOLLOW prove every component is one this call created.
+        for path in sorted(dirs):
+            os.mkdir(os.path.join(root, *path.split("/")), 0o755)
+        for path, oid, executable in files:
+            _write_file(os.path.join(root, *path.split("/")), blobs[oid], executable)
+            manifest[path] = (oid, executable)
+        _write_index(root, files)
+        head = os.path.join(root, ".git", "HEAD")
+        with open(head, "w", encoding="ascii", newline="\n") as handle:
+            handle.write(sha + "\n")
+    except Exception:
+        _discard_worktree(root)
+        return None
     return manifest
+
+
+def _discard_worktree(root: str) -> None:
+    """Remove everything but ``.git`` (and the index this call may have written)."""
+    from ..utils.file_ops import robust_rmtree
+
+    with contextlib.suppress(OSError):
+        os.unlink(os.path.join(root, ".git", "index"))
+    for name in os.listdir(root):
+        if name == ".git":
+            continue
+        path = os.path.join(root, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            robust_rmtree(Path(path), ignore_errors=True)
+        else:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+
+
+def _write_index(root: str, files: list[tuple[str, str, bool]]) -> None:
+    """A version-2 index of the written files, as ``git checkout`` leaves it (C6)."""
+    import hashlib
+
+    body = bytearray(b"DIRC" + struct.pack(">II", 2, len(files)))
+    mask = 0xFFFFFFFF
+    for path, oid, executable in sorted(files, key=lambda f: f[0].encode("utf-8")):
+        info = os.lstat(os.path.join(root, *path.split("/")))
+        name = path.encode("utf-8")
+        body += struct.pack(
+            ">10I",
+            int(info.st_ctime) & mask,
+            info.st_ctime_ns % 1_000_000_000,
+            int(info.st_mtime) & mask,
+            info.st_mtime_ns % 1_000_000_000,
+            info.st_dev & mask,
+            info.st_ino & mask,
+            0o100755 if executable else 0o100644,
+            getattr(info, "st_uid", 0) & mask,
+            getattr(info, "st_gid", 0) & mask,
+            info.st_size & mask,
+        )
+        body += bytes.fromhex(oid) + struct.pack(">H", min(len(name), 0xFFF)) + name
+        body += b"\0" * (8 - (62 + len(name)) % 8)
+    body += hashlib.sha1(bytes(body)).digest()  # noqa: S324 -- git's index checksum
+    index = os.path.join(root, ".git", "index")
+    fd = os.open(
+        index,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_TRUNC
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_BINARY", 0),
+        0o644,
+    )
+    try:
+        os.write(fd, bytes(body))
+    finally:
+        os.close(fd)
