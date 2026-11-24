@@ -18,7 +18,7 @@ from apm_cli.utils import realpath
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.realpath import resolve_path
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-portability.byte_deterministic")]
 
 _LINKS = pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 
@@ -39,7 +39,14 @@ def tree(tmp_path: Path) -> Path:
     return root
 
 
-_PLAIN = ["dir", "dir/file.md", "dir/sub", "dir/missing.md", "dir/missing/deeper/x.md", "dir/file.md/under-file"]
+_PLAIN = [
+    "dir",
+    "dir/file.md",
+    "dir/sub",
+    "dir/missing.md",
+    "dir/missing/deeper/x.md",
+    "dir/file.md/under-file",
+]
 _LINKED = [
     "link_dir",
     "link_dir/file.md",
@@ -96,12 +103,24 @@ def test_linux_resolves_in_the_kernel(tree: Path, monkeypatch: pytest.MonkeyPatc
     assert (resolve_path(linked), resolve_path(missing)) == expected
 
 
-_FUZZ_PARTS = ["dir", "sub", "file.md", "missing", "..", ".", "link_dir", "link_file", "dangling", "escape", "x"]
+_FUZZ_PARTS = [
+    "dir",
+    "sub",
+    "file.md",
+    "missing",
+    "..",
+    ".",
+    "link_dir",
+    "link_file",
+    "dangling",
+    "escape",
+    "x",
+]
 
 
 @_LINKS
 def test_seeded_paths_match_posix_realpath(tree: Path) -> None:
-    rng = random.Random(4939)
+    rng = random.Random(4939)  # noqa: S311 - a seeded test sequence
     for _ in range(400):
         parts = [rng.choice(_FUZZ_PARTS) for _ in range(rng.randint(1, 6))]
         text = str(tree) + "/" + "/".join(parts)

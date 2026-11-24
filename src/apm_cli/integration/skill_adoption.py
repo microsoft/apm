@@ -411,12 +411,11 @@ _NON_SKILL_MEMBERS = frozenset({"bin", ".claude-plugin"})
 
 def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple[Any, Path, bool]]:
     """Yield (profile, skills root, legacy layout) for skill targets outside this install."""
-    from apm_cli.utils.realpath import resolve_path
-
     from apm_cli.install.helpers.reconciliation_scope import (
         _scoped_known_targets_for_reconciliation,
     )
     from apm_cli.integration.skill_layout import resolve_skill_layout
+    from apm_cli.utils.realpath import resolve_path
 
     targets = list(integrator._skill_targets or ())
     # A harness a native plugin route serves is not outside this install (#5036).

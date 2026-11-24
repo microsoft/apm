@@ -166,9 +166,8 @@ def _activate_validated_candidate(
     callback_content_hashes: dict[str, tuple[Path, str]] | None = None,
 ) -> Path:
     """Publish one accepted candidate, then expose its download metadata."""
-    from apm_cli.utils.realpath import resolve_path
-
     from apm_cli.utils.content_hash import compute_package_hash
+    from apm_cli.utils.realpath import resolve_path
 
     content_hash = compute_package_hash(candidate_path, framed=True)
     live_path = staging_session.publish_replacement(candidate_path)
