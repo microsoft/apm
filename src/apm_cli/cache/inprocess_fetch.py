@@ -1215,18 +1215,25 @@ def _reaches_cone(directory: str, cones: tuple[str, ...]) -> bool:
     )
 
 
-def _check_cone_dir(prefix: str, raw_name: bytes, cones: tuple[str, ...]) -> None:
-    """R1/R2: a directory on the way to or inside a cone has a safe, case-exact name.
+def _check_cone_dir(prefix: str, raw_name: bytes, path: str, cones: tuple[str, ...]) -> None:
+    """R1/R2: directories that can hold a written file, or sit beside the cone path, are safe.
 
-    ``core.ignorecase`` folds case in cone matching, so a sibling that differs from
-    the cone's next component only in case would be written by git and not here.
+    R1: a directory on the way to or inside a cone passes the same name refusals as
+    written files. R2: ``core.ignorecase`` folds case in cone matching, so a sibling
+    that differs from the cone's next component only in case would be written by git
+    and not here.
     """
-    name = _safe_name(raw_name)
+    if _reaches_cone(path, cones):
+        _safe_name(raw_name)
+    try:
+        name = raw_name.decode("utf-8")
+    except UnicodeDecodeError:
+        return
     for cone in cones:
         if not (cone + "/").startswith(prefix):
             continue
         component = cone[len(prefix) :].split("/", 1)[0]
-        if name != component and name.casefold() == component.casefold():
+        if component and name != component and name.casefold() == component.casefold():
             raise _Refuse("a directory differs from the cone only in case")
 
 
@@ -1258,9 +1265,7 @@ def _sparse_plan(
                 raise _Refuse("worktree path exceeds the length cap")
             path = prefix + raw_name.decode("utf-8", "replace")
             if mode == "40000":
-                if _reaches_cone(path, cones):
-                    # R1: every directory that can hold a written file passes B1's names.
-                    _check_cone_dir(prefix, raw_name, cones)
+                _check_cone_dir(prefix, raw_name, path, cones)
                 stack.append((path + "/", oid))
                 continue
             if not _in_cone(path, cones):

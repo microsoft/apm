@@ -235,26 +235,31 @@ def test_a_deeper_override_is_evaluated_by_state(tmp_path: Path) -> None:
 
 
 def _commit_tree(src: Path, entries: list[tuple[str, str, bytes]]) -> str:
-    """A commit whose tree holds *entries* (mode, path, bytes), built with plumbing only."""
-    index = src / ".git" / "probe-index"
-    env_index = {**os.environ, "GIT_INDEX_FILE": str(index)}
+    """A commit whose tree holds *entries* (mode, path, bytes), built with ``git mktree``.
+
+    ``git update-index`` refuses names such as ``.git``; ``mktree`` writes any name,
+    as a hostile server could.
+    """
+    tree: dict = {}
     for mode, path, data in entries:
+        *dirs, leaf = path.split("/")
+        node = tree
+        for part in dirs:
+            node = node.setdefault(part, {})
         blob = _git(src, "hash-object", "-w", "--stdin", stdin=data).decode().strip()
-        subprocess.run(
-            [*_GIT, "update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}"],
-            cwd=src,
-            env=env_index,
-            capture_output=True,
-            check=True,
-        )
-    tree = (
-        subprocess.run(
-            [*_GIT, "write-tree"], cwd=src, env=env_index, capture_output=True, check=True
-        )
-        .stdout.decode()
-        .strip()
-    )
-    return _git(src, "commit-tree", tree, "-m", "planted", stdin=b"").decode().strip()
+        node[leaf] = (mode, blob)
+
+    def write(node: dict) -> str:
+        lines = []
+        for name, value in node.items():
+            if isinstance(value, dict):
+                lines.append(f"040000 tree {write(value)}\t{name}")
+            else:
+                lines.append(f"{value[0]} blob {value[1]}\t{name}")
+        listing = "\n".join(lines).encode("utf-8") + b"\n"
+        return _git(src, "mktree", stdin=listing).decode().strip()
+
+    return _git(src, "commit-tree", write(tree), "-m", "planted", stdin=b"").decode().strip()
 
 
 @pytest.mark.parametrize("nested", [".git", ".GIT", "git~1", ".git.", ".git\u200c"])
