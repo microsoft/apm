@@ -56,6 +56,8 @@ steps:
       - Skipped inactive experimental resolver
       - dependency unpinned
       - Traceback
+    # The quickstart never compiles; install counts the routed instruction (#5344).
+    forbid_except: ["Claude Code does not load"]
   - n: 5
     run:
       - git add apm.yml apm.lock.yaml .gitignore
@@ -77,6 +79,8 @@ steps:
     files: []
     key_lines: ["No changes -- install state already up to date"]
     forbidden_lines: [integrated, adopted, "[!]"]
+    # The quickstart never compiles; install counts the routed instruction (#5344).
+    forbid_except: ["Claude Code does not load"]
   - n: 7
     run: ["apm install microsoft/apm/packages/apm-guide#{release}"]
     exit: 0
@@ -86,4 +90,6 @@ steps:
       pins: true
     key_lines: ["[*] Installed"]
     forbidden_lines: ["[!]"]
+    # The quickstart never compiles; install counts the routed instruction (#5344).
+    forbid_except: ["Claude Code does not load"]
 known_cells:

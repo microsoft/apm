@@ -12,6 +12,7 @@ GRAPH=direct-also-transitive | cross-root diamond | replaced edge
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -795,6 +796,124 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     assert not [key for key in modules if ".apm-reanchor-" in key], sorted(modules)
 
 
+def test_an_absolute_compile_output_outside_the_project_is_scanned(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5235: an --output outside the project is recorded by its absolute path, so a
+    link from it into the moving copy refuses the re-anchor before any write."""
+    from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    def instruction(project: Path) -> None:
+        rules = project / ".apm/instructions/proj.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text(
+            '---\napplyTo: "**"\ndescription: Project rules\n---\nProject body.\n',
+            encoding="utf-8",
+        )
+
+    world = _docs_world(tmp_path, apm_binary_path, instruction)
+    output = tmp_path / "outside" / "CONTEXT.md"
+    output.parent.mkdir()
+    world.apm("compile", "--single-agents", "--output", str(output))
+    link = os.path.relpath(world.project / _LINK, output.parent).replace(os.sep, "/")
+    output.write_text(_marked(AGENTS_MD_GENERATED_MARKER, link), "utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    flat = " ".join((refused.stdout + refused.stderr).split())
+    assert "CONTEXT.md links into its apm_modules copy" in flat, flat
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+_COPY_LOG_ENTRY = """\
+import json
+import sys
+
+sys.path.extend(json.loads(sys.argv.pop(1)))
+log = open(sys.argv.pop(1), "a", encoding="utf-8")
+
+def record(event, args):
+    if event == "shutil.copyfile":
+        log.write(str(args[0]) + "\\t" + str(args[1]) + "\\n")
+        log.flush()
+
+sys.addaudithook(record)
+from apm_cli.cli import main
+main()
+"""
+
+
+def test_a_fresh_copy_re_anchor_stages_each_package_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5193: deciding and building e's fresh copy stages each of its files once.
+
+    The decision compares only the hash-excluded subtrees, and the one staged
+    image is verified against the lock's content_hash, never staged twice.
+    """
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+
+    def git_head(project: Path) -> None:
+        head = project / "vendor/e/.git/HEAD"
+        head.parent.mkdir(parents=True)
+        head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+    world = _docs_world(tmp_path, apm_binary_path, git_head)
+    (world.project / "vendor/e/.git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+    log = tmp_path / "copies.log"
+    roots = json.dumps([str(Path(path).resolve()) for path in sys.path if path])
+    runner = ApmLifecycleRunner((sys.executable, "-c", _COPY_LOG_ENTRY, roots, str(log)))
+
+    result = runner.run(("uninstall", "./vendor/e"), cwd=world.project, env=world.env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    skill = (world.project / "vendor/e/.apm/skills/e-skill/SKILL.md").resolve()
+    staged = [
+        destination
+        for source, destination in (
+            line.split("\t", 1) for line in log.read_text(encoding="utf-8").splitlines()
+        )
+        if Path(source).resolve() == skill and "apm-reanchor-" in destination
+    ]
+    assert len(staged) == 1, staged
+    assert not (world.project / "apm_modules/_local/e").exists()
+
+
+@pytest.mark.parametrize(
+    ("output", "link"),
+    [("dist/AGENTS.md", f"../{_LINK}"), ("CONTEXT.md", _LINK)],
+    ids=["pruned-dir", "custom-name"],
+)
+def test_a_compile_output_option_link_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path, output: str, link: str
+) -> None:
+    """#5235: compile records an output written with --output, and the scan reads it,
+    even in a directory compile's placement prunes or under a custom file name."""
+    from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    def instruction(project: Path) -> None:
+        rules = project / ".apm/instructions/proj.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text(
+            '---\napplyTo: "**"\ndescription: Project rules\n---\nProject body.\n',
+            encoding="utf-8",
+        )
+
+    world = _docs_world(tmp_path, apm_binary_path, instruction)
+    world.apm("compile", "--single-agents", "--output", output)
+    (world.project / output).write_text(_marked(AGENTS_MD_GENERATED_MARKER, link), "utf-8")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    flat = " ".join((refused.stdout + refused.stderr).split())
+    assert f"{output} links into its apm_modules copy" in flat, flat
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
 # -- Which compiled outputs the moving-copy check reads (#5097) ------------------
 
 
@@ -1100,6 +1219,52 @@ def test_an_nfd_descendant_spelling_is_refused(tmp_path: Path, apm_binary_path: 
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "installs elsewhere" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def _folds_normalization(path: Path) -> bool:
+    probe = path / "caf\u00e9-probe"
+    probe.mkdir()
+    try:
+        return (path / "cafe\u0301-probe").exists()
+    finally:
+        probe.rmdir()
+
+
+def test_an_nfd_spelling_of_the_same_source_directory_reanchors(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5222: where the volume folds Unicode normalization, ../<NFD> and ../<NFC> name one
+    source directory with no link, so the re-anchor takes the fresh spelling."""
+    if not _folds_normalization(tmp_path):
+        pytest.skip("needs a normalization-insensitive volume; the seam cell covers the proof")
+    world = _respelled_world(
+        tmp_path, apm_binary_path, lambda vendor: None, spellings=("caf\u00e9", "cafe\u0301")
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+
+
+def test_two_directories_that_differ_only_by_normalization_stay_distinct(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5222: where NFC and NFD are two directories, they stay two packages."""
+    nfc, nfd = "caf\u00e9", "cafe\u0301"
+    if _folds_normalization(tmp_path):
+        pytest.skip("needs a normalization-sensitive volume")
+    world = _respelled_world(
+        tmp_path,
+        apm_binary_path,
+        lambda vendor: _skill_package(vendor / nfd, "g"),
+        spellings=(nfc, nfd),
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    copies = {key.rsplit("/", 2)[-2] for key in _modules(world.project) if key.endswith("/apm.yml")}
+    assert {nfc, nfd} <= copies, sorted(copies)
+    _assert_no_frozen_rewrites_nothing(world)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")

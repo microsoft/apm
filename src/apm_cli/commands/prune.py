@@ -87,8 +87,8 @@ def _refuse_lock_graph(lockfile: LockFile | None, removed: set[str], logger, not
     """Exit 1 if the lock owner rejects *lockfile* without *removed* (#5140).
 
     Removing a replaced package's only parent leaves its row pointing at an
-    absent parent. The check runs the owner's graph rule on a shallow copy
-    (#5185 makes it public).
+    absent parent. The check runs the owner's public graph rule on a shallow
+    copy, without emitting YAML (#5185).
     """
     if lockfile is None or not removed:
         return
@@ -97,7 +97,7 @@ def _refuse_lock_graph(lockfile: LockFile | None, removed: set[str], logger, not
         key: dep for key, dep in lockfile.dependencies.items() if key not in removed
     }
     try:
-        remaining._validate_replacement_evidence()
+        remaining.validate_graph()
     except LockfileFormatError as exc:
         logger.error(f"Cannot prune {', '.join(sorted(removed))}: {exc}. {note}")
         logger.error_detail(PRUNE_REPLACED_PARENT.sentence())
@@ -437,6 +437,7 @@ def prune(ctx, dry_run):
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
+        failed_keys: set[str] = set()
         compile_inputs = snapshot_compile_inputs(
             project_root, package_target_selection(apm_package), apm_modules_dir
         )
@@ -455,9 +456,11 @@ def prune(ctx, dry_run):
                 deleted_pkg_paths.append(pkg_path)
             except Exception as e:
                 failed_count += 1
+                failed_keys.update(decision.path_keys[org_repo_name])
                 logger.error(f"Failed to remove {org_repo_name}: {e}")
 
         BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
+        pruned_keys = _keep_failed_chains(decision, lockfile, pruned_keys, failed_keys)
 
         if lockfile is not None:
             cleanup_claims = {
@@ -622,6 +625,20 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _keep_failed_chains(
+    decision, lockfile, pruned_keys: list[str], failed_keys: set[str]
+) -> list[str]:
+    """The pruned keys minus the parent chain of every row whose removal failed (#5238).
+
+    A failed row keeps its pruned parents' lock rows, so the retry can still
+    read the graph and finish instead of retaining the row forever.
+    """
+    if not failed_keys or lockfile is None:
+        return pruned_keys
+    pinned = decision.failed_removal_chains(lockfile, pruned_keys, failed_keys)
+    return [key for key in pruned_keys if key not in pinned]
 
 
 def _cleanup_stale_server_configs(
