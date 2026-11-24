@@ -26,6 +26,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import re
 import stat
@@ -826,8 +827,8 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path, ledger=None) -> 
     )
     dirs = _moving_dirs(plan.moves)
 
-    def names(member: Path) -> bool:
-        data = member.read_bytes()
+    def names(member: Path, data: bytes | None = None) -> bool:
+        data = member.read_bytes() if data is None else data
         return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
 
     for deployed in sorted(_recorded_claims(lockfile, ledger)):
@@ -875,8 +876,6 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
         AGENTS_MD_GENERATED_MARKER,
         DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
         GEMINI_MD_GENERATED_MARKER,
-        decode_utf8_prefix,
-        has_generated_marker_header,
     )
     from ...compilation.context_optimizer import (
         PLACEMENT_HIDDEN_TOOL_TREES,
@@ -912,18 +911,48 @@ def _compiled_output_naming(project_root: Path, names) -> str | None:
             for name in sorted(_COMPILED_NAMES.intersection(files)):
                 path = here / name
                 try:
-                    # One lstat: a link, FIFO or device is never opened (#5097).
-                    if not stat.S_ISREG(path.lstat().st_mode):
-                        continue
-                    with path.open("rb") as handle:
-                        header = decode_utf8_prefix(handle.read(4096))
-                    if has_generated_marker_header(header, markers) and names(path):
+                    data = _marked_regular_file(path, markers)
+                    if data is not None and names(path, data):
                         return portable_relpath(path, root)
                 except OSError:
                     return portable_relpath(path, root)
     except _UnreadableDir as unreadable:
         return portable_relpath(Path(unreadable.args[0]), root)
     return None
+
+
+def _marked_regular_file(path: Path, markers) -> bytes | None:
+    """The bytes of *path* when it is a regular file carrying an APM header, else ``None``.
+
+    Opened without following a final link and without blocking, then checked
+    on the descriptor itself, so a link, FIFO or device swapped in is never
+    read (#5097). Only a 4 KiB prefix is read unless the header is APM's.
+    Windows has no ``O_NOFOLLOW``, so a link is refused there before opening.
+    """
+    from ...compilation.constants import decode_utf8_prefix, has_generated_marker_header
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow and not stat.S_ISREG(path.lstat().st_mode):
+        return None
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        if error.errno in (errno.ELOOP, errno.EMLINK):
+            return None  # a final link: never followed
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        head = os.read(fd, 4096)
+        if not has_generated_marker_header(decode_utf8_prefix(head), markers):
+            return None
+        chunks = [head]
+        while chunk := os.read(fd, 1 << 16):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
