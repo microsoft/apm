@@ -184,3 +184,25 @@ def test_refuses_batch_when_missing_directory_and_dotdot_reach_a_linked_director
     assert not regular.exists()
     assert not (project / "new").exists()
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO")
+def test_a_special_file_refusal_names_the_path_as_printable_ascii(tmp_path: Path) -> None:
+    """A directory name with ESC or a newline is shown printable in the refusal (#5187)."""
+    from apm_cli.compilation.output_writer import (
+        CompiledOutputSpecialFileError,
+        refuse_unsafe_output,
+    )
+
+    folder = tmp_path / "docs\x1b[31m\nx"
+    folder.mkdir()
+    fifo = folder / "AGENTS.md"
+    os.mkfifo(fifo)
+
+    with pytest.raises(CompiledOutputSpecialFileError) as refused:
+        refuse_unsafe_output(fifo, tmp_path, managed=False)
+
+    message = str(refused.value)
+    assert message.isascii() and message.isprintable(), message
+    assert "\x1b" not in message and "\n" not in message
+    assert fifo.is_fifo()
