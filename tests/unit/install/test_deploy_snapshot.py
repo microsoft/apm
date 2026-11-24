@@ -2229,7 +2229,19 @@ def test_a_group_writable_apm_home_is_trusted_only_for_a_user_private_group(
         return
     with pytest.raises(JournalReplayError) as kept:
         _replay(apm_home, project, lambda: ledger)
-    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    _assert_deferred_for_group_write(kept.value, apm_home, config)
+
+
+_HOME_GROUP_WRITABLE = (
+    "APM_HOME is group writable and its group cannot be shown private to this user"
+)
+
+
+def _assert_deferred_for_group_write(error, apm_home: Path, config: Path) -> None:
+    """Only APM_HOME's group write refused: it is named, nothing restored, store left (#5385)."""
+    assert error.home == apm_home
+    assert error.issues == [(".mcp.json", _HOME_GROUP_WRITABLE)]
+    assert error.store.name.startswith("deploy-")
     assert config.read_bytes() == b"killed\n"
 
 
@@ -2300,8 +2312,39 @@ def test_a_group_writable_apm_home_needs_a_complete_account_enumeration(
     with pytest.raises(JournalReplayError) as kept:
         _replay(apm_home, project, lambda: ledger)
 
-    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    _assert_deferred_for_group_write(kept.value, apm_home, config)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner, group and mode bits")
+def test_a_group_writable_apm_home_defers_replay_until_its_group_write_is_removed(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5385 W3d: only APM_HOME's group write fails, so the store waits for the chmod."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o775)
+    _local_account_databases(tmp_path, monkeypatch, "files sss")
+
+    with pytest.raises(JournalReplayError) as deferred:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert deferred.value.home == apm_home
+    assert [path for path, _reason in deferred.value.issues] == [".mcp.json"]
+    assert deferred.value.store == store
+    assert store.is_dir()
+    assert not (store / "RETAINED").exists()
+    assert [p.name for p in store.parent.iterdir()] == [store.name]
     assert config.read_bytes() == b"killed\n"
+
+    apm_home.chmod(0o755)
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+    assert not store.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
