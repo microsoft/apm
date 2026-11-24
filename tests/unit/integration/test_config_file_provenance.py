@@ -741,3 +741,28 @@ def test_a_record_turned_into_a_symlink_loop_never_breaks_another_lookup(
 
     assert config_file_origin(other) is not Origin.CREATED
     assert recorded.is_symlink() and other.read_text(encoding="utf-8") == _WITH_ENTRY
+
+
+def test_a_users_skeleton_reached_through_a_second_path_is_kept(tmp_path, apm_home) -> None:
+    """#5189: the record is found by the file's identity when its own path is gone.
+
+    A second mount path is modelled with a hard link: the file APM recorded under
+    one path is now reached only through another.
+    """
+    first, second = tmp_path / "mount-a" / "project", tmp_path / "mount-b" / "project"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    config = first / ".mcp.json"
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=first)
+    assert config_file_origin(config) is Origin.PREEXISTING
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry is gone again
+    try:
+        os.link(config, second / ".mcp.json")
+    except (OSError, NotImplementedError):
+        pytest.skip("hard links are unavailable")
+    config.unlink()
+    before = (second / ".mcp.json").read_bytes()
+
+    assert _apm_empties(second / ".mcp.json", root=second) is False
+    assert (second / ".mcp.json").read_bytes() == before
