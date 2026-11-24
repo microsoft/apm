@@ -64,6 +64,9 @@ KNOWN_LARGE_MODULES = {
     "drift.py": 1058,
     # The resolver takes its frozen pin mode from InstallService (#4012).
     "phases/resolve.py": 1001,
+    # Every journal rename, delete and link restore releases held directories
+    # and drops containment proofs first (#5382). Decomposition tracked as follow-up.
+    "deploy_snapshot.py": 1011,
 }
 
 
