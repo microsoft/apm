@@ -622,20 +622,27 @@ def _repaired_survivors(lockfile, retained, walk, reparented) -> list[str]:
     """Surviving transitive rows whose depth and dev status a fresh resolve re-derives (#5126).
 
     A row qualifies when the complete walk reached it under its own lock key
-    and its recorded parent is the walk's nearest parent (or prune re-parents
-    it to that parent); any other row keeps its metadata unchanged.
+    and its recorded parent is the walk's nearest parent, by identity and by
+    exact key, and that parent could be recorded (``reparent_blocker``); or
+    when prune re-parents it to that parent. Any other row keeps its metadata.
     """
     if walk is None or lockfile is None:
         return []
+    from ..deps.reachability import parent_identity_counts, reparent_blocker
+
+    identity_counts = parent_identity_counts(lockfile)
     repaired = []
     for key in sorted(retained):
         row = lockfile.dependencies.get(key)
         if row is None or not row.depth or row.depth < 2 or walk.depths.get(key, 1) < 2:
             continue
-        parent = lockfile.dependencies.get(walk.parent_keys.get(key, ""))
+        parent_key = walk.parent_keys.get(key, "")
+        parent = lockfile.dependencies.get(parent_key)
         if key in reparented or (
             parent is not None
             and lockfile_parent_identity(parent, lockfile.replacements) == row.resolved_by
+            and row.declaring_parent in (None, parent_key)
+            and reparent_blocker(lockfile, walk, key, identity_counts) is None
         ):
             repaired.append(key)
     return repaired
