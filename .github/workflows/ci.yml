@@ -433,6 +433,7 @@ jobs:
         uv run --frozen --extra dev pytest -p no:cacheprovider -q
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
+        tests/perf/test_architecture_linter_scaling.py::test_definition_index_answers_every_real_query_like_the_direct_scan
 
   # Required by merge-gate.yml at PR time and on merge_group. It gates only
   # the deterministic contracts: the wall-clock scaling ratio stays its own

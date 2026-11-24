@@ -620,3 +620,31 @@ def test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n() -> Non
         f"ratio {large / small:.2f}"
     )
     assert large / small <= _MAX_MATRIX_RATIO
+
+
+def test_definition_index_answers_every_real_query_like_the_direct_scan() -> None:
+    """On a full run of the real repository, every ``_defining_files`` query the
+    registry guards make gets the same answer from the per-run index as from the
+    direct scan it replaced (#5196)."""
+    import scripts.architecture_linter.checks.registry_owner_guards as guards
+    from scripts.architecture_linter.checks.registry_definition_index import (
+        _defining_files,
+        _scan_defining_files,
+    )
+
+    queried: list[str] = []
+    differing: list[str] = []
+
+    def compared(provider, rule_id, name, *, kinds):
+        indexed = _defining_files(provider, rule_id, name, kinds=kinds)
+        if indexed != _scan_defining_files(provider, rule_id, name, kinds=kinds):
+            differing.append(name)
+        queried.append(name)
+        return indexed
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(guards, "_defining_files", compared)
+        report = runner.run(Path(__file__).resolve().parents[2])
+    assert report.failures == ()
+    assert queried, "no guard asked the index anything: the comparison proves nothing"
+    assert differing == [], differing
