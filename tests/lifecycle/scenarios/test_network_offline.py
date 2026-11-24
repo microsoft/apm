@@ -333,6 +333,7 @@ _MARKETPLACES = {
 # The catalog cache a project install may refresh under APM_HOME (as the source machine).
 _CATALOG_CACHE = (
     ".apm/cache/marketplace/version-pins.json",
+    ".apm/cache/marketplace/version-pins.lock",
     *(
         f".apm/cache/marketplace/{name}{suffix}"
         for name, _package in _MARKETPLACES.values()

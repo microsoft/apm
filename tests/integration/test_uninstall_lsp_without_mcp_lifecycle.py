@@ -77,8 +77,16 @@ class _Scope:
 
     def harness_servers(self) -> dict[str, set[str]]:
         """Return the LSP server names each LSP-capable harness config holds."""
+        servers: dict[str, set[str]] = {}
+        for harness, (path, key) in self.harness_configs().items():
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            servers[harness] = set(data.get(key) or {})
+        return servers
+
+    def harness_configs(self) -> dict[str, tuple[Path, str]]:
+        """Return each LSP-capable harness config path and its servers key."""
         base = self.scene.home if self.user else self.scene.project
-        configs = {
+        return {
             "copilot": (self.lsp_config, "lspServers"),
             "claude": (
                 base / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json",
@@ -91,11 +99,6 @@ class _Scope:
                 "lsp",
             ),
         }
-        servers: dict[str, set[str]] = {}
-        for harness, (path, key) in configs.items():
-            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            servers[harness] = set(data.get(key) or {})
-        return servers
 
     def locked_views(self) -> dict[str, set[str]]:
         lock_path = self.manifest_root / "apm.lock.yaml"
@@ -130,6 +133,10 @@ def scope(
     factory = LocalPackageFactory(scene.isolated.package_root)
     packages = {
         "lsp-kit": factory.create("lsp-kit", lsp_dependencies=(_lsp("kit-lsp"),)),
+        "root-kit": factory.create(
+            "root-kit",
+            lsp_dependencies=({**_lsp("root-lsp"), "command": "${CLAUDE_PLUGIN_ROOT}/bin/lsp"},),
+        ),
         "keep-kit": factory.create("keep-kit", lsp_dependencies=(_lsp("keep-lsp"),)),
         "mixed-kit": factory.create(
             "mixed-kit",
@@ -213,6 +220,65 @@ def test_unreadable_target_config_still_fails_closed(scope: _Scope) -> None:
     assert "LSP cleanup failed" in output, describe(result)
     assert _MANIFEST_ERROR not in output, describe(result)
     assert scope.lsp_config.read_bytes() == foreign
+
+
+def test_uninstall_keeps_a_user_edited_lsp_entry_and_reports_it(scope: _Scope) -> None:
+    """An entry the user edited after install is kept and named, not deleted (#5263)."""
+    scope.declare("lsp-kit")
+    scope.install()
+    data = json.loads(scope.lsp_config.read_text(encoding="utf-8"))
+    data["lspServers"]["kit-lsp"]["command"] = "hand-edited"
+    scope.lsp_config.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    edited = scope.lsp_config.read_bytes()
+
+    result = scope.uninstall("lsp-kit")
+
+    assert result.returncode == 0, describe(result)
+    assert scope.lsp_config.read_bytes() == edited
+    assert "kit-lsp" in flat(result.stdout + result.stderr), describe(result)
+    assert all(view == set() for view in scope.locked_views().values()), scope.locked_views()
+
+
+@pytest.mark.parametrize("edited", [False, True], ids=["as-written", "user-edited"])
+def test_uninstall_judges_a_plugin_root_entry_at_its_own_package_root(
+    scope: _Scope, edited: bool
+) -> None:
+    """A ${CLAUDE_PLUGIN_ROOT} entry is APM's only at its package's root: an edit to
+    another absolute path is kept and named, an untouched entry still goes (#5263)."""
+    scope.declare("root-kit")
+    scope.install()
+    data = json.loads(scope.lsp_config.read_text(encoding="utf-8"))
+    assert "${CLAUDE_PLUGIN_ROOT}" not in json.dumps(data["lspServers"]["root-lsp"])
+    if edited:
+        data["lspServers"]["root-lsp"]["command"] = "/user/custom/bin/lsp"
+        scope.lsp_config.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    before = scope.lsp_config.read_bytes()
+
+    result = scope.uninstall("root-kit")
+
+    assert result.returncode == 0, describe(result)
+    if edited:
+        assert scope.lsp_config.read_bytes() == before
+        assert "Kept LSP server root-lsp" in flat(result.stdout + result.stderr), describe(result)
+    else:
+        assert scope.configured() == set(), describe(result)
+
+
+def test_uninstall_changes_no_lsp_config_when_a_later_one_is_unreadable(scope: _Scope) -> None:
+    """Every config is read before the first change: one unreadable config changes none (#5263)."""
+    harnesses = ("claude", "copilot", "opencode")
+    scope.declare("lsp-kit", targets=harnesses)
+    installed = scope.scene.install(",".join(harnesses), user=scope.user)
+    assert installed.returncode == 0, describe(installed)
+    configs = {harness: path for harness, (path, _key) in scope.harness_configs().items()}
+    configs["opencode"].write_text("{not json\n", encoding="utf-8")
+    before = {harness: path.read_bytes() for harness, path in configs.items()}
+
+    result = scope.uninstall("lsp-kit")
+
+    assert result.returncode == 1, describe(result)
+    assert "LSP cleanup failed" in flat(result.stdout + result.stderr), describe(result)
+    assert {harness: path.read_bytes() for harness, path in configs.items()} == before
 
 
 @pytest.mark.parametrize(
