@@ -84,12 +84,19 @@ def test_an_insteadof_rewrite_of_the_url_is_reported_for_the_url_check() -> None
     assert prefixes == ("https://github.com/",)
 
 
-def test_schannel_falls_back_to_git_on_every_host() -> None:
-    """git's schannel checks certificate revocation; only git matches it (W3d)."""
-    with pytest.raises(fetch._Refuse, match="sslBackend"):
-        fetch._trust({}, {"http.sslbackend": "schannel"})
+def test_schannel_trusts_the_windows_store_and_other_backends_fall_back(monkeypatch) -> None:
+    """W3d SC2: schannel maps to the OS store on Windows only; any other backend is git's."""
+    from apm_cli.deps.anonymous_ref_listing import OS_TRUST
+
     with pytest.raises(fetch._Refuse, match="sslBackend"):
         fetch._trust({}, {"http.sslbackend": "gnutls"})
+    monkeypatch.setattr("os.name", "posix")
+    with pytest.raises(fetch._Refuse, match="schannel outside Windows"):
+        fetch._trust({}, {"http.sslbackend": "schannel"})
+    monkeypatch.setattr("os.name", "nt")
+    assert fetch._trust({}, {"http.sslbackend": "schannel"}) == ("file", OS_TRUST)
+    with pytest.raises(fetch._Refuse, match="not spelled 'schannel'"):
+        fetch._trust({}, {"http.sslbackend": "Schannel", "http.sslcainfo": "/ca.pem"})
 
 
 def test_openssl_trusts_exactly_gits_ca_file(tmp_path: Path) -> None:

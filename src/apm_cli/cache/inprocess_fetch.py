@@ -596,17 +596,20 @@ def _effective(env: Mapping[str, str]) -> tuple:
 
 
 def _trust(child_env: Mapping[str, str], values: Mapping[str, str]) -> tuple[str, str]:
-    """W3: ``("file", CA path)`` for git's OpenSSL trust; schannel falls back to git."""
+    """W3: ``("file", CA path)`` for git's OpenSSL trust or ``anon.OS_TRUST`` for schannel's."""
     from ..deps import anonymous_ref_listing as anon
 
     backend = values.get("http.sslbackend", "").lower()
-    if backend not in ("", "openssl"):
-        # schannel checks certificate revocation the way only git does: git fetches.
+    if backend not in ("", "openssl", "schannel"):
         raise _Refuse(f"git config http.sslBackend={backend}")
-    if os.name == "nt" and not (
-        child_env.get("GIT_SSL_CAINFO")
-        or values.get("http.sslcainfo")
-        or child_env.get("SSL_CERT_FILE")
+    if (
+        backend != "schannel"
+        and os.name == "nt"
+        and not (
+            child_env.get("GIT_SSL_CAINFO")
+            or values.get("http.sslcainfo")
+            or child_env.get("SSL_CERT_FILE")
+        )
     ):
         # W3d R5: Git for Windows' curl bundle is not certifi; no named CA file, no guess.
         raise _Refuse("no CA file named for git's OpenSSL backend on Windows")
@@ -897,6 +900,12 @@ def _session(trust: tuple[str, str]):
     return _session_for_refs(trust[1])
 
 
+def _requests_verify(ca: str) -> str | bool:
+    from ..deps.anonymous_ref_listing import requests_verify
+
+    return requests_verify(ca)
+
+
 def _post(
     upload_url: str,
     proxy: str | None,
@@ -930,7 +939,7 @@ def _post(
         max_hops=0,
         ambient_credentials=False,
         proxies={"https": proxy} if proxy else {},
-        verify=trust[1] if trust[0] == "file" else True,
+        verify=_requests_verify(trust[1]),
         timeout=_TIMEOUT,
         stream=True,
     ) as response:
