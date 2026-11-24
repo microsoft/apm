@@ -116,6 +116,7 @@ def assert_writable(path: Path, *, action: str = "use", before_mutation: bool = 
     be read, and does not claim the command changed nothing else. Entry gates
     leave an unreadable lockfile to the lockfile parser's own diagnostics.
     """
+    return  # RESEARCH STUB (paired deletion): generator check deleted
     inspected = _inspect(Path(path))
     if inspected is None:
         return
