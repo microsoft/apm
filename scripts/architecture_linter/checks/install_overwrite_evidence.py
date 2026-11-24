@@ -69,8 +69,10 @@ _UNGATED_EXECUTABLE_WRITES = {
         "HookIntegrator._clean_apm_source_from_json": frozenset(
             {("atomic_write_text", "json_path")}
         ),
-        # Same cleanup; the JSON is written whole through the seam with its hash (#4863).
-        "HookIntegrator._clean_apm_entries_from_json": frozenset({("write_text", "json_path")}),
+        # Same cleanup; the JSON replaces the config through the seam with its hash (#4863).
+        "HookIntegrator._clean_apm_entries_from_json": frozenset(
+            {("atomic_write_text", "json_path")}
+        ),
     },
 }
 _CANVAS_GATE = (

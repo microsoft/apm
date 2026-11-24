@@ -912,8 +912,10 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/hook_integrator.py",
-            '                write_seam.write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
-            '                json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
+            "                with provenance.recorded_config_write(json_path):\n"
+            '                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
+            "                with provenance.recorded_config_write(json_path):\n"
+            '                    json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
             id="raw-write-text",
         ),
         pytest.param(
