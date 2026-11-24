@@ -98,6 +98,9 @@ GATE_PLUGIN_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::"
     "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
 )
+SOURCE_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
+)
 _OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
 # Witnesses whose package can deploy a bin/ artifact, with the scope it lands at
 # (#4981). Loose bin/ deploys only for a user-scope marketplace plugin with a
@@ -107,6 +110,7 @@ _OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
 BIN_WITNESSES: Mapping[str, str] = {
     GATE_BIN_SPINE: "user",
     GATE_PLUGIN_BIN_SPINE: "project",
+    SOURCE_BIN_SPINE: "project",
     **{
         _OWNERSHIP + name: "user"
         for name in (
@@ -269,6 +273,7 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
+    from tests.lifecycle.machines._source_bin import source_bin_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
@@ -326,6 +331,11 @@ def machine_cells() -> list[MachineCell]:
         # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
         assignment = {"PRIM": "bin", "SCOPE": "project"}
         cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
+    for key in sorted(source_bin_cells()):
+        # A whole plugin's bin/ declared by one form through one command (#4096).
+        _, op, form = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": "bin"}
+        cells.append(MachineCell(key, SOURCE_BIN_SPINE, "T-2", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)
