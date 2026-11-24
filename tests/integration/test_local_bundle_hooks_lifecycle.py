@@ -1933,6 +1933,43 @@ def test_uninstall_bundle_refuses_a_user_hook_whose_cwd_escapes_the_project(
     assert script in _claims_of(consumer)
 
 
+def test_uninstall_bundle_keeps_a_script_a_user_hook_runs_through_its_cwd(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281: ``./scripts/x.sh`` in cwd ``<bundle>/hooks`` runs the bundle's script.
+
+    The command alone resolves elsewhere from every base, so only the cwd check
+    (runs_through_cwd) sees the script; without it uninstall deletes it.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "cwd-runs-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {
+                "preToolUse": [
+                    {
+                        "type": "command",
+                        "bash": "./scripts/x.sh",
+                        "cwd": path.rsplit("/", 2)[0],
+                    }
+                ]
+            },
+        },
+    )
+    assert script == ".github/hooks/scripts/hookpkg/hooks/scripts/x.sh", script
+
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    text = output(result)
+
+    assert (consumer / script).is_file(), f"uninstall removed a script a user hook runs:\n{text}"
+    assert result.returncode == 1, text
+    assert ".github/hooks/user.json" in text, text
+    assert "Traceback" not in text, text
+    assert script in _claims_of(consumer)
+
+
 @pytest.mark.parametrize("preview", [(), ("--dry-run",)], ids=["run", "dry-run"])
 def test_a_refused_bundle_uninstall_leaves_the_pending_record_untouched(
     tmp_path: Path, apm_binary_path: Path, preview: tuple[str, ...]
