@@ -296,6 +296,34 @@ def test_gemini_name_mismatch_cannot_shadow_a_user_agent(tmp_path: Path) -> None
     assert "rename the source to reviewer.agent.md" in message
 
 
+def test_gemini_huge_integer_temperature_skips_only_that_agent(tmp_path: Path) -> None:
+    # 401 digits overflow a double: Gemini's js-yaml reads it as a string and
+    # rejects the agent, and float() raises OverflowError instead of skipping.
+    huge = "9" * 401
+    _write_agent(tmp_path, "hot.agent.md", f"---\ndescription: d\ntemperature: {huge}\n---\nB\n")
+    _write_agent(tmp_path, "ok.agent.md", "---\ndescription: d\ntemperature: 1\n---\nB\n")
+
+    result, diagnostics = _integrate(tmp_path)
+
+    assert result.files_integrated == 1
+    assert result.files_skipped == 1
+    assert (tmp_path / ".gemini" / "agents" / "ok.md").exists()
+    assert not (tmp_path / ".gemini" / "agents" / "hot.md").exists()
+    [message] = _warnings(diagnostics)
+    assert "Gemini agent hot.agent.md: 'temperature' must be a number" in message
+
+
+def test_gemini_large_finite_integer_temperature_is_kept(tmp_path: Path) -> None:
+    # 308 digits still fit a double, and Gemini v0.70.0 loads the agent.
+    _write_agent(tmp_path, "t.agent.md", f"---\ndescription: d\ntemperature: {'9' * 308}\n---\nB\n")
+
+    result, _ = _integrate(tmp_path)
+
+    assert result.files_integrated == 1
+    deployed = tmp_path / ".gemini" / "agents" / "t.md"
+    assert _frontmatter(deployed.read_text(encoding="utf-8"))["temperature"] == int("9" * 308)
+
+
 def test_gemini_invalid_agent_does_not_block_siblings(tmp_path: Path) -> None:
     _write_agent(tmp_path, "good.agent.md", "---\ndescription: Good\n---\nGood.\n")
     _write_agent(tmp_path, "bad.agent.md", "---\ndescription: Bad\ntools: [Bash]\n---\nBad.\n")

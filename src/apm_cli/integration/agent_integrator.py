@@ -1345,6 +1345,21 @@ class AgentIntegrator(BaseIntegrator):
         return None
 
     @staticmethod
+    def _gemini_number(value: object) -> float | None:
+        """*value* as Gemini reads a YAML number, or ``None`` if it reads no number.
+
+        Gemini's js-yaml (4.3.2 in v0.70.0) reads a numeric scalar too large for
+        a double as a string, which ``z.number()`` rejects; ``float()`` raises
+        ``OverflowError`` for exactly those integers.
+        """
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return None
+        try:
+            return float(value)
+        except OverflowError:
+            return None
+
+    @staticmethod
     def _gemini_optional_field_problem(fm: dict) -> str | None:
         """Type-check the optional native fields the way the loader schema does."""
         display_name = fm.get("display_name")
@@ -1352,12 +1367,10 @@ class AgentIntegrator(BaseIntegrator):
             return "'display_name' must be a string"
         temperature = fm.get("temperature")
         # z.number() rejects NaN (it accepts Infinity), so NaN fails here too.
-        if temperature is not None and (
-            isinstance(temperature, bool)
-            or not isinstance(temperature, int | float)
-            or math.isnan(temperature)
-        ):
-            return "'temperature' must be a number"
+        if temperature is not None:
+            number = AgentIntegrator._gemini_number(temperature)
+            if number is None or math.isnan(number):
+                return "'temperature' must be a number"
         for field in ("max_turns", "timeout_mins"):
             value = fm.get(field)
             if value is not None and (
