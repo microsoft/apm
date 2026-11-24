@@ -36,12 +36,11 @@ KEY_FILE = "verdict.key"
 # Argv the record serves; anything else runs the CLI as usual.
 SERVED_ARGV = (("install",), ("install", "--frozen"))
 
-# Environment that can change an install verdict or its output. A hit keys on
-# these (their values, or their absence) plus every name the recorded run read
-# (_env_log); the static guard in tests/integration/test_verdict_record.py fails
-# when ``src/apm_cli`` reads an environment variable that is neither here nor in
-# ENV_NOT_VERDICT. Owner-read roots (the APM home, harness user roots) are
-# named only by their owners and keyed through the run's own reads.
+# Environment that can change an install verdict or its output. A hit keys on these (their
+# values, or their absence) plus every name the recorded run read (_env_log); the static guard
+# in tests/integration/test_verdict_record.py fails when ``src/apm_cli`` reads an environment
+# variable that is neither here nor in ENV_NOT_VERDICT. Owner-read roots (the APM home, harness
+# user roots) are named only by their owners and keyed through the run's own reads.
 ENV_ALLOWLIST = (
     "ADO_APM_PAT",
     "ADO_HOST",
