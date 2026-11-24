@@ -464,3 +464,54 @@ def test_a_shorthand_routes_to_the_default_registry_beside_a_catalog(
     _assert_registry_state(project, artifacts, world.registry)
     widget = _locked(project)["acme/widget"]
     assert "discovered_via" not in widget and "marketplace_plugin_name" not in widget, widget
+
+
+def test_a_failed_catalog_declaration_names_the_plugin_and_its_catalog(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Unregistered catalog and missing plugin both name widget and corp-catalog,
+    never the internal id, and the printed hints run (#5256)."""
+    world = EnterpriseRegistryWorld(tmp_path, apm_binary_path)
+    widget = world.catalog["plugins"][0]
+    widget.update(registry=REGISTRY_NAME, version=VERSION)
+    with world.serve() as proxy:
+        artifacts = world.publish_all(proxy)
+        env = world.env(world.employee, proxy)
+        project = world.employee.work_root / "consumer"
+        project.mkdir()
+        consumer = world.manifest("consumer")
+        consumer["targets"] = ["copilot"]
+        consumer["dependencies"] = {"apm": [{"name": "widget", "marketplace": "corp-catalog"}]}
+        dump_yaml(consumer, project / "apm.yml")
+        world.provision(world.employee, env, project)
+
+        def failed_install(step: str, hint: str) -> None:
+            result = world.run(env, project, *INSTALL, step=step, expect=1)
+            text = " ".join((result.stdout + result.stderr).split())
+            assert "'widget' from marketplace 'corp-catalog'" in text, _evidence(result)
+            assert "_marketplace/" not in text, _evidence(result)
+            assert f"Run '{hint}" in text, _evidence(result)
+            assert not (project / "apm.lock.yaml").exists()
+
+        failed_install("unregistered", "apm marketplace add https://")
+        world.egress_step(
+            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
+        )
+        world.egress_step(
+            proxy,
+            env,
+            project,
+            *INSTALL,
+            step="install-after-add",
+            allowed=frozenset({CATALOG_HOST, REGISTRY_HOST}),
+        )
+        _assert_registry_state(project, artifacts, world.registry)
+
+        world.run(env, project, "uninstall", "widget@corp-catalog", step="uninstall", expect=None)
+        widget["name"] = "gadget"
+        world.run(env, project, "marketplace", "update", "corp-catalog", step="refresh")
+        dump_yaml(consumer, project / "apm.yml")
+        (project / "apm.lock.yaml").unlink(missing_ok=True)
+        failed_install("missing", "apm marketplace browse corp-catalog")
+        browse = world.run(env, project, "marketplace", "browse", "corp-catalog", step="browse")
+    assert "gadget" in browse.stdout, _evidence(browse)
