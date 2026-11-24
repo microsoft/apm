@@ -57,7 +57,7 @@ APM verifies package-management HTTPS against the operating-system trust store b
 
 Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, then the normal OS/`certifi` defaults. Higher-precedence controls suppress additive-bundle validation. Unset or blank `APM_EXTRA_CA_BUNDLE` preserves existing behavior.
 
-The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage). For isolated `github.com` Git attempts, APM inherits your Git `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath`; see [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
+The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage). For isolated Git attempts to GitHub hosts (`github.com`, GHE Cloud `*.ghe.com` and GitHub Enterprise Server), APM inherits your Git `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath`; see [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 ## Registry (MCP and proxy)
 
