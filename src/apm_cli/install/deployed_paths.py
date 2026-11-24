@@ -13,6 +13,7 @@ from apm_cli.utils.path_security import (
     resolve_for_containment,
 )
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.realpath import resolve_path
 
 
 def format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
@@ -171,7 +172,7 @@ def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) 
         origin = scoped_profile_or_none(static, user_scope=True)
     if origin is None or not origin.supports("skills"):
         return ()
-    skills_root = origin.skills_deploy_path(root).resolve()
+    skills_root = resolve_path(origin.skills_deploy_path(root))
     try:
         parts = physical.relative_to(skills_root).parts
     except ValueError:
@@ -180,7 +181,7 @@ def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) 
         return ()
     for target in targets:
         destination = target.skills_deploy_path(root) if target.supports("skills") else None
-        if destination is not None and destination.resolve() == skills_root:
+        if destination is not None and resolve_path(destination) == skills_root:
             return (deployed_path_entry(destination / parts[0], root, [target]),)
     return ()
 
