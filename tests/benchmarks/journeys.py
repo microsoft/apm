@@ -694,8 +694,9 @@ def _noop(_ctx: Context) -> None:
 # stderr); the variable is never part of the verdict key (ENV_NOT_VERDICT).
 _REPLAY_TRACE = (("APM_INSTALL_FAST_PATH", "verdict"),)
 _REPLAY_LINE = "[i] verdict record: "
-# Journeys whose setup keeps the installed project between samples.
-_KEEP_INSTALLED = ("install-noop", "install-noop-replay")
+# Journeys whose setup keeps the installed project between their own samples.
+# install-noop does not: a kept project would replay from sample 2 on.
+_KEEP_INSTALLED = ("install-noop-replay",)
 
 
 def _setup_replay(ctx: Context) -> None:
@@ -706,12 +707,12 @@ def _setup_replay(ctx: Context) -> None:
 
 
 def _replay_outcome(tail: str) -> str:
-    """``hit`` or ``miss (<reason>)`` from a run's verdict-record line; "" when none."""
-    found = ""
-    for line in tail.splitlines():
-        if line.startswith(_REPLAY_LINE):
-            found = line[len(_REPLAY_LINE) :].strip()
-    return found
+    """Every verdict-record outcome of a run, in order ("miss (expired), recorded")."""
+    return ", ".join(
+        line[len(_REPLAY_LINE) :].strip()
+        for line in tail.splitlines()
+        if line.startswith(_REPLAY_LINE)
+    )
 
 
 _AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
@@ -944,8 +945,13 @@ def _redact(text: str) -> str:
 
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
     journey = _for_world(ctx, journey)
-    with _journey_env(ctx, journey):
-        return _measure(ctx, journey, args)
+    try:
+        with _journey_env(ctx, journey):
+            return _measure(ctx, journey, args)
+    finally:
+        # Installed state kept between one journey's samples never leaks into the next.
+        if journey.name in _KEEP_INSTALLED:
+            ctx.is_installed = False
 
 
 def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
