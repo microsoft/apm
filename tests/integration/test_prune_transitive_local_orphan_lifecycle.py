@@ -859,3 +859,40 @@ def test_prune_keeps_a_survivor_whose_directory_another_candidate_shares(
     assert {"_local/d", "_local/e", "_local/f"} <= set(rows), sorted(rows)
     assert _row_named(world, "f")[1]["resolved_by"] in rows
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+def test_prune_keeps_the_children_of_an_anchor_its_top_no_longer_declares(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """d and e stay as f's alias anchors, but d's manifest no longer declares e.
+
+    Walking only d would miss h, which kept e still declares; prune keeps
+    every pending row and names it instead of deleting h.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("h", ()),
+        ("e", ("../f", "../h")),
+        ("d", ("../e",)),
+        ("z", ("../f-link",)),
+        ("a", ("../z",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _link_dir(vendor / "f-link", vendor / "f")
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a"])
+    _skill_package(vendor / "d", "d")
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert "Retained _local/h:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/h"} <= set(rows), sorted(rows)
+    assert (world.project / ".claude/skills/h-skill/SKILL.md").is_file()
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()

@@ -666,3 +666,4 @@ def test_fails_closed_when_a_candidate_directory_cannot_be_stat(tmp_path, monkey
     assert result.complete is False
     assert [key for key, _ in result.unverifiable] == [other_key]
     assert "Permission denied" in result.unverifiable[0][1]
+    assert (tmp_path / "other" / "apm.yml").is_file()
