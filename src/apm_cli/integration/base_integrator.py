@@ -314,12 +314,13 @@ class BaseIntegrator:
         """Keep only files admitted by the canonical deployment source plan."""
         if source_plan is None:
             return files
-        from apm_cli.utils.paths import portable_relpath
+        from apm_cli.utils.paths import portable_relpaths
 
+        relatives = portable_relpaths(files, source_plan.source_root)
         return [
             path
-            for path in files
-            if source_plan.includes(portable_relpath(path, source_plan.source_root))
+            for path, relative in zip(files, relatives, strict=True)
+            if source_plan.includes(relative)
         ]
 
     # ------------------------------------------------------------------

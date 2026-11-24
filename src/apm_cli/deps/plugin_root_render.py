@@ -49,11 +49,13 @@ def plugin_root_of(dependency: Any) -> str | None:
 
 def bind_plugin_roots(dependencies: Iterable[Any] | None, package_path: Path) -> None:
     """Record the materialized package root on declarations that reference it."""
-    root = str(package_path.resolve())
+    root: str | None = None
     for dependency in dependencies or ():
         to_dict = getattr(dependency, "to_dict", None)
         if hasattr(dependency, "plugin_root") and callable(to_dict):
             if contains_plugin_root(to_dict()):
+                if root is None:  # Resolved only when a declaration references it.
+                    root = str(package_path.resolve())
                 dependency.plugin_root = root
 
 

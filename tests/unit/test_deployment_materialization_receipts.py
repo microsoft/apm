@@ -1386,3 +1386,31 @@ def test_locator_resolves_a_retargeted_skills_root_live(
 
     assert session._locator(path, [TARGET]) is None
     assert path.read_text(encoding="utf-8") == "old\n"
+
+
+def test_recording_many_writes_resolves_each_root_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One record() call observes each root once; every written file is still resolved."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    paths = [path]
+    for name in ("a", "b", "c"):
+        extra = path.parent.parent / name / "SKILL.md"
+        extra.parent.mkdir(parents=True)
+        extra.write_text(f"rendered {name}\n", encoding="utf-8")
+        paths.append(extra)
+    session = _session(root, lock)
+    resolved: list[str] = []
+    realpath = os.path.realpath
+
+    def counted(value, *args, **kwargs):
+        resolved.append(os.fspath(value))
+        return realpath(value, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os.path, "realpath", counted)
+        session.record({p: compute_file_hash(p) for p in paths}, [TARGET], "pkg")
+    session.flush()
+    assert resolved.count(os.fspath(TARGET.skills_deploy_path(root))) == 1
+    assert {os.fspath(p) for p in paths} <= set(resolved)
+    assert lock.deployment_ledger.records
