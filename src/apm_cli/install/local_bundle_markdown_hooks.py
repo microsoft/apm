@@ -284,7 +284,8 @@ def _unadmitted(
     rows = _hooked_rows(project_root, targets, lock_paths)
     if not rows:
         return []
-    allow_map = allow_executables()
+    # A provider, or the map an explicit bundle install already resolved.
+    allow_map = allow_executables() if callable(allow_executables) else allow_executables
     from ..security.executables import (
         EXEC_TYPE_HOOKS,
         exec_map_authorizes_all,
@@ -470,3 +471,33 @@ def retire_unadmitted_bundle_markdown(
                 )
             )
     return retired
+
+
+def retire_before_bundle_install(
+    scope: Any,
+    project_root: Path,
+    targets: Any,
+    allow_executables: Any,
+    *,
+    logger: Any = None,
+    dry_run: bool = False,
+) -> None:
+    """Run the Markdown preflight and retirement before ``apm install <bundle>`` deploys.
+
+    An explicit bundle install skips the scope reconcile a plain install
+    runs, so hooked Markdown a withdrawn key admitted is retired here, by the
+    same owner, against the trust map this install resolved (#5308 review).
+    """
+    from ..core.scope import get_apm_dir
+
+    lock_dir = get_apm_dir(scope) if scope is not None else Path(project_root)
+    preflight_bundle_markdown_records(project_root, targets, scope=scope, logger=logger)
+    retire_unadmitted_bundle_markdown(
+        project_root,
+        targets,
+        allow_executables,
+        lock_dir=lock_dir,
+        scope=scope,
+        logger=logger,
+        dry_run=dry_run,
+    )

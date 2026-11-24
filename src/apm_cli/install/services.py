@@ -26,6 +26,7 @@ from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
 from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
 from .local_bundle_markdown_hooks import record_bundle_markdown_hooks as _record_md_hooks
+from .local_bundle_markdown_hooks import retire_before_bundle_install as _retire_md_hooks
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
@@ -872,6 +873,9 @@ def integrate_local_bundle(
 
     bundle_dir: Path = bundle_info.source_dir
     pack_files = _deployable_pack_files(bundle_info)
+    _retire_md_hooks(
+        scope, project_root, targets, allow_executables, logger=logger, dry_run=dry_run
+    )
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
