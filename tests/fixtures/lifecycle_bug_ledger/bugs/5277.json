@@ -1,0 +1,19 @@
+{
+  "issue": 5277,
+  "fixed_in": "Unreleased",
+  "summary": "Under unmanaged_files: deny, audit --ci flagged the .claude/settings.json and .claude/apm-hooks.json an approved hook install had just written, because only lock deployed_files counted as managed; they now count only while their hook ownership verifies.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "filesystem.open_world_observation"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_counts_apm_owned_claude_hook_files",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_flags_claude_hook_files_whose_ownership_does_not_verify",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_still_flags_a_user_file_beside_verified_hook_files",
+    "tests/unit/integration/test_hook_ownership_verified_files.py::test_an_unverifiable_pair_stays_unmanaged"
+  ]
+}

@@ -8,6 +8,7 @@ from typing import Any
 from apm_cli.security.gate import is_generated_python_artifact
 from apm_cli.utils.path_security import (
     PathTraversalError,
+    SymlinkedDeployError,
     ensure_path_within,
     resolve_for_containment,
 )
@@ -73,7 +74,12 @@ def deployed_path_entry(
     def _resolved_candidate() -> Path:
         # Resolved lazily, once per call (external-root targets never need it).
         if not resolved:
-            resolved.append(resolve_for_containment(target_path))
+            try:
+                resolved.append(resolve_for_containment(target_path))
+            except (OSError, RuntimeError):
+                # A link loop cannot be resolved; refuse it like any linked parent (#5287).
+                refuse_symlinked_deploy(target_path, project_root)
+                raise
         return resolved[0]
 
     def _try_target(tgts) -> str | None:
@@ -117,19 +123,23 @@ def deployed_path_entry(
     try:
         project_path = ensure_path_within(target_path, project_root)
         return portable_relpath(project_path, project_root)
+    except (OSError, RuntimeError):
+        refuse_symlinked_deploy(target_path, project_root)
+        raise
     except (PathTraversalError, ValueError):
-        linked = _symlinked_component(target_path, project_root)
-        if linked is not None:
-            # Refused as before; the message names the link and the next step (#5156).
-            raise RuntimeError(  # noqa: B904
-                f"Refusing deployment through a symlinked path component: {linked}. "
-                "Replace the symlink with a regular directory or remove it, then retry."
-            )
+        refuse_symlinked_deploy(target_path, project_root)
         raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
             f"target matched. This is a bug -- please report it."
         )
+
+
+def refuse_symlinked_deploy(target_path: Path, project_root: Path) -> None:
+    """Raise the standard refusal when a directory below *project_root* is a link."""
+    linked = _symlinked_component(target_path, project_root)
+    if linked is not None:
+        raise SymlinkedDeployError(linked)
 
 
 def _symlinked_component(target_path: Path, project_root: Path) -> str | None:
@@ -283,3 +293,26 @@ def log_hook_display_payloads(
             logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
             for _jline in _payload.get("rendered_json", "").splitlines():
                 logger.verbose_detail(f"  |     {_jline}")
+
+
+def bundle_entry_within(
+    dest: Path, deploy_root: Path, project_root: Path, rel: str, logger: Any
+) -> bool:
+    """Whether *dest* stays inside *deploy_root*; a skipped entry is warned about.
+
+    A link loop cannot be resolved, so it is refused like any linked parent (#5287).
+    """
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+    try:
+        ensure_path_within(dest, deploy_root)
+    except PathTraversalError as exc:
+        if logger is not None:
+            logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+        return False
+    except (OSError, RuntimeError):
+        refuse_symlinked_deploy(
+            dest, project_root if dest.is_relative_to(project_root) else deploy_root
+        )
+        raise
+    return True

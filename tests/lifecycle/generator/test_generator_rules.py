@@ -51,6 +51,7 @@ from tests.lifecycle.generator.space import Entry, build_space, raw_cells
 from tests.lifecycle.generator.witnesses import (
     BIN_WITNESSES,
     FORM_SOURCES,
+    GATE_PLUGIN_BIN_SPINE,
     SOURCE_SPINE,
     SOURCE_SPINE_UNOBSERVED,
     credits,
@@ -788,6 +789,26 @@ def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
             assert entry["status"] == "baseline", (op, entry)
 
 
+def test_a_local_path_bin_cell_maps_to_the_native_plugin_source_while_u_bin_holds(
+    monkeypatch,
+) -> None:
+    """U-BIN-SRC: a local directory that can deploy bin/ is a Claude plugin directory, the
+    native-plugin source; the mapping's targets are witnessed, and it lapses with U-BIN."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    mapped = {k: v for k, v in data["mapped"].items() if v["rules"] == ["U-BIN-SRC"]}
+    ops = ("approve-deny", "audit", "compile", "install", "lock", "prune", "uninstall", "update")
+    named = {f"T3|OP={op}|SRC=local-path|PRIM=bin" for op in ops} | {"pair|SRC=local-path|PRIM=bin"}
+    assert set(mapped) == named, sorted(set(mapped) ^ named)
+    for key, entry in mapped.items():
+        assert entry["maps_to"] == key.replace("SRC=local-path", "SRC=native-plugin"), entry
+        target = data["obligations"][entry["maps_to"]]
+        assert target["status"] == "required", (key, target)
+    cell = {"OP": "install", "SRC": "local-path", "PRIM": "bin"}
+    assert classify("T3", cell).rules == ("U-BIN-SRC",)
+    monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
+    assert classify("T3", cell) == Verdict("obligation", ())
+
+
 def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
     pins = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["pins"]
     assert pins["U-USER-SCOPE-ORG-POLICY"] == U_USER_ORG_POLICY_PIN, pins
@@ -827,9 +848,11 @@ def test_no_ungoverned_user_scope_step_credits_an_org_deny() -> None:
     ):
         assert rows[key]["status"] == "required", (key, rows[key])
         assert rows[key]["witness"].endswith("[project]"), (key, rows[key])
-    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell (#4981).
+    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell
+    # (#4981); the whole-plugin bin spine, whose bin/ deploys at project scope, does.
     bin_cell = "T1|OP=compile|PRIM=bin|GATE=denied-dependency"
-    assert rows[bin_cell]["status"] == "baseline", (bin_cell, rows[bin_cell])
+    assert rows[bin_cell]["witness"] == GATE_PLUGIN_BIN_SPINE, (bin_cell, rows[bin_cell])
+    assert rows[bin_cell]["credited_by"] == ["G1|compile|bin|denied-dependency|project|plugin"]
     for key, row in rows.items():
         user_only = row.get("credited_by") and all(
             cell.endswith("|denied-dependency|user") for cell in row["credited_by"]
@@ -915,7 +938,10 @@ def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive(
         assert f"def {name.split('[')[0]}(" in (root / path).read_text(encoding="utf-8"), node
     for op, src, prim in SOURCE_SPINE_UNOBSERVED:
         key = f"T3|OP={op}|SRC={src}|PRIM={prim}"
-        assert data["obligations"][key]["status"] == "baseline", data["obligations"][key]
+        entry = data["obligations"].get(key)
+        # Unobserved by the source spine: baseline, removed by a rule, or credited by
+        # another spine that does observe it (the registry kit spine, #4096).
+        assert entry is None or entry.get("witness") != SOURCE_SPINE, (key, entry)
     # A projected pair keeps no unexercised step among its credits (it names no OP).
     unexercised = {
         f"T3|{op}|{form}|{prim}"

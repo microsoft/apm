@@ -1187,3 +1187,118 @@ def test_a_resolved_tip_probe_carries_no_credential_and_runs_untranslated(
     assert len(envs) == 2
     assert not [e for e in envs if {"GITHUB_TOKEN", "GH_TOKEN"} & e.keys()]
     assert all(e.get("LC_ALL") == "C" and e.get("LANGUAGE") == "C" for e in envs)
+
+
+def test_a_rewrite_in_git_config_parameters_keys_the_tip_to_the_mirror(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """#5246: an insteadOf carried in GIT_CONFIG_PARAMETERS sends the probe to the mirror.
+
+    The tip the mirror served is recorded for the mirror, never as the
+    origin's own verdict.
+    """
+    from apm_cli.cache.commit_reachability import (
+        _url_only_env,
+        admit_pinned_commit,
+        effective_contact,
+    )
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    remote = "https://origin.invalid/acme/repo.git"
+    downloader = _RefDownloader(tmp_path / "cache", [remote], predicted=remote)
+    downloader.git_env = {"GIT_CONFIG_PARAMETERS": f"'url.{origin.url}.insteadof'='{remote}'"}
+    downloader._tiered_resolver = _RemotelyResolved()
+
+    probe_env = _url_only_env(downloader.git_env)
+    assert effective_contact(remote, probe_env) == normalize_repo_url(origin.url)
+
+    resolved = ResolvedReference("main", GitReferenceType.BRANCH, origin.m2, "main")
+    admit_pinned_commit(downloader, _ref("main"), "main", resolved=resolved)
+
+    markers = list((tmp_path / "cache" / "reachability").rglob("verified-v2/*"))
+    recorded = {m.read_text(encoding="utf-8").splitlines()[-1] for m in markers}
+    assert normalize_repo_url(remote) not in recorded, recorded
+
+
+def test_a_failed_download_diagnostic_lists_only_the_mirror_a_remote_activates(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5221: with an includeIf mirror, the failure diagnostic never lists the origin.
+
+    The origin host cannot be resolved, so the lost commit can only be named
+    when every listing went to the mirror.
+    """
+    from apm_cli.cache.commit_reachability import (
+        AdmittedCommitGoneError,
+        _note_admitted,
+        name_a_lost_admitted_commit,
+    )
+
+    remote = "https://origin.invalid/acme/repo.git"
+    mirror = tmp_path / "mirror.gitconfig"
+    mirror.write_text(f'[url "{origin.url}"]\n\tinsteadOf = {remote}\n', encoding="ascii")
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{remote}"]\n\tpath = {mirror.as_posix()}\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    listed: list[list[str]] = []
+    git_env = importlib.import_module("apm_cli.utils.git_env")
+    real_refs = git_env.git_remote_refs
+
+    def _refs(url, *patterns, **kwargs):
+        result = real_refs(url, *patterns, **kwargs)
+        listed.append([url, str(result.returncode)])
+        return result
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _refs)
+    downloader = _RefDownloader(tmp_path / "cache", [remote], predicted=remote)
+
+    @name_a_lost_admitted_commit
+    def _download(_downloader, _repo_ref):
+        _note_admitted("main", origin.f1)
+        raise _FETCH_FAILED
+
+    with pytest.raises(AdmittedCommitGoneError) as failed:
+        _download(downloader, _RefDep())
+
+    assert f"'main' was admitted at commit {origin.f1[:12]}" in str(failed.value)
+    assert f"now points to {origin.m2[:12]}" in str(failed.value)
+    assert listed and all(code == "0" for _url, code in listed), listed
+
+
+def test_a_failed_download_diagnostic_skips_the_check_when_mirror_rules_cannot_apply(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5221: when the clone-config probe fails, nothing lists the origin instead."""
+    from apm_cli.cache.commit_reachability import _note_admitted, name_a_lost_admitted_commit
+
+    remote = "https://origin.invalid/acme/repo.git"
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{remote}"]\n\tpath = /nonexistent\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+
+    def _no_probe(*_args, **_kwargs):
+        raise OSError("probe unavailable")
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_clone_env", _no_probe)
+    listed: list[str] = []
+    monkeypatch.setattr(
+        "apm_cli.utils.git_env.git_remote_refs", lambda url, *a, **k: listed.append(url)
+    )
+    downloader = _RefDownloader(tmp_path / "cache", [remote], predicted=remote)
+
+    @name_a_lost_admitted_commit
+    def _download(_downloader, _repo_ref):
+        _note_admitted("main", origin.f1)
+        raise _FETCH_FAILED
+
+    with pytest.raises(subprocess.CalledProcessError) as failed:
+        _download(downloader, _RefDep())
+
+    assert failed.value is _FETCH_FAILED
+    assert listed == []

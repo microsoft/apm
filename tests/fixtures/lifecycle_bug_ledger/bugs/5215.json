@@ -1,0 +1,14 @@
+{
+  "issue": 5215,
+  "fixed_in": "Unreleased",
+  "summary": "The symlinked-destination refusal interpolated a repo-controlled directory name as is, so control or escape bytes in a package's directory names reached the terminal; the name now passes through printable_ascii_text.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_deployed_path_symlink_refusal.py::test_a_linked_directory_name_with_an_escape_byte_is_rendered_inert"
+  ]
+}

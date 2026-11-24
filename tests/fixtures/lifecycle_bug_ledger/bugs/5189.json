@@ -1,0 +1,14 @@
+{
+  "issue": 5189,
+  "fixed_in": "Unreleased",
+  "summary": "A config file reached through a second mount path missed its record, so a PREEXISTING record was not found and the unrecorded fallback could delete the user's emptied skeleton; records now carry the file's identity and a miss consults it to keep the file.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/unit/integration/test_config_file_provenance.py::test_a_users_skeleton_reached_through_a_second_path_is_kept"
+  ]
+}
