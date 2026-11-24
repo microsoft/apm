@@ -327,8 +327,8 @@ def claude_agents_md_blocker_warning(blocker: str) -> str:
     from ..core.remediation import CLAUDE_AGENTS_MD_BLOCKED
 
     return (
-        f"{CLAUDE_AGENTS_MD_BLOCKED.bind(fix=blocker).sentence()} Until then, always-on "
-        "and directory instructions stay in .claude/rules/."
+        f"{CLAUDE_AGENTS_MD_BLOCKED.bind(fix=blocker).sentence()} Always-on and directory "
+        "instructions stay in .claude/rules/ until a compiled AGENTS.md carries them."
     )
 
 

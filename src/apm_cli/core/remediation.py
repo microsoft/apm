@@ -1012,9 +1012,8 @@ PROTOCOL_FALLBACK_DISALLOWED = _entry(
 CLAUDE_AGENTS_MD_BLOCKED = _entry(
     "claude-agents-md-blocked",
     "apm install",
-    "move always-on and directory instructions from .claude/rules/ into AGENTS.md",
+    "retire the .claude/rules/ copies a compiled AGENTS.md already carries",
     before="{fix}",
-    then="run 'apm compile'",
 )
 CLAUDE_DIRECTORY_INSTRUCTION_SINGLE_FILE = _entry(
     "claude-directory-instruction-single-file",
