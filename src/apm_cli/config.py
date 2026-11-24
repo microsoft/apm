@@ -22,6 +22,8 @@ _SELF_UPDATE_INSTALL_DIR_KEY = "self_update_install_dir"
 _SELF_UPDATE_CHANNELS = {"stable", "prerelease"}
 
 _config_cache: dict | None = None
+# A missing config file is remembered too (writers invalidate both); callers get a fresh {}.
+_config_missing = False
 
 
 def ensure_config_exists():
@@ -86,10 +88,13 @@ def get_config(*, create: bool | None = None):
 
 def get_config_if_exists() -> dict:
     """Read the existing configuration without creating a user config file."""
-    global _config_cache
+    global _config_cache, _config_missing
     if _config_cache is not None:
         return _config_cache
+    if _config_missing:
+        return {}
     if not os.path.isfile(CONFIG_FILE):
+        _config_missing = True
         return {}
     with open(CONFIG_FILE, encoding="utf-8") as f:
         _config_cache = json.load(f)
@@ -111,8 +116,9 @@ def _resolve_create_config(
 
 def _invalidate_config_cache():
     """Invalidate the config cache (called after writes)."""
-    global _config_cache
+    global _config_cache, _config_missing
     _config_cache = None
+    _config_missing = False
 
 
 def update_config(updates):
@@ -1007,7 +1013,11 @@ def get_mcp_registry_url(*, create_config: bool = False) -> str | None:
     say so. Passing ``create_config=True`` preserves the legacy bootstrapping
     behavior for callers that intentionally materialise user config.
     """
-    if _config_cache is None and not create_config and not os.path.exists(CONFIG_FILE):
+    if (
+        _config_cache is None
+        and not create_config
+        and (_config_missing or not os.path.exists(CONFIG_FILE))
+    ):
         return None
     return get_config(create=create_config).get(_MCP_REGISTRY_URL_KEY)
 

@@ -227,9 +227,16 @@ def is_user_scope_root(root: Path) -> bool:
     facts (such as an org from a git remote) skip this root.
     """
     try:
-        return Path(root).resolve() == get_apm_home().resolve()
+        home = get_apm_home()
+        resolved_home = _RESOLVED_HOMES.get(str(home))
+        if resolved_home is None:
+            resolved_home = _RESOLVED_HOMES[str(home)] = home.resolve()
+        return Path(root).resolve() == resolved_home
     except (OSError, ValueError):
         return False
+
+
+_RESOLVED_HOMES: dict[str, Path] = {}
 
 
 def policy_discovery_uses_git_remote(root: Path) -> bool:
