@@ -317,11 +317,14 @@ def _plan_key(repo_dir: Path, paths, extra_git_args) -> tuple | None:
             return None
     except (OSError, UnicodeDecodeError):
         return None
-    if len(head) not in (40, 64) or any(c not in "0123456789abcdef" for c in head):
+    from apm_cli.utils.git_object_id import object_format
+
+    try:
+        oid_format = object_format(head)
+    except ValueError:
         return None
-    object_format = "sha256" if len(head) == 64 else "sha1"
     scope = tuple(paths) if paths is not None else None
-    return (object_format, head, scope, tuple(extra_git_args or ()))
+    return (oid_format, head, scope, tuple(extra_git_args or ()))
 
 
 def _plan_tracked_symlinks(

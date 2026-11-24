@@ -78,6 +78,9 @@ def test_a_plain_pack_entry_is_answered(tmp_path: Path, type_byte: int, expected
         "packed-replace-ref",
         "not-found",
         "empty-idx",
+        "offset-in-trailer",
+        "unterminated-entry-header",
+        "reserved-type",
     ],
 )
 def test_shapes_git_must_decide_are_left_to_git(tmp_path: Path, shape: str) -> None:
@@ -112,6 +115,22 @@ def test_shapes_git_must_decide_are_left_to_git(tmp_path: Path, shape: str) -> N
         (tmp_path / "refs" / "replace" / SHA).write_text(SHA + "\n", encoding="ascii")
     elif shape == "packed-replace-ref":
         (tmp_path / "packed-refs").write_text(f"{SHA} refs/replace/{SHA}\n", encoding="ascii")
+    elif shape == "offset-in-trailer":
+        data = bytearray(idx.read_bytes())
+        size = (pack_dir / "pack-1.pack").stat().st_size
+        data[-44:-40] = struct.pack(">I", size - 10)
+        idx.write_bytes(bytes(data))
+    elif shape in ("unterminated-entry-header", "reserved-type"):
+        head = b"PACK" + struct.pack(">II", 2, 1)
+        if shape == "reserved-type":
+            body = head + bytes([5 << 4 | 5]) + b"x" * 8
+        else:
+            body = head + bytes([1 << 4 | 0x80]) + b"\x80" * 3
+        trailer = hashlib.sha1(body).digest()  # noqa: S324 -- git's pack trailer
+        (pack_dir / "pack-1.pack").write_bytes(body + trailer)
+        data = bytearray(idx.read_bytes())
+        data[-40:-20] = trailer
+        idx.write_bytes(bytes(data))
     elif shape == "not-found":
         _assert_answer(tmp_path, None, sha="cd" * 20)
         return
@@ -151,8 +170,14 @@ def test_outside_the_differential_git_wins_without_raising(
 
 
 def _git_runner(repo: Path):
+    from tests.utils.git_link_fixture import neutral_git_env
+
+    env = neutral_git_env()  # never the runner's signing or object-format config
+
     def run(*args: str) -> str:
-        return subprocess.run([str(_GIT), *args], check=True, capture_output=True, text=True).stdout
+        return subprocess.run(
+            [str(_GIT), *args], check=True, capture_output=True, text=True, env=env
+        ).stdout
 
     return run
 

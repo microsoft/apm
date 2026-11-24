@@ -15,7 +15,6 @@ checkout itself is still verified by ``cache/checkout_verify``.
 
 from __future__ import annotations
 
-import bisect
 import mmap
 import os
 import struct
@@ -24,6 +23,8 @@ from pathlib import Path
 _IDX_V2 = b"\xfftOc\x00\x00\x00\x02"
 _FANOUT = 8 + 4 * 256
 _COMMIT, _OFS_DELTA, _REF_DELTA = 1, 6, 7
+# 4 type/size bits plus 7 per continuation byte: 10 bytes cover a 64-bit size.
+_MAX_ENTRY_HEADER = 10
 
 
 def _refused(git_dir: Path, sha: str) -> bool:
@@ -70,23 +71,33 @@ def _index_lookup(idx, want: bytes) -> tuple[int, bytes] | None:
     lo = fanout[want[0] - 1] if want[0] else 0
     hi = fanout[want[0]]
     names = _FANOUT
-    keys = [idx[names + 20 * i : names + 20 * i + 20] for i in range(lo, hi)]
-    at = bisect.bisect_left(keys, want)
-    if at == len(keys) or keys[at] != want:
+    while lo < hi:  # binary search over the fixed-width names in place
+        mid = (lo + hi) // 2
+        name = idx[names + 20 * mid : names + 20 * mid + 20]
+        if name < want:
+            lo = mid + 1
+        else:
+            hi = mid
+    if lo >= fanout[want[0]] or idx[names + 20 * lo : names + 20 * lo + 20] != want:
         return None
     offsets = names + 24 * total
-    (offset,) = struct.unpack(">I", idx[offsets + 4 * (lo + at) : offsets + 4 * (lo + at) + 4])
+    (offset,) = struct.unpack(">I", idx[offsets + 4 * lo : offsets + 4 * lo + 4])
     if offset & 0x80000000:
         return None  # a 64-bit offset table entry
     return offset, idx[-40:-20]
 
 
 def _entry_type(pack: Path, offset: int, checksum: bytes, objects: int) -> int | None:
-    """The object type at *offset* of a pack whose header and trailer match its index."""
+    """The object type at *offset* of a pack whose header and trailer match its index.
+
+    The offset must lie in the object data (after the 12-byte header, before the
+    20-byte trailer) and the entry's whole variable-length header must parse
+    there, as git parses it; anything else is no answer.
+    """
     with open(pack, "rb") as handle:
         size = os.fstat(handle.fileno()).st_size
         header = handle.read(12)
-        if size < offset + 1 or size < 32 or header[:4] != b"PACK":
+        if size < 32 or not 12 <= offset < size - 20 or header[:4] != b"PACK":
             return None
         version, count = struct.unpack(">II", header[4:12])
         if version not in (2, 3) or count != objects:
@@ -95,8 +106,16 @@ def _entry_type(pack: Path, offset: int, checksum: bytes, objects: int) -> int |
         if handle.read(20) != checksum:
             return None
         handle.seek(offset)
-        first = handle.read(1)
-    return (first[0] >> 4) & 7 if first else None
+        entry = handle.read(min(_MAX_ENTRY_HEADER, size - 20 - offset))
+    if not entry:
+        return None
+    kind = (entry[0] >> 4) & 7
+    if kind in (0, 5):
+        return None  # reserved types
+    for used, byte in enumerate(entry, start=1):
+        if not byte & 0x80:
+            return kind if used <= _MAX_ENTRY_HEADER else None
+    return None  # the size header never terminates inside the object data
 
 
 def packed_commit(git_dir: Path, sha: str) -> bool | None:
@@ -141,5 +160,5 @@ def check(answer: bool | None, spawned: bool) -> None:
     Outside the differential git's answer simply wins: a pack repacked between
     the two reads must never fail an install.
     """
-    if differential() and answer is not None and answer != spawned:
+    if answer is not None and answer != spawned and differential():
         raise PackIndexMismatch("pack index answer differs from git cat-file -t")
