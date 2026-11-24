@@ -77,3 +77,40 @@ def test_no_deployed_bundle_hooks_never_resolves_trust(tmp_path: Path) -> None:
     targets = [SimpleNamespace(name="claude", root_dir=".claude")]
     assert unadmitted_bundle_hooks(tmp_path, targets, lambda: calls.append(1)) == []
     assert calls == []
+
+
+_SCRIPT = ".github/hooks/scripts/hookpkg/hooks/scripts/x.sh"
+
+
+def _user_hook_with_cwd(project: Path, command: str, cwd: object) -> set[str]:
+    """Write an unowned Copilot hook running *command* in *cwd*; return the hook files in use."""
+    from apm_cli.install.local_bundle_hook_trust import _per_file_configs_running
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (project / _SCRIPT).parent.mkdir(parents=True)
+    (project / _SCRIPT).write_bytes(b"#!/bin/sh\n")
+    handler = {"type": "command", "bash": command, "cwd": cwd}
+    hook = project / ".github" / "hooks" / "user.json"
+    hook.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": [handler]}}))
+    return _per_file_configs_running(project, [KNOWN_TARGETS["copilot"]], set(), {_SCRIPT})
+
+
+def test_a_handler_running_a_bundle_script_through_its_cwd_is_in_use(tmp_path: Path) -> None:
+    """#5281: ``./x.sh`` in the script's own directory runs the bundle's script."""
+    assert _user_hook_with_cwd(
+        tmp_path, "./x.sh", ".github/hooks/scripts/hookpkg/hooks/scripts"
+    ) == {".github/hooks/user.json"}
+
+
+def test_a_handler_whose_cwd_points_elsewhere_is_not_in_use(tmp_path: Path) -> None:
+    """#5281 control: the same command in an unrelated directory runs another script."""
+    assert _user_hook_with_cwd(tmp_path, "./x.sh", "tools") == set()
+
+
+def test_a_handler_whose_cwd_cannot_be_resolved_inside_the_project_is_in_use(
+    tmp_path: Path,
+) -> None:
+    """#5281: an escaping, variable or non-string cwd cannot be cleared; fail closed."""
+    for index, cwd in enumerate(("../outside", "$HOME/hooks", "~/hooks", 7, "")):
+        project = tmp_path / f"p{index}"
+        assert _user_hook_with_cwd(project, "./x.sh", cwd) == {".github/hooks/user.json"}, cwd

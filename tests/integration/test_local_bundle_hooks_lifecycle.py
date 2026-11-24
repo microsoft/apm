@@ -1744,3 +1744,46 @@ def test_uninstall_bundle_refuses_a_hook_shape_the_grammar_does_not_recognize(
 
     assert ".github/hooks/user.json" in text, text
     assert (consumer / script).is_file()
+
+
+def test_uninstall_bundle_ignores_a_user_hook_whose_cwd_is_elsewhere(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281 control: ``./x.sh`` in an unrelated cwd runs another script; uninstall goes on."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "cwd-elsewhere-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {"preToolUse": [{"type": "command", "bash": "./x.sh", "cwd": "tools"}]},
+        },
+    )
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg"))
+
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / script).exists()
+    assert script not in _claims_of(consumer)
+
+
+def test_uninstall_bundle_refuses_a_user_hook_whose_cwd_escapes_the_project(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5281: a cwd outside the project cannot be cleared; uninstall fails closed."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    consumer, _hook = _copilot_bundle_consumer(world, tmp_path, "cwd-escape-consumer")
+    script = _user_hook_naming_the_script(
+        consumer,
+        lambda path: {
+            "version": 1,
+            "hooks": {"preToolUse": [{"type": "command", "bash": "./x.sh", "cwd": "../elsewhere"}]},
+        },
+    )
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".github/hooks/user.json" in text, text
+    assert "Traceback" not in text, text
+    assert (consumer / script).is_file()
+    assert script in _claims_of(consumer)
