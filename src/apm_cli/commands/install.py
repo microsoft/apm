@@ -1652,7 +1652,6 @@ def install(  # noqa: PLR0913
                     elapsed_seconds=time.perf_counter() - install_started_at,
                     result=command_result,
                 ),
-                apm_diagnostics,
                 dry_run=dry_run,
             )
             summary_rendered = True

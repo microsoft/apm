@@ -1154,10 +1154,10 @@ def _target_line(project: Path) -> str:
     return format_provenance(resolve_targets(project, yaml_targets=restriction))
 
 
-def _attest(project: Path, line: str | None = None, during=None) -> None:
+def _attest(project: Path, line: str | None = None, during=None, printed: str = "") -> None:
     """A converged full install: it announced its targets and attested the state."""
     with verdict_record.recording(["install"]):
-        sys.stdout.write("[+] Installed 1 APM dependency.\n")
+        sys.stdout.write(printed + "[+] Installed 1 APM dependency.\n")
         verdict_record.note_run_targets(line if line is not None else _target_line(project))
         verdict_record.note_attested_install()
         if during is not None:
@@ -1291,3 +1291,20 @@ def _record_attested_noop() -> None:
     with verdict_record.recording(["install"]):
         sys.stdout.write(_OUTPUT)
         verdict_record.note_verified_noop(verdict_record.ATTESTED)
+
+
+def test_a_deferral_warning_the_install_printed_is_never_attested(project: Path) -> None:
+    """A2 allowlist: a kept stale copy means the next run has work; it must prove itself."""
+    _attest(project, printed="[!] Kept .claude/skills/x: it changed after the install.\n")
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_parked_mcp_notice_is_re_judged_live_and_still_attests(project: Path) -> None:
+    """A2 allowlist: the services phase re-runs on every attested hit, so its notice may pass."""
+    _attest(
+        project,
+        printed="  [!] Parked MCP server 'm' from transitive package o/p (self-defined, not approved)\n",
+    )
+
+    assert _attested_hit() is True

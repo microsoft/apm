@@ -211,6 +211,10 @@ _RUN_TARGETS: list[str] = []
 _KILL_VALUES = frozenset({"0", "false", "no", "off"})
 # O1: the summary's elapsed seconds are templated; any other clock-dependent
 # token (a cache age, a countdown) means the output is not recorded at all.
+# W3d A2 (allowlist): a full install attests only when every warning-or-error
+# line it printed is a notice the attested hit re-judges and prints live.
+_WARNING_LINE = re.compile(r"^\s*\[[!x]\]")
+_LIVE_NOTICES = (re.compile(r"^\s*\[!\] Parked MCP server '"),)
 _ELAPSED = "\x00elapsed\x00"
 _ELAPSED_RE = re.compile(r"(up to date in )\d+\.\d(s\.)")
 _CLOCK_RE = re.compile(
@@ -806,6 +810,7 @@ def attested_state(argv: list[str], root: Path) -> bool:
         return False
     try:
         if not os.path.lexists(_record_path(root)):
+            _trace("attested miss (no record)")
             return False
         _ENTRY_ENV, _ENTRY_PRESENTATION = _RUN_ENTRY[0]
         _verified_stdout(argv, root, attested=True)
@@ -897,7 +902,11 @@ def recording(argv: list[str]) -> Iterator[None]:
         if code == 0 and _ATTESTED_INSTALL and not _VERIFIED_NOOP:
             # No output is recorded, so an unknown no-op form does not matter:
             # every attested hit renders its output live.
-            _record_locked(argv, entry, out, err, attested=True)
+            unsettled = _unsettled_line("".join(out.parts) + "".join(err.parts))
+            if unsettled is None:
+                _record_locked(argv, entry, out, err, attested=True)
+            else:
+                _trace(f"no attestation (printed: {unsettled[:80]})")
         elif _UNKNOWN:
             _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
         elif code == 0 and _VERIFIED_NOOP:
@@ -973,6 +982,14 @@ def _record_after(
     provenance = ATTESTED if ATTESTED in _VERIFIED_NOOP else PROVEN
     out_text, err_text = "".join(out.parts), "".join(err.parts)
     _write_at_entry(entry, argv, out_text, err_text, deployed, provenance=provenance)
+
+
+def _unsettled_line(text: str) -> str | None:
+    """The first warning or error line that is not a live-rejudged notice (A2)."""
+    for line in text.splitlines():
+        if _WARNING_LINE.match(line) and not any(p.match(line) for p in _LIVE_NOTICES):
+            return line.strip()
+    return None
 
 
 def _targets_settled(announced: str) -> bool:
@@ -1066,7 +1083,9 @@ def _write(
             return
         from apm_cli.install import verdict_inputs
 
-        notice, due = verdict_inputs.notice_schedule(_ENTRY_TIME[0] if _ENTRY_TIME else 0.0)
+        notice, due = verdict_inputs.notice_schedule(
+            _ENTRY_TIME[0] if _ENTRY_TIME else 0.0, output=kind != ATTESTED
+        )
         key = _key(create=True)
         if key is None:
             _trace("no record (no private key)")

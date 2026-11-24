@@ -64,7 +64,7 @@ def key_startup(digest: Any, root: Path, notice: str, surfaces: list[str]) -> No
         digest.put("notice-mtime", b"%d" % os.stat(notice).st_mtime_ns)
 
 
-def notice_schedule(entry_time: float) -> tuple[str, float | None]:
+def notice_schedule(entry_time: float, *, output: bool = True) -> tuple[str, float | None]:
     """The update-check file and when its daily check falls due, if the schedule
     decides the notice; ("", None) when another gate does.
 
@@ -80,7 +80,9 @@ def notice_schedule(entry_time: float) -> tuple[str, float | None]:
     path = get_update_cache_path()
     checked = os.stat(path).st_mtime
     # File times can trail the clock (a coarse kernel clock, 2 s on FAT).
-    if checked >= entry_time - _CLOCK_GRAIN:
+    if output and checked >= entry_time - _CLOCK_GRAIN:
+        # A record of output only: an attested record replays none, and the
+        # notice is keyed and rendered live by the next run.
         raise ValueError("this run checked for updates")
     return str(path), checked + _NOTICE_PERIOD
 
