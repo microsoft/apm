@@ -720,30 +720,195 @@ class TestUpdateNoChanges:
 
     def test_unchanged_plan_with_pending_pin_repairs_proceeds_with_yes(self, runner, tmp_path):
         """A conflicting legacy pin repair commits even when the dependency plan is unchanged (#5243)."""
+        from apm_cli.marketplace.version_pins import open_ref_pin_stage, stage_ref_pin
+
         with runner.isolated_filesystem(temp_dir=tmp_path):
             _make_apm_yml(Path.cwd())
             captured = {}
 
             def fake_install(_apm, **kwargs):
-                cb = kwargs["plan_callback"]
-                captured["proceed"] = cb(UpdatePlan(entries=()))
+                stage = open_ref_pin_stage()
+                try:
+                    stage_ref_pin("mkt", "plug", "v1", repair=True)
+                    cb = kwargs["plan_callback"]
+                    captured["proceed"] = cb(UpdatePlan(entries=()))
+                finally:
+                    stage.discard()
                 from apm_cli.models.results import InstallResult
 
                 return InstallResult()
 
-            with (
-                patch(
-                    "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
-                ),
-                patch(
-                    "apm_cli.marketplace.version_pins.has_pending_pin_repairs", return_value=True
-                ),
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
             ):
                 result = runner.invoke(cli, ["update", "--yes"])
 
             assert result.exit_code == 0, result.output
             assert captured.get("proceed") is True
             assert "No dependency changes were applied" in result.output
+
+    def test_unchanged_plan_with_real_staged_pin_repair_commits_and_reports_summary(
+        self, runner, tmp_path
+    ):
+        """Real staged pin repairs render before confirmation, commit on --yes, and summarize."""
+        import json
+        from types import SimpleNamespace
+
+        from apm_cli.marketplace.version_pins import enforce_ref_pin, open_ref_pin_stage
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            pins_dir = Path.cwd() / "pins"
+            pins_dir.mkdir()
+            pins_file = pins_dir / "version-pins.json"
+            legacy_pins = {"alias-a/plug": "v1", "alias-b/plug": "v2"}
+            pins_file.write_text(json.dumps(legacy_pins), encoding="utf-8")
+
+            sources = [
+                SimpleNamespace(name="alias-a", url="https://example.com/org/cat", path="m.json"),
+                SimpleNamespace(name="alias-b", url="https://example.com/org/cat", path="m.json"),
+            ]
+            catalog = "example.com/org/cat:m.json"
+
+            def fake_install(_apm, **kwargs):
+                stage = open_ref_pin_stage()
+                try:
+                    with (
+                        patch(
+                            "apm_cli.marketplace.registry.get_registered_marketplaces",
+                            return_value=sources,
+                        ),
+                        patch(
+                            "apm_cli.marketplace.source_identity.catalog_pin_identity",
+                            return_value=catalog,
+                        ),
+                    ):
+                        enforce_ref_pin(
+                            "alias-a",
+                            "plug",
+                            "v1",
+                            pins_dir=str(pins_dir),
+                            accept_change=True,
+                            catalog=catalog,
+                        )
+                        proceed = kwargs["plan_callback"](UpdatePlan(entries=()))
+                        assert proceed is True
+                        stage.commit(pins_dir=str(pins_dir))
+                finally:
+                    stage.discard()
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+
+            assert result.exit_code == 0, result.output
+            assert "Marketplace ref pin repairs:" in result.output
+            assert "replace conflicting legacy pins (alias-a=v1, alias-b=v2) -> v1" in result.output
+            assert (
+                "Repaired 1 marketplace ref pin. No dependency changes were applied."
+                in result.output
+            )
+            assert json.loads(pins_file.read_text(encoding="utf-8")) == {f"{catalog}#plug": "v1"}
+
+    def test_unchanged_plan_with_real_staged_pin_repair_dry_run_and_decline(self, runner, tmp_path):
+        """Dry-run and declined confirmation render pin repairs and leave pins unchanged."""
+        import json
+        from types import SimpleNamespace
+
+        from apm_cli.marketplace.version_pins import enforce_ref_pin, open_ref_pin_stage
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            pins_dir = Path.cwd() / "pins"
+            pins_dir.mkdir()
+            pins_file = pins_dir / "version-pins.json"
+            legacy_pins = {"alias-a/plug": "v1", "alias-b/plug": "v2"}
+            pins_file.write_text(json.dumps(legacy_pins), encoding="utf-8")
+
+            sources = [
+                SimpleNamespace(name="alias-a", url="https://example.com/org/cat", path="m.json"),
+                SimpleNamespace(name="alias-b", url="https://example.com/org/cat", path="m.json"),
+            ]
+            catalog = "example.com/org/cat:m.json"
+
+            decline_tty = False
+
+            def fake_install(_apm, **kwargs):
+                import sys
+
+                stage = open_ref_pin_stage()
+                orig_stdin = sys.stdin
+                if decline_tty:
+
+                    class _TtyStream:
+                        def __init__(self, inner):
+                            self._inner = inner
+
+                        def isatty(self):
+                            return True
+
+                        def __getattr__(self, name):
+                            return getattr(self._inner, name)
+
+                    sys.stdin = _TtyStream(orig_stdin)
+                try:
+                    with (
+                        patch(
+                            "apm_cli.marketplace.registry.get_registered_marketplaces",
+                            return_value=sources,
+                        ),
+                        patch(
+                            "apm_cli.marketplace.source_identity.catalog_pin_identity",
+                            return_value=catalog,
+                        ),
+                    ):
+                        enforce_ref_pin(
+                            "alias-a",
+                            "plug",
+                            "v1",
+                            pins_dir=str(pins_dir),
+                            accept_change=True,
+                            catalog=catalog,
+                        )
+                    proceed = kwargs["plan_callback"](UpdatePlan(entries=()))
+                    assert proceed is False
+                    stage.discard()
+                finally:
+                    sys.stdin = orig_stdin
+                    stage.discard()
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                dry_result = runner.invoke(cli, ["update", "--dry-run"])
+
+            assert dry_result.exit_code == 0, dry_result.output
+            assert "Marketplace ref pin repairs:" in dry_result.output
+            assert (
+                "replace conflicting legacy pins (alias-a=v1, alias-b=v2) -> v1"
+                in dry_result.output
+            )
+            assert "Dry run: no changes applied" in dry_result.output
+            assert json.loads(pins_file.read_text(encoding="utf-8")) == legacy_pins
+
+            decline_tty = True
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                decline_result = runner.invoke(cli, ["update"], input="n\n")
+
+            assert decline_result.exit_code == 0, decline_result.output
+            assert "Marketplace ref pin repairs:" in decline_result.output
+            assert "Apply these changes?" in decline_result.output
+            assert "No changes applied." in decline_result.output
+            assert json.loads(pins_file.read_text(encoding="utf-8")) == legacy_pins
 
 
 def test_module_cache_rehydration_requires_locked_dependencies(tmp_path: Path) -> None:

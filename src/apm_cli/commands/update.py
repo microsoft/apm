@@ -122,6 +122,76 @@ class _UpdateRunState:
     revision_pins_applied: bool = False
     cache_rehydration_requested: bool = False
     gate_retirement: bool = False
+    pin_repairs: tuple[Any, ...] = ()
+
+
+def _render_update_completion_summary(
+    *,
+    installed: int,
+    changed: int,
+    revision_pin_updates: list[Any],
+    plan_state: _UpdateRunState,
+    exec_reconcile_required: bool,
+    restored_provenance: bool,
+    logger: CommandLogger,
+) -> None:
+    """Render the final update outcome summary after all writes commit."""
+    applied = bool(installed) and changed > 0
+    dep_noun = "dependency" if changed == 1 else "dependencies"
+    if applied and revision_pin_updates:
+        count = len(revision_pin_updates)
+        pin_noun = "pin" if count == 1 else "pins"
+        _rich_success(
+            f"Updated {changed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
+        )
+    elif applied:
+        _rich_success(f"Updated {changed} APM {dep_noun}.")
+    elif plan_state.cache_rehydration_requested and installed:
+        logger.success(
+            _no_ref_change_summary(
+                exec_reconcile_required or plan_state.gate_retirement,
+                restored_provenance,
+            ),
+            symbol="check",
+        )
+    elif revision_pin_updates:
+        count = len(revision_pin_updates)
+        noun = "pin" if count == 1 else "pins"
+        _rich_success(f"Updated {count} revision {noun} in apm.yml.")
+    elif plan_state.pin_repairs:
+        count = len(plan_state.pin_repairs)
+        noun = "pin" if count == 1 else "pins"
+        _rich_success(
+            f"Repaired {count} marketplace ref {noun}. No dependency changes were applied."
+        )
+    else:
+        _rich_success("No dependency changes were applied.")
+
+    if applied and plan_state.pin_repairs:
+        count = len(plan_state.pin_repairs)
+        noun = "pin" if count == 1 else "pins"
+        _rich_success(f"Repaired {count} marketplace ref {noun}.")
+
+
+def _render_pin_repairs_plan(repairs: tuple[Any, ...]) -> str:
+    """Render staged marketplace ref-pin repairs as an ASCII plan."""
+    if not repairs:
+        return ""
+    lines = ["Marketplace ref pin repairs:"]
+    for repair in repairs:
+        label = f"{repair.plugin_name}@{repair.marketplace_name}"
+        if repair.version:
+            label = f"{label} ({repair.version})"
+        if repair.conflicting_pins:
+            conflicts = ", ".join(f"{alias}={ref}" for alias, ref in repair.conflicting_pins)
+            lines.append(
+                f"  [~] {label}: replace conflicting legacy pins ({conflicts}) -> {repair.new_ref}"
+            )
+        elif repair.previous_ref:
+            lines.append(f"  [~] {label}: update ref pin {repair.previous_ref} -> {repair.new_ref}")
+        else:
+            lines.append(f"  [~] {label}: repair ref pin -> {repair.new_ref}")
+    return "\n".join(lines)
 
 
 def _stdin_is_tty() -> bool:
@@ -1044,9 +1114,14 @@ def _run_dep_update_locked(
 
         # A moved revision pin is already listed above; list each package once (#4208).
         unpinned_plan = plan.excluding(update.dep_key for update in revision_pin_updates)
-        from apm_cli.marketplace.version_pins import has_pending_pin_repairs
+        from apm_cli.marketplace.version_pins import (
+            has_pending_pin_repairs,
+            staged_ref_pin_repair_details,
+        )
 
-        has_pin_repairs = has_pending_pin_repairs()
+        pin_repairs = staged_ref_pin_repair_details()
+        plan_state.pin_repairs = pin_repairs
+        has_pin_repairs = bool(pin_repairs) or has_pending_pin_repairs()
         if unpinned_plan.has_changes:
             rendered = render_plan_text(unpinned_plan, verbose=verbose)
             if rendered:
@@ -1059,7 +1134,9 @@ def _run_dep_update_locked(
             reconcile_note = _reconcile_note(_exec_reconcile_required, plan_state.gate_retirement)
             if reconcile_note:
                 logger.info(reconcile_note)
-            elif not _cache_rehydration_required and not _restored_provenance and not has_pin_repairs:
+            elif (
+                not _cache_rehydration_required and not _restored_provenance and not has_pin_repairs
+            ):
                 return _handle_unchanged_plan_no_op(
                     len(revision_pin_resolution.skips),
                     apm_package,
@@ -1069,6 +1146,11 @@ def _run_dep_update_locked(
                 )
             if not has_pin_repairs:
                 plan_state.cache_rehydration_requested = True
+
+        rendered_pin_repairs = _render_pin_repairs_plan(pin_repairs)
+        if rendered_pin_repairs:
+            _rich_echo(rendered_pin_repairs)
+            _rich_echo("")
 
         if revision_pin_updates and unpinned_plan.has_changes:
             pin_count = len(revision_pin_updates)
@@ -1257,30 +1339,15 @@ def _run_dep_update_locked(
         # if the plan predicted changes.
         installed = getattr(result, "installed_count", 0)
         changed = len(plan.changed_entries)
-        applied = bool(installed) and changed > 0
-        dep_noun = "dependency" if changed == 1 else "dependencies"
-        if applied and revision_pin_updates:
-            count = len(revision_pin_updates)
-            pin_noun = "pin" if count == 1 else "pins"
-            _rich_success(
-                f"Updated {changed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
-            )
-        elif applied:
-            _rich_success(f"Updated {changed} APM {dep_noun}.")
-        elif plan_state.cache_rehydration_requested and installed:
-            logger.success(
-                _no_ref_change_summary(
-                    _exec_reconcile_required or plan_state.gate_retirement,
-                    bool(_restored_provenance),
-                ),
-                symbol="check",
-            )
-        elif revision_pin_updates:
-            count = len(revision_pin_updates)
-            noun = "pin" if count == 1 else "pins"
-            _rich_success(f"Updated {count} revision {noun} in apm.yml.")
-        else:
-            _rich_success("No dependency changes were applied.")
+        _render_update_completion_summary(
+            installed=installed,
+            changed=changed,
+            revision_pin_updates=revision_pin_updates,
+            plan_state=plan_state,
+            exec_reconcile_required=_exec_reconcile_required,
+            restored_provenance=bool(_restored_provenance),
+            logger=logger,
+        )
 
         # Fire post-update lifecycle scripts
         _fire_update_scripts(
