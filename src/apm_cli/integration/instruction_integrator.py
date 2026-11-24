@@ -114,9 +114,9 @@ class InstructionIntegrator(BaseIntegrator):
         # Rule path -> the compiled AGENTS.md that now carries it, for each rule
         # on disk this install stops writing (#5343); finalize names the moves.
         self.agents_md_carried: dict[Path, Path] = {}
-        # Claude rule path -> (package, content) the first package wrote this
-        # install; install order is declaration order, so it wins (#5343).
-        self._claude_rule_writers: dict[Path, tuple[str, str]] = {}
+        # Claude rule path -> (identity, label, content) the first package wrote
+        # this install; install order is declaration order, so it wins (#5343).
+        self._claude_rule_writers: dict[Path, tuple[str, str, str]] = {}
         # One compiled-coverage snapshot per project root for this install.
         self._compiled_coverage: dict[Path, Any] = {}
         # Routing verdicts per root and directory for this install (#4787).
@@ -623,7 +623,8 @@ class InstructionIntegrator(BaseIntegrator):
                 )
             ):
                 self._claude_rule_writers.setdefault(
-                    target_path, (_package_label(package_info), new_content)
+                    target_path,
+                    (_package_identity(package_info), _package_label(package_info), new_content),
                 )
             if skip:
                 if adopted:
@@ -665,17 +666,22 @@ class InstructionIntegrator(BaseIntegrator):
         Two packages can ship instructions that render to one ``.claude/rules/``
         path. The first one integrated (declared first) keeps it, the later one
         is skipped, and the user is told both names so no instruction is lost
-        silently.
+        silently. The project's own instruction always wins, as a deliberate
+        local override, in install and replay alike.
         """
         from apm_cli.utils.diagnostics import printable_ascii_text
 
-        winner = self._claude_rule_writers.get(target_path)
+        identity = _package_identity(package_info)
         package = _package_label(package_info)
-        if winner is None or winner[0] == package or winner[1] == content:
+        if identity == ".":
+            self._claude_rule_writers[target_path] = (identity, package, content)
             return False
-        if diagnostics is not None:
+        winner = self._claude_rule_writers.get(target_path)
+        if winner is None or winner[0] == identity or winner[2] == content:
+            return False
+        if diagnostics is not None and winner[0] != ".":
             name = source_file.name.removesuffix(".instructions.md")
-            kept, skipped = printable_ascii_text(winner[0]), printable_ascii_text(package)
+            kept, skipped = printable_ascii_text(winner[1]), printable_ascii_text(package)
             diagnostics.warn(
                 f"{printable_ascii_text(rel_path)}: {kept} and {skipped} both ship an "
                 f"instruction named '{printable_ascii_text(name)}'; kept {kept}'s (declared "
@@ -1172,6 +1178,16 @@ class InstructionIntegrator(BaseIntegrator):
             project_root,
             managed_files=managed_files,
         )
+
+
+def _package_identity(package_info) -> str:
+    """A stable identity for *package_info*: its dependency key, or ``.`` for the project."""
+    dependency_ref = getattr(package_info, "dependency_ref", None)
+    if dependency_ref is not None:
+        return dependency_ref.get_unique_key()
+    if getattr(getattr(package_info, "package", None), "name", None) == "_local":
+        return "."
+    return str(getattr(package_info, "install_path", "") or "")
 
 
 def _package_label(package_info) -> str:
