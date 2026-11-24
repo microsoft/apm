@@ -439,14 +439,18 @@ def verified_apm_hook_files(project_root: Path, lock) -> frozenset[str]:
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     try:
+        approved = _approved_bundle_hook_keys(project_root)
+    except (AttributeError, OSError, TypeError, ValueError, KeyError):
+        return frozenset()
+    # Bundle Markdown records are judged by apm.yml approvals alone.
+    managed = _verified_markdown_records(project_root, approved, KNOWN_TARGETS.values())
+    try:
         sources = {
             dependency_hook_source_marker(locked.to_dependency_ref())
             for locked in lock.get_all_dependencies()
         }
-        approved = _approved_bundle_hook_keys(project_root)
     except (AttributeError, OSError, TypeError, ValueError, KeyError):
-        return frozenset()
-    managed: set[str] = set()
+        return frozenset(managed)
     specs = merge_hook_config_projection_specs(list(KNOWN_TARGETS.values()))
     for config_rel, (sidecar_rel, container_key) in specs.items():
         if _hook_ownership_verifies(
@@ -454,6 +458,31 @@ def verified_apm_hook_files(project_root: Path, lock) -> frozenset[str]:
         ):
             managed.update((config_rel, sidecar_rel))
     return frozenset(managed)
+
+
+def _verified_markdown_records(project_root: Path, approved, targets) -> set[str]:
+    """Bundle Markdown approval records whose every entry names an approved key.
+
+    The record APM writes beside hooked bundle Markdown (#5254) counts as
+    managed only while it is a regular, unlinked file that parses and grants
+    nothing apm.yml does not approve; anything else stays unmanaged.
+    """
+    found: set[str] = set()
+    for root_dir in {Path(getattr(target, "root_dir", "") or "") for target in targets}:
+        rel = (root_dir / BUNDLE_MARKDOWN_RECORD_FILE).as_posix()
+        path = Path(project_root) / rel
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            keys = [
+                key
+                for key, _files in per_file_bundle_hook_keys(path, BUNDLE_RECORD_MARKDOWN).values()
+            ]
+        except (OSError, ValueError, TypeError):
+            continue
+        if keys and all(key in approved for key in keys):
+            found.add(rel)
+    return found
 
 
 def _approved_bundle_hook_keys(project_root: Path) -> frozenset[str]:
