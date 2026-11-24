@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 from types import CodeType
 
 import pytest
@@ -182,3 +184,279 @@ class TestLockFileReadCost:
             chain = lock._extensions["x-chain"]
             assert next(iter(chain)) == "deep"
             assert chain["k0"] == ["leaf"]
+
+
+def _rich_lock(tag: str, *, unicode: bool = False) -> LockFile:
+    """A lockfile whose strings stress the dumper: quoting, folding (and unicode)."""
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url=f"owner/rich-{tag}",
+            resolved_commit="b" * 40,
+            deployed_files=[".github/r.md", ".github/x y.md"],
+            deployed_file_hashes={".github/r.md": "sha256:" + "d" * 64},
+        )
+    )
+    lock.mcp_configs = {
+        "kb": {
+            "name": "kb",
+            "registry": False,
+            "transport": "stdio",
+            "args": ["yes", "null", "0123", "a: b", "#c", " lead", "x\ny", "\r\n", "\t"]
+            + (["caf\u00e9"] if unicode else []),
+            "lookalikes": [
+                "true",
+                "False",
+                "on",
+                "~",
+                "",
+                "1.5",
+                "1e3",
+                ".inf",
+                "0x1f",
+                "0o17",
+                "2026-01-01",
+                "2026-01-01T00:00:00Z",
+                "12:30",
+                "-",
+                "'q'",
+                '"d"',
+                "[x]",
+                "{y}",
+            ],
+            "count": 3,
+            "enabled": True,
+            "missing": None,
+            "env": {"LONG": "word " * 40},
+        }
+    }
+    return lock
+
+
+def _yaml_frames(action: Callable[[], object]) -> int:
+    """Count Python frames inside the ``yaml`` package while *action* runs.
+
+    Loader-agnostic: the pure-Python and libyaml loaders both construct
+    through ``yaml/constructor.py``, so any parse shows up here.
+    """
+    package = str(Path(yaml.__file__).parent)
+    calls = 0
+
+    def profiler(frame, event, _arg):
+        nonlocal calls
+        if event == "call" and frame.f_code.co_filename.startswith(package):
+            calls += 1
+
+    previous = sys.getprofile()
+    sys.setprofile(profiler)
+    try:
+        action()
+    finally:
+        sys.setprofile(previous)
+    return calls
+
+
+class TestRecordedDocumentAdmission:
+    """A seeded document never differs from a fresh parse of its text."""
+
+    def test_a_document_with_a_float_is_parsed_not_recorded(self):
+        from apm_cli.deps.lockfile_container import parse_lockfile_text, remember_lockfile_text
+
+        text = f"lockfile_version: '1'\nx-{uuid.uuid4().hex}: 1.5\n"
+        remember_lockfile_text(text, {"lockfile_version": "1", "wrong": 1.5})
+
+        assert parse_lockfile_text(text) == yaml.safe_load(text)
+
+
+_ADVERSARIAL_SCALARS = [
+    "yes",
+    "on",
+    "off",
+    "null",
+    "~",
+    "1e3",
+    "0o17",
+    "0x1F",
+    "2026-01-01",
+    "12:30",
+    "",
+    " lead",
+    "trail ",
+    "a: b",
+    "- x",
+    "#c",
+    "'q'",
+    '"dq"',
+    "\t",
+    "multi\nline",
+    "caf\u00e9",
+    "&anchor",
+    "*alias",
+    "!tag",
+    2**70,
+    -1,
+    0,
+    True,
+    False,
+    None,
+]
+
+
+class TestRecordedParseAdmission:
+    """QL rebase conditions: one admission gate and exact round-trip equality."""
+
+    def test_a_dumped_document_loads_back_exactly(self):
+        from apm_cli.deps.lockfile_container import _plain_copy
+
+        document = {
+            "lockfile_version": "1",
+            "scalars": list(_ADVERSARIAL_SCALARS),
+            "keys": {str(value): value for value in _ADVERSARIAL_SCALARS},
+        }
+        text = yaml_io.yaml_to_str(document)
+
+        loaded = yaml_io.load_machine_yaml_str(text)
+
+        assert _plain_copy(document) == loaded
+        assert json.dumps(_plain_copy(document)) == json.dumps(loaded)
+
+    def test_an_over_budget_text_is_not_seeded_and_reads_refuse_it(self):
+        from apm_cli.deps.lockfile_container import (
+            _parsed_texts,
+            parse_key,
+            parse_lockfile_text,
+            remember_lockfile_text,
+        )
+
+        text = "lockfile_version: '1'\n#" + "x" * yaml_io._MAX_MACHINE_YAML_CHARS + "\n"
+
+        remember_lockfile_text(text, {"lockfile_version": "1"})
+
+        assert not yaml_io.machine_yaml_admits(text)
+        assert parse_key(text) not in _parsed_texts
+        with pytest.raises(yaml.YAMLError, match="character budget"):
+            parse_lockfile_text(text)
+
+
+@pytest.mark.parametrize("where", ["value", "key"])
+@pytest.mark.parametrize("brk", ["\x85", "\u2028", "\u2029"], ids=["nel", "ls", "ps"])
+def test_a_text_with_a_yaml_line_break_reads_like_a_fresh_parse(where, brk):
+    from apm_cli.deps.lockfile_container import parse_lockfile_text, remember_lockfile_text
+
+    odd = f"a{brk}b-{uuid.uuid4().hex}"
+    document = (
+        {"lockfile_version": "1", "x": odd}
+        if where == "value"
+        else {
+            "lockfile_version": "1",
+            odd: "v",
+        }
+    )
+    text = yaml_io.yaml_to_str(document)
+
+    remember_lockfile_text(text, document)
+
+    assert parse_lockfile_text(text) == yaml_io.load_machine_yaml_str(text)
+
+
+_ASCII_SCALARS = [chr(code) for code in range(128)] + [
+    "\r\n",
+    "a\rb",
+    "<<",
+    "=",
+    ".inf",
+    "1_000",
+    "+1",
+    "-.5",
+    "0b101",
+    "1:30:00",
+    "y",
+    "No",
+    "OFF",
+    "~ x",
+    "a #b",
+    "a\\b",
+    "%x",
+    "@x",
+    "`x",
+    "|",
+    ">",
+    "? x",
+    "!!str",
+]
+
+
+@pytest.mark.parametrize("as_key", [False, True], ids=["values", "keys"])
+def test_every_ascii_scalar_seeds_a_document_equal_to_a_fresh_load(as_key):
+    from apm_cli.deps.lockfile_container import _parsed_texts, parse_key, remember_lockfile_text
+
+    tag = uuid.uuid4().hex
+    if as_key:
+        document = {"lockfile_version": "1", **{f"{s}{tag}": "v" for s in _ASCII_SCALARS}}
+    else:
+        document = {"lockfile_version": "1", "x": [*_ASCII_SCALARS, tag]}
+    text = yaml_io.yaml_to_str(document)
+
+    remember_lockfile_text(text, document)
+
+    assert text.isascii()
+    assert parse_key(text) in _parsed_texts
+    fresh = yaml_io.load_machine_yaml_str(text)
+    assert _parsed_texts[parse_key(text)] == fresh
+    assert json.dumps(_parsed_texts[parse_key(text)]) == json.dumps(fresh)
+
+
+def _round_trips(value: str) -> bool:
+    try:
+        return yaml_io.load_machine_yaml_str(yaml_io.yaml_to_str({"x": value})) == {"x": value}
+    except yaml.YAMLError:
+        return False
+
+
+def test_every_bmp_code_point_round_trips_except_the_refused_class():
+    """Pins _UNSAFE_STR: the dump/load mismatches are exactly NEL and lone surrogates."""
+    from apm_cli.deps.lockfile_container import _UNSAFE_STR
+
+    plain = [chr(cp) for cp in range(0x10000) if not 0xD800 <= cp <= 0xDFFF]
+    loaded = yaml_io.load_machine_yaml_str(yaml_io.yaml_to_str({"x": plain}))["x"]
+    mismatched = {ord(a) for a, b in zip(plain, loaded, strict=True) if a != b}
+    surrogates = {cp for cp in range(0xD800, 0xE000) if not _round_trips(chr(cp))}
+
+    # libyaml refuses a dumped lone surrogate; the pure-Python loader keeps it.
+    assert mismatched == {0x85}
+    assert surrogates <= set(range(0xD800, 0xE000))
+    refused = {cp for cp in range(0x10000) if _UNSAFE_STR.search(chr(cp))}
+    assert mismatched | surrogates <= refused
+    assert refused == {0x85, 0x2028, 0x2029} | set(range(0xD800, 0xE000))
+
+
+@pytest.mark.parametrize("where", ["value", "key"])
+def test_a_lone_surrogate_is_never_seeded_and_reads_like_a_fresh_read(where):
+    from apm_cli.deps.lockfile_container import (
+        _parsed_texts,
+        parse_key,
+        parse_lockfile_text,
+        remember_lockfile_text,
+    )
+
+    odd = f"p\udcff-{uuid.uuid4().hex}"
+    document = (
+        {"lockfile_version": "1", "x": odd}
+        if where == "value"
+        else {
+            "lockfile_version": "1",
+            odd: "v",
+        }
+    )
+    text = yaml_io.yaml_to_str(document)
+
+    remember_lockfile_text(text, document)
+
+    assert parse_key(text) not in _parsed_texts
+    try:
+        fresh = yaml_io.load_machine_yaml_str(text)
+    except yaml.YAMLError as refused:
+        with pytest.raises(type(refused)):
+            parse_lockfile_text(text)
+    else:
+        assert parse_lockfile_text(text) == fresh
