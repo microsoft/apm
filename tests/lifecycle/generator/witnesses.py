@@ -313,8 +313,11 @@ def machine_cells() -> list[MachineCell]:
             if assignment["GATE"] == "denied-dependency":
                 # A refusal proves its GATE level only, never a success cell.
                 continue
-            if witness == GATE_PACK_SPINE:
-                # A real pack over the primitive also proves the OP x PRIM pair.
+            if witness == GATE_PACK_SPINE or (
+                witness == GATE_PLUGIN_BIN_SPINE and assignment["OP"] == "pack"
+            ):
+                # A real pack over the primitive also proves the OP x PRIM pair; the
+                # plugin bin spine's pack runs over a deployed plugin bin/ (#5253).
                 context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
                 cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
             if witness == GATE_BUNDLE_SPINE and assignment["GATE"] in ("none", "allowed"):

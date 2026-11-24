@@ -28,14 +28,19 @@ I1-I9. ``plugin_bin_cells`` labels the same script statically.
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
+import yaml
+
+from tests.lifecycle import driver
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.world.scopes import use_policy
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 
 PLUGIN = "p-native-claude-bin"
 KINDS = {PLUGIN: frozenset({"bin"})}
@@ -46,6 +51,7 @@ DENY_POLICY = "deny-native"
 # Harness settings files whose enabledPlugins declare a project-scope plugin.
 SETTINGS = (".claude/settings.json", ".github/copilot/settings.json")
 _RETIRED = r"1 native plugin\(s\) removed"
+_READ_ONLY = ("marketplace", "audit-ci", "pack")
 
 
 class PluginBinBench(Bench):
@@ -98,8 +104,8 @@ class GatePluginBin(StepRunner):
         self.credited.add(cell)
         requested = self._requested(op)
         if not self.dry:
-            fields: dict[str, object] = {"mutating": op not in ("marketplace", "audit-ci")}
-            if op == "audit-ci":
+            fields: dict[str, object] = {"mutating": op not in _READ_ONLY}
+            if op in ("audit-ci", "pack"):
                 fields["read_only"] = True
             if op == "marketplace":
                 fields.update(forbidden={"project": ("*",), "outside": ("*",)}, allowed={})
@@ -120,6 +126,9 @@ class GatePluginBin(StepRunner):
 
     def _check_outcome(self, op: str, requested: PluginBinState, step: Step, retires: bool) -> None:
         """What I1-I9 cannot see: the whole root and its declarations go or stay together."""
+        if op == "pack":
+            self._check_pack(step)
+            return
         after = set(step.after.deployed)
         wanted = {"/".join(c) for c in expected_deployed(requested.model(), KINDS)}
         if op == "install":
@@ -158,6 +167,55 @@ class GatePluginBin(StepRunner):
         records = [k for k in rows if lock.dependencies[k].native_plugin]
         assert not records, f"prune kept the native plugin record: {records}"
 
+    def _check_pack(self, step: Step) -> None:
+        """Pack leaves the whole plugin out and says so once, with no looping remedy (#5253)."""
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        listed = {line.strip() for line in step.result.stdout.splitlines()}
+        assert not any(f"bin/{PLUGIN}" in line for line in listed), step.result.stdout
+        named = [line for line in output.splitlines() if f"lifecycle/{PLUGIN}" in line]
+        assert len(named) == 1, f"want one line naming the native plugin: {named}"
+        assert named[0].lstrip().startswith("[!]"), named[0]
+        assert "'apm install' to record provenance" not in output, output
+
+    def tripwire_bundle(self) -> None:
+        """A consumer of the project's bundle gets nothing of the omitted plugin (#5253).
+
+        The bundle's own lock names no ``native_plugin`` root it does not carry, and
+        installing the bundle deploys nothing under ``.agents/plugins`` and records no
+        such row.
+        """
+        if self.dry:
+            return
+        world, project = self.bench.world, self.bench.deploy_root
+        before = {p.relative_to(project).as_posix() for p in project.rglob("*")}
+        out = world.root / "tripwire-bundle"
+        packed = self.bench.run(("pack", "--output", str(out)))
+        assert packed.returncode == 0, packed.stdout + packed.stderr
+        # Pack synthesizes the project's plugin manifest; nothing else in it changes.
+        added = {p.relative_to(project).as_posix() for p in project.rglob("*")} - before
+        assert added <= {".claude-plugin", ".claude-plugin/plugin.json"}, sorted(added)
+        if ".claude-plugin" in added:
+            shutil.rmtree(project / ".claude-plugin")
+        (bundle,) = [path for path in out.iterdir() if path.is_dir()]
+        rows = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        carried = [row for row in rows.get("dependencies") or [] if "native_plugin" in row]
+        assert not carried, f"the bundle lock names a root it does not carry: {carried}"
+        consumer = world.root / "tripwire-consumer"
+        consumer.mkdir()
+        manifest = "name: consumer\nversion: 1.0.0\ntargets: [claude]\ndependencies:\n  apm: []\n"
+        (consumer / "apm.yml").write_text(manifest, encoding="utf-8")
+        runner = ApmLifecycleRunner(driver.driver_command(), timeout_seconds=driver.TIMEOUT_SECONDS)
+        result = runner.run(
+            ("install", str(bundle)), cwd=consumer, env=world.env, scenario_id="tripwire-bundle"
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (consumer / ".agents").exists(), sorted(map(str, consumer.rglob("*")))
+        lock = consumer / "apm.lock.yaml"
+        text = lock.read_text(encoding="utf-8") if lock.exists() else ""
+        assert "native_plugin" not in text, text
+        shutil.rmtree(out)
+        shutil.rmtree(consumer)
+
     def _credit(self, op: str, cell: str, step: Step, retires: bool) -> None:
         present: dict[str, list[str]] = {}
         absent: dict[str, list[str]] = {}
@@ -168,7 +226,7 @@ class GatePluginBin(StepRunner):
             matches = (_RETIRED,)
         elif op != "install":
             # A catalog command leaves every project byte alone; approve leaves the root.
-            unchanged["project"] = ("*",) if op == "marketplace" else (ROOT, *SETTINGS)
+            unchanged["project"] = ("*",) if op in ("marketplace", "pack") else (ROOT, *SETTINGS)
         if not retires and step.after.deployed:
             present["project"] = [BIN_PATH]
         evidence = Evidence(
@@ -258,6 +316,8 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     # then an orphaned plugin is pruned whole.
     machine.run("install", *install, machine.spec())
     machine.run("audit-ci", "audit", "--ci")
+    # pack leaves the whole plugin out, naming it once (#5253).
+    machine.run("pack", "pack", "--dry-run")
     machine.undeclare()
     machine.run("prune", "prune", retires=True)
     # unapproved-exec: the gate turns on over a plugin deployed with it off.
@@ -267,6 +327,8 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     # denied-dependency: org policy denies the approved, deployed plugin.
     machine.run("approve", "approve", PLUGIN)
     machine.run("install", *install)
+    machine.run("pack", "pack", "--dry-run")
+    machine.tripwire_bundle()
     machine.deny_by_policy()
     machine.run("marketplace", "marketplace", "add", machine.marketplace_url())
     machine.run("prune", "prune", retires=True)
