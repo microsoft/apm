@@ -19,10 +19,13 @@ before treating that message as an authentication problem.
 If the network row says `git not found; cannot test network`, the check
 could not run: it does not establish a network failure.
 
-To recover, choose another working directory outside the exclusion root and
-rerun `apm doctor`. Once its `git` row passes, retry your original install
-command. Network access, authentication, or later installation steps may
-still need attention.
+To recover a project install, stay in your project directory: changing it
+changes which `apm.yml` APM installs and where it deploys. Move Git, or the
+`PATH` entry that finds it, outside the exclusion root instead, rerun
+`apm doctor`, and retry once its `git` row passes. For `apm doctor` itself and
+for global (`--global`) installs, running from another working directory
+outside the exclusion root also works. Network access, authentication, or
+later installation steps may still need attention.
 
 APM skips any `git` found at or below an **exclusion root**: the nearest
 directory containing `.git`, else the nearest containing `apm.yml`, else the
