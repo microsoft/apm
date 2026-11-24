@@ -27,9 +27,7 @@ from apm_cli.integration.skill_adoption import (
     tree_equals_install_output,
 )
 from apm_cli.integration.skill_bundle_routes import promoted_skill_name
-from apm_cli.integration.skill_package_routing import (
-    get_effective_type,
-)
+from apm_cli.integration.skill_package_routing import get_effective_type
 from apm_cli.integration.skill_package_routing import (
     should_compile_instructions as _should_compile_instructions,
 )
