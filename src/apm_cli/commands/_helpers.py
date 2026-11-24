@@ -587,23 +587,27 @@ def resolve_cli_packages_for_project_root(
     project_root: Path,
 ) -> tuple[str, ...]:
     """Resolve relative CLI package paths from invoking_dir relative to project_root (#4545)."""
-    if invoking_dir.resolve() == project_root.resolve():
+    from ..models.dependency.identity import normalise_local_path_separators
+
+    invoking, root = invoking_dir.resolve(), project_root.resolve()
+    if invoking == root:
         return packages
     resolved: list[str] = []
     for pkg in packages:
         # Only an explicit relative path names the invoking directory; a bare
         # name (``foo``, ``name@market``) never depends on what the subdir holds.
-        if pkg.startswith(("./", "../", ".\\", "..\\")):
-            target_path = (invoking_dir / pkg).resolve()
-            try:
-                rel = target_path.relative_to(project_root.resolve()).as_posix()
-                if not rel.startswith("."):
-                    rel = f"./{rel}"
-            except ValueError:
-                rel = os.path.relpath(target_path, project_root).replace("\\", "/")
-            resolved.append(rel)
-        else:
+        if not pkg.startswith(("./", "../", ".\\", "..\\")):
             resolved.append(pkg)
+            continue
+        # Rebase lexically: resolving would follow a selected symlink and hide
+        # it from install's symlink refusal, so the final component is kept.
+        joined = os.path.normpath(os.path.join(invoking, normalise_local_path_separators(pkg)))
+        rel = os.path.relpath(joined, root).replace("\\", "/")
+        if rel == ".":
+            rel = "./"
+        elif rel != ".." and not rel.startswith(("./", "../")):
+            rel = f"./{rel}"
+        resolved.append(rel)
     return tuple(resolved)
 
 
