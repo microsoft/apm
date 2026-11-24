@@ -282,8 +282,16 @@ def test_a_bearer_or_foreign_header_is_not_consumed() -> None:
     env["GIT_CONFIG_COUNT"] = str(count + 1)
     env[f"GIT_CONFIG_KEY_{count}"] = "http.extraheader"
     env[f"GIT_CONFIG_VALUE_{count}"] = "X-Corp: 1"
-    with pytest.raises(fetch._Refuse):
-        fetch._split_managed_auth(env)
+    header, left = fetch._split_managed_auth(env)
+    assert header is not None
+    assert "X-Corp: 1" in left.values()  # stays, so the gate sends the fetch to git
+    with pytest.raises(fetch._Refuse, match="extraheader"):
+        fetch._classify(
+            [
+                Entry(left[f"GIT_CONFIG_KEY_{i}"], left[f"GIT_CONFIG_VALUE_{i}"])
+                for i in range(int(left["GIT_CONFIG_COUNT"]))
+            ]
+        )
 
 
 def test_no_managed_auth_leaves_the_env_untouched() -> None:
