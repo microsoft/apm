@@ -509,10 +509,11 @@ class TestEnsureBareRepo:
         assert result == winner
         assert _git_dir_has(winner, remote.main)
         # The staged clone's own ref names the tip, so no tag-only probe runs;
-        # only the winner is checked for the sha.
-        assert child.subcommands() == ["clone", "cat-file"], (
-            "a winner holding the sha is not fetched"
-        )
+        # only the winner is checked for the sha, and a commit its pack holds is
+        # answered from the pack index (cache/pack_index) without a spawn.
+        subcommands = child.subcommands()
+        assert subcommands[0] == "clone"
+        assert subcommands[1:] in ([], ["cat-file"]), "a winner holding the sha is not fetched"
 
 
 @trust_cached_repos()

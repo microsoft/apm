@@ -10,7 +10,8 @@ flavours, including UNC, ``\\\\?\\``, drive-relative, ``..`` and unicode case.
 from __future__ import annotations
 
 import random
-from pathlib import PurePath, PurePosixPath, PureWindowsPath
+import sys
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -173,3 +174,17 @@ def test_the_same_path_is_dot() -> None:
     assert paths.relative_posix(PurePosixPath("/w/a"), PurePosixPath("/w/a")) == "."
     same = paths.relative_to(PureWindowsPath("C:\\A"), PureWindowsPath("c:\\a"))
     assert same == PureWindowsPath(".")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_portable_relpaths_matches_portable_relpath_per_path(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    (base / "dir").mkdir(parents=True)
+    (base / "dir" / "f.md").write_text("x", encoding="utf-8")
+    (tmp_path / "outside.md").write_text("x", encoding="utf-8")
+    (base / "link.md").symlink_to(tmp_path / "outside.md")
+    files = [base / "dir" / "f.md", base / "missing.md", base / "link.md", tmp_path / "outside.md"]
+    for anchor in (base, tmp_path / "absent-base"):
+        assert paths.portable_relpaths(files, anchor) == [
+            paths.portable_relpath(p, anchor) for p in files
+        ]
