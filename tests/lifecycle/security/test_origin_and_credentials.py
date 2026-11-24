@@ -466,11 +466,20 @@ def _origin_row(world: World) -> dict:
 
 
 def _origin_rebind(world: World) -> None:
-    """The local name now points at another catalog that offers p-skill from p-exec."""
+    """The local name now points at another catalog that offers p-skill from p-exec.
+
+    Since #4970 a non-interactive rebind of a registered name to another
+    catalog is refused unless ``--yes`` confirms it; the row's user does.
+    """
     _origin_publish(
         world, _ORIGIN_OTHER_SLUG, [_origin_plugin("p-skill", "lifecycle/p-exec")], _ORIGIN_MARKET
     )
-    _origin_register(world, _ORIGIN_OTHER_SLUG, "--name", _ORIGIN_MARKET)
+    refused = driver.run(
+        world, ["marketplace", "add", _ORIGIN_OTHER_SLUG, "--name", _ORIGIN_MARKET]
+    )
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    assert "Re-run with --yes" in refused.stdout + refused.stderr
+    _origin_register(world, _ORIGIN_OTHER_SLUG, "--name", _ORIGIN_MARKET, "--yes")
 
 
 def _origin_unreachable(world: World) -> None:
