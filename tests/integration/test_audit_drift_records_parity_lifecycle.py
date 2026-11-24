@@ -247,7 +247,7 @@ def test_an_adversarial_deployed_destination_gives_the_live_verdict(
 _NEWLINE_SPLITS_THE_ENTRY = KnownFailure(
     "#5279",
     "the drift list prints a file name's newline verbatim",
-    r"(?m)^\[\+\] all checks passed\.md",
+    r"\n\s*\[\+\] all checks passed\.md  \[test/plain\]",
 )
 
 
