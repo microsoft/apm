@@ -38,9 +38,11 @@ dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
 A package removed from `apm.yml` by hand that another installed package still
-declares is kept; the next `apm install` records it as transitive. If a
-retained package's manifest cannot be read, prune keeps such packages rather
-than guess.
+declares is kept; the next `apm install` records it as transitive. A
+transitive local package that no remaining package declares is orphaned: its
+lock entry goes, and its deployed files go only where APM can prove it wrote
+them. If a retained package's manifest cannot be read, prune keeps such
+packages rather than guess, and names each one it kept.
 
 Switching a whole-repository dependency such as `owner/repo` to `path:`
 dependencies on the same repository needs no prune: the next `apm install` or
@@ -77,6 +79,14 @@ allowing a retry to finish after an earlier lockfile write failed. Retained
 source content does not preserve an undeclared package's deployment ownership.
 A stale dependency or owner reference is not
 "nothing to prune." If `apm.yml` is missing, the command exits with an error.
+
+Before it changes anything, prune checks that the lockfile it would write is
+valid. Removing the only package that declares a dependency redirected by a
+`replace` entry would leave that dependency without its parent, so prune (and
+`apm prune --dry-run`) exits 1, names the package and the dependency, and
+changes nothing. To prune it, remove the `replace` entry from `apm.yml` (or
+keep the declaring package), run `apm install` to rebuild the lockfile, then
+run `apm prune` again.
 
 ## Options
 

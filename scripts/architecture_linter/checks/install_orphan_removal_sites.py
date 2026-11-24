@@ -67,7 +67,8 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     ("src/apm_cli/commands/_helpers.py", "_check_orphaned_packages", "_inspect_installed_orphans"),
     ("src/apm_cli/commands/_helpers.py", "_inspect_installed_orphans", _ENTRY),
     ("src/apm_cli/commands/deps/cli.py", "_resolve_scope_deps", "_inspect_installed_orphans"),
-    ("src/apm_cli/commands/prune.py", "prune", _ENTRY),
+    ("src/apm_cli/commands/prune.py", "_orphan_decision", _ENTRY),
+    ("src/apm_cli/commands/prune.py", "prune", "_orphan_decision"),
     ("src/apm_cli/commands/uninstall/engine.py", "_uninstall_orphan_decision", _ENTRY),
     (
         "src/apm_cli/commands/uninstall/engine.py",
