@@ -2020,6 +2020,37 @@ def test_a_rollback_keeps_a_path_whose_parent_became_a_link(tmp_path: Path, apm_
     assert deployed in [path for path, _reason in issues]
 
 
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_rollback_keeps_a_path_whose_parent_became_a_junction(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A rollback treats a directory junction parent like a symbolic link: kept and reported (#5229)."""
+    import _winapi
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    deployed = project / "agents" / "a.md"
+    deployed.parent.mkdir(parents=True)
+    deployed.write_bytes(b"prior\n")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.write_bytes(b"installed\n")
+    journal.after_write(deployed)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.md").write_bytes(b"outside\n")
+    shutil.rmtree(project / "agents")
+    _winapi.CreateJunction(str(outside), str(project / "agents"))
+
+    issues = journal.restore()
+
+    assert (outside / "a.md").read_bytes() == b"outside\n"
+    assert deployed in [path for path, _reason in issues]
+
+
 def test_a_rollback_never_cleans_a_directory_through_a_linked_parent(
     tmp_path: Path, apm_home: Path
 ) -> None:
