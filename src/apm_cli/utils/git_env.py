@@ -1231,11 +1231,15 @@ def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
     contacted); it never authorizes a contact. Use
     :func:`validate_git_url_rewrite_safety` before contacting a remote.
     """
+    return resolve_git_url_rewrite(remote_url, git_url_rewrites(env)) or remote_url
+
+
+def git_url_rewrites(env: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """The ``insteadOf`` rewrites git applies under *env*; independent of the URL."""
     child = git_subprocess_env(env)
     # Merge the parent process config exactly as git_network_env does.
     _append_parent_git_config(child)
-    snapshot = _read_effective_git_config(child)
-    return resolve_git_url_rewrite(remote_url, snapshot.rewrites) or remote_url
+    return tuple(_read_effective_git_config(child).rewrites)
 
 
 def _append_git_url_rewrites(

@@ -461,6 +461,30 @@ class TieredRefResolver:
         # so verbose tier stats do not inflate the commits-API count.
         self.stats["sha_passthrough"] = 0
 
+    def _note_default_branch_tip(self, dep_ref: DependencyReference, resolved) -> None:
+        """Record a no-ref clone of the origin's default branch as a remote observation.
+
+        The legacy path clones the origin's default branch and reads the
+        checked-out branch's commit: the same current-remote observation the
+        ``legacy_clone`` tier records. Only a named branch counts; anything
+        else stays unrecorded and is verified like a pin.
+        """
+        from ..models.dependency.types import GitReferenceType
+
+        sha = getattr(resolved, "resolved_commit", None) or ""
+        branch = getattr(resolved, "ref_name", None) or ""
+        if (
+            not self.freshness_policy.requires_remote
+            or getattr(resolved, "ref_type", None) != GitReferenceType.BRANCH
+            or not _SHA_RE.match(sha)
+            or not branch
+            or branch == "HEAD"
+        ):
+            return
+        key = (_repository_cache_identity(dep_ref), "")
+        with self._coalesce_lock:
+            self._remote_resolutions[key] = sha.lower()
+
     def remotely_resolved(self, dep_ref: DependencyReference, sha: str) -> bool:
         """Authorize persistence only for a current-remote tier's exact observation."""
         key = (_repository_cache_identity(dep_ref), dep_ref.reference or "")
@@ -534,7 +558,10 @@ class TieredRefResolver:
         # preserve the existing default-branch + artifactory paths
         # without re-implementing them per-tier.
         if not ref or dep_ref.is_artifactory():
-            return self._legacy.resolve_full(dep_ref)
+            resolved = self._legacy.resolve_full(dep_ref)
+            if not ref and not dep_ref.is_artifactory():
+                self._note_default_branch_tip(dep_ref, resolved)
+            return resolved
 
         # Ref is already a concrete commit SHA (e.g. the download ref was
         # rewritten from the lockfile): resolution is a no-op with zero I/O.

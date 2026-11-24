@@ -812,3 +812,43 @@ def test_a_branch_named_like_a_version_still_resolves() -> None:
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "2.x") == "9" * 40
     assert (api.queries, api.listings) == ([], 1)
+
+
+def _legacy_returning(ref_type: GitReferenceType, ref_name: str, sha: str) -> L3LegacyClone:
+    inner = MagicMock()
+    inner.resolve.return_value = ResolvedReference(
+        original_ref="owner/repo", ref_type=ref_type, resolved_commit=sha, ref_name=ref_name
+    )
+    return L3LegacyClone(legacy_resolver=inner)
+
+
+@pytest.mark.parametrize(
+    ("ref_type", "ref_name", "policy", "recorded"),
+    [
+        (GitReferenceType.BRANCH, "main", RefFreshnessPolicy.CURRENT_REMOTE, True),
+        (GitReferenceType.BRANCH, "HEAD", RefFreshnessPolicy.CURRENT_REMOTE, False),
+        (GitReferenceType.BRANCH, "", RefFreshnessPolicy.CURRENT_REMOTE, False),
+        (GitReferenceType.COMMIT, "main", RefFreshnessPolicy.CURRENT_REMOTE, False),
+        (GitReferenceType.BRANCH, "main", RefFreshnessPolicy.LOCKED_OR_CURRENT, False),
+    ],
+    ids=["named-branch", "detached", "unnamed", "commit", "lock-allowed"],
+)
+def test_a_default_branch_clone_is_a_remote_observation_only_for_a_named_branch(
+    ref_type, ref_name, policy, recorded
+):
+    cache = PerRunRefCache()
+    legacy = _legacy_returning(ref_type, ref_name, SHA_A)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), legacy],
+        cache=cache,
+        legacy=legacy,
+        freshness_policy=policy,
+    )
+    tip = DependencyReference(repo_url="owner/repo")
+
+    resolved = resolver.resolve(tip)
+
+    assert resolved.resolved_commit == SHA_A
+    assert resolver.remotely_resolved(tip, SHA_A) is recorded
+    assert resolver.remotely_resolved(tip, SHA_B) is False
+    assert resolver.remotely_resolved(_dep(ref="main"), SHA_A) is False

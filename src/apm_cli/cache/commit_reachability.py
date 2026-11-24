@@ -54,6 +54,8 @@ class VerdictStage:
         self._lock = threading.Lock()
         self._scratch: str | None = None
         self._memo: dict[str, object] = {}
+        # One origin listing per remote for this attempt (see branch_and_tag_refs).
+        self.listings: dict = {}
 
     def add(self, marker: Path, canonical: str) -> None:
         with self._lock:
@@ -84,6 +86,7 @@ class VerdictStage:
         """Write the staged verdicts (best effort: a missing one is re-checked)."""
         with self._lock:
             pending, self._pending = self._pending, {}
+            self.listings = {}
         for marker, canonical in pending.items():
             try:
                 _write_marker(marker, canonical)
@@ -94,6 +97,7 @@ class VerdictStage:
     def discard(self) -> None:
         with self._lock:
             self._pending = {}
+            self.listings = {}
         self._close()
 
     def _close(self) -> None:
@@ -103,6 +107,7 @@ class VerdictStage:
         with self._lock:
             scratch, self._scratch = self._scratch, None
             self._memo = {}
+            self.listings = {}
         if scratch is not None:
             shutil.rmtree(scratch, ignore_errors=True)
         with _stage_lock:
@@ -131,6 +136,12 @@ def _stage() -> VerdictStage | None:
 def _linked_dirs(path: Path, depth: int = 3) -> bool:
     """Whether any of the *depth* directories above *path* in the ref cache is a link."""
     return any(part.is_symlink() for part in list(path.parents)[:depth])
+
+
+def _attempt_listings() -> dict | None:
+    """The open install attempt's listing memo; None outside an attempt (no reuse)."""
+    stage = _stage()
+    return None if stage is None else stage.listings
 
 
 def _write_marker(marker: Path, canonical: str) -> None:
@@ -292,7 +303,7 @@ def _require_at_origin(downloader, dep_ref, sha: str) -> None:
     )
 
 
-_CONTACTS: dict[tuple, str] = {}
+_REWRITES: dict[tuple, tuple[tuple[str, str], ...] | None] = {}
 
 
 def effective_contact(contact: str, env) -> str | None:
@@ -303,10 +314,10 @@ def effective_contact(contact: str, env) -> str | None:
     extra git process per package.
     """
     merged = {**os.environ, **(env or {})}
-    key = (contact, _rewrite_config(merged), _config_files_state(merged))
-    if key not in _CONTACTS:
-        _CONTACTS[key] = _effective_contact(contact, env)
-    return _CONTACTS[key]
+    key = (_rewrite_config(merged), _config_files_state(merged))
+    if key not in _REWRITES:
+        _REWRITES[key] = _probe_rewrites(env)
+    return _effective_contact(contact, _REWRITES[key])
 
 
 def _rewrite_config(env: dict[str, str]) -> tuple:
@@ -348,14 +359,26 @@ def _config_files_state(env: dict[str, str]) -> tuple:
     return tuple(state)
 
 
-def _effective_contact(contact: str, env) -> str | None:
-    from ..utils.git_env import effective_git_url
-    from .url_normalize import normalize_repo_url
+def _probe_rewrites(env) -> tuple[tuple[str, str], ...] | None:
+    """The rewrites git applies under *env* (one config probe), or None if unknown."""
+    from ..utils.git_env import git_url_rewrites
 
     try:
-        effective = effective_git_url(contact, env)
+        return git_url_rewrites(env)
     except Exception:
+        return None
+
+
+def _effective_contact(contact: str, rewrites) -> str | None:
+    from ..utils.git_env import resolve_git_url_rewrite
+    from .url_normalize import normalize_repo_url
+
+    if rewrites is None:
         # Unknown contact: callers neither trust nor record a verdict for it.
+        return None
+    try:
+        effective = resolve_git_url_rewrite(contact, rewrites) or contact
+    except Exception:
         return None
     try:
         return normalize_repo_url(effective)
@@ -833,19 +856,18 @@ def _branch_and_tag_records(url: str, env, *, probed: bool = False) -> list[tupl
 
     *env* is already the listing env when *probed*.
     """
-    from ..utils.git_env import git_remote_refs
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from .git_cache import _safe_git_args
 
     where = _sanitize_origin(url)
     listing_env = env if probed else _probed_listing_env(url, env)
     try:
-        listing = git_remote_refs(
+        listing = branch_and_tag_refs(
             url,
-            "refs/heads/*",
-            "refs/tags/*",
             env=listing_env,
             timeout=60,
             git_args=_safe_git_args(),
+            memo=_attempt_listings(),
         )
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
@@ -924,8 +946,8 @@ def require_reachable_commit(
             tag, or reachability cannot be verified (for example offline on
             the first install of this commit).
     """
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from ..deps.git_remote_ops import tag_commit_shas
-    from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args, _sanitize_url
 
     sha = sha.lower()
@@ -947,8 +969,8 @@ def require_reachable_commit(
     if canonical is not None and _recorded(marker, canonical):
         return
     try:
-        listing = git_remote_refs(
-            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
+        listing = branch_and_tag_refs(
+            url, env=env, timeout=60, git_args=_safe_git_args(), memo=_attempt_listings()
         )
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(unverifiable, exc) from exc

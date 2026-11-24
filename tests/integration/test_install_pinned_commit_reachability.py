@@ -858,3 +858,32 @@ with open({str(calls_log)!r}, "a") as log:
     urls = [call[-1] for call in probed]
     assert sorted(set(urls)) == sorted(urls), probed
     assert bool(urls) is include_if, probed
+
+
+@pytest.mark.parametrize("target", ["refs/pull/1/head", "refs/tags/v-f1"], ids=["pull", "tag"])
+def test_a_default_branch_head_aimed_outside_refs_heads_fails_closed(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    """A tip dependency trusts only a named origin branch, never a HEAD symref elsewhere."""
+    _git("--git-dir", str(origin.path), "update-ref", "refs/tags/v-f1", origin.f1, cwd=tmp_path)
+    # git symbolic-ref refuses HEAD outside refs/heads/; a hostile server need not.
+    (origin.path / "HEAD").write_text(f"ref: {target}\n", encoding="ascii")
+    advertised = _git("ls-remote", "--symref", str(origin.path), "HEAD", cwd=tmp_path)
+    assert f"ref: {target}\tHEAD" in advertised
+    project = _project(tmp_path, "main")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"][0].pop("ref")
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    result = _install(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "cache"))
+
+    # Resolution fails closed (no default branch to name), before any verdict.
+    output = " ".join(result.output.split())
+    assert result.exit_code == 1, result.output
+    assert "1 package failed" in output
+    assert "Failed to download dependency acme/platform/pkg" in output
+    assert "No install transaction changes were committed" in output
+    assert _UNREACHABLE not in output
+    assert _installed(project) == []
+    assert not (project / "apm.lock.yaml").exists()
+    assert not list((tmp_path / "cache").rglob("verified/*"))
