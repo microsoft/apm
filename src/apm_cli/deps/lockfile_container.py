@@ -123,7 +123,7 @@ def render_staged_document(document: object) -> str:
     """Emit a staged plain document, seeding the parse memo for later text reads."""
     from ..utils import yaml_io
 
-    text = yaml_io.yaml_to_str(document)
+    text = yaml_io.machine_yaml_to_str(document)
     remember_lockfile_text(text, document)
     return text
 

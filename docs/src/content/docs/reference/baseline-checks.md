@@ -47,6 +47,7 @@ first failure to skip expensive I/O.
 | `content-integrity` | block | `ci_checks.py` | yes |
 | `local-bundle-hooks` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
+| `claude-instructions-compiled` | warning | `claude_instructions_check.py` | project scope with a Claude target |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
 | `drift` | block | `_check_drift` in `ci_checks.py`, invoked from `commands/audit.py` | yes, unless `--no-drift` |
 
@@ -212,6 +213,12 @@ your own changes in a separate hook entry.
 - **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead. It also fails when a file the lockfile does not record sits at one of a package's own hook destinations (such as `.github/hooks/<package>-<name>.json`) while the executables gate withholds that package's hooks (denied or not approved); the detail names the path. For targets that merge hooks into one config file (such as `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`), it fails on an entry that matches such a package's own hook and that no ownership record attributes to another source; the detail names the file and the event. `apm install` keeps such a file or entry and warns naming it, because no lock record proves APM wrote it.
 - **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`. For an unrecorded file at a withheld package's hook path, delete it if you did not write it yourself, then run `apm audit --ci`; for a named merged-config entry, remove the entry if you did not add it yourself.
 
+### `claude-instructions-compiled`
+
+- **What it verifies.** That every instruction routed to `AGENTS.md` for Claude Code (`applyTo: "**"` or one directory) has a compiled copy Claude loads: an APM-generated `AGENTS.md` imported by `CLAUDE.md`. Install no longer writes these to `.claude/rules/`.
+- **Warns when.** A project or dependency instruction routes to `AGENTS.md` and no compiled file carries it. The detail names the instructions. `apm install` warns with the same names. It is a warning: `apm audit --ci` reports it and still exits 0.
+- **Remediation.** Run `apm compile`, or narrow the instruction's `applyTo` to keep it in `.claude/rules/`. See [Claude plus Copilot projects that never compile](../../consumer/update-and-refresh/#claude-plus-copilot-projects-that-never-compile).
+
 ### `includes-consent`
 
 - **What it verifies.** That projects deploying local content (the lockfile's `local_deployed_files` is non-empty) declare an `includes:` field in `apm.yml` for explicit governance.
@@ -229,7 +236,7 @@ your own changes in a separate hook entry.
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `lockfile-targets-current`, `skill-subset-consistency`, `config-consistency`, `native-mcp-ownership`, `native-mcp-drift` (only when reported), `kept-mcp-entries` (only when reported), `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `lockfile-targets-current`, `skill-subset-consistency`, `config-consistency`, `native-mcp-ownership`, `native-mcp-drift` (only when reported), `kept-mcp-entries` (only when reported), `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `claude-instructions-compiled`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 

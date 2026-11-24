@@ -218,6 +218,45 @@ def test_only_the_fresh_landing_skips_verification(tmp_path: Path) -> None:
         forget_verdicts()
 
 
+def test_fetches_queued_behind_the_first_answer_then_run_concurrently() -> None:
+    import threading
+
+    queued = 4
+    overlap = threading.Barrier(queued, timeout=10)
+    first_answer = threading.Event()
+    lead_sent = threading.Event()
+    answered: list[bytes] = []
+
+    def first(*_args) -> bytes:
+        lead_sent.set()
+        first_answer.wait(10)
+        return b"first"
+
+    def later(*_args) -> bytes:
+        overlap.wait()  # breaks unless every queued fetch is in flight at once
+        return b"later"
+
+    def fetch_later() -> None:
+        answered.append(fetch._admitted_post("u", None, ("file", ""), b"", post=later))
+
+    with invocation_scope():
+        lead = threading.Thread(
+            target=lambda: answered.append(
+                fetch._admitted_post("u", None, ("file", ""), b"", post=first)
+            )
+        )
+        lead.start()
+        assert lead_sent.wait(10)
+        followers = [threading.Thread(target=fetch_later) for _ in range(queued)]
+        for thread in followers:
+            thread.start()
+        first_answer.set()
+        for thread in [lead, *followers]:
+            thread.join(15)
+
+    assert sorted(answered) == [b"first"] + [b"later"] * queued
+
+
 def _shared_tree_pack(fanouts: list[int], leaf_files: int) -> tuple[str, bytes]:
     """``(commit id, pack)``: every level's entries all name the one tree below it."""
     blob = b"x\n"

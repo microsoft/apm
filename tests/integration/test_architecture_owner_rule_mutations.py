@@ -2920,6 +2920,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A local-bundle hook with no recorded approval key is admitted instead of retired.",
     ),
     MutationCase(
+        guard_id="install-deployment-local-reparent-rule",
+        rule_id="install-deployment-local-reparent-rule",
+        path="src/apm_cli/commands/uninstall/local_reanchor.py",
+        old="        edges = walk.declaring_edges[key]\n",
+        new="        edges = walk.declaring_edges[key]\n        ranked = min(nearest, key=str)\n",
+        intent="Uninstall ranks a re-parented row's parent outside reparent_rows (#5161).",
+    ),
+    MutationCase(
         guard_id="install-deployment-lock-parent-placement",
         rule_id="install-deployment-lock-parent-placement",
         path="src/apm_cli/deps/why_walker.py",

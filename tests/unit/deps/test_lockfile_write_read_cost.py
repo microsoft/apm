@@ -98,11 +98,13 @@ def test_a_command_emits_its_lockfile_once_however_often_it_writes(tmp_path):
     def command() -> None:
         with lockfile_write_scope(LockfileWriter.INSTALL):
             staged_emits.append(
-                _count_calls(yaml_io.yaml_to_str.__code__, lambda: _write_twice_and_noop(path))
+                _count_calls(
+                    yaml_io.machine_yaml_to_str.__code__, lambda: _write_twice_and_noop(path)
+                )
             )
             assert not path.exists()
 
-    emits = _count_calls(yaml_io.yaml_to_str.__code__, command)
+    emits = _count_calls(yaml_io.machine_yaml_to_str.__code__, command)
 
     assert staged_emits == [0]
     assert emits == 1
