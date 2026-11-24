@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import posixpath
 import stat
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -114,21 +114,30 @@ def entry_matches_expected(fingerprint: str, expected: str | None) -> bool:
     return fingerprint.rsplit(":", 1)[0] == expected
 
 
-def interrupted_staging(events: Mapping[str, Any], entries: Mapping[str, str]) -> set[str]:
+def interrupted_staging(
+    events: Mapping[str, Any], entries: Mapping[str, str], known: Collection[str]
+) -> set[str]:
     """Staging files an atomic write left when killed before its rename (#5395).
 
     A regular file named with APM's staging prefix is APM's in-flight state
-    only beside a write APM began in this unit and never sealed (*events*
-    holds a pending tuple in the same directory). Anywhere else it is kept,
-    as any unknown file is.
+    only when nothing recorded it (*known*: the prior state, the unit's seal
+    and every write event) and a content write APM began in the same
+    directory, below the unit, never sealed. A directory creation or removal
+    is no such write. Anything else is judged as before, so a recorded file
+    a user edited is still kept.
     """
     from apm_cli.utils.atomic_io import STAGING_PREFIX
 
-    pending = {posixpath.dirname(rel) for rel, event in events.items() if isinstance(event, tuple)}
+    pending = {
+        posixpath.dirname(rel)
+        for rel, event in events.items()
+        if rel and isinstance(event, tuple) and str(event[1]).startswith("sha256:")
+    }
     return {
         rel
         for rel, fingerprint in entries.items()
-        if posixpath.basename(rel).startswith(STAGING_PREFIX)
+        if rel not in known
+        and posixpath.basename(rel).startswith(STAGING_PREFIX)
         and posixpath.dirname(rel) in pending
         # A regular file: "<hash>:<mode>", never a directory, link or other entry.
         and ":" in fingerprint

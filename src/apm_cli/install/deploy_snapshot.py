@@ -825,7 +825,8 @@ def _dir_holds_apm_state(unit: _Replay, current: Mapping[str, Any], whole: Any) 
     if modes != {None} and current.get("mode") not in modes:
         return False
     entries: Mapping[str, str] = current["dir"]
-    accounted, unknown = _interrupted_staging(unit.events, entries), set()
+    known = {*prior, *sealed, *unit.events}
+    accounted, unknown = _interrupted_staging(unit.events, entries, known), set()
     for rel, fingerprint in entries.items():
         event = unit.events.get(rel)
         pending = isinstance(event, tuple)

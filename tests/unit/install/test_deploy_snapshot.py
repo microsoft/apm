@@ -2754,22 +2754,35 @@ def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_hom
     assert manifest.read_text(encoding="utf-8").count("\n") >= 2
 
 
+_STAGED = "apm-atomic-k3x9"
+_WRITE = ("pending", "sha256:" + "0" * 64, None)
+_SEALED = "sha256:" + "0" * 64 + ":420"
+
+
 @pytest.mark.parametrize(
-    ("name", "pending", "restored"),
+    ("name", "events", "recorded", "restored"),
     [
-        ("apm-atomic-k3x9", True, True),
-        ("apm-atomic-k3x9", False, False),
-        ("notes.md", True, False),
+        (_STAGED, {"SKILL.md": _WRITE}, False, True),
+        (_STAGED, {"SKILL.md": _SEALED}, False, False),
+        ("notes.md", {"SKILL.md": _WRITE}, False, False),
+        (_STAGED, {"SKILL.md": _WRITE}, True, False),
+        (_STAGED, {"": ("pending", "absent", None)}, False, False),
     ],
-    ids=["staging-beside-unsealed-write", "staging-with-no-open-write", "user-file"],
+    ids=[
+        "staging-beside-unsealed-write",
+        "staging-with-no-open-write",
+        "user-file",
+        "recorded-staging-name-edited",
+        "pending-directory-removal-only",
+    ],
 )
 def test_a_staging_file_is_apms_only_beside_an_unsealed_write(
-    tmp_path: Path, name: str, pending: bool, restored: bool
+    tmp_path: Path, name: str, events: dict, recorded: bool, restored: bool
 ) -> None:
     """#5395: an atomic write killed before its rename left its staging file.
 
-    It is APM's in-flight state only next to a write APM began in that
-    directory and never sealed; any other unknown file is kept.
+    It is APM's in-flight state only when nothing recorded it and a content
+    write APM began in that directory never sealed; anything else is kept.
     """
     from apm_cli.install.deploy_snapshot import _apply, _decide, _Replay
     from apm_cli.install.deploy_state import file_mode
@@ -2777,11 +2790,9 @@ def test_a_staging_file_is_apms_only_beside_an_unsealed_write(
     skill = tmp_path / "skill"
     skill.mkdir()
     (skill / name).write_bytes(b"partial bytes")
-    sealed_dir = {"dir": {}, "mode": file_mode(skill)}
-    write = ("pending", "sha256:" + "0" * 64, None) if pending else "0" * 64 + ":420"
-    unit = _Replay(
-        "skill", skill, "absent", None, {}, (), events={"": sealed_dir, "SKILL.md": write}
-    )
+    sealed = {name: "sha256:" + "1" * 64 + ":420"} if recorded else {}
+    whole = {"dir": sealed, "mode": file_mode(skill)}
+    unit = _Replay("skill", skill, "absent", None, {}, (), events={"": whole, **events})
 
     apply, kept = _decide([unit])
     for decided in apply:
