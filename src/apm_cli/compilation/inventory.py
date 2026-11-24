@@ -30,7 +30,6 @@ class InventoryDirectory:
     file_names: tuple[str, ...]
 
 
-@dataclass(frozen=True)
 def _seeded_listing(root: Path):
     from ..utils.content_hash import seeded_listing
 
@@ -54,9 +53,10 @@ def _seeded_walk(root: Path, listing: dict[str, list[str]]):
 
 
 # PERF B3 PROTOTYPE: compute the walk too and fail loudly on any difference.
-_B3_DIFFERENTIAL = False
+_B3_DIFFERENTIAL = True
 
 
+@dataclass(frozen=True)
 class CompileInventory:
     """Deterministic, read-only filesystem snapshot for one compile invocation.
 
