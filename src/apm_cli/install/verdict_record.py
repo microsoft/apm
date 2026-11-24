@@ -856,7 +856,7 @@ def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
             return
         _record_after(argv, entry, out, err)
     except OSError as exc:
-        _trace(f"no record ({type(exc).__name__})")
+        _trace(f"no record ({type(exc).__name__}: {exc})")
     finally:
         lock.release()
 
@@ -996,5 +996,5 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
             raise
         _trace("recorded")
     except (OSError, ValueError, TypeError) as exc:
-        _trace(f"no record ({type(exc).__name__})")
+        _trace(f"no record ({type(exc).__name__}: {exc})")
         return
