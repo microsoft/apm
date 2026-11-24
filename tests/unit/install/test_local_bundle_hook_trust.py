@@ -193,10 +193,18 @@ def test_a_handler_whose_cwd_climbs_out_of_a_link_is_in_use(tmp_path: Path) -> N
     ("command", "cwd"),
     [
         ("./x.sh", "tools"),
+        ("sh -e ./x.sh", "tools"),
+        ("bash -eu ./x.sh", "tools"),
         ("./prefix-x.sh", _SCRIPT_DIR),
         ("./scripts/x.sh", _SCRIPT_DIR),
     ],
-    ids=["bare-name-elsewhere", "longer-name-in-script-dir", "subdir-of-script-dir"],
+    ids=[
+        "bare-name-elsewhere",
+        "shell-options-elsewhere",
+        "shell-flags-elsewhere",
+        "longer-name-in-script-dir",
+        "subdir-of-script-dir",
+    ],
 )
 def test_a_cwd_handler_running_another_script_is_not_in_use(
     tmp_path: Path, command: str, cwd: str

@@ -158,8 +158,9 @@ def _runs(
         return True  # the name sits in syntax the words lost: fail closed
     for index, word in named:
         if index in operands:
-            # A shell's script operand is one path, judged whole (#5210).
-            if not _certainly_elsewhere(word, paths, bases, moved):
+            # A shell's script operand is one path, judged whole (#5210), from
+            # the handler's cwd when it declares one (#5332).
+            if not _certainly_elsewhere(word, paths, bases, moved, from_cwd):
                 return True
         elif nested and any(space in word for space in " \t"):
             # The intact word may itself be a script path with a space in it.
