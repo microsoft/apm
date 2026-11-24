@@ -310,11 +310,13 @@ def ambient_tls_stamp() -> tuple:
     from apm_cli.core.invocation_memo import forget_epoch
 
     environ = os.environ
-    home = environ.get("HOME") or environ.get("USERPROFILE")
-    xdg = environ.get("XDG_CONFIG_HOME") or (os.path.join(home, ".config") if home else None)
+    named = tuple((name, environ.get(name)) for name in _TLS_STAMP_ENV)
+    value = dict(named)
+    home = value["HOME"] or value["USERPROFILE"]
+    xdg = value["XDG_CONFIG_HOME"] or (os.path.join(home, ".config") if home else None)
     candidates = (
-        environ.get("GIT_CONFIG_GLOBAL"),
-        environ.get("GIT_CONFIG_SYSTEM"),
+        value["GIT_CONFIG_GLOBAL"],
+        value["GIT_CONFIG_SYSTEM"],
         os.path.join(home, ".gitconfig") if home else None,
         os.path.join(xdg, "git", "config") if xdg else None,
     )
@@ -334,5 +336,4 @@ def ambient_tls_stamp() -> tuple:
             if name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
         )
     )
-    named = tuple((name, environ.get(name)) for name in _TLS_STAMP_ENV)
     return (forget_epoch(), named, carried, tuple(files))
