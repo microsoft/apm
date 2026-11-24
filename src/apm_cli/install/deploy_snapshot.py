@@ -357,18 +357,18 @@ class DeployJournal:
 
 
 def lockfile_identity(text: str) -> str:
-    """Identify a lockfile document by its content, not its formatting.
-
-    A staged document the commit skipped as unchanged, or wrote with other
-    line endings, has the identity of the lockfile on disk.
-    """
+    """Identify a lockfile by content: other line endings keep the on-disk identity."""
     import yaml
 
     from apm_cli.deps.lockfile_container import parse_lockfile_text
+    from apm_cli.utils.yaml_io import load_yaml_str
 
     try:
-        # The owner's memoized parse: one text is identified at commit and settle.
-        canonical = json.dumps(parse_lockfile_text(text), sort_keys=True, default=str)
+        try:  # The owner's memoized parse; text it refuses keeps the old loader's identity.
+            tree = parse_lockfile_text(text)
+        except Exception:
+            tree = load_yaml_str(text)
+        canonical = json.dumps(tree, sort_keys=True, default=str)
     except (yaml.YAMLError, ValueError, TypeError, RecursionError):
         canonical = text.replace("\r\n", "\n")
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
