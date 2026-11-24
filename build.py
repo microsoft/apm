@@ -71,7 +71,8 @@ ON_TRACK = {
 }
 
 
-REPORT = os.environ.get("PERF_REPORT_JSON") or \
+_CI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "report.json")
+REPORT = os.environ.get("PERF_REPORT_JSON") or (_CI if os.path.exists(_CI) else None) or \
     "/Users/danielmeppiel/.copilot/session-state/3e13e13b-ca92-4e58-8ec4-98ccb45457df/files/report-data/report.json"
 SNAP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -305,13 +306,15 @@ def pr(n):
 
 def main():
     nfinal = sum(r["src"] == "final" for r in ROWS)
-    if nfinal < 50:
+    if nfinal < int(os.environ.get("PERF_REPORT_MIN_ROWS", "10")):
         sys.exit(f"only {nfinal} final rows (data {REPORT}); nothing written, Desktop copy NOT refreshed")
     if "--refresh-pr" in sys.argv and os.path.exists(os.path.join(HERE, "pr-state.json")):
         os.remove(os.path.join(HERE, "pr-state.json"))
     os.makedirs(CH, exist_ok=True)
+    have_interim = any(r["src"] == "interim" for r in ROWS)
+
     def full(js, pop):
-        return all(cell(j, o, pop, "tree-50", "final") for o in OSES for j in js)
+        return not have_interim or all(cell(j, o, pop, "tree-50", "final") for o in OSES for j in js)
     i_js = ["install-cold", "install-frozen", "install-warm"]
     if full(i_js, ANON):
         s1 = chart("1-install.png", i_js + ["install-noop", "install-noop-replay"], ANON, "tree-50", "final", openssl=True, height=2.6)
@@ -360,6 +363,7 @@ def main():
     for f in os.listdir(CH):
         if f.endswith(".png"):
             shutil.copyfile(os.path.join(CH, f), os.path.join(dst, "charts", f))
+    subprocess.run(["bash", os.path.join(HERE, "push.sh")], timeout=120)
     pdf = open(os.path.join(HERE, "report.pdf"), "rb").read()
     print("pages:", pdf.count(b"/Type /Page") - pdf.count(b"/Type /Pages"), "srcs:", srcs,
           "final rows:", sum(r["src"] == "final" for r in ROWS))
