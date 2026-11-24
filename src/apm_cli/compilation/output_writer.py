@@ -82,7 +82,9 @@ def refuse_unsafe_output(path: Path, base_dir: Path, *, managed: bool) -> None:
             )
         return
     if not stat.S_ISREG(mode):
-        shown = portable_relpath(path, base_dir)
+        from ..utils.diagnostics import printable_ascii_text
+
+        shown = printable_ascii_text(portable_relpath(path, base_dir))
         raise CompiledOutputSpecialFileError(
             f"Refusing to compile: {shown} is not a regular file "
             "(a FIFO, socket, device or directory), so it was not read."
