@@ -57,6 +57,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
+from apm_cli.utils.realpath_win import release_held
 
 _Kind = Literal["absent", "file", "dir", "symlink"]
 _STORE_PREFIX = "deploy-"
@@ -97,6 +98,7 @@ def remove_empty_directories(directories: Iterable[Path]) -> None:
     for directory in sorted(set(directories), key=lambda p: len(p.parts), reverse=True):
         with contextlib.suppress(OSError):
             if directory.is_dir() and not directory.is_symlink():
+                release_held(directory)
                 directory.rmdir()
 
 
@@ -318,6 +320,7 @@ class DeployJournal:
             "Pre-install copies kept after a failed restore.\n", encoding="ascii"
         )
         retained = self.store.with_name(_RETAINED_PREFIX + self.store.name[len(_STORE_PREFIX) :])
+        release_held(self.store)
         try:
             self.store.rename(retained)
         except OSError:
@@ -339,6 +342,7 @@ class DeployJournal:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         if unit.link is not None:
+            release_held(path)  # an APM-created link: no proof may survive at or below it
             os.symlink(unit.link, path)
         elif unit.kind == "dir" and copy is not None:
             shutil.copytree(copy, path, symlinks=True)
@@ -350,8 +354,10 @@ class DeployJournal:
         store, self.store = self.store, None
         if store is None:
             return
+        release_held(store)
         shutil.rmtree(store, ignore_errors=True)
         with contextlib.suppress(OSError):
+            release_held(store.parent)
             store.parent.rmdir()
 
 
@@ -724,6 +730,7 @@ def _apply(unit: _Replay) -> None:
         _modes.apply_own_mode(staged, mode)
         if os.path.lexists(path):
             _remove(path)
+        release_held(path)
         os.replace(staged, path)
     finally:
         if os.path.lexists(staged):
@@ -738,6 +745,7 @@ def _keep(store: Path) -> Path:
             encoding="ascii",
         )
     retained = store.with_name(_RETAINED_PREFIX + store.name[len(_STORE_PREFIX) :])
+    release_held(store)
     try:
         store.rename(retained)
     except OSError:
@@ -861,6 +869,7 @@ def _replay_store(
         raise JournalReplayError(_keep(store), [(str(store), str(exc))], applied=False) from None
     if commit is not None and commit == committed():
         # The killed install's lockfile reached disk: its deployment is committed.
+        release_held(store)
         shutil.rmtree(store, ignore_errors=True)
         return ReplayOutcome()
     try:
@@ -884,6 +893,7 @@ def _replay_store(
     if kept:
         # The copies of what was kept stay available for recovery.
         return ReplayOutcome(len(apply), tuple(kept), (_keep(store),))
+    release_held(store)
     shutil.rmtree(store, ignore_errors=True)
     return ReplayOutcome(len(apply))
 
@@ -985,6 +995,7 @@ def replay_abandoned_journals(
         if not os.path.lexists(store / _MANIFEST):
             # An in-memory journal (a fast apply, or an older APM) recorded
             # nothing replay can prove: reclaim it, as every install did before.
+            release_held(store)
             shutil.rmtree(store, ignore_errors=True)
             continue
         if not _replays_for(store, root, workspace):
@@ -995,5 +1006,6 @@ def replay_abandoned_journals(
         retained += outcome.retained
     # Leave no empty store parent behind, as a settled journal does.
     with contextlib.suppress(OSError):
+        release_held(store_parent)
         store_parent.rmdir()
     return ReplayOutcome(restored, tuple(kept), tuple(retained))

@@ -269,6 +269,7 @@ def test_apm_replacing_a_tree_drops_its_proofs(tree: Path) -> None:
 
     leaf = tree / "dir" / "sub" / "x.md"
     with invocation_scope():
+        assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
         assert resolve_path(leaf) == leaf
         assert realpath.proven_link_free(tree / "dir" / "sub")
         release_held(tree / "dir" / "sub")
@@ -277,6 +278,56 @@ def test_apm_replacing_a_tree_drops_its_proofs(tree: Path) -> None:
         shutil.rmtree(tree / "dir" / "sub")
         (tree / "dir" / "sub").symlink_to(tree / "outside", target_is_directory=True)
         assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+
+
+def _expect_link_refused(tree: Path, leaf: Path) -> None:
+    """The replaced directory is a link again: answers, link scan and containment agree."""
+    from apm_cli.utils.path_security import first_symlink_component
+
+    assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+    assert first_symlink_component(tree, leaf) == tree / "dir" / "sub"
+    with pytest.raises(PathTraversalError):
+        ensure_path_within(leaf, tree / "dir")
+
+
+def _replace_with_rmtree(sub: Path, target: Path) -> None:
+    from apm_cli.integration import write_seam
+
+    write_seam.rmtree(sub)
+    sub.symlink_to(target, target_is_directory=True)
+
+
+def _replace_with_rename(sub: Path, target: Path) -> None:
+    from apm_cli.integration import write_seam
+
+    write_seam.rename(sub, sub.with_name("moved"))
+    sub.symlink_to(target, target_is_directory=True)
+
+
+def _replace_with_copied_link(sub: Path, target: Path) -> None:
+    from apm_cli.utils.file_ops import robust_copy_entry
+
+    os.rmdir(sub)  # unreleased: only the link creator can drop the proof
+    staged = sub.with_name("staged-link")
+    staged.symlink_to(target, target_is_directory=True)
+    robust_copy_entry(staged, sub)
+
+
+@_LINKS
+@pytest.mark.parametrize(
+    "replace", [_replace_with_rmtree, _replace_with_rename, _replace_with_copied_link]
+)
+def test_a_proven_directory_apm_replaces_with_a_link_is_refused(tree: Path, replace) -> None:
+    """R4: write_seam and every APM link creator drop proofs at or below the path."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
+    with invocation_scope():
+        assert resolve_path(leaf) == leaf
+        assert realpath.proven_link_free(sub)
+        replace(sub, tree / "outside")
+        assert not realpath.proven_link_free(sub)
+        _expect_link_refused(tree, leaf)
 
 
 @pytest.mark.parametrize("volatile", [".git", "pkg.inc.0a1b2c3d", "x.tmp", "staging"])

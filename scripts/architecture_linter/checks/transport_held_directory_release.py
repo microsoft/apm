@@ -24,6 +24,8 @@ Two closed-world rules guard that decision:
   ``from os|shutil import``), and ``<path>.rename(x)``/``.replace(x)``
   (exactly one positional argument, no keyword, a receiver that is not a
   string literal: ``str.replace`` always takes two) and ``<path>.rmdir()`` --
+  and every link creation -- ``os.symlink`` and ``<path>.symlink_to(x)``, which
+  path resolution's per-invocation containment proofs must not outlive --
   must be preceded, in its enclosing function or an enclosing outer function,
   by a ``release_held(...)`` call, or the function must be in ``_ALLOWLIST``
   with a reviewed reason. Routing through ``file_ops.robust_rmtree`` /
@@ -72,7 +74,10 @@ _INVENTORY = (
     "src/apm_cli/commands/update.py",
     "src/apm_cli/deps/plugin_parser.py",
     "src/apm_cli/deps/registry/resolver.py",
+    "src/apm_cli/install/deploy_snapshot.py",
+    "src/apm_cli/install/journal_modes.py",
     "src/apm_cli/install/resolution_staging.py",
+    "src/apm_cli/integration/write_seam.py",
     "src/apm_cli/utils/file_ops.py",
 )
 
@@ -104,7 +109,7 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
     ),
 }
 
-_OS_MUTATIONS = frozenset({"removedirs", "rename", "renames", "replace", "rmdir"})
+_OS_MUTATIONS = frozenset({"removedirs", "rename", "renames", "replace", "rmdir", "symlink"})
 _SHUTIL_MUTATIONS = frozenset({"move", "rmtree"})
 _PATH_RENAMES = frozenset({"rename", "replace"})
 
@@ -150,7 +155,11 @@ def _is_raw_mutation(
         return func.attr in _OS_MUTATIONS
     if isinstance(receiver, ast.Name) and receiver.id in shutil_names:
         return func.attr in _SHUTIL_MUTATIONS
-    if isinstance(receiver, ast.Constant | ast.JoinedStr) or call.keywords:
+    if isinstance(receiver, ast.Constant | ast.JoinedStr):
+        return False
+    if func.attr == "symlink_to":
+        return True
+    if call.keywords:
         return False
     if func.attr in _PATH_RENAMES:
         return len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)

@@ -16,6 +16,8 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from apm_cli.utils.realpath_win import release_held
+
 _PERMISSION_BITS = 0o777
 
 
@@ -144,6 +146,7 @@ def _stage_tree(copy: Path, staged: Path, read: Any) -> None:
     for entry in sorted(copy.rglob("*")):
         target = staged / entry.relative_to(copy)
         if entry.is_symlink():
+            release_held(target)
             os.symlink(os.readlink(entry), target)
         elif entry.is_dir():
             target.mkdir(mode=0o700)
