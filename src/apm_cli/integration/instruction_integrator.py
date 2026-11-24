@@ -594,9 +594,6 @@ class InstructionIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
 
-            def note_writer(path=target_path, content=new_content) -> None:
-                self._claude_rule_writers.setdefault(path, (_package_label(package_info), content))
-
             # Compare against the rendered output, not the source: rule-dir
             # formats transform content, so a source-based adopt never matches
             # and up-to-date rules would churn (apm#1662). Managed rules are
@@ -611,11 +608,18 @@ class InstructionIntegrator(BaseIntegrator):
                 diagnostics,
                 target_paths,
                 expected_content=new_content,
-                # The bytes already on disk are this package's: it holds the path.
-                on_identical=note_writer if claude_rule else None,
             )
-            if claude_rule and not skip:
-                note_writer()
+            # Written, adopted or already identical: this package holds the path.
+            if claude_rule and (
+                not skip
+                or adopted
+                or self.is_content_identical_to_text(
+                    target_path, new_content, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
+                )
+            ):
+                self._claude_rule_writers.setdefault(
+                    target_path, (_package_label(package_info), new_content)
+                )
             if skip:
                 if adopted:
                     files_adopted += 1
