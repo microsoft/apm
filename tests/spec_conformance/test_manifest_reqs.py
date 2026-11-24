@@ -953,6 +953,42 @@ def test_consumer_maps_cursor_universal_instruction_to_always_apply(
 
 
 @pytest.mark.req("req-tg-006")
+def test_consumer_diagnoses_claude_agent_tools_that_cannot_resolve(tmp_path, capsys):
+    """The claude target copies agents verbatim; a ``tools`` allowlist written for
+    another harness resolves to nothing in Claude Code, so the restriction is not
+    preserved and a default-visible diagnostic is required (#5356)."""
+    source = tmp_path / "scoped.agent.md"
+    source.write_text(
+        "---\nname: scoped\ntools: [bash, view, edit]\n---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    diagnostics = DiagnosticCollector()
+
+    AgentIntegrator._warn_claude_frontmatter(source, diagnostics, "spec-fixture")
+
+    losses = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert len(losses) == 1
+    assert "scoped.agent.md" in losses[0].message
+    assert "field 'tools'" in losses[0].message
+    assert "bash, view, edit" in losses[0].message
+    assert "narrower access than declared" in losses[0].message
+    assert losses[0].detail.startswith("Fix:")
+    diagnostics.render_summary()
+    output = capsys.readouterr().out
+    assert "[!]" in output
+    assert "scoped.agent.md" in output
+    assert "Fix:" in output
+
+    native = tmp_path / "native.agent.md"
+    native.write_text(
+        "---\nname: native\ntools: [Read, Grep]\n---\nReview changes.\n", encoding="utf-8"
+    )
+    silent = DiagnosticCollector()
+    AgentIntegrator._warn_claude_frontmatter(native, silent, "spec-fixture")
+    assert not silent.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION)
+
+
+@pytest.mark.req("req-tg-006")
 def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
     source = tmp_path / "scoped.agent.md"
     source.write_text(
