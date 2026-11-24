@@ -827,3 +827,33 @@ def test_prune_with_an_inaccessible_source_ancestor_keeps_candidates_and_reports
     assert "Traceback" not in pruned, pruned
     assert {"_local/d", "_local/e", "_local/f"} <= set(_rows(world))
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
+@pytest.mark.parametrize("hash_seed", [str(seed) for seed in range(8)])
+def test_prune_keeps_a_survivor_whose_directory_another_candidate_shares(
+    tmp_path: Path, apm_binary_path: Path, hash_seed: str
+) -> None:
+    """vendor/e becomes a link to vendor/f: a still reaches f, so f and its files stay.
+
+    Two candidate rows resolve to one directory; the answer must not depend
+    on set iteration order, so prune runs under several hash seeds.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("f", ()), ("e", ()), ("d", ("../f",)), ("a", ("../f",))):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/e", "./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a"])
+    shutil.rmtree(vendor / "e")
+    os.symlink("f", vendor / "e", target_is_directory=True)
+    world.env["PYTHONHASHSEED"] = hash_seed
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/f" in rows, sorted(rows)
+    assert _row_named(world, "f")[1]["resolved_by"] in rows
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
