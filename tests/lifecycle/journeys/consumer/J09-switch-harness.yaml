@@ -33,10 +33,10 @@ steps:
     run: [apm install]
     exit: 0
     note: APM-owned .claude/ files go; the user's .claude/notes.md stays
-    files: [apm.lock.yaml, .claude/skills/live/SKILL.md]
+    files: [apm.lock.yaml, .claude/rules/live.md, .claude/skills/live/SKILL.md]
     key_lines:
       - "[i] Targets: copilot, cursor  (source: apm.yml)"
-      - "[i] Cleaned 1 stale deployed path for acme/live-kit:"
+      - "[i] Cleaned 2 stale deployed paths for acme/live-kit:"
   - n: 4
     run: [apm compile --target copilot]
     exit: 0

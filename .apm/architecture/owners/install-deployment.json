@@ -514,8 +514,8 @@
     {
       "id": "claude-agents-md-instruction-routing",
       "decision": "Which Claude project instructions load from AGENTS.md instead of .claude/rules/, and which hand-authored root files block that route (#3939)",
-      "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787; uncompiled_routed_instructions names routed instructions no compiled file carries, for the install warning and the audit claude-instructions-compiled check in policy/claude_instructions_check.py #5344); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
-      "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py", "src/apm_cli/policy/claude_instructions_check.py"],
+      "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
+      "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py"],
       "guards": ["install-deployment-claude-agents-md-routing"]
     },
     {

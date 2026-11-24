@@ -269,9 +269,10 @@ _ALWAYS_ON = "Always-on marker for the Claude AGENTS.md route."
 
 
 def test_claude_routes_an_always_on_instruction_to_agents_md(lifecycle_world) -> None:
-    """#4005: Claude keeps only path-scoped rules in .claude/rules; ``apm compile``
-    writes an always-on ('**') instruction to AGENTS.md and a CLAUDE.md importing it.
-    The package's skill and its path-scoped instruction stay deployed across compile."""
+    """#4005 + #5343: with no compiled AGENTS.md carrying it, install keeps an always-on
+    ('**') instruction as its 0.37 Claude rule; a Claude-only compile then keeps it out
+    of AGENTS.md, so Claude has exactly one copy. The package's skill and its
+    path-scoped instruction stay deployed across compile."""
     use_policy(lifecycle_world, "allow")
     root = skill_package(LocalPackageFactory(lifecycle_world.root / "route-always"), "f-all")
     instruction = root / ".apm" / "instructions" / "f-all.instructions.md"
@@ -289,16 +290,17 @@ def test_claude_routes_an_always_on_instruction_to_agents_md(lifecycle_world) ->
         policy="allow",
     )
     step = scenario.run("install f-all")
+    assert "apm compile" in step.output, step.output
     project = lifecycle_world.project
     ruled = [p for p in (project / ".claude").rglob("*.md") if _ALWAYS_ON in p.read_text("utf-8")]
-    assert not ruled, f"an always-on instruction became a Claude rule: {ruled}"
-    assert "apm compile" in step.output, step.output
+    assert [p.name for p in ruled] == ["f-all.md"], ruled
     scenario.assert_deployed()
     _assert_route(scenario, "deployed", targets=("claude",))
     compiled = scenario.run("compile", credit=_assignments("compile", _SINGLE, "deployed"))
-    assert _ALWAYS_ON in (project / "AGENTS.md").read_text(encoding="utf-8"), compiled.output
-    claude_md = (project / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
-    assert "@AGENTS.md" in claude_md, claude_md
+    agents = project / "AGENTS.md"
+    compiled_text = agents.read_text(encoding="utf-8") if agents.is_file() else ""
+    assert _ALWAYS_ON not in compiled_text, compiled.output
+    assert (project / ".claude" / "rules" / "f-all.md").is_file(), compiled.output
     scenario.assert_deployed()
     _assert_route(scenario, "deployed", targets=("claude",))
     scenario.finish()

@@ -126,20 +126,13 @@ def _after_mcp_move(
 
 
 def _claude_agents_md_rules(package: Path) -> frozenset[str]:
-    """The ``.claude/rules/`` files #3939's one-time move retires for *package*."""
-    retired = set()
+    """The ``.claude/rules/`` files of *package* that #3939 routes to ``AGENTS.md``."""
+    routed = set()
     for source in (package / ".apm" / "instructions").glob("*.instructions.md"):
         metadata = loads_frontmatter(source.read_text(encoding="utf-8")).metadata or {}
         if routes_to_agents_md(metadata.get("applyTo")):
-            retired.add(f".claude/rules/{source.name.removesuffix('.instructions.md')}.md")
-    return frozenset(retired)
-
-
-def _after_claude_agents_md_move(
-    retired: frozenset[str], rows: set[tuple], files: set[str]
-) -> tuple[set[tuple], set[str]]:
-    """The deployment rows and files left once Claude rules move to AGENTS.md."""
-    return {row for row in rows if row[2] not in retired}, set(files) - retired
+            routed.add(f".claude/rules/{source.name.removesuffix('.instructions.md')}.md")
+    return frozenset(routed)
 
 
 @pytest.mark.parametrize("case", list(VERDICTS))
@@ -155,15 +148,12 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         shutil.copytree(source / case, project, dirs_exist_ok=True)
         manifest = (project / "apm.yml").read_bytes()
         lock_path = project / "apm.lock.yaml"
-        retired = _claude_agents_md_rules(source / "pkg")
-        assert retired, "fixture package must exercise the #3939 move"
-        original_rows, original_paths = _after_claude_agents_md_move(
-            retired,
-            *_after_mcp_move(
-                _deployment_rows(lock_path),
-                set(_project_files(project)),
-                declares_copilot=case in _DECLARES_COPILOT,
-            ),
+        routed = _claude_agents_md_rules(source / "pkg")
+        assert routed, "fixture package must exercise Claude routing"
+        original_rows, original_paths = _after_mcp_move(
+            _deployment_rows(lock_path),
+            set(_project_files(project)),
+            declares_copilot=case in _DECLARES_COPILOT,
         )
         settled_files: dict[str, str] | None = None
         settled_lock_bytes: bytes | None = None
@@ -200,10 +190,6 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         # declares (#4517); a pre-0.37 lock has none.
         assert "manifest_targets" not in fixture_lock
         assert settled.pop("manifest_targets") == _DECLARED_TARGETS[case]
-        for dependency in fixture_lock.get("dependencies") or []:
-            dependency["deployed_files"] = [
-                path for path in dependency.get("deployed_files") or [] if path not in retired
-            ]
         for lock in (fixture_lock, settled):
             lock.pop("deployments", None)
             servers = lock.get("mcp_target_servers") or {}

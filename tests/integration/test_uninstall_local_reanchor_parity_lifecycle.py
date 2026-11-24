@@ -726,7 +726,9 @@ def test_a_compiled_agents_md_link_into_the_moving_copy_keeps_resolving(
         )
 
     world = _docs_world(tmp_path, apm_binary_path, instruction)
-    world.apm("compile")
+    # Install keeps the rule (#5343), so a Claude-only compile writes the
+    # instruction into AGENTS.md only when forced to.
+    world.apm("compile", "--force-instructions")
     agents = (world.project / "AGENTS.md").read_text(encoding="utf-8")
     assert f"]({_LINK})" in agents, agents
     assert (world.project / _LINK).is_file()
