@@ -338,6 +338,58 @@ def _check_release(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+def _statement_slots(function: ast.AST) -> tuple[dict[int, ast.AST], dict[int, tuple[int, int]]]:
+    """Parent of every node under *function*, and (block, index) of every statement."""
+    parents: dict[int, ast.AST] = {}
+    slots: dict[int, tuple[int, int]] = {}
+    for parent in ast.walk(function):
+        for _field, value in ast.iter_fields(parent):
+            children = value if isinstance(value, list) else [value]
+            for position, child in enumerate(children):
+                if not isinstance(child, ast.AST):
+                    continue
+                parents[id(child)] = parent
+                if isinstance(value, list) and isinstance(child, ast.stmt):
+                    slots[id(child)] = (id(value), position)
+    return parents, slots
+
+
+def _statement_chain(
+    node: ast.AST, function: ast.AST, parents: dict[int, ast.AST], slots: dict[int, tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """(block, index) of each statement enclosing *node*, innermost first, up to *function*."""
+    chain: list[tuple[int, int]] = []
+    current: ast.AST | None = node
+    while current is not None and current is not function:
+        slot = slots.get(id(current))
+        if slot is not None:
+            chain.append(slot)
+        current = parents.get(id(current))
+    return chain
+
+
+def _release_dominates(index: TreeIndex, function: ast.AST, call: ast.Call) -> bool:
+    """Whether a ``release_held`` in *function*'s own scope runs on every path to *call*.
+
+    The release's statement must sit earlier in a block that also encloses the
+    call: a release in a sibling ``if``/``else``/``try`` branch never counts.
+    """
+    parents, slots = _statement_slots(function)
+    call_chain = set(_statement_chain(call, function, parents, slots))
+    for node in index.own_scope(function):
+        if not (isinstance(node, ast.Call) and _callee(node) == _RELEASE):
+            continue
+        chain = _statement_chain(node, function, parents, slots)
+        if not chain:
+            continue
+        for outer_block, outer_position in chain:
+            if any(
+                block_id == outer_block and outer_position < later for block_id, later in call_chain
+            ):
+                return True
+    return False
+
+
 _LINK_COPY_MESSAGE = (
     "{name} copies a tree with its links: link-free proofs under the destination must not "
     "outlive them. Call release_held(<destination>) before it, route it through "
@@ -359,7 +411,7 @@ def _module_link_copy_findings(
         if (path, name) in _LINK_COPY_ALLOWLIST:
             used.add((path, name))
             continue
-        if any(_releases_before(index, function, node) for function in chain):
+        if any(_release_dominates(index, function, node) for function in chain):
             continue
         findings.append(
             violation(
