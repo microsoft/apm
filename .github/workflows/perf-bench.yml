@@ -162,6 +162,12 @@ jobs:
     - name: Install harness
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
+    - name: Red-team cells (research)
+      working-directory: new
+      continue-on-error: true
+      run: |
+        uv sync --frozen --extra dev --quiet
+        uv run --frozen pytest -q -p no:xdist -p no:cacheprovider tests/integration/test_redteam_e2.py 2>&1 | tail -60
     - name: Interleaved runs
       working-directory: harness
       env:
