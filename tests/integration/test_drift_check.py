@@ -710,9 +710,10 @@ class TestSectionDMultiTarget:
     ) -> None:
         """Replay routes Claude instructions exactly as install did (#3939).
 
-        Without a hand-authored CLAUDE.md the ``**`` rule loads from AGENTS.md;
-        with one, install keeps it in .claude/rules/. The scratch replay must
-        read that decision from the live project, so neither layout drifts.
+        With no compiled AGENTS.md carrying it, install keeps the ``**`` rule
+        in .claude/rules/ (#5343), with or without a hand-authored CLAUDE.md.
+        The scratch replay must read that decision from the live project, so
+        neither layout drifts.
         """
         project = _make_apm_project(
             tmp_path,
@@ -726,7 +727,7 @@ class TestSectionDMultiTarget:
             (project / "CLAUDE.md").write_bytes(b"# Team notes\n")
         _install(project, monkeypatch)
         assert (project / ".claude" / "rules" / "docs.md").is_file()
-        assert (project / ".claude" / "rules" / "rules.md").is_file() is hand_authored_claude_md
+        assert (project / ".claude" / "rules" / "rules.md").is_file()
 
         result = _audit(project, monkeypatch, "--ci", "-f", "json")
         assert result.exit_code == 0, result.output

@@ -73,10 +73,14 @@ def routed_claude_rules(
         return {}
     if effective_target is not None and not _packs_claude(effective_target):
         return {}
-    active = True if _recorded_claude(lockfile) else _producer_deploys_claude(project_root)
+    recorded = _recorded_claude(lockfile)
+    active = True if recorded else _producer_deploys_claude(project_root)
     if active is False:
         return {}
     from ..integration.instruction_integrator import routed_claude_rule_renders
+
+    if recorded:
+        _refuse_colliding_claude_rules(lockfile, project_root, dependency_keys)
 
     rules = routed_claude_rule_renders(
         lockfile,
@@ -97,6 +101,48 @@ def routed_claude_rules(
         )
         return {}
     return rules
+
+
+def _refuse_colliding_claude_rules(
+    lockfile, project_root: Path, dependency_keys: Collection[str] | None
+) -> None:
+    """Refuse a bundle that would silently drop a same-named Claude rule (#5343).
+
+    Two dependencies can ship instructions that render to one
+    ``.claude/rules/`` path, and install keeps one copy. The pack ships that
+    deployed copy, so it refuses when another shipped dependency renders
+    different bytes at a path the lock records for a different dependency.
+    """
+    from ..integration.instruction_integrator import routed_claude_rule_renders
+    from ..utils.diagnostics import printable_ascii_text
+
+    owners = {
+        path: dep.get_unique_key()
+        for dep in lockfile.get_all_dependencies()
+        for path in dep.deployed_files
+    }
+    rendered = routed_claude_rule_renders(
+        lockfile,
+        project_root,
+        project_root / "apm_modules",
+        include_local=False,
+        verified=True,
+        dependency_keys=dependency_keys,
+        every_rule=True,
+    )
+    for dep_key, rules in rendered.items():
+        for path, text in rules.items():
+            owner = owners.get(path)
+            if owner is None or owner == dep_key:
+                continue
+            disk = project_root / path
+            if disk.is_file() and disk.read_bytes() != text.encode("utf-8"):
+                raise ValueError(
+                    f"Cannot pack {printable_ascii_text(path)}: dependencies "
+                    f"{printable_ascii_text(owner)} and {printable_ascii_text(dep_key)} both ship an "
+                    "instruction with that name, and the bundle can ship only one. Rename one "
+                    "of the instruction files."
+                )
 
 
 def merged_routed_claude_rules(

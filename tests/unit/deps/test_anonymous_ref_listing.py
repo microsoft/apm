@@ -225,7 +225,7 @@ def test_ca_follows_git_precedence(monkeypatch):
     assert arl._verify({"SSL_CERT_FILE": "/ssl.pem"}, {}) == "/ssl.pem"
     assert arl._verify({}, {}) == certifi.where()
     with pytest.raises(arl._Fallback):
-        arl._verify({}, {"http.sslbackend": "schannel"})
+        arl._verify({}, {"http.sslbackend": "gnutls"})
     with pytest.raises(arl._Fallback):
         arl._verify({"GIT_SSL_CAINFO": "/missing.pem"}, {})
 

@@ -4,7 +4,7 @@ $ apm audit
 --- stdout
 [>] Scanning installed packages and deployed files...
 
-[*] 11 file(s) scanned -- no issues found
+[*] 12 file(s) scanned -- no issues found
 --- stderr
 [>] Replaying install (cache-only)...
 [+] Replayed 2 package(s)

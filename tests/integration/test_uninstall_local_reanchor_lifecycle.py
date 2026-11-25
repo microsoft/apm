@@ -420,8 +420,13 @@ def _graph(tmp_path: Path, apm_binary_path: Path, packages, dev: list[str]) -> R
     return world
 
 
-def test_reanchor_keeps_the_first_declaring_edge(tmp_path: Path, apm_binary_path: Path) -> None:
-    """#4889: z then a both declare ../e; install keeps z's edge, ties resolved_by to a."""
+def test_reanchor_records_the_lowest_key_parents_declaring_edge(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889, #5386: z then a both declare ../e; install records a for both fields.
+
+    Before #5386 install kept z's (first) edge while resolved_by named a.
+    """
     world = _graph(
         tmp_path,
         apm_binary_path,
@@ -430,14 +435,15 @@ def test_reanchor_keeps_the_first_declaring_edge(tmp_path: Path, apm_binary_path
     )
     world.apm("uninstall", "./vendor/e")
     row = _rows(world)["_local/e"]
-    assert (row["declaring_parent"], row["resolved_by"]) == ("./vendor/z", "_local/a")
+    assert (row["declaring_parent"], row["resolved_by"]) == ("./vendor/a", "_local/a")
     _assert_reanchored_like_a_full_install(world)
 
 
 def test_reanchor_ranks_an_equal_depth_diamond_by_the_new_keys(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#4889: d -> e -> f and b -> a -> f; once e is transitive, a's key ranks first."""
+    """#4889, #5386: d -> e -> f and b -> a -> f; once e is transitive, a's key ranks first,
+    and f records a's edge for declaring_parent too."""
     world = _graph(
         tmp_path,
         apm_binary_path,
@@ -445,7 +451,9 @@ def test_reanchor_ranks_an_equal_depth_diamond_by_the_new_keys(
         ["./vendor/d", "./vendor/b"],
     )
     world.apm("uninstall", "./vendor/e")
-    assert _rows(world)["_local/f"]["resolved_by"] == "_local/a"
+    row = _rows(world)["_local/f"]
+    # #5386: the declaring edge is a's too, not e's (met first through d).
+    assert (row["resolved_by"], row["declaring_parent"]) == ("_local/a", "local:vendor/a")
     _assert_reanchored_like_a_full_install(world)
 
 

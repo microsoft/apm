@@ -448,10 +448,15 @@ class WorldServices:
             raise KeyError(f"{slug!r} is not unserved")
         self._repositories[slug] = self._unserved.pop(slug)
 
-    def start(self, directory: Path) -> WorldServices:
-        """Start the proxy; ``directory`` receives its private CA material."""
+    def start(self, directory: Path, *, crl_url: str | None = None) -> WorldServices:
+        """Start the proxy; ``directory`` receives its private CA material.
+
+        *crl_url* puts a CRL distribution point on the proxy's leaf certificate.
+        """
         stack = contextlib.ExitStack()
-        self._proxy = stack.enter_context(local_scripted_https_proxy(directory, self.handlers()))
+        self._proxy = stack.enter_context(
+            local_scripted_https_proxy(directory, self.handlers(), crl_url=crl_url)
+        )
         self._directory = directory
         self._stack = stack
         return self

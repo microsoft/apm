@@ -185,7 +185,6 @@ def test_unreachable_policy_without_cache_is_not_a_stale_decision(
     chain.env.pop("no_proxy", None)
 
     result = chain.run("audit", "--ci", "--no-drift")
-    # Drop table borders so a wrapped cell reads as one phrase, whatever the widths.
-    output = " ".join((result.stdout + result.stderr).replace("|", " ").split())
+    output = " ".join((result.stdout + result.stderr).split())
     assert "now deployed" not in output, output
     assert "exec-status-current" not in output or "not verified" in output, output

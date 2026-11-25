@@ -413,11 +413,33 @@ class TestDirectValidators:
             tmp_path / "skills" / "alpha" / "SKILL.md", "---\nname: alpha\ndescription: desc\n---\n"
         )
         with patch(
-            "apm_cli.utils.path_security.ensure_path_within", side_effect=ValueError("outside base")
+            "apm_cli.utils.path_security.ensure_path_within_resolved",
+            side_effect=ValueError("outside base"),
         ):
             result = _validate_skill_bundle(tmp_path, ValidationResult())
         assert result.is_valid is False
         assert "outside base" in result.errors[0]
+
+    @pytest.mark.parametrize("linked", ["skill_md", "skill_dir"])
+    def test_validate_skill_bundle_rejects_link_outside_skills(
+        self, tmp_path: Path, linked: str
+    ) -> None:
+        outside = tmp_path / "outside" / "alpha"
+        _write(outside / "SKILL.md", "---\nname: alpha\ndescription: desc\n---\n")
+        package = tmp_path / "pkg"
+        alpha = package / "skills" / "alpha"
+        try:
+            if linked == "skill_md":
+                alpha.mkdir(parents=True)
+                (alpha / "SKILL.md").symlink_to(outside / "SKILL.md")
+            else:
+                alpha.parent.mkdir(parents=True)
+                alpha.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+        result = _validate_skill_bundle(package, ValidationResult())
+        assert result.is_valid is False
+        assert any("outside the allowed base directory" in error for error in result.errors)
 
     def test_validate_skill_bundle_surfaces_frontmatter_parse_error(self, tmp_path: Path) -> None:
         _write(tmp_path / "skills" / "alpha" / "SKILL.md", "---\nname: alpha\n")

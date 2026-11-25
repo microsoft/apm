@@ -8,7 +8,6 @@ $ apm install --frozen
   |-- (files unchanged)
   [+] microsoft/apm-sample-package #v1.0.0 @<SHA8> (cached)
   |-- (files unchanged)
-[!] Claude Code does not load 1 instruction(s) routed to AGENTS.md yet. Run 'apm compile' to write the AGENTS.md Claude Code loads them from. See https://microsoft.github.io/apm/consumer/update-and-refresh/#claude-plus-copilot-projects-that-never-compile. Use --verbose to list them.
 [i] Instructions installed for claude. Run 'apm compile' to update AGENTS.md / CLAUDE.md.
 
 [i] No changes -- install state already up to date in <DUR>.

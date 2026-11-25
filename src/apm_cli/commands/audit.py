@@ -512,24 +512,14 @@ def _preview_strip(
 
 def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
     """Summarize a passing run; warn-mode violations are not a clean pass (#3994)."""
-    warned = sum(1 for check in ci_result.checks if check.warned and not check.advisory)
-    advisory = sum(1 for check in ci_result.checks if check.warned and check.advisory)
-    if not warned and not advisory:
+    warned = sum(1 for check in ci_result.checks if check.warned)
+    if not warned:
         _rich_success(f"{STATUS_SYMBOLS['success']} All {total} check(s) passed")
         return
-    summary = f"{total} check(s) passed"
-    if advisory:
-        # A baseline warning, whatever the policy (#5344); it fails CI from v0.40.0.
-        summary += (
-            f"; {advisory} {'reports a warning' if advisory == 1 else 'report warnings'}: "
-            "audit --ci will fail on this in v0.40.0 (#5358)"
-        )
-    if warned:
-        summary += (
-            f"; {warned} {'reports' if warned == 1 else 'report'} violations under "
-            "'enforcement: warn' and fail once the policy switches to block"
-        )
-    _rich_warning(f"{summary}.")
+    _rich_warning(
+        f"{total} check(s) passed; {warned} {'reports' if warned == 1 else 'report'} violations under "
+        "'enforcement: warn' and fail once the policy switches to block."
+    )
 
 
 def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:

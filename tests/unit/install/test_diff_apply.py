@@ -703,6 +703,30 @@ def test_a_locked_plugin_package_takes_the_full_pipeline(
     _assert_declines_with(tmp_path, monkeypatch, capsys, before, "plugin package")
 
 
+@pytest.mark.parametrize("carrier", ["AGENTS.md", "CLAUDE.md", "record"])
+def test_a_claude_rule_a_compiled_agents_md_may_carry_takes_the_full_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, carrier: str
+) -> None:
+    """The lock omits a rule left to AGENTS.md, so only the full run restores it (#5343)."""
+    from apm_cli.core.agents_md_compile_record import write_record
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    claude = [KNOWN_TARGETS["claude"]]
+    diff_apply._refuse_claude_carried_rules(project, claude)
+    diff_apply._refuse_claude_carried_rules(project, [KNOWN_TARGETS["copilot"]])
+    if carrier == "record":
+        write_record(project, {"AGENTS.md": {"sha256": "x", "instructions": []}})
+    else:
+        (project / carrier).write_text("@AGENTS.md\n", encoding="utf-8")
+
+    with pytest.raises(Decline, match=r"compiled AGENTS\.md"):
+        diff_apply._refuse_claude_carried_rules(project, claude)
+    diff_apply._refuse_claude_carried_rules(project, [KNOWN_TARGETS["copilot"]])
+
+
 def test_a_locked_native_plugin_record_declines(tmp_path: Path) -> None:
     """A removed enable declaration or plugin root is restored only by claude_plugins."""
     lock = _lock(**{"o/p": {}})
