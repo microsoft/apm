@@ -1512,15 +1512,17 @@ def install(  # noqa: PLR0913
         # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
         auth_resolver.set_logger(logger)
 
-        # Capture manifest state before this attempt can auto-create apm.yml.
-        apm_yml_exists = manifest_path.exists()
         transaction = InstallTransaction(
             manifest_path=manifest_path,
             apm_modules_dir=get_modules_dir(scope),
             validation=None,
             logger=logger,
             acquire_lock=not dry_run,
+            journal_packages=packages,
         )
+        # Capture manifest state after a killed install's apm.yml was restored
+        # and before this attempt can auto-create apm.yml.
+        apm_yml_exists = manifest_path.exists()
 
         if not apm_yml_exists and packages:
             derived_project_name = (
