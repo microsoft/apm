@@ -2,7 +2,7 @@ name: Perf SoL trace (research)
 
 on:
   push:
-    branches: [perf-research/arch-trace8]
+    branches: [perf-research/arch-trace9]
 
 permissions:
   contents: read
@@ -16,7 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, product: 29ea126de929c885b2da33f857c124f486bed7f5}
+          - {os: ubuntu-24.04, product: 2b07104c4e7ed9a7a0601988b9654b1d8551b3eb}
+          - {os: windows-2025, product: 2b07104c4e7ed9a7a0601988b9654b1d8551b3eb}
+          - {os: macos-15, product: 2b07104c4e7ed9a7a0601988b9654b1d8551b3eb}
     defaults:
       run:
         shell: bash
