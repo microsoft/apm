@@ -133,6 +133,9 @@ def render(g, srcs):
     a(f"- **Resolve paths fewer times.** {pr(5132)} string containment; kernel realpath on Linux (#5333 via train "
       f"{pr(5355)}); {pr(5354)} + {pr(5380)} resolve each root once; {pr(5204)} removed a per-package quadratic re-seal"
       + (f"; {pr(5372)} resolves link-free paths with one openat2 (Linux 0.906 / 0.919)" if IN(5372) else "")
+      + (f"; {pr(5374)} exact Windows path forms with fewer kernel opens (Windows 0.961 anon / 0.967 auth)" if IN(5374) else "")
+      + (f"; {pr(5382)} proves each directory link-free once per command (macOS -15%, Linux -1-2%, off on Windows "
+         "where it overlaps #5374)" if IN(5382) else "")
       + ". " + ("Waiting: " + ", ".join(waiting([
           (5372, "(Linux cold 0.883)"),
           (5374, "exact Windows paths (Windows 0.961 anon / 0.967 auth)"),
@@ -258,6 +261,7 @@ def render(g, srcs):
          (5366, "pack checkout"), (5374, "Windows paths"), (5382, "containment once"), (5372, "Linux paths"),
          (5383, "re-install #2")) if not IN(n)) + "); then " if not all(IN(n) for n in (5376, 5353, 5366, 5374, 5382, 5372, 5383)) else "")
       + "a 5x on Linux needs an integrate redesign plus the lockfile cut, with "
-      "B1 on enterprise hosts and lever S (#5377) for monorepos.")
+      + ("B1 on enterprise hosts next (lever S #5377 for monorepos rides the train)." if IN(5377)
+         else "B1 on enterprise hosts and lever S (#5377) for monorepos."))
     a("")
     return "\n".join(out)
