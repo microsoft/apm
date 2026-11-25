@@ -163,13 +163,12 @@ jobs:
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
     - name: Lane-N replacement probe (research)
-      if: matrix.shard == 1
       working-directory: harness
       continue-on-error: true
       env:
         NEW_APM: ${{ github.workspace }}/new/${{ env.VENV_APM }}
         PYTHONUNBUFFERED: '1'
-      run: uv run --frozen python .github/probe/lanen/lanen_probe.py 2>&1 | grep -E "^PROBE|Traceback|Error" | head -60
+      run: uv run --frozen python .github/probe/lanen/lanen_probe.py 2>&1 | grep -E "^PROBE|ORACLE|Traceback|Error" | head -60
     - name: Interleaved runs
       working-directory: harness
       env:

@@ -5,6 +5,32 @@ import io
 import json
 import os
 import atexit
+import sys
+
+_own = {k: collections.Counter() for k in ("list", "read", "stat", "apmyml")}
+_own_paths = {k: collections.defaultdict(set) for k in _own}
+_HERE = os.path.abspath(__file__)
+
+
+def _owner():
+    f = sys._getframe(2)
+    names = []
+    while f is not None and len(names) < 2:
+        fn = f.f_code.co_filename
+        if "apm_cli" in fn and fn != _HERE:
+            mod = fn.replace(os.sep, "/").split("apm_cli/", 1)[-1]
+            names.append(f"{mod}:{f.f_code.co_name}")
+        f = f.f_back
+    return " <- ".join(names) or "?"
+
+
+def _note(kind, kp):
+    o = _owner()
+    _own[kind][o] += 1
+    _own_paths[kind][o].add(kp)
+    if kind == "read" and kp.endswith(os.sep + "apm.yml"):
+        _own["apmyml"][o] += 1
+        _own_paths["apmyml"][o].add(kp)
 
 _c = {k: collections.Counter() for k in ("list", "read", "stat")}
 
@@ -28,6 +54,8 @@ def install(out):
                 kp = key(path)
                 if kp:
                     _c[kind][kp] += 1
+                    if kp.startswith(am) or kp.startswith(root + os.sep):
+                        _note(kind, kp)
             return orig(path, *a, **k)
 
         setattr(mod, name, f)
@@ -40,6 +68,8 @@ def install(out):
             kp = key(file)
             if kp:
                 _c["read"][kp] += 1
+                if kp.startswith(am) or kp.startswith(root + os.sep):
+                    _note("read", kp)
         return oopen(file, mode, *a, **k)
 
     builtins.open = bopen
@@ -51,6 +81,8 @@ def install(out):
             kp = key(path)
             if kp:
                 _c["read"][kp] += 1
+                if kp.startswith(am) or kp.startswith(root + os.sep):
+                    _note("read", kp)
         return oosopen(path, flags, *a, **k)
 
     os.open = osopen
@@ -87,6 +119,10 @@ def install(out):
             res["per_package_avg"] = {k: round(sum(c[k] for c in pk) / len(pk), 1)
                                       for k in ("list", "list_distinct", "read", "read_distinct", "stat", "stat_distinct")}
         res["most_reread_files"] = sorted(reread, reverse=True)[:15]
+        res["owners"] = {
+            k: [[n, len(_own_paths[k][o]), o] for o, n in c.most_common(25)]
+            for k, c in _own.items()
+        }
         with oopen(out, "w") as fh:
             json.dump(res, fh)
 

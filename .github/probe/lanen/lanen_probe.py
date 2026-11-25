@@ -18,6 +18,8 @@ NEW = Path(os.environ["NEW_APM"])
 VENV = NEW.parent.parent
 PY = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 FIX = os.environ.get("PROBE_FIXTURE", "tree-50")
+_pf = Path(__file__).with_name("parts")
+PARTS = set((_pf.read_text().split() if _pf.exists() else ["imports", "counts", "fork"]))
 PAIRS = int(os.environ.get("PROBE_PAIRS", "6"))
 
 
@@ -68,38 +70,45 @@ with open_world(fixture, work / "world") as world:
             return rc, cpu, err
 
     modfile = work / "modules.txt"
+    if "imports" not in PARTS and "fork" not in PARTS:
+        root = cold()
+        out = work / "counts.json"
+        rc, _, _ = measured([str(PY), str(HERE / "runner.py"), "count", str(out)], root)
+        say("counts", {"rc": rc, **json.loads(out.read_text())})
+        sys.exit(0)
     root = cold()
     rc, cpu_dump, _ = measured([str(PY), str(HERE / "runner.py"), "dump", str(modfile)], root)
     mods = modfile.read_text().split()
     say("modules", {"rc": rc, "count": len(mods), "apm_cli": sum(m.startswith("apm_cli") for m in mods)})
 
-    root = cold()
-    rc, cpu_it, err = measured([str(PY), "-X", "importtime", str(HERE / "runner.py"), "run"], root)
-    rows = []
-    for line in err.splitlines():
-        m = re.match(r"import time:\s+(\d+) \|\s+(\d+) \|(\s*)(\S+)", line)
-        if m:
-            rows.append((int(m.group(1)), m.group(4).strip()))
-    by_top = Counter()
-    for us, name in rows:
-        by_top[name.split(".")[0]] += us
-    say("importtime", {"rc": rc, "install_cpu_s": round(cpu_it, 3), "modules": len(rows),
-                       "self_total_s": round(sum(u for u, _ in rows) / 1e6, 3),
-                       "top_packages_s": [(k, round(v / 1e6, 3)) for k, v in by_top.most_common(12)],
-                       "top_modules_ms": [(n, round(u / 1e3, 1)) for u, n in sorted(rows, reverse=True)[:15]]})
+    if "imports" in PARTS or "counts" in PARTS:
+        root = cold()
+        rc, cpu_it, err = measured([str(PY), "-X", "importtime", str(HERE / "runner.py"), "run"], root)
+        rows = []
+        for line in err.splitlines():
+            m = re.match(r"import time:\s+(\d+) \|\s+(\d+) \|(\s*)(\S+)", line)
+            if m:
+                rows.append((int(m.group(1)), m.group(4).strip()))
+        by_top = Counter()
+        for us, name in rows:
+            by_top[name.split(".")[0]] += us
+        say("importtime", {"rc": rc, "install_cpu_s": round(cpu_it, 3), "modules": len(rows),
+                           "self_total_s": round(sum(u for u, _ in rows) / 1e6, 3),
+                           "top_packages_s": [(k, round(v / 1e6, 3)) for k, v in by_top.most_common(12)],
+                           "top_modules_ms": [(n, round(u / 1e3, 1)) for u, n in sorted(rows, reverse=True)[:15]]})
 
-    bare, imp = [], []
-    for _ in range(PAIRS):
-        bare.append(measured([str(PY), "-c", "pass"], root)[1])
-        imp.append(measured([str(PY), str(HERE / "runner.py"), "imports", str(modfile)], root)[1])
-    say("import_only", {"bare_python_cpu_p50": round(statistics.median(bare), 3),
-                        "import_set_cpu_p50": round(statistics.median(imp), 3),
-                        "import_cost_p50": round(statistics.median(imp) - statistics.median(bare), 3)})
+        bare, imp = [], []
+        for _ in range(PAIRS):
+            bare.append(measured([str(PY), "-c", "pass"], root)[1])
+            imp.append(measured([str(PY), str(HERE / "runner.py"), "imports", str(modfile)], root)[1])
+        say("import_only", {"bare_python_cpu_p50": round(statistics.median(bare), 3),
+                            "import_set_cpu_p50": round(statistics.median(imp), 3),
+                            "import_cost_p50": round(statistics.median(imp) - statistics.median(bare), 3)})
 
-    root = cold()
-    out = work / "counts.json"
-    rc, cpu_count, _ = measured([str(PY), str(HERE / "runner.py"), "count", str(out)], root)
-    say("counts", {"rc": rc, **json.loads(out.read_text())})
+        root = cold()
+        out = work / "counts.json"
+        rc, cpu_count, _ = measured([str(PY), str(HERE / "runner.py"), "count", str(out)], root)
+        say("counts", {"rc": rc, **json.loads(out.read_text())})
 
     if os.name != "nt":
         env = dict(world.env, OBJC_DISABLE_INITIALIZE_FORK_SAFETY="YES")  # both modes get exactly this env
@@ -128,3 +137,7 @@ with open_world(fixture, work / "world") as world:
                             "fork_child_cpu_p50": round(statistics.median(fork), 3),
                             "paired_fork_over_sub_p50": round(statistics.median(ratios), 3),
                             "lockfile_digests": sorted(digests)})
+        osname = {"linux": "linux", "darwin": "macos"}.get(sys.platform, sys.platform)
+        print(f"| ORACLE | {FIX} | fork-server (imports deleted) | {osname} | pairs {len(base)} | "
+              f"{statistics.median(base):.3f} -> {statistics.median(fork):.3f} | "
+              f"{statistics.median(ratios):.3f} |", flush=True)
