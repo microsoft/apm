@@ -55,8 +55,10 @@ def world_install(request):
             # The engine under test: the apm_cli this test imports, not another install.
             env["PYTHONPATH"] = str(Path(apm_cli.__file__).resolve().parents[1])
 
-            def install(*args: str, pythonpath: str = "") -> tuple[int, str, str]:
-                run_env = dict(env)
+            def install(
+                *args: str, pythonpath: str = "", fast: str = "verdict"
+            ) -> tuple[int, str, str]:
+                run_env = dict(env, APM_INSTALL_FAST_PATH=fast)
                 if pythonpath:
                     run_env["PYTHONPATH"] = os.pathsep.join((pythonpath, env["PYTHONPATH"]))
                 done = subprocess.run(
@@ -132,6 +134,30 @@ def _assert_full_pipeline_ran(result: tuple[int, str, str]) -> None:
     assert code == 0, stdout + stderr
     assert "attested" in _traces(stderr), stderr
     assert "recorded" not in _traces(stderr), stderr
+
+
+def test_every_fast_answer_prints_what_the_full_pipeline_prints(world_install) -> None:
+    """#4770 differential: the attested hit and the output replay print what the full
+    pipeline (every fast path off) prints for the same state, and no answer moves a byte."""
+    install, project, _world = world_install
+    _assert_attested(install())
+    before = _tree_bytes(project)
+
+    attested, replayed, full = install(), install(), install(fast="0")
+
+    _assert_attested_hit(attested)
+    assert "hit" in _traces(replayed[2]), replayed[2]
+    assert full[0] == 0 and not _traces(full[2]), full[1] + full[2]
+    assert _normalized(attested[1]) == _normalized(replayed[1]) == _normalized(full[1])
+    assert _tree_bytes(project) == before
+
+
+def _tree_bytes(project: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    }
 
 
 def _a_deployed_file(project: Path) -> str:

@@ -176,6 +176,70 @@ def test_any_verdict_input_change_misses(
     assert capsys.readouterr().out == ""
 
 
+# Executable gates: install re-judges the lock's recorded exec_status, which none of
+# these moves, so the record's key is their only control (#4770, W3d R1).
+_GATE_CHANGES = (
+    "user exec deny",
+    "project exec deny",
+    "revoked approval",
+    "user deny after approval",
+    "org exec deny-all",
+)
+_APPROVED_FIRST = frozenset({"revoked approval", "user deny after approval"})
+
+
+def _user_executables(project: Path, **store: list[str]) -> None:
+    import json
+
+    config = {"executables": {"allow": [], "deny": [], **store}}
+    _home(project).mkdir(exist_ok=True)
+    (_home(project) / "config.json").write_text(json.dumps(config) + "\n", encoding="utf-8")
+
+
+def _gate_change(project: Path, change: str) -> None:
+    if change in ("user exec deny", "user deny after approval"):
+        _user_executables(project, deny=["o/p"])
+    elif change == "project exec deny":
+        (project / "apm.yml").write_text(
+            "name: demo\nversion: 1.0.0\nexecutables:\n  deny:\n    - o/p\n", encoding="utf-8"
+        )
+    elif change == "revoked approval":
+        _user_executables(project)
+    elif change == "org exec deny-all":
+        policy = project.parent / "cache" / "policy_v1" / "k"
+        policy.mkdir(parents=True)
+        (policy / "p.yml").write_text("executables:\n  deny_all: true\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("change", _GATE_CHANGES)
+def test_an_executables_gate_change_misses_the_replay(project: Path, capsys, change: str) -> None:
+    """apm.yml, the lock and every deployed byte are unchanged; the gate input is not."""
+    if change in _APPROVED_FIRST:
+        _user_executables(project, allow=["o/p"])
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is True, "positive control: run 2 hits"
+    capsys.readouterr()
+
+    _gate_change(project, change)
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("change", _GATE_CHANGES)
+def test_an_executables_gate_change_misses_the_attested_hit(project: Path, change: str) -> None:
+    """The attested hit re-judges the lock's exec_status; the gate input must miss the key."""
+    if change in _APPROVED_FIRST:
+        _user_executables(project, allow=["o/p"])
+    _attest(project)
+    assert _attested_hit() is True, "positive control: run 2 matches the attestation"
+
+    _gate_change(project, change)
+
+    _assert_proves_itself()
+
+
 def test_an_unrelated_environment_variable_still_hits(
     project: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
