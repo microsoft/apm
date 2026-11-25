@@ -1,52 +1,27 @@
-## Car 1 extension candidate: result-level pass dedup (lane-N B)
+## Lane-N B (result-level pass dedup): fold into Car 1 only where free, otherwise DEAD
 
-**What it deletes.** Cold fresh t50 walks and hashes each package tree several times, once per owner.
-- The owner attribution (L, 55 packages, run 45541158727) shows the content-hash tree pass is the largest:
-  - `content_hash._package_files`: 3102 directory listings over 1034 distinct dirs, and 7254 stats.
-  - Tree bytes are read 1434 + 717 times: `_compute_package_hash_impl` plus `compute_package_digests`.
-- Next come format detection and `find_plugin_json` (1350 stats), then the `skill_integrator` directory scans.
-- `apm.yml` parsing is already memoized by text (`manifest_io._parsed_texts`), so its 9x re-reads are only syscalls.
+**Measured.** All eight memos together give:
+- L: paired 0.964 median across 3 shards (0.964 / 0.960 / 0.983), run 45542197103; wrapper paired CPU 0.984.
+- M: 0.911, run 45542213046 (wrapper 1.011, noisy).
+- W: run 45542228941 pending (for the record only).
 
-**Ceiling head.** L/M head 10720dee (perf-research/arch-passmemo) on d3881480; W head ec0f9e4c on 6d67f5aa. These are unsafe per-invocation memos, applied only to paths under apm_modules:
-1. One package-tree hash pass computes both streams (legacy and framed), memoized per (package, exclude).
-2. `_package_files` per (root, native, skip_roots).
-3. `compute_file_hash` per path.
-4. `find_plugin_json`.
-5. `PackageFormatDetector.detect` (default detectors only).
-6. `_collect_nested_skill_dirs`.
-7. `SkillIntegrator._skill_names_in_directory`.
-8. `carried_license._skill_dirs`.
+Setup: tree-50, 6 pairs per shard; heads L/M 10720dee and W ec0f9e4c; harness probe4 b22f8968. Digests are identical to base: lock af1dced3c0ad, deployed 9680bf021f7c.
 
-**Measured.**
-- Probe B_sub/base_sub (harness perf-research/arch-lanen-probe4 @ b22f8968; tree-50, 6 pairs per shard, 3-way interleave):
+At 9V74 that is about -0.1 s on L 4.3 s.
 
-  | OS | Run | Shard 1 | Shard 2 | Shard 3 | Median | Wrapper paired CPU |
-  |----|-----|---------|---------|---------|--------|--------------------|
-  | L | 45542197103 | 0.964 | 0.960 | 0.983 | **0.964** | 0.984 |
-  | M | 45542213046 | 0.911 | 0.874 | 0.918 | 0.911 | 1.011 (noisy) |
+**Test.** A memo is FREE when Car 1 (classify / plan-once) already computes the value once and threads it to the consumer: the same code path, no new invariant. A memo NEEDS A NEW INVARIANT when reuse across call sites requires "the tree did not change between the two observations".
 
-  W: run 45542228941 pending.
-- Faithfulness: lockfile af1dced3c0ad and deployed-file digest 9680bf021f7c are identical to base on every shard.
-- At 9V74, L 4.3 s goes to about 4.15-4.2 s (-0.08..-0.15 s). It is a Python car, not a North Star.
+FREE: fold into Car 1 by construction, since they are classification inputs Car 1 already computes once per package:
+- `PackageFormatDetector.detect` (default detectors), with `find_plugin_json` and `_collect_nested_skill_dirs` beneath it.
+- These are the "detect <- detect" / "find_plugin_json <- detect" owners in the attribution (1350 + 600 + 600 stats on L).
+- Car 1's plan already carries the classification. Consumers read it from the plan instead of re-detecting, so there is no cache, no lifetime and no invalidation.
+- Expected share: a minority of the 0.964. Not measured separately; Car 1's own paired read covers it.
 
-**Safety work each memo needs to ship (cost line per row).**
-- **Lifetime (IR2).** Every memo lives in `invocation_scope` only and is cleared by `forget_invocation_memos` (lifecycle scripts). The bump uses the same generation discipline as the K proofs (capture the generation before the observation, publish only if unchanged; G3).
-  - cost: one int compare per publish.
-- **Invalidation on writes.** The apm_modules tree is NOT write-once within an invocation:
-  - carried-license copies add files (covered by `exclude`, which callers derive from the download result, never from disk);
-  - re-materialize, update and prune rewrite or remove trees.
-  - So the hash and file-list memos must be keyed by the materialization event: the M2 materialize-once receipt, (package, sha, variant). Any rewrite of a package root must drop that root's entries. Owner: the materializer, via one `forget_package(root)` hook. Keying by path alone is the unsafe part of this head.
-  - cost: one dict pop per materialize.
-- **Hash pass (memo 1).** Computing both streams in one pass is safe by construction: same bytes, two hashers.
-  - It must still read through the no-follow / containment path (the K4/K-series rules, symlink refusal in `_package_files`).
-  - Verification of a fetched package against its pinned hash must use a hash computed AFTER the last write to that root. This follows from the receipt key above.
-  - cost: zero extra (one fewer pass).
-- **compute_file_hash (memo 3).** Only for sources under apm_modules. Deployed-side hashes (project files, `compute_deployed_hashes`) must never be memoized: they are written during the same invocation, and the deployed-hash provenance (lockfile `deployed_files`) must describe the final bytes.
-  - cost: none on the source side.
-- **Detection and scans (memos 4-8).** These are pure functions of a package root's tree, so they need the same receipt keying. `_skill_names_in_directory` is also called on PROJECT skill dirs: memoize only the apm_modules branch, never target dirs (they change as skills deploy).
-  - cost: none.
-- **Not memoized:**
-  - The security gate scan (667 reads, single pass; it must see deployed bytes).
-  - The policy checks.
+DEAD: each needs a new invariant.
+1. **One hash pass, both streams, reused across callers** (`_compute_package_hash_impl` vs `compute_package_digests`). Computing both streams in one call is free, but the win comes from the SECOND caller reusing the first's result. That needs "no write to the package root between the two hashes". Carried-license copies and re-materialization write there, so this is a new receipt-keyed invariant.
+2. **`_package_files` per root.** Same tree-unchanged invariant.
+3. **`compute_file_hash` per path.** File-unchanged invariant, plus a new source/deployed split rule: deployed-side hashes must never be reused.
+4. **`SkillIntegrator._skill_names_in_directory`.** Also called on PROJECT target dirs, which change as skills deploy, so it needs a source-only split and the tree-unchanged invariant.
+5. **`carried_license._skill_dirs`.** No intra-owner redundancy (517 calls over 517 distinct dirs). Reuse would mean sharing a walk with `compilation/inventory.collect`, which is a cross-owner inventory: a new invariant. And SoL's O-walk2 already bounds walk sharing at L 0.992.
 
-**Recommendation.** Fold memos 1-3 (hash pass, file list, source file hash) into Car 1 (plan-once) as a package-tree inventory produced once per materialization receipt and consumed by the hash, detection, discovery and carried-license owners. That is the "visit once" shape. Memos 4-8 become free consumers of that inventory. Expected L about 0.96-0.98 on its own. Kill bar: < 2% L paired at the car head.
+**Verdict.** Fold the FREE subset (format detection and its helpers) into Car 1 as consumers of the plan. Everything else is DEAD; no new invariants for a <= 4% L bound.
