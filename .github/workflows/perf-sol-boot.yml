@@ -1,21 +1,24 @@
-name: Perf SoL boot floor (research)
+name: Perf SoL trace (research)
 
 on:
   push:
-    branches: [perf-research/arch-boot]
+    branches: [perf-research/arch-trace]
 
 permissions:
   contents: read
 
 jobs:
-  boot:
-    name: boot ${{ matrix.os }}
+  trace:
+    name: trace ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2025]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -27,45 +30,27 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: false
-      - name: Install side CLI (as the bench does) and harness
-        shell: bash
+      - name: Install product e62f520f
         run: |
           set -euo pipefail
-          git -C harness worktree add --detach "$GITHUB_WORKSPACE/side" HEAD
+          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git e62f520f4bfc569d7a07e02d93d8273613742678
+          git -C harness worktree add --quiet --detach ../side FETCH_HEAD
           (cd side && uv sync --frozen --no-editable --quiet)
-          (cd harness && uv sync --frozen --extra dev --quiet)
-      - name: Boot probe
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "$RUNNER_OS" = Windows ]; then PY=side/.venv/Scripts/python.exe; APM=side/.venv/Scripts/apm.exe; else PY=side/.venv/bin/python; APM=side/.venv/bin/apm; fi
-          mkdir -p out
+          if [ "$RUNNER_OS" = Windows ]; then APM=side/.venv/Scripts/apm.exe; else APM=side/.venv/bin/apm; fi
           echo "APM_ABS=$GITHUB_WORKSPACE/$APM" >> "$GITHUB_ENV"
-          cd harness
-          [ "${SKIP_PROBE:-}" = 1 ] && exit 0
-          uv run --frozen python scripts/perf/boot_probe.py "$GITHUB_WORKSPACE/$PY" "$GITHUB_WORKSPACE/$APM" "$GITHUB_WORKSPACE/out/boot-${{ matrix.os }}.json" 21
-      - name: Install-cold t50 plain (CPU) then with importtime
-        shell: bash
+          (cd harness && uv sync --frozen --extra dev --quiet)
+      - name: Traced locked-warm + warm
+        working-directory: harness
+        env:
+          APM_INSTALL_FAST_PATH: trace
+          APM_BENCH_PASS_ENV: APM_INSTALL_FAST_PATH
+          APM_BENCH_NO_IMPORTTIME: "1"
         run: |
           set -euo pipefail
-          cd harness
-          uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 0 --runs 3 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/plain" --work "$GITHUB_WORKSPACE/work"
-          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/importtime" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 0 --runs 2 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/itime" --work "$GITHUB_WORKSPACE/work"
-          uv run --frozen python scripts/perf/importtime_report.py "$GITHUB_WORKSPACE/out" > "$GITHUB_WORKSPACE/out/importtime-report-${{ matrix.os }}.md"
-          cat "$GITHUB_WORKSPACE/out/importtime-report-${{ matrix.os }}.md"
-      - name: A/A world check (rtt 0/30 x counts off/on), install-cold t50
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd harness
-          for rtt in 0 30; do
-            for counts in off on; do
-              extra=""; [ "$counts" = on ] && extra="--counts"
-              uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt $rtt --rtt-journeys install-cold --runs 3 $extra --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/aa-rtt$rtt-counts$counts" --work "$GITHUB_WORKSPACE/work-aa"
-            done
-          done
+          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-locked-warm,install-warm --rtt 0 --runs 1 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
+          grep -h "install fast path" "$GITHUB_WORKSPACE"/out/stderr/*.txt | sort | uniq -c
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: boot-${{ matrix.os }}
+          name: trace-${{ matrix.os }}
           path: out/

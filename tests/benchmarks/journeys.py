@@ -509,8 +509,10 @@ class Context:
             if self.count_fs:
                 env["APM_PERF_COUNT_FS"] = "1"
         importtime_dir = os.environ.get("APM_BENCH_IMPORTTIME_DIR")
-        if importtime_dir:
+        if importtime_dir and not os.environ.get("APM_BENCH_NO_IMPORTTIME"):
             env["PYTHONPROFILEIMPORTTIME"] = "1"
+        for name in filter(None, os.environ.get("APM_BENCH_PASS_ENV", "").split(",")):
+            env[name] = os.environ.get(name, "")
         with (
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
