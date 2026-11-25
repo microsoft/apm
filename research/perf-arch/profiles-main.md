@@ -40,3 +40,7 @@ L cold 0.924 / cold-auth 0.974 / warm 0.945 [45472888786]; W cold 0.930 / cold-a
 
 ## 21:15 CET main 0a2460a7 (+#5353 A', #5205) vs 0f397094, t50, 6 pairs
 L: cold 0.994, cold-auth 0.530 (spawns 363->20, requests 250->100), warm-auth 0.796 (requests 100->50, ls-remote 50->0) [45475047324]. W: cold 1.004, cold-auth 0.456 (365->19), warm-auth 0.866 [45475248050]. W warm-auth children 3.53 s = cat-file x50 + ls-tree x50 (cache-hit verify via git) -> next warm candidate.
+
+## 01:40 CET main 1e4a208e (+#5366 C, #5376 schannel B1, #5390, #5394) vs 0a2460a7, t50, 6 pairs
+L: cold 0.905, cold-auth 0.909, warm-auth 0.931 [45514042000]. W default-schannel (JH harness 60799936): cold 0.461 (37.1->16.7 s, spawns 366->18), cold-auth 0.448 (spawns 369->20) [45514102212]. W OpenSSL profile 45514072084 pending.
+W OpenSSL world same range [45514072084]: cold 0.978, cold-auth 0.977, warm-auth 0.964 (counts unchanged).

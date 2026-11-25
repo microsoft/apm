@@ -204,3 +204,15 @@
 00:48 | VP gates: #5377 final-head bench (real fixture L+W schannel + t50 neutral <=1.010), #5382 stack on #5374 427c0876; H8 by 05:00 -> Bets | Bets | none
 00:51 | SoL notes 692b3bac; hooks/MCP <3%; warm stub missed -> re-aim; records split running -> VP | SoL W3d ping 01:25; Bets benches ~01:30 | none
 00:51 | VP: hooks/MCP closed; warm re-aim after records; E1 owns W update residual (+45 spawns) -> SoL to cross-check + tell E1 | SoL W3d ping 01:25 | none
+00:57 | #5366 C + #5376 schannel B1 landed (main 1e4a208e); profile L 45514042000 / W 45514072084 / W-schannel 45514102212; notes 8e7c5e4c | read ~01:35; pulse VP 01:30 | none
+01:02 | records cut NOT train row (parts sum W 0.963 vs combined 0.905 = knock-on) -> v0.40 headline; default no tiny car -> VP | SoL warm cache-hit re-aim on main 1e4a208e | none
+01:02 | VP: no records car; records-model redesign = v0.40 headline; warm stub on top of #5410 (E1 loose-object reader) + #5366 -> SoL | SoL | none
+01:04 | PULSE: #5376 validated W default-schannel cold 0.461/auth 0.448; L 0.905; JH harness branch was deleted (Bets restored 60799936) -> VP; #5382 K now macOS-only | Bets benches 25 min; W profile | harness deletion incident
+01:06 | tick: W OpenSSL profile pending; no new landings | Bets 25 min; SoL | none
+01:06 | W OpenSSL main 1e4a208e: cold 0.978 / auth 0.977 / warm-auth 0.964 (logged; batch with next pulse) | Bets 25 min; SoL | none
+01:12 | #5377 final real L 0.450 M 0.386 W 1.006 (unengaged); CONTRADICTION: schannel B1 engages offline (0.461) but not real github.com in JH harness (81->81) -> VP default F&C DEBUG probe; #5382 W 1.015 vs same-code noise, A/A running | Bets 30 min | default-W real engagement unknown
+01:12 | VP: Bets runs schannel real-github DEBUG probe (F&C deleted) by 03:00; default-W claims HELD (offline only); #5377 L 0.450/M 0.386 claim; #5382 macOS-only, W in A/A band passes | Bets probe 03:00 | default-W real engagement
+01:13 | regent frame -> Bets: parity with git (schannelCheckRevoke modes); deliver (a) reason (b) git ls-remote same runner (c) parity fix + cost by 03:00; train row by 05:30 if W3d OK; S88 real-network confirmation | Bets 03:00 | none
+01:14 | FINDING locked-warm: wasted diff-apply attempt = W 0.885/L 0.919 -> VP default SoL early-decline car; records re-read W 0.968 | SoL trace + W cache-hit; Bets probe 03:00 | none
+01:14 | VP approved locked-warm early-decide car (SoL; stop if bug; measure on #5383) -> SoL | SoL pulse 02:00; Bets 03:00 | none
+01:15 | design headline -> integrate redesign (records re-sized sub-part) -> VP | SoL 02:00; Bets 03:00 | none
