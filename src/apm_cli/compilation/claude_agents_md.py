@@ -667,13 +667,13 @@ def compiled_agents_md_may_carry(project_root: Path) -> bool:
     defer to the full run when APM home records a compile for this root or a
     root ``AGENTS.md`` or ``CLAUDE.md`` exists.
     """
-    from ..core.agents_md_compile_record import read_record
+    from ..core.agents_md_compile_record import ROOT_CARRIERS, read_record
 
     if read_record(project_root):
         return True
     return any(
         (project_root / name).is_symlink() or (project_root / name).exists()
-        for name in ("AGENTS.md", "CLAUDE.md")
+        for name in ROOT_CARRIERS
     )
 
 

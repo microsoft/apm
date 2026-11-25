@@ -1540,3 +1540,78 @@ def test_terminal_styling_never_hides_a_deferral_warning(
 
 def _assert_replays(expected: bool) -> None:
     assert verdict_record.replay(["install"]) is expected
+
+
+# #5434 (RT1, W3d): the full run reads the root AGENTS.md / CLAUDE.md and every compiled
+# AGENTS.md the compile record names (with its directory's CLAUDE.md) to decide whether a
+# Claude rule is carried (compiled_agents_md_may_carry, CompiledCoverage, #5343). A change
+# to any of them misses the replay; the same carriers unchanged still hit.
+_CARRIER = "## Global Instructions\n\nAlways run the linter.\n"
+
+
+@pytest.mark.parametrize("name", ["AGENTS.md", "CLAUDE.md"])
+def test_a_root_carrier_appearing_after_the_record_misses(project: Path, capsys, name: str) -> None:
+    _record()
+    (project / name).write_text(_CARRIER, encoding="utf-8")
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+@pytest.mark.parametrize("change", ["removed", "edited"])
+def test_a_root_carrier_changed_after_the_record_misses(project: Path, capsys, change: str) -> None:
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    _record()
+    if change == "removed":
+        (project / "AGENTS.md").unlink()
+    else:
+        (project / "CLAUDE.md").write_text("# no import\n", encoding="utf-8")
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+@pytest.mark.parametrize("member", ["docs/AGENTS.md", "docs/CLAUDE.md"])
+def test_a_recorded_compiled_agents_md_or_its_claude_md_changed_misses(
+    project: Path, capsys, member: str
+) -> None:
+    from apm_cli.core.agents_md_compile_record import write_record
+
+    (project / "docs").mkdir()
+    (project / "docs" / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "docs" / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    write_record(project, {"docs/AGENTS.md": {"sha256": "sha256:0", "instructions": []}})
+    _record()
+    (project / member).write_text(_CARRIER + "edited\n", encoding="utf-8")
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+def test_unchanged_carriers_still_hit(project: Path, capsys) -> None:
+    """Control: keying the carriers never turns a valid replay into a miss."""
+    from apm_cli.core.agents_md_compile_record import write_record
+
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "docs").mkdir()
+    (project / "docs" / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    write_record(project, {"docs/AGENTS.md": {"sha256": "sha256:0", "instructions": []}})
+    _record()
+    capsys.readouterr()
+
+    _assert_replays(True)
+
+
+def test_the_replay_keys_every_file_the_carrier_decision_reads(project: Path) -> None:
+    """One owner: the replay keys carrier_inputs, and the decline reads its root names."""
+    from apm_cli.compilation.claude_agents_md import compiled_agents_md_may_carry
+    from apm_cli.core.agents_md_compile_record import ROOT_CARRIERS, carrier_inputs
+
+    keyed = set(carrier_inputs(project))
+    for name in ROOT_CARRIERS:
+        assert project / name in keyed
+        (project / name).write_text(_CARRIER, encoding="utf-8")
+        assert compiled_agents_md_may_carry(project)
+        (project / name).unlink()
+    assert not compiled_agents_md_may_carry(project)

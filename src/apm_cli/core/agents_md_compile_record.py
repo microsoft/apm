@@ -31,6 +31,24 @@ def read_record(root: Path) -> dict:
     return files if isinstance(files, dict) else {}
 
 
+ROOT_CARRIERS = ("AGENTS.md", "CLAUDE.md")
+
+
+def carrier_inputs(root: Path) -> list[Path]:
+    """Every project file the Claude carrier decision reads, besides this record (#5434).
+
+    ``compiled_agents_md_may_carry`` reads the root carriers; ``CompiledCoverage``
+    reads each recorded ``AGENTS.md`` and its directory's ``CLAUDE.md``. A fast
+    path that replays a verdict keys all of them, so a changed carrier misses.
+    """
+    paths = {root / name for name in ROOT_CARRIERS}
+    for relative in read_record(root):
+        if isinstance(relative, str):
+            agents_md = root / relative
+            paths.update((agents_md, agents_md.parent / "CLAUDE.md"))
+    return sorted(paths)
+
+
 def write_record(root: Path, files: dict) -> None:
     """Replace the record for *root*; a failed write only costs a reminder."""
     from apm_cli.integration.write_seam import atomic_write_text, mkdir
