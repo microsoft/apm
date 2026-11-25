@@ -240,13 +240,19 @@ jobs:
             tests/lifecycle/scenarios/test_engine_parity_invariants.py
 
   # PR integration shards keep only the per-group sample of the linter session
-  # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
-  # here, nightly and on every release-candidate dispatch.
+  # cache's byte-equality guard; the full owner-mutation replay runs here,
+  # nightly and on every release-candidate dispatch. Serially it outgrew its
+  # 40-minute cap (#5475), so it fans out round-robin: each shard replays
+  # every job-total-th case, and the shards together replay every case once.
   architecture-cache-full-matrix:
-    name: Architecture Cache Full Matrix (Linux)
+    name: Architecture Cache Full Matrix (Linux, shard ${{ matrix.shard }})
     needs: resolve-ref
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -269,8 +275,9 @@ jobs:
       - name: Replay the full owner mutation matrix through the session cache
         env:
           PYTEST_PERF: "1"
+          APM_ARCH_CACHE_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
         run: |
-          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers -s \
             -m benchmark \
             tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix
 

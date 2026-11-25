@@ -3200,7 +3200,8 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
 
     PR shards keep the per-group sample; the nightly lifecycle workflow (also
     dispatched on each release-candidate ref) replays the full matrix with
-    PYTEST_PERF=1, and its tracking-issue signal waits for that job.
+    PYTEST_PERF=1 across round-robin shards, and its tracking-issue signal
+    waits for that job.
     """
     workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
     assert "schedule" in workflow["on"]
@@ -3210,7 +3211,14 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
     assert all(key not in job for key in ("if", "continue-on-error"))
     step = workflow_step(job, "Replay the full owner mutation matrix through the session cache")
     assert "if" not in step and "continue-on-error" not in step
-    assert effective_env(workflow, job, step)["PYTEST_PERF"] == "1"
+    env = effective_env(workflow, job, step)
+    assert env["PYTEST_PERF"] == "1"
+    # The replay fans out (#5475); the shard spec comes from the strategy
+    # contexts so the shards always cover every case, and one slow shard
+    # never cancels the others.
+    assert env["APM_ARCH_CACHE_SHARD"] == "${{ strategy.job-index }}/${{ strategy.job-total }}"
+    assert job["strategy"]["fail-fast"] is False
+    assert len(job["strategy"]["matrix"]["shard"]) > 1
     tokens = step["run"].replace("\\\n", " ").split()
     assert CACHE_FULL_MATRIX_NODE in tokens
     assert ("-m", "benchmark") in set(pairwise(tokens))
