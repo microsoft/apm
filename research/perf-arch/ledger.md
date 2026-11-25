@@ -300,3 +300,4 @@
 04:47 | tick: main 1e4a208e; inbox silent; O-walk2 not yet reported (due ~04:40, +6 min); Bets A3x3 + B in flight; tick prompt refreshed | SoL O-walk2; push ~04:55 | none
 04:47 | SoL O-walk2 L 0.992/W 0.987/M 1.026 (verified); engagement proven per OS; O-TIME absolute bound ~15 min then kill line | kill ~05:05 | none
 04:48 | Bets A3x3 verified: fork-server L 0.807 med (0.806-0.826) [45541271380], M 0.883 [45541286025]; L ~3.47 s at 9V74 = AT line; combined B+fork ~05:30 | O-TIME kill ~05:05; combined ~05:30 | none
+04:48 | doc v3.4: section 8 Lane N oracles + VP-verbatim lesson; section 6 gate superseded note; push a58668ec02a580c2e06523339fc2fa25314ce0bb | O-TIME kill line | none

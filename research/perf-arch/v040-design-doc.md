@@ -603,6 +603,16 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
 - An oracle that clears is ALSO reported as a Python car (an extension of Car 1). The native lane only has value beyond the oracle's Python form.
 - Native shape: returns DATA only; policy stays in the Python owners. Proved by a side-by-side differential build. W3d ruling before any code.
 
+### Replacement North Star research: interpreter + import deletion (FINDING, 04:49 CET; VP-verified)
+- Fork-server oracle (a parent pre-imports all apm_cli + deps, then forks one child per cold install; only the child's wait4 CPU is measured), stacked L/M head d3881480, tree-50, 6 pairs per shard, 3 shards. Rows are `| ORACLE |` lines in the "Lane-N replacement probe (research)" step (harness perf-research/arch-lanen-probe3 @ 3655346e):
+  - L [45541271380]: 0.826 (4.561 -> 3.744 s) / 0.807 (3.152 -> 2.551) / 0.806 (2.894 -> 2.346); median 0.807; per-shard absolute -0.55..-0.82 s.
+  - M [45541286025]: 0.862 / 0.897 / 0.883; median 0.883.
+  - W: no fork; import-only CPU minus bare python 0.625 s (~0.90), a PROXY, not a paired deletion.
+  - Faithfulness: identical lockfile digest (af1dced3c0ad) and deployed-file digest (9680bf021f7c, path + mode + bytes) fork vs subprocess, with one identical env dict.
+- At 9V74, "~3.47 s" L = 4.3 s (stacked UNSAFE upper bound) x 0.807 (another upper bound): a bound on a bound, not a projection. Shard bases differ (2.9-4.6 s CPU), so the median ratio and per-shard absolutes are quoted.
+- Lazy imports were 1.00x (#4812); reaching this needs a process-model change (warm resident process / fork server).
+- Next: combined head (result-level pass dedup B + fork), L t50 paired. A proposal goes to the VP + regent only if L at 9V74 <= ~3.3 s. It must carry: W3d's trust-boundary design before any code; a W number (paired deletion, or an explicit no-fork-on-Windows plan); the ship/distribution impact (a resident process is a product change, CEO gate likely); and a kill date.
+
 ## 8. What did not work (kills, with numbers)
 - lazy imports (L 0.988 / W 0.995);
 - frozen/zipapp boot (no win);
