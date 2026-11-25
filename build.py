@@ -145,7 +145,8 @@ def load():
 ROWS, META = load()
 NEW_SHA = (META.get("new") or "9ba3589d")[:8]
 # CLAIM HOLD (PERF VP 02:15): set to None once the real-github.com Windows probe clears #5376 engagement.
-WIN_CAVEAT = "offline mirror; real-network engagement under verification"
+WIN_CAVEAT = None  # lifted 03:15 (PERF VP): real-network engagement confirmed, run 45518723251
+WIN_FOOTNOTE = "offline-mirror bench; real-network engagement confirmed (run 45518723251)"
 OLD_NEW = "9ba3589d"
 NEW_LABEL = META.get("new_label") or ""
 FAT = os.environ.get("PERF_REPORT_FORCE_FAT") == "1" or NEW_SHA != OLD_NEW

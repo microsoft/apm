@@ -96,7 +96,7 @@ def render(g, srcs):
       + "; repeat no-op (#3+, footnote 1): " + ", ".join(f"{OSN[o]} {fin('install-noop-replay', o, 'tree-50')}" for o in OSES)
       + ("; --frozen no-op: Linux " + fin("install-frozen-noop", "linux", "tree-50") + frozen_verdict()
          if any(r["journey"] == "install-frozen-noop" for r in ROWS) else "")
-      + (". **Windows default config now engages the in-process fetch** (#5376, merged: default cold 0.449 / 0.447, "
+      + (". **Windows default config now engages the in-process fetch** (footnote 2; #5376, merged: default cold 0.449 / 0.447, "
          "warm 0.868 of the main before it" + (f"; {WC}" if WC else "") + "), so Windows numbers above are the default setup. " if IN(5376) else
          ". **Windows in its default config is the gap:** the in-process fetch does not engage under schannel until "
          "#5376 (on track) lands, which takes default-config cold to 0.474 of today (run 45458601150); Windows warm "
@@ -104,6 +104,9 @@ def render(g, srcs):
       "size: audit " + rng("audit") + "; outdated " + rng("outdated") + "; uninstall " + rng("uninstall") + "; prune "
       + rng("prune") + "; compile " + rng("compile") + "; pack " + rng("pack") + "; boot " + rng("boot-version") + " (flat).")
     a("")
+    if g.get("WIN_FOOTNOTE") and IN(5376):
+        a(f"*Footnote 2 (Windows default numbers): {g['WIN_FOOTNOTE']}.*")
+        a("")
     a("*Footnote 1: repeat no-op = an unchanged re-install once the verified-state record exists (the bench allows up "
       "to 3 untimed no-ops to converge first). Open finding under attribution: when the first re-install runs right "
       "after cold + warm installs in the same world, it traces 'no record'; standalone it records on main (runs "
