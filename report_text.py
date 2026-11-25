@@ -44,6 +44,15 @@ def render(g, srcs):
                     return f" ({r.get('pairs')} pairs; the 95% band crosses 1.0, so flat, not a regression)"
         return ""
 
+    def frozen_verdict():
+        for r in ROWS:
+            if r["src"] == "final" and r["journey"] == "install-frozen-noop" and r["os"] == "linux" \
+                    and r["fixture"] == "tree-10" and r.get("new_wall") is not None:
+                w = r["new_wall"]
+                return (f" (tree-10 wall p50 {w:.2f} s: " + ("<= 1 s, closes #4770)" if w <= 1.0
+                        else "> 1 s, #4770 stays open)"))
+        return ""
+
     def rng(j):
         v = sorted(1 / r["ratio"] for r in ROWS if r["src"] == "final" and r["journey"] == j and r["tls"] == "default")
         return f"{v[0]:.1f}-{v[-1]:.1f}x" if v else "measuring"
@@ -83,8 +92,10 @@ def render(g, srcs):
       + ", Windows " + fin("install-frozen", "windows", "tree-50") + WD + ". Warm: Linux " + fin("install-warm", "linux", "tree-50")
       + ", macOS " + fin("install-warm", "macos", "tree-50") + ", Windows " + W("install-warm") + ("" if IN(5376) else " (#5376, on track, measured Windows default warm 0.856 "
       "of today at its previous head; the rerun at its final head is running)")
-      + ". First unchanged re-install (#2): " + ", ".join(f"{OSN[o]} {fin('install-noop', o, 'tree-50')}" for o in OSES)
+      + ". No-op installs, first re-install / repeat / --frozen no-op. First unchanged re-install (#2): " + ", ".join(f"{OSN[o]} {fin('install-noop', o, 'tree-50')}" for o in OSES)
       + "; repeat no-op (#3+, footnote 1): " + ", ".join(f"{OSN[o]} {fin('install-noop-replay', o, 'tree-50')}" for o in OSES)
+      + ("; --frozen no-op: Linux " + fin("install-frozen-noop", "linux", "tree-50") + frozen_verdict()
+         if any(r["journey"] == "install-frozen-noop" for r in ROWS) else "")
       + (". **Windows default config now engages the in-process fetch** (#5376, merged: default cold 0.449 / 0.447, "
          "warm 0.868 of the main before it" + (f"; {WC}" if WC else "") + "), so Windows numbers above are the default setup. " if IN(5376) else
          ". **Windows in its default config is the gap:** the in-process fetch does not engage under schannel until "

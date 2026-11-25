@@ -18,11 +18,19 @@ req() { # os fixtures journeys pairs
       && { echo "${BASE:0:8} $1 $2 $3 $b" >> "$LOG"; echo "ok $1 $2 pairs=$4 $3 -> $b"; return; }
     sleep 15
   done; echo "FAILED $1 $2 $3"; }
+# install-frozen-noop (E2, closes #4770 if wall p50 <= 1 s at tree-10): Linux only, if the harness has it.
+# FROZEN_NOOP=1/0 forces it on/off; default = detect in the harness journeys.py.
+if [ -z "${FROZEN_NOOP:-}" ]; then
+  gh api "repos/microsoft/apm/contents/tests/benchmarks/journeys.py?ref=$PERF_BENCH_HARNESS_REF" -q .content 2>/dev/null \
+    | base64 -d 2>/dev/null | grep -q '"install-frozen-noop"' && FROZEN_NOOP=1 || FROZEN_NOOP=0
+fi
+echo "install-frozen-noop in Linux request: $FROZEN_NOOP"
 for os in linux macos windows; do
   if [ "$os" = windows ]; then   # Windows tree-50 x 15 pairs is long: one request per fixture
     req $os tree-10 $INST 5; req $os tree-50 $INST 5
   else
-    req $os tree-10,tree-50 $INST 5
+    if [ "$os" = linux ] && [ "$FROZEN_NOOP" = 1 ]; then req $os tree-10,tree-50 "$INST,install-frozen-noop" 5
+    else req $os tree-10,tree-50 $INST 5; fi
   fi
   req $os tree-10,tree-50 $AUTH 2
   req $os tree-10,tree-50 $REST 2

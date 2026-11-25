@@ -35,6 +35,7 @@ JLABEL = {
     "install-warm": "warm\n(cache filled)",
     "install-noop": "re-install #2\n(unchanged)",
     "install-noop-replay": "re-install #3+\n(repeat user)",
+    "install-frozen-noop": "--frozen\nno-op",
     "install-cold-auth": "cold",
     "install-warm-auth": "warm",
     "update": "update",
@@ -53,6 +54,7 @@ TNAME = {k: v.replace("\n", " ") for k, v in JLABEL.items()}
 TNAME.update({"install-cold": "install cold", "install-frozen": "install frozen",
               "install-warm": "install warm", "install-noop": "re-install #2 (unchanged)",
               "install-noop-replay": "re-install #3+ (repeat user)",
+              "install-frozen-noop": "--frozen no-op (CI re-run)",
               "install-cold-auth": "install cold", "install-warm-auth": "install warm"})
 
 
@@ -125,7 +127,8 @@ def load():
                          "ratio": 1 / r["speedup"], "base_cpu": h.get("base_s", r["base_cpu_s"]),
                          "new_cpu": h.get("new_s", r["new_cpu_s"]), "cls": h.get("cpu_class", "?"),
                          "ref": h.get("reference_class", False), "quality": r.get("quality", ""),
-                         "rev": r.get("harness_rev"), "run": r.get("run"), "band": r.get("band"), "pairs": r.get("pairs")})
+                         "rev": r.get("harness_rev"), "run": r.get("run"), "band": r.get("band"), "pairs": r.get("pairs"),
+                         "new_wall": r.get("new_wall_s")})
     for r in (json.load(open(INTERIM)) if os.path.exists(INTERIM) else []):
         if r["base"] == "703acd6f" and r["journey"] != "install-noop":
             rows.append({"src": "interim", "journey": r["journey"], "os": r["os"], "fixture": r["fixture"],
@@ -269,7 +272,7 @@ def fmt(r):
 
 def table():
     order = [("install-cold", ANON), ("install-frozen", ANON), ("install-warm", ANON), ("install-noop", ANON),
-             ("install-noop-replay", ANON), ("install-cold-auth", AUTH), ("install-warm-auth", AUTH),
+             ("install-noop-replay", ANON), ("install-frozen-noop", ANON), ("install-cold-auth", AUTH), ("install-warm-auth", AUTH),
              ("install-cold", ENTA), ("install-warm", ENTA), ("install-noop", ENTA), ("install-cold-auth", ENTU),
              ("update", ANON), ("uninstall", ANON), ("prune", ANON), ("outdated", ANON),
              ("compile", ANON), ("audit", ANON), ("audit-ci", ANON), ("pack", ANON), ("install-bundle", ANON),
@@ -283,7 +286,7 @@ def table():
         for os_ in OSES:
             a, b = cell(j, os_, pop, "tree-50"), cell(j, os_, pop, "tree-10")
             cs.append(f"{fmt(a)} / {fmt(b)}" if (a or b) else "measuring")
-        if j in ("install-noop-replay", "install-noop", "update", "uninstall", "prune", "outdated", "compile",
+        if j in ("install-noop-replay", "install-noop", "install-frozen-noop", "update", "uninstall", "prune", "outdated", "compile",
                  "audit", "audit-ci", "pack", "install-bundle", "boot-version", "boot-help") and pop == ANON:
             p = "all" if j.startswith(("install-noop", "compile", "audit", "pack", "install-bundle", "boot")) else popshort[pop]
         else:

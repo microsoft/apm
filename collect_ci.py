@@ -81,9 +81,14 @@ def from_shards(rd):
             e = cells.setdefault((r["fixture"], r["journey"]), {}).setdefault((shard, idx), {})
             e[kind] = {"cpu": s["cpu_s"], "req": (s.get("traffic") or {}).get("requests"),
                        "spawns": sum((s.get("spawns") or {}).values()), "replay": s.get("replay", ""),
-                       "units": s["cpu_s"] / yard if yard else None}
+                       "units": s["cpu_s"] / yard if yard else None, "wall": s.get("wall_s")}
             e["model"] = model
     return cells, meta_os
+
+
+def _med(xs):
+    xs = [x for x in xs if x is not None]
+    return statistics.median(xs) if xs else None
 
 
 def row_from_pairs(fx, j, pairs, os_, rid):
@@ -104,6 +109,8 @@ def row_from_pairs(fx, j, pairs, os_, rid):
         "paired_p50": p50, "band": band(ratios), "speedup": 1 / p50,
         "base_cpu_s": statistics.median(p["base"]["cpu"] for p in full),
         "new_cpu_s": statistics.median(p["new"]["cpu"] for p in full),
+        "base_wall_s": _med([p["base"].get("wall") for p in full]),
+        "new_wall_s": _med([p["new"].get("wall") for p in full]),
         "by_class": by_class,
         "headline": {"cpu_class": ref, "reference_class": ref == REFERENCE_CLASS, **by_class[ref]},
         "requests": f"{first['base']['req']}->{first['new']['req']}",
