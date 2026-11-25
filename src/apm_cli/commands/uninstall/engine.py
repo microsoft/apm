@@ -1700,6 +1700,11 @@ def _sync_integrations_after_uninstall(
                     f"Best-effort re-integration skipped for {pkg_id}. "
                     f"{INTEGRATED_FILES_STALE.sentence()}"
                 )
+                # Count the failed rebuild so uninstall exits non-zero (#4954).
+                reintegration_diagnostics.error(
+                    "Could not rebuild the surviving package's integrated files",
+                    package=pkg_id,
+                )
                 logger.verbose_detail(
                     f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
                 )
