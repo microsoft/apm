@@ -175,6 +175,16 @@ with open_world(fixture, work / "world") as world:
                 digests.add((side, lock_digest(root), deployed_digest(root)))
         if srv:
             srv.stdin.close()
+        if os.environ.get("MAIN_APM"):
+            root = cold()
+            rc, _, _ = measured([os.environ["MAIN_APM"], "install"], root, env=env)
+            main_dep = (lock_digest(root), deployed_digest(root))
+            sides_dep = {d[0]: (d[1], d[2]) for d in digests}
+            say("vs_main", {"main_1e4a208e": main_dep, "rc": rc,
+                            **{k: ("SAME" if v == main_dep else f"DIFF {v}") for k, v in sides_dep.items()}})
+            print(f"| ORACLE-DIGEST | {FIX} | vs plain 1e4a208e | {osname} | "
+                  + " ".join(f"{k}={'SAME' if v == main_dep else 'DIFF'}" for k, v in sorted(sides_dep.items()))
+                  + " |", flush=True)
         med = {k: statistics.median(v) for k, v in cpu.items()}
         def paired(a, b):
             return statistics.median([x / y for x, y in zip(cpu[a], cpu[b])])

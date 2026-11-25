@@ -168,7 +168,13 @@ jobs:
       env:
         NEW_APM: ${{ github.workspace }}/new/${{ env.VENV_APM }}
         PYTHONUNBUFFERED: '1'
-      run: uv run --frozen python .github/probe/lanen/lanen_probe.py 2>&1 | grep -E "^PROBE|ORACLE|Traceback|Error" | head -60
+        PROBE_MAIN_SHA: 1e4a208e073a3ea1484f71ceba8d065f23a815ec
+      run: |
+        git fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$PROBE_MAIN_SHA"
+        git worktree add --quiet --detach ../main FETCH_HEAD
+        (cd ../main && uv sync --frozen --no-editable --quiet)
+        export MAIN_APM="$GITHUB_WORKSPACE/main/$VENV_APM"
+        uv run --frozen python .github/probe/lanen/lanen_probe.py 2>&1 | grep -E "^PROBE|ORACLE|Traceback|Error" | head -60
     - name: Interleaved runs
       working-directory: harness
       env:
