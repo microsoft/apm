@@ -6,15 +6,26 @@ the whole walk in one ``open(O_PATH)`` and report the result through
 ``/proc/self/fd``. :func:`resolve_path` returns exactly what
 ``Path.resolve()`` returns, and falls back to it whenever the fast form
 cannot prove that (another OS, no ``/proc``, a dangling link, a loop, an
-access error). Nothing is cached: every call observes the filesystem as
-it is now, the same as ``Path.resolve()``. On Windows the exact forms live
-in :mod:`apm_cli.utils.realpath_win`.
+access error). A path the kernel proves link-free in one ``openat2``
+(``RESOLVE_NO_SYMLINKS``) is its own answer.
+
+Where no kernel form applies (macOS and other POSIX), inside one command, a directory whose resolved form is its own exact text has
+no link anywhere on its path (W3d ``containment-once`` K1-K9). Such a proof is
+kept in the command's invocation memo, which user code (a lifecycle script)
+clears, and lets a path directly under a proven directory resolve with one
+``lstat`` of its leaf instead of a walk. A leaf that is a link or a reparse
+point, a ``..`` anywhere, a volatile component (``.git``, staging, ``.inc.``,
+``.tmp``, backups), or any doubt takes the full resolution. APM drops the proofs
+under a path before it renames or deletes there (:func:`forget_proofs`, called by
+``realpath_win.release_held``). Linux (the kernel forms) and Windows (the exact forms
+in :mod:`apm_cli.utils.realpath_win`) keep no proofs: measured no faster with them.
 """
 
 from __future__ import annotations
 
 import errno
 import os
+import stat
 import sys
 import threading
 from pathlib import Path, PosixPath
@@ -27,6 +38,71 @@ _MISSING = (errno.ENOENT, errno.ENOTDIR)
 _MAX_MISSING_DEPTH = 32
 _PROC_FD = "/proc/self/fd/"
 _STOCK_RESOLVE = Path.resolve
+_PROOFS = "realpath-link-free-directories"
+_WINDOWS = sys.platform == "win32"
+# Any reparse point (symbolic link, junction, mount point) leaves the fast form.
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_memo_getter: list = []
+
+
+def _memo(name: str) -> dict | None:
+    """The command's invocation memo *name*, or ``None`` outside a command."""
+    if not _memo_getter:
+        from ..core.invocation_memo import invocation_memo
+
+        _memo_getter.append(invocation_memo)
+    return _memo_getter[0](name)
+
+
+def _leaf_is_link(info: os.stat_result) -> bool:
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    return bool(getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+_VOLATILE_MARKERS = ("staging", ".inc.", ".tmp", "backup", "migration", "refresh")
+
+
+def _components(text: str) -> list[str]:
+    return text.replace("\\", "/").split("/")
+
+
+def _volatile(text: str) -> bool:
+    """R3: APM renames and deletes under these components, so nothing there is proven."""
+    for part in _components(text.lower()):
+        if part == ".git" or any(marker in part for marker in _VOLATILE_MARKERS):
+            return True
+    return False
+
+
+def _proven_answer(text: str, proofs: dict) -> str | None:
+    """The resolved form of *text* when its directory is proven link-free, else ``None``."""
+    if ".." in _components(text):
+        return None
+    absolute = os.path.abspath(text)
+    head, name = os.path.split(absolute)
+    if not name or head not in proofs or _volatile(name):
+        return None
+    try:
+        info = os.lstat(absolute)
+    except FileNotFoundError:
+        return absolute
+    except OSError:
+        return None
+    if _leaf_is_link(info):
+        return None
+    if stat.S_ISDIR(info.st_mode):
+        proofs[absolute] = True  # an existing, non-link directory under a proven one
+    return absolute
+
+
+def proven_link_free(directory: Path) -> bool:
+    """Whether this command proved *directory* has no link on its path (see module doc)."""
+    proofs = _memo(_PROOFS)
+    text = str(directory)
+    # abspath() collapses ``..`` lexically, which a link before it would not.
+    return proofs is not None and ".." not in _components(text) and os.path.abspath(text) in proofs
+
 
 # Whether /proc names reach the objects this process opens (they would not
 # across a chroot or mount-namespace boundary) is a property of the process,
@@ -192,19 +268,63 @@ def kernel_resolves() -> bool:
 
 
 def resolve_path(path: Path) -> Path:
-    """Return ``path.resolve()``, computed in the kernel when that is exact.
+    """Return ``path.resolve()``, through an exact fast form when one applies.
 
-    Only a stock ``PosixPath`` takes the fast form: a subclass (which may
-    override ``resolve`` or ``__fspath__``) keeps its own behavior, and any
-    failure of the fast form leaves the answer (or the error) to it.
+    Only a stock ``PosixPath`` or ``WindowsPath`` takes a fast form: a subclass
+    (which may override ``resolve`` or ``__fspath__``) keeps its own behavior,
+    and any failure of a fast form leaves the answer (or the error) to it.
     """
+    stock = type(path) is PosixPath and PosixPath.resolve is _STOCK_RESOLVE
+    proofs = None if _WINDOWS or not stock or kernel_resolves() else _memo(_PROOFS)
+    text = str(path)
+    if proofs is not None:
+        answer = _proven_answer(text, proofs)
+        if answer is not None:
+            return type(path)(answer)
+    resolved = _platform_resolve(path, text)
+    if proofs is not None:
+        _record_proof(text, str(resolved), proofs)
+    return resolved
+
+
+def _record_proof(text: str, resolved: str, proofs: dict) -> None:
+    """Prove the leaf's directory when resolution kept the exact text (R1: it must exist now)."""
+    if ".." in _components(text):
+        return
+    absolute = os.path.abspath(text)
+    head = os.path.dirname(absolute)
+    if resolved != absolute or not head or head == absolute or _volatile(head):
+        return
+    try:
+        info = os.lstat(head)
+    except OSError:
+        return  # a missing directory is never proven before it exists
+    if stat.S_ISDIR(info.st_mode) and not _leaf_is_link(info):
+        proofs[head] = True
+
+
+def forget_proofs(under: object = None) -> None:
+    """Drop every proof of this command (*under* names the path APM is about to change).
+
+    APM calls this (through ``realpath_win.release_held``) before it renames,
+    deletes or recreates a tree, so a proof never outlives the directory it saw.
+    All proofs go, not only those spelled below *under*: a link or case alias
+    (``/alias/sub`` for ``/real/sub``) would escape a prefix match, and a dropped
+    proof only costs the next resolve its full walk.
+    """
+    del under
+    memo = _memo(_PROOFS)
+    if memo:
+        memo.clear()
+
+
+def _platform_resolve(path: Path, text: str) -> Path:
     if (
         _FAST
         and not _proc_state["refused"]
         and type(path) is PosixPath
         and PosixPath.resolve is _STOCK_RESOLVE
     ):
-        text = str(path)
         if text.startswith("/") and not text.startswith("//"):
             if _link_free(text):
                 return path
@@ -217,15 +337,11 @@ def resolve_path(path: Path) -> Path:
     return path.resolve()
 
 
-if sys.platform == "win32":
-    # Bound once at import: other platforms keep the function above unchanged.
+if _WINDOWS:
+    # Bound once at import (E1 F3): other platforms never load the Windows forms.
+    # Windows keeps no proofs (resolve_path), so every resolve lands here.
     from apm_cli.utils.realpath_win import resolve_windows as _resolve_windows
 
-    def resolve_path(path: Path) -> Path:
-        """Return ``path.resolve()``, through the exact Windows fast forms when they apply.
-
-        See :mod:`apm_cli.utils.realpath_win`; a subclass or anything the fast
-        forms cannot prove leaves the answer (or the error) to ``Path.resolve``.
-        """
+    def _platform_resolve(path: Path, text: str) -> Path:
         fast = _resolve_windows(path)
         return fast if fast is not None else path.resolve()

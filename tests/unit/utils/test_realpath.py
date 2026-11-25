@@ -153,6 +153,258 @@ def test_a_fifo_leaf_resolves_without_blocking(tree: Path) -> None:
     assert resolve_path(fifo) == fifo.resolve()
 
 
+# -- containment once per directory (W3d containment-once K1-K9) ------------------
+
+
+@pytest.fixture
+def k_applies():
+    """K runs where no kernel form does: refuse the kernel form for this process."""
+    realpath._reset_proof()
+    realpath._proc_state["refused"] = True
+    yield
+    realpath._reset_proof()
+
+
+@pytest.mark.parametrize("relative", [*_PLAIN, *(pytest.param(r, marks=_LINKS) for r in _LINKED)])
+@pytest.mark.usefixtures("k_applies")
+def test_a_proven_directory_answers_exactly_as_pathlib(tree: Path, relative: str) -> None:
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    path = tree / relative
+    with invocation_scope():
+        for _ in range(3):  # the first call proves, the rest take the one-lstat form
+            for probe in (tree / "dir" / "sub", tree / "dir" / "file.md", path):
+                assert resolve_path(probe) == probe.resolve(), probe
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_seeded_paths_match_realpath_inside_one_command(tree: Path) -> None:
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    rng = random.Random(5377)  # noqa: S311 - a seeded test sequence
+    with invocation_scope():
+        for _ in range(800):
+            parts = [rng.choice(_FUZZ_PARTS) for _ in range(rng.randint(1, 6))]
+            text = str(tree) + "/" + "/".join(parts)
+            assert str(resolve_path(Path(text))) == os.path.realpath(text), text
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_link_planted_by_user_code_is_seen_after_the_memo_drops(tree: Path) -> None:
+    """K1/K9: user code mid-command clears every proof (forget_invocation_memos)."""
+    from apm_cli.core.invocation_memo import forget_invocation_memos, invocation_scope
+
+    target = tree / "dir" / "sub" / "deployed.md"
+    with invocation_scope():
+        assert resolve_path(target) == target.resolve()
+        assert realpath.proven_link_free(tree / "dir" / "sub")
+        (tree / "dir" / "sub").rename(tree / "dir" / "sub-moved")
+        (tree / "dir" / "sub").symlink_to(tree / "outside", target_is_directory=True)
+        forget_invocation_memos()
+        assert not realpath.proven_link_free(tree / "dir" / "sub")
+        assert resolve_path(target) == target.resolve() == tree / "outside" / "deployed.md"
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(target, tree / "dir")
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_link_planted_before_the_command_is_never_proven(tree: Path) -> None:
+    """K2/K9: a tree from an earlier run is proven by resolution, which sees its links."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    with invocation_scope():
+        for _ in range(2):
+            assert resolve_path(tree / "dir" / "escape" / "x.md") == tree / "outside" / "x.md"
+            assert not realpath.proven_link_free(tree / "dir" / "escape")
+            with pytest.raises(PathTraversalError):
+                ensure_path_within(tree / "dir" / "escape" / "x.md", tree / "dir")
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_leaf_link_under_a_proven_directory_is_still_found(tree: Path) -> None:
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.path_security import first_symlink_component
+
+    with invocation_scope():
+        assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
+        assert realpath.proven_link_free(tree / "dir")
+        assert (
+            first_symlink_component(tree, tree / "dir" / "link_file") == tree / "dir" / "link_file"
+        )
+        assert first_symlink_component(tree, tree / "dir" / "file.md") is None
+        assert first_symlink_component(tree, tree / "dir" / "missing.md") is None
+
+
+@pytest.mark.usefixtures("k_applies")
+def test_outside_a_command_nothing_is_proven(tree: Path) -> None:
+    assert resolve_path(tree / "dir" / "file.md") == (tree / "dir" / "file.md").resolve()
+    assert not realpath.proven_link_free(tree / "dir")
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "win32" or realpath.kernel_resolves()),
+    reason="only where a fast platform form applies",
+)
+def test_a_platform_with_a_fast_form_keeps_no_proofs(tree: Path) -> None:
+    """Linux (kernel forms) and Windows (exact forms): K is not applied, nothing is proven."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    leaf = tree / "dir" / "file.md"
+    with invocation_scope():
+        for _ in range(3):
+            assert resolve_path(leaf) == leaf.resolve()
+        assert not realpath.proven_link_free(tree / "dir")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows reports the on-disk case")
+@pytest.mark.usefixtures("k_applies")
+def test_a_case_variant_leaf_resolves_to_the_disk_case_on_windows(tree: Path) -> None:
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    with invocation_scope():
+        for _ in range(2):
+            probe = tree / "dir" / "FILE.MD"
+            assert resolve_path(probe) == probe.resolve()
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_missing_directory_is_not_proven_before_it_exists(tree: Path) -> None:
+    """R1: a later link at the not-yet-existing directory is still followed and found."""
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.path_security import first_symlink_component
+
+    later = tree / "dir" / "later"
+    leaf = later / "x.md"
+    with invocation_scope():
+        assert resolve_path(leaf) == leaf.resolve()
+        assert not realpath.proven_link_free(later)
+        later.symlink_to(tree / "outside", target_is_directory=True)
+        for _ in range(2):
+            assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+            assert first_symlink_component(tree, leaf) == later
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(leaf, tree / "dir")
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_apm_replacing_a_tree_drops_its_proofs(tree: Path) -> None:
+    """R2: release_held (called before APM renames or deletes) forgets proofs below it."""
+    import shutil
+
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.realpath_win import release_held
+
+    leaf = tree / "dir" / "sub" / "x.md"
+    with invocation_scope():
+        assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
+        assert resolve_path(leaf) == leaf
+        assert realpath.proven_link_free(tree / "dir" / "sub")
+        release_held(tree / "dir" / "sub")
+        assert not realpath.proven_link_free(tree / "dir" / "sub")
+        assert not realpath.proven_link_free(tree / "dir")  # every proof goes (aliases)
+        shutil.rmtree(tree / "dir" / "sub")
+        (tree / "dir" / "sub").symlink_to(tree / "outside", target_is_directory=True)
+        assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_mutation_spelled_through_an_alias_drops_the_proof(tree: Path) -> None:
+    """``/root/link_dir/sub`` names ``/root/dir/sub``: a prefix match would keep its proof."""
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.integration import write_seam
+
+    sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
+    with invocation_scope():
+        assert resolve_path(leaf) == leaf
+        write_seam.rmtree(tree / "link_dir" / "sub")
+        sub.symlink_to(tree / "outside", target_is_directory=True)
+        _expect_link_refused(tree, leaf)
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_dotdot_spelling_is_never_proven(tree: Path) -> None:
+    """``link_dir/..`` is lexically ``root`` but resolves to ``root``'s parent's view."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    with invocation_scope():
+        assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
+        assert realpath.proven_link_free(tree / "dir")
+        assert not realpath.proven_link_free(tree / "link_dir" / ".." / "dir")
+
+
+def _expect_link_refused(tree: Path, leaf: Path) -> None:
+    """The replaced directory is a link again: answers, link scan and containment agree."""
+    from apm_cli.utils.path_security import first_symlink_component
+
+    assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+    assert first_symlink_component(tree, leaf) == tree / "dir" / "sub"
+    with pytest.raises(PathTraversalError):
+        ensure_path_within(leaf, tree / "dir")
+
+
+def _replace_with_rmtree(sub: Path, target: Path) -> None:
+    from apm_cli.integration import write_seam
+
+    write_seam.rmtree(sub)
+    sub.symlink_to(target, target_is_directory=True)
+
+
+def _replace_with_rename(sub: Path, target: Path) -> None:
+    from apm_cli.integration import write_seam
+
+    write_seam.rename(sub, sub.with_name("moved"))
+    sub.symlink_to(target, target_is_directory=True)
+
+
+def _replace_with_copied_link(sub: Path, target: Path) -> None:
+    from apm_cli.utils.file_ops import robust_copy_entry
+
+    os.rmdir(sub)  # unreleased: only the link creator can drop the proof
+    staged = sub.with_name("staged-link")
+    staged.symlink_to(target, target_is_directory=True)
+    robust_copy_entry(staged, sub)
+
+
+@_LINKS
+@pytest.mark.parametrize(
+    "replace", [_replace_with_rmtree, _replace_with_rename, _replace_with_copied_link]
+)
+@pytest.mark.usefixtures("k_applies")
+def test_a_proven_directory_apm_replaces_with_a_link_is_refused(tree: Path, replace) -> None:
+    """R4: write_seam and every APM link creator drop proofs at or below the path."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
+    with invocation_scope():
+        assert resolve_path(leaf) == leaf
+        assert realpath.proven_link_free(sub)
+        replace(sub, tree / "outside")
+        assert not realpath.proven_link_free(sub)
+        _expect_link_refused(tree, leaf)
+
+
+@pytest.mark.parametrize("volatile", [".git", "pkg.inc.0a1b2c3d", "x.tmp", "staging"])
+@pytest.mark.usefixtures("k_applies")
+def test_nothing_under_a_volatile_component_is_proven(tree: Path, volatile: str) -> None:
+    """R3: APM renames and deletes there."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    directory = tree / "dir" / volatile
+    directory.mkdir()
+    with invocation_scope():
+        for _ in range(2):
+            assert resolve_path(directory / "x.md") == (directory / "x.md").resolve()
+        assert not realpath.proven_link_free(directory)
+
+
 @pytest.fixture
 def fresh_proof():
     realpath._reset_proof()

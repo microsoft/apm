@@ -509,8 +509,12 @@ def release_held(under: object = None) -> None:
 
     Call before APM renames or deletes *under*. A registered package that
     contains *under* or lies below it is unregistered too, so no thread can
-    re-hold that tree before the operation runs.
+    re-hold that tree before the operation runs. On every platform it first drops
+    this command's link-free proofs there (:func:`realpath.forget_proofs`).
     """
+    from apm_cli.utils.realpath import forget_proofs
+
+    forget_proofs(under)
     if not ENABLED or not (_held or _registered or _root):
         return
     base = None

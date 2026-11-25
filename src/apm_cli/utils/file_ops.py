@@ -430,6 +430,7 @@ def robust_copytree(
 def robust_copy_entry(src: Path, dst: Path) -> None:
     """Copy one directory entry without following links; a link is copied as a link."""
     if src.is_symlink():
+        release_held(dst)
         os.symlink(os.readlink(src), dst, target_is_directory=src.is_dir())
     elif src.is_dir():
         robust_copytree(src, dst, symlinks=True)

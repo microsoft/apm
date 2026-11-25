@@ -67,6 +67,27 @@ def _expect_clean(report) -> None:
         ),
         pytest.param(
             RELEASE,
+            "src/apm_cli/integration/write_seam.py",
+            "    release_held(path)\n    shutil.rmtree(path, **kwargs)\n",
+            "    shutil.rmtree(path, **kwargs)\n",
+            id="write-seam-rmtree",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/install/journal_modes.py",
+            "            release_held(target)\n",
+            "",
+            id="unreleased-os-symlink",
+        ),
+        pytest.param(
+            RELEASE,
+            "src/apm_cli/commands/prune.py",
+            None,
+            "\n\ndef _link(a, b):\n    a.symlink_to(b)\n",
+            id="unreleased-symlink-to",
+        ),
+        pytest.param(
+            RELEASE,
             "src/apm_cli/utils/file_ops.py",
             "            os.rmdir(path)  # a directory symlink or junction on Windows\n",
             "            os.unlink(path)\n",
