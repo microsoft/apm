@@ -13,12 +13,29 @@ import time
 
 STATS: dict[str, float] = {}
 COUNTS: dict[str, int] = {}
-_depth = [0]
+import threading as _threading
+
+_local = _threading.local()
+
+
+class _Depth:
+    def __getitem__(self, i):
+        return getattr(_local, "d", 0)
+
+    def __setitem__(self, i, v):
+        _local.d = v
+
+
+_depth = _Depth()
+
+
+_lock = _threading.Lock()
 
 
 def _add(name: str, dt: float) -> None:
-    STATS[name] = STATS.get(name, 0.0) + dt
-    COUNTS[name] = COUNTS.get(name, 0) + 1
+    with _lock:
+        STATS[name] = STATS.get(name, 0.0) + dt
+        COUNTS[name] = COUNTS.get(name, 0) + 1
 
 
 def _timed(name, fn):
