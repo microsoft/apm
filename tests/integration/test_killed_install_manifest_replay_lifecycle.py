@@ -68,6 +68,10 @@ def _kill_on_engine(world: FaultWorld, fault: str, *args: str, **extra: str) -> 
     assert result.returncode == _KILLED_EXIT, (command, result.stdout, result.stderr)
 
 
+def _records(world: FaultWorld) -> list[Path]:
+    return sorted((world.isolated.config_root / "install-snapshots").glob("manifest-*"))
+
+
 def _declared(world: FaultWorld) -> str:
     return (world.project / "apm.yml").read_text(encoding="utf-8")
 
@@ -82,6 +86,7 @@ def _assert_restored(world: FaultWorld, manifest: bytes, lock: bytes | None, del
     assert (world.project / "apm.yml").read_bytes() == manifest
     assert world.lockfile_bytes() == lock
     assert not (world.project / _DELTA_SKILL).exists(), "the killed install's deploy was kept"
+    assert not _records(world), "the replayed manifest record was kept"
     audit = world.apm("audit", "--ci", "--no-policy")
     assert audit.returncode == 0, evidence(audit)
     world.assert_user_file_intact()
@@ -101,6 +106,7 @@ def test_a_kill_at_the_lock_commit_point_restores_apm_yml_on_the_next_command(
     _assert_restored(world, manifest, lock, delta)
     added = world.install(delta)
     assert added.returncode == 0, evidence(added)
+    assert not _records(world), "a committed install kept its manifest record"
     world.assert_converges()
     assert (world.project / _DELTA_SKILL).is_file()
 
@@ -135,3 +141,86 @@ def test_a_kill_after_the_lock_commit_keeps_the_new_package(
     assert delta in _declared(world)
     assert world.lockfile_bytes() == committed
     assert (world.project / _DELTA_SKILL).is_file()
+    assert not _records(world)
+
+
+def test_an_apm_yml_edited_after_the_kill_is_kept_and_named(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Replay undoes only the bytes the killed install wrote; a user's later edit stays."""
+    world = build_world(tmp_path, apm_binary_path)
+    delta = world.write_package("delta")
+    _kill_at_commit(world, delta)
+    edited = (world.project / "apm.yml").read_bytes() + b"# hand edit\n"
+    (world.project / "apm.yml").write_bytes(edited)
+
+    result = world.install("--frozen")
+    output = _text(result)
+    assert f"An interrupted 'apm install {delta}' never locked" in output, evidence(result)
+    assert "Run 'apm install' to lock what apm.yml declares" in output, evidence(result)
+    assert (world.project / "apm.yml").read_bytes() == edited
+    again = world.install("--frozen")
+    assert "An interrupted" not in _text(again), evidence(again)
+
+
+def test_a_killed_install_that_created_apm_yml_removes_it_on_the_next_command(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = build_world(tmp_path, apm_binary_path, installed=False)
+    (world.project / "apm.yml").unlink()
+    delta = world.write_package("delta")
+    _kill_at_commit(world, "--target", "claude", delta)
+    assert (world.project / "apm.yml").is_file()
+
+    with expect_output_violation("I8", reason="no apm.yml: the command exits before install"):
+        result = world.install("--frozen")
+    output = _text(result)
+    assert result.returncode != 0, evidence(result)
+    assert f"Run 'apm install {delta}' to add it again" in output, evidence(result)
+    assert "No apm.yml found" in output, evidence(result)
+    assert _OUT_OF_SYNC not in output, evidence(result)
+    assert not (world.project / "apm.yml").exists()
+
+
+def test_concurrent_commands_after_the_kill_restore_apm_yml_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = build_world(tmp_path, apm_binary_path)
+    manifest, lock = (world.project / "apm.yml").read_bytes(), world.lockfile_bytes()
+    delta = world.write_package("delta")
+    _kill_at_commit(world, delta)
+
+    command = (str(apm_binary_path), "install", "--no-policy", "--frozen")
+    procs = [
+        subprocess.Popen(
+            command,
+            cwd=world.project,
+            env=world.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    outputs = [" ".join(p.communicate(timeout=300)[0].split()) for p in procs]
+    assert [p.returncode for p in procs] == [0, 0], outputs
+    assert sum("to add it again" in out for out in outputs) == 1, outputs
+    assert (world.project / "apm.yml").read_bytes() == manifest
+    assert world.lockfile_bytes() == lock
+
+
+def test_a_killed_uninstall_keeps_apm_yml_and_lock_paired(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The other direction: uninstall flushes its lockfile before its commit point."""
+    world = build_world(tmp_path, apm_binary_path)
+    with expect_output_violation("I8", reason="the process is killed at its commit point"):
+        killed = world.runner.run(
+            ("uninstall", "./packages/alpha"),
+            cwd=world.project,
+            env=dict(world.env, APM_TEST_LOCK_COMMIT="kill"),
+        )
+    assert killed.returncode == _KILLED_EXIT, evidence(killed)
+    frozen = world.install("--frozen")
+    assert frozen.returncode == 0, evidence(frozen)
+    assert _OUT_OF_SYNC not in _text(frozen), evidence(frozen)

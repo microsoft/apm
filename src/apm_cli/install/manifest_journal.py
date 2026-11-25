@@ -53,10 +53,12 @@ def _write(path: Path, record: dict[str, Any]) -> None:
     atomic_write_text(path, json.dumps(record, sort_keys=True), new_file_mode=0o600)
 
 
+def _packages(packages: list[str]) -> str:
+    return " ".join(shlex.quote(p) for p in packages)
+
+
 def _fix(packages: list[str]) -> str:
-    return (
-        "apm install " + " ".join(shlex.quote(p) for p in packages) if packages else "apm install"
-    )
+    return f"apm install {_packages(packages)}".rstrip()
 
 
 class ManifestJournal:
@@ -141,6 +143,7 @@ def replay_abandoned_manifest(workspace: Path, logger: Any) -> None:
     Call under the lifecycle lock, before the command reads the manifest.
     Raises ``InstallFailureAlreadyRendered`` when the record cannot be read.
     """
+    from apm_cli.core.remediation import INTERRUPTED_ADD_KEPT, INTERRUPTED_ADD_RETRY
     from apm_cli.install.errors import InstallFailureAlreadyRendered
     from apm_cli.install.transaction import _committed_lockfile, _restore_manifest_from_snapshot
 
@@ -176,7 +179,7 @@ def replay_abandoned_manifest(workspace: Path, logger: Any) -> None:
         if logger is not None:
             logger.warning(
                 f"An interrupted '{fix}' never locked what it added to {manifest.name}, which "
-                "changed since, so it was kept as is. Run 'apm install' to lock what it declares."
+                f"changed since, so it was kept as is. {INTERRUPTED_ADD_KEPT.sentence()}"
             )
         return
     if prior is None:
@@ -188,5 +191,5 @@ def replay_abandoned_manifest(workspace: Path, logger: Any) -> None:
         logger.warning(
             f"An interrupted '{fix}' never locked what it added to {manifest.name}; "
             f"{manifest.name} was restored to its state before that install. "
-            f"Run '{fix}' to add it again."
+            f"{INTERRUPTED_ADD_RETRY.bind(packages=_packages(record['packages'])).sentence()}"
         )

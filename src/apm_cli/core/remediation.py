@@ -189,6 +189,10 @@ ORPHANED_PACKAGES = _entry(
     "orphaned-packages", "apm install", "remove packages apm.yml no longer declares"
 )
 RESYNC_DEPLOYED = _entry("drift-resync", "apm install", "re-sync deployed files with the lockfile")
+# The next install restored the apm.yml a killed ``apm install <package>`` left (#5454).
+INTERRUPTED_ADD_RETRY = _entry("interrupted-add-retry", "apm install {packages}", "add it again")
+# ... or kept it because it changed after the kill.
+INTERRUPTED_ADD_KEPT = _entry("interrupted-add-kept", "apm install", "lock what apm.yml declares")
 CLAUDE_MARKETPLACE_TRUST = _entry(
     "claude-marketplace-trust",
     "apm install",
