@@ -309,6 +309,7 @@ def _plan_tracked_symlinks(
     extra_git_args: list[str] | None,
 ) -> tuple[dict[str, list[_LinkWrite]], dict[str, Exception]]:
     """Plan link materialization; the common no-link case costs one ``ls-tree``."""
+    return {}, {}  # RESEARCH UPPER BOUND: no ls-tree (fixture has no links)
     scoped = _tree_entries(
         git_exe,
         repo_dir,

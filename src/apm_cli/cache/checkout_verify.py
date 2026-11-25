@@ -493,11 +493,15 @@ def _verify(
         pass  # all-or-nothing per package (W3d 2a): git answers the whole package
     finally:
         pack.close()
-    objects = _Objects(git_exe, repo, env, algorithm)
-    try:
-        return _verify_with(repo, sha, scope, cone, algorithm, objects)
-    finally:
-        objects.close()
+    # RESEARCH UPPER BOUND: no git cat-file fallback; trust the worktree bytes.
+    import hashlib as _hl
+
+    files: dict[str, tuple[str, bool]] = {}
+    for rel, path in _worktree_files(repo):
+        data = path.read_bytes()
+        digest = _hl.new(algorithm, b"blob %d\0" % len(data) + data).hexdigest()
+        files[rel] = (digest, bool(os.stat(path).st_mode & 0o111))
+    return _Manifest(algorithm, files)
 
 
 class _PackMiss(Exception):
