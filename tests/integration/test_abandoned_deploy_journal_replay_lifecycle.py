@@ -571,6 +571,42 @@ def test_a_write_killed_before_its_seal_is_restored(tmp_path: Path, apm_binary_p
     assert _stores(chain) == [], _evidence(result)
 
 
+def test_a_staging_file_left_by_a_killed_atomic_write_is_restored(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5395: killed between staging a new skill's file and its rename, the
+    staging file beside APM's unsealed write is APM's: the skill is rolled back,
+    nothing is reported as a user change and no snapshot store is retained."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    before = _tree_state(chain.project)
+    _write_package(chain, revision="v2", description="agent helper v2", extra=True)
+    new_skill = chain.project / "pkg" / ".apm" / "skills" / "pkg-new-skill"
+    new_skill.mkdir(parents=True)
+    (new_skill / "SKILL.md").write_text(
+        "---\nname: pkg-new-skill\ndescription: new skill\n---\n# new skill\n",
+        encoding="utf-8",
+    )
+    _kill_mid_refusal(
+        chain, "stage+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_PATH="pkg-new-skill/SKILL.md"
+    )
+    _abandoned(chain)
+    staged = [p for p in chain.project.rglob("apm-atomic-*") if "pkg-new-skill" in p.parts]
+    assert staged, "the kill left no staging file in the new skill"
+    shutil.rmtree(new_skill)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert "Kept" not in _text(result), _evidence(result)
+    assert not any(p.exists() for p in staged), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert chain.run("audit", "--ci").returncode == 0
+
+
 def test_a_shared_config_without_its_baseline_is_kept_and_reported(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
