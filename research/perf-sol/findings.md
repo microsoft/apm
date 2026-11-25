@@ -146,3 +146,13 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 ## F18 (19:55) Single-pass integrate ceiling: KILL -- files/single-pass.md
 - Upper bound A 306874b7 (bytes+hash memo): L 1.002, W 0.999 t50 [45461174996, 45461225856]; B d345643 (+walk, verified-read, journal fd): L 0.993, W 0.987 [45461604679, 45461641952]. Kill rule < 15% L.
 - Engagement proven by profile 45462440650: reads/walks are already one per path; read leaves ~6% L total.
+
+## F20 (01:30, 25 Nov) Records sub-block split: no faithful car -> v0.40 headline
+- Separate deletions (W/L): journal 0.990/0.991, entry_state 0.993/1.005, ledger.record 0.999/0.977, deploy_store put 0.981/0.971 [45512251179.. 45512535211].
+- Combined re-run tonight: W 0.968 [45514773300], L 0.953 [45514804328] (yesterday's 0.905 overstated). Mostly downstream knock-on; batching cannot remove it.
+## F21 (01:30) Locked-warm: the diff-apply fast path APPLIES (667 files) and costs more than the full pipeline
+- Deleting it (b7275b8d): locked-warm W 0.885 [45513481474], L 0.919 [45513512058]; warm control 1.009/0.993.
+- Trace 45516588105 (L+W): locked-warm "applied a verified diff (667 files)"; warm "full run (no lockfile)".
+## F22 (01:30) Warm cache-hit remainder on main 1e4a208e + #5410 (ec258a86 -> stub 34bd5f70)
+- L warm 0.978 / warm-auth 0.987; spawns 64 -> 15 / 67 -> 16 [45515065061]. The remainder is the ls-tree link plan (git_sparse._plan_tracked_symlinks). W pending (45515035586 schannel, 45515126517 openssl).
+- Hooks/MCP fully enabled (tree-50-exec): hooks 0.975, MCP 0.992 W. sklinks ~0.
