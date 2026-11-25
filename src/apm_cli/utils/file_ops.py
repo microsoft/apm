@@ -363,6 +363,28 @@ def _reflink_copy_file(src: str, dst: str, *, follow_symlinks: bool = True) -> s
     return shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
 
 
+def _release_before_first_link(dst: str, ignore: Any) -> Any:
+    """An ``ignore`` hook that releases *dst* once, before the walk creates its first link.
+
+    ``copytree(symlinks=True)`` recreates links. A link-free proof under *dst*
+    must not outlive one (R4), so the first directory listing that holds a
+    link drops the proofs there, before copytree writes that entry. A tree
+    without links pays one ``scandir`` per directory and releases nothing.
+    """
+    released = False
+
+    def walk(directory: str, names: list[str]) -> Any:
+        nonlocal released
+        if not released:
+            with os.scandir(directory) as entries:
+                if any(entry.is_symlink() for entry in entries):
+                    release_held(dst)
+                    released = True
+        return ignore(directory, names) if ignore is not None else set()
+
+    return walk
+
+
 def robust_copytree(
     src: Path | str,
     dst: Path | str,
@@ -400,13 +422,14 @@ def robust_copytree(
     Path to the destination directory.
     """
     src_s, dst_s = str(src), str(dst)
+    walk_ignore = _release_before_first_link(dst_s, ignore) if symlinks else ignore
 
     def _do_copytree() -> str:
         return shutil.copytree(
             src_s,
             dst_s,
             symlinks=symlinks,
-            ignore=ignore,
+            ignore=walk_ignore,
             copy_function=_reflink_copy_file,
             dirs_exist_ok=dirs_exist_ok,
         )

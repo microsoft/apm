@@ -33,6 +33,15 @@ Two closed-world rules guard that decision:
   those helpers release first. ``unlink``/``os.remove`` are not counted: they
   remove files or links, and a hold never covers a reparse point.
 
+* ``transport-platform-link-copy-release``: a tree copy that recreates links --
+  ``copytree(..., symlinks=<anything but False>)`` through ``shutil`` or a bare
+  ``from shutil import copytree`` -- is a link creator too. In
+  ``_LINK_COPY_INVENTORY`` (``_INVENTORY`` plus the modules that copy package
+  trees with their links) it must be preceded by ``release_held(...)`` in its
+  enclosing functions, or be in ``_LINK_COPY_ALLOWLIST`` with a reviewed reason.
+  ``file_ops.robust_copytree`` releases its destination before the first link
+  it creates, so routing through it is not a raw link copy.
+
 The inventory is frozen: a NEW module that renames or deletes a directory under
 ``apm_modules`` is out of scope of static detection and joins ``_INVENTORY`` by
 review. An allowlist entry that no longer mutates a directory is stale and fails.
@@ -58,6 +67,7 @@ from scripts.architecture_linter.models import FileFacts, Rule, Violation
 
 REGISTRATION_RULE_ID = "transport-platform-held-root-registration"
 RELEASE_RULE_ID = "transport-platform-held-directory-release"
+LINK_COPY_RULE_ID = "transport-platform-link-copy-release"
 
 _OWNER = "src/apm_cli/utils/realpath_win.py"
 _REGISTRAR = "src/apm_cli/deps/apm_resolver.py"
@@ -106,6 +116,52 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
     ),
     ("src/apm_cli/utils/file_ops.py", "robust_copytree._cleanup_partial"): (
         "runs only as _retry_on_lock's before_retry, after its release_held()"
+    ),
+}
+
+_LINK_COPY_INVENTORY = tuple(
+    sorted(
+        {
+            *_INVENTORY,
+            "src/apm_cli/deps/reachability.py",
+            "src/apm_cli/install/diff_apply.py",
+            "src/apm_cli/install/drift.py",
+            "src/apm_cli/install/legacy_plugin_compat.py",
+        }
+    )
+)
+
+_PRIVATE_COPY_REASON = "copies into a fresh private directory path resolution never proved"
+_LINK_COPY_ALLOWLIST: dict[tuple[str, str], str] = {
+    ("src/apm_cli/deps/reachability.py", "_normalized_local_plugin"): (
+        "copies into a fresh mkdtemp staging directory, never proved or held"
+    ),
+    ("src/apm_cli/install/deploy_snapshot.py", "DeployJournal._restore_unit"): (
+        "restores into a path robust_rmtree just released, so no proof there survives"
+    ),
+    ("src/apm_cli/install/deploy_snapshot.py", "DeployJournal.record"): (
+        "copies into the APM-private journal store, which no deploy path resolves"
+    ),
+    ("src/apm_cli/install/diff_apply.py", "_commit"): (
+        "copies into a staging name, a volatile path proofs never cover"
+    ),
+    ("src/apm_cli/install/drift.py", "_copy_install_tree"): (
+        "copies into a fresh mkdtemp replay tree, never proved or held"
+    ),
+    (
+        "src/apm_cli/install/legacy_plugin_compat.py",
+        "_normalize_legacy_plugin_transactionally",
+    ): _PRIVATE_COPY_REASON,
+    (
+        "src/apm_cli/install/legacy_plugin_compat.py",
+        "_preflight_legacy_plugin_normalization",
+    ): _PRIVATE_COPY_REASON,
+    ("src/apm_cli/install/legacy_plugin_compat.py", "matches_fresh_legacy_plugin_hash"): (
+        _PRIVATE_COPY_REASON
+    ),
+    ("src/apm_cli/utils/file_ops.py", "robust_copytree._do_copytree"): (
+        "its ignore hook (_release_before_first_link) releases the destination before the "
+        "walk creates the first link"
     ),
 }
 
@@ -169,6 +225,37 @@ def _is_raw_mutation(
     if isinstance(receiver, ast.Name) and receiver.id in shutil_names:
         return func.attr in _SHUTIL_MUTATIONS
     return _is_path_mutation(call, func)
+
+
+def _copies_links(
+    call: ast.Call, copytree_names: frozenset[str], shutil_names: frozenset[str]
+) -> bool:
+    """``copytree(..., symlinks=X)`` with X not the literal ``False``: it recreates links."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        named = func.id in copytree_names
+    elif isinstance(func, ast.Attribute) and func.attr == "copytree":
+        named = isinstance(func.value, ast.Name) and func.value.id in shutil_names
+    else:
+        named = False
+    if not named:
+        return False
+    for keyword in call.keywords:
+        if keyword.arg == "symlinks":
+            value = keyword.value
+            return not (isinstance(value, ast.Constant) and value.value is False)
+    return len(call.args) >= 3
+
+
+def _copytree_names(index: TreeIndex) -> frozenset[str]:
+    """Names bound to ``shutil.copytree`` by ``from shutil import copytree [as x]``."""
+    return frozenset(
+        alias.asname or alias.name
+        for node in index.nodes
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "shutil"
+        for alias in node.names
+        if alias.name == "copytree"
+    )
 
 
 def _enclosing_functions(index: TreeIndex, node: ast.AST) -> list[ast.AST]:
@@ -246,6 +333,65 @@ def _check_release(provider: FactsProvider) -> tuple[Violation, ...]:
             f"stale _ALLOWLIST entry: {name} no longer renames or deletes a directory",
         )
         for path, name in sorted(_ALLOWLIST)
+        if (path, name) not in used and path in inventory
+    )
+    return tuple(findings)
+
+
+_LINK_COPY_MESSAGE = (
+    "{name} copies a tree with its links: link-free proofs under the destination must not "
+    "outlive them. Call release_held(<destination>) before it, route it through "
+    "file_ops.robust_copytree, or add a reviewed _LINK_COPY_ALLOWLIST entry"
+)
+
+
+def _module_link_copy_findings(
+    path: str, index: TreeIndex, used: set[tuple[str, str]]
+) -> list[Violation]:
+    findings: list[Violation] = []
+    _os_names, shutil_names, _bare = _module_aliases(index)
+    copytree_names = _copytree_names(index)
+    for node in index.nodes:
+        if not isinstance(node, ast.Call) or not _copies_links(node, copytree_names, shutil_names):
+            continue
+        chain = _enclosing_functions(index, node)
+        name = index.function_qualname(chain[0]) if chain else "module-level code"
+        if (path, name) in _LINK_COPY_ALLOWLIST:
+            used.add((path, name))
+            continue
+        if any(_releases_before(index, function, node) for function in chain):
+            continue
+        findings.append(
+            violation(
+                LINK_COPY_RULE_ID,
+                path,
+                _LINK_COPY_MESSAGE.format(name=name),
+                line=node.lineno,
+                column=node.col_offset + 1,
+            )
+        )
+    return findings
+
+
+def _check_link_copy(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every tree copy that recreates links releases proofs under its destination first."""
+    inventory = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    used: set[tuple[str, str]] = set()
+    for path in _LINK_COPY_INVENTORY:
+        facts, errors = _load(provider, inventory, LINK_COPY_RULE_ID, path, parse=True)
+        findings.extend(errors)
+        index = provider.tree_index(path) if facts is not None else None
+        if index is None or index.root is None:
+            continue
+        findings.extend(_module_link_copy_findings(path, index, used))
+    findings.extend(
+        violation(
+            LINK_COPY_RULE_ID,
+            path,
+            f"stale _LINK_COPY_ALLOWLIST entry: {name} no longer copies a tree with its links",
+        )
+        for path, name in sorted(_LINK_COPY_ALLOWLIST)
         if (path, name) not in used and path in inventory
     )
     return tuple(findings)
@@ -331,5 +477,12 @@ RULES = (
         guard_ids=(RELEASE_RULE_ID,),
         description="APM releases Windows held directories before it renames or deletes them.",
         check=_check_release,
+    ),
+    Rule(
+        id=LINK_COPY_RULE_ID,
+        group=GROUP,
+        guard_ids=(LINK_COPY_RULE_ID,),
+        description="A tree copy that recreates links releases proofs under its destination.",
+        check=_check_link_copy,
     ),
 )
