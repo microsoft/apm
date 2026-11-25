@@ -455,14 +455,19 @@ def test_an_oversized_or_encoded_caps_answer_falls_back(monkeypatch, chunks, hea
         )
 
 
-def test_a_lone_carriage_return_in_a_cone_attributes_record_refuses() -> None:
-    """git reads ``* diff\\reol=crlf`` as one record with eol=crlf; splitlines() would not."""
-    data = b"* diff\reol=crlf\n"
+@pytest.mark.parametrize(
+    "data",
+    [b"* diff\reol=crlf\n", "*\u00a0eol=crlf\n".encode(), b"* diff\x0beol=crlf\n"],
+    ids=["lone-cr", "nbsp", "vertical-tab"],
+)
+def test_whitespace_git_does_not_split_on_refuses_the_cone(data: bytes) -> None:
+    """git splits records only on LF and fields on " \\t\\r\\n"; Python splits on more."""
     oid = "a" * 40
 
     assert not fetch._cone_attributes_ok(
         {oid: ("blob", data)}, "b" * 40, [(".gitattributes", oid, False)]
     )
+    assert fetch._attributes_source_ok(b"*.md diff\r\n*.c\tdiff\n")
 
 
 def test_an_executable_cone_gitattributes_keeps_its_mode() -> None:

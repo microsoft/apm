@@ -1271,8 +1271,9 @@ def _attributes_source_ok(data: bytes) -> bool:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return False
-    if "\r" in text.replace("\r\n", "\n"):
-        # git splits records only on LF and reads a lone CR as whitespace.
+    if any(c.isspace() and c not in " \t\n" for c in text.replace("\r\n", "\n")):
+        # git splits records only on LF and fields only on " \t\r\n"; Python's
+        # splitlines()/split() also break on CR, VT, FF, NEL, NBSP and the like.
         return False
     for raw in text.splitlines():
         line = raw.strip()
