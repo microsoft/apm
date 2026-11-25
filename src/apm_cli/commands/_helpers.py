@@ -587,8 +587,6 @@ def resolve_cli_packages_for_project_root(
     project_root: Path,
 ) -> tuple[str, ...]:
     """Resolve relative CLI package paths from invoking_dir relative to project_root (#4545)."""
-    from ..models.dependency.identity import normalise_local_path_separators
-
     invoking, root = invoking_dir.resolve(), project_root.resolve()
     if invoking == root:
         return packages
@@ -599,22 +597,37 @@ def resolve_cli_packages_for_project_root(
         if not pkg.startswith(("./", "../", ".\\", "..\\")):
             resolved.append(pkg)
             continue
-        # Resolve only the parent, so an intermediate symlink followed by ``..``
-        # lands where the filesystem does; the final component is kept as
-        # written, so install still refuses a selected symlink.
-        joined = os.path.join(invoking, normalise_local_path_separators(pkg).rstrip("/"))
-        parent, name = os.path.split(joined)
-        if name in ("", ".", ".."):
-            target = os.path.realpath(joined)
-        else:
-            target = os.path.join(os.path.realpath(parent), name)
-        rel = os.path.relpath(target, root).replace("\\", "/")
-        if rel == ".":
-            rel = "./"
-        elif rel != ".." and not rel.startswith(("./", "../")):
-            rel = f"./{rel}"
-        resolved.append(rel)
+        resolved.append(_rebase_relative_package(pkg, invoking, root))
     return tuple(resolved)
+
+
+def _rebase_relative_package(pkg: str, invoking: Path, root: Path) -> str:
+    """Rebase an explicit relative *pkg* from *invoking* onto *root* (#4545).
+
+    Only the parent is resolved, so an intermediate symlink followed by
+    ``..`` lands where the filesystem does; the final component is kept as
+    written, so install still refuses a selected symlink. ``.`` components
+    are dropped first, so ``./link/.`` cannot hide the link either. Across
+    Windows drives no relative path exists, so the absolute path is kept.
+    """
+    from ..models.dependency.identity import normalise_local_path_separators
+
+    parts = [
+        part for part in normalise_local_path_separators(pkg).split("/") if part not in ("", ".")
+    ]
+    if not parts or parts[-1] == "..":
+        target = os.path.realpath(os.path.join(invoking, *parts))
+    else:
+        target = os.path.join(os.path.realpath(os.path.join(invoking, *parts[:-1])), parts[-1])
+    try:
+        rel = os.path.relpath(target, root).replace("\\", "/")
+    except ValueError:
+        return Path(target).as_posix()
+    if rel == ".":
+        return "./"
+    if rel != ".." and not rel.startswith(("./", "../")):
+        return f"./{rel}"
+    return rel
 
 
 @contextlib.contextmanager
