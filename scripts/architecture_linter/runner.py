@@ -583,7 +583,7 @@ def _with_import_error(result: GroupResult, entry: _CatalogEntry) -> GroupResult
     )
 
 
-def _run_partial(
+def _run(
     root: Path,
     *,
     group_names: Collection[str] | None = None,
@@ -864,7 +864,7 @@ def merge_partial_runs(
     )
 
 
-def _run(
+def _run_report(
     root: Path,
     *,
     selected_rule_ids: Collection[str] | None = None,
@@ -882,7 +882,7 @@ def _run(
     `source_overrides` is an in-memory, Python-only mutation-test seam.  It is
     routed through the same source cache and has no command-line equivalent.
     """
-    partial = _run_partial(
+    partial = _run(
         root,
         selected_rule_ids=selected_rule_ids,
         source_overrides=source_overrides,
@@ -900,12 +900,12 @@ def run_groups(root: Path, group_names: Collection[str]) -> PartialRun:
     unknown = sorted(set(group_names) - set(GROUP_MODULE_NAMES))
     if unknown:
         raise ValueError("unknown rule groups: " + ", ".join(unknown))
-    return _run_partial(root, group_names=group_names)
+    return _run(root, group_names=group_names)
 
 
 def run(root: Path) -> RunReport:
     """Run the complete six-group catalog against `root`."""
-    return _run(root)
+    return _run_report(root)
 
 
 def run_selected_rules(
@@ -924,7 +924,7 @@ def run_selected_rules(
     full lint. Inside `linter_session()` consecutive calls share the
     session-scoped inventory and parse cache.
     """
-    return _run(
+    return _run_report(
         root,
         selected_rule_ids=rule_ids,
         source_overrides=source_overrides,

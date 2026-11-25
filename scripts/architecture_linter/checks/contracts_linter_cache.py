@@ -53,12 +53,12 @@ def _check_content_key(provider: FactsProvider) -> tuple[Violation, ...]:
     runner, failures = checked_facts(provider, _RUNNER, CONTENT_KEY_RULE_ID, require_python=True)
     findings.extend(failures)
     if not failures:
-        if not _calls_in(runner.calls, "_run_partial", "current_session"):
+        if not _calls_in(runner.calls, "_run", "current_session"):
             findings.append(
                 violation(
                     CONTENT_KEY_RULE_ID,
                     _RUNNER,
-                    "_run_partial must obtain its LinterSession from current_session()",
+                    "_run must obtain its LinterSession from current_session()",
                 )
             )
         for call in runner.calls:

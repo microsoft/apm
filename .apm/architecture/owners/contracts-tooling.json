@@ -198,7 +198,7 @@
     {
       "id": "architecture-linter-performance",
       "decision": "Session-scoped reuse of the architecture linter inventory, owner registry and content-keyed file facts; findings identical with and without reuse",
-      "owner": "scripts/architecture_linter/session_cache.py (LinterSession) consumed by facts.py FactsProvider.file_facts and runner.py _run_partial",
+      "owner": "scripts/architecture_linter/session_cache.py (LinterSession) consumed by facts.py FactsProvider.file_facts and runner.py _run",
       "selectors": [
         "scripts/architecture_linter/facts.py",
         "scripts/architecture_linter/runner.py",
