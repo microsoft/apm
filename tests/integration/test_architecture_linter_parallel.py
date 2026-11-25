@@ -214,6 +214,45 @@ def test_driver_fails_closed_and_names_the_broken_bucket(
     assert _FAILURE_LINE in out
 
 
+def test_a_worker_that_cannot_start_fails_the_run_and_reaps_started_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    buckets = parallel.plan_buckets(2)
+    pid_file = tmp_path / "first.pid"
+    sleeper = (
+        "import os, pathlib, sys, time;"
+        " pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(120)"
+    )
+
+    def scripted_argv(root: Path, bucket: tuple[str, ...], report_path: Path) -> list[str]:
+        if tuple(bucket) == buckets[0]:
+            return [sys.executable, "-c", sleeper, str(pid_file)]
+        return [str(tmp_path / "no-such-interpreter")]
+
+    started_sleepers: list[parallel._Worker] = []
+    real_start = parallel._start
+
+    def recording_start(*args: object) -> parallel._Worker:
+        worker = real_start(*args)
+        started_sleepers.append(worker)
+        return worker
+
+    monkeypatch.setattr(parallel, "worker_argv", scripted_argv)
+    monkeypatch.setattr(parallel, "_start", recording_start)
+
+    exit_code = cli.main(["--root", str(tmp_path), "--workers", "2"])
+
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert out.splitlines() == [
+        f"parallel:{'+'.join(buckets[1])}:1:1: {_FAILURE_LINE} could not start: FileNotFoundError"
+    ]
+    assert len(started_sleepers) == 1
+    assert started_sleepers[0].process.returncode is not None
+
+
 def test_startup_failure_renders_identically_through_real_workers(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

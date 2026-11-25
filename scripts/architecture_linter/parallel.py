@@ -355,11 +355,29 @@ def _wait_all(workers: Sequence[_Worker], timeout: float) -> set[str]:
             worker.process.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             timed_out.add(worker.label)
+    return timed_out
+
+
+def _reap(workers: Sequence[_Worker]) -> None:
+    """Kill and wait for every worker still running; never leave orphans."""
     for worker in workers:
         if worker.process.poll() is None:
             worker.process.kill()
-            worker.process.wait()
-    return timed_out
+    for worker in workers:
+        worker.process.wait()
+
+
+def _start(root: Path, bucket: tuple[str, ...], scratch_dir: Path, index: int) -> _Worker:
+    report_path = scratch_dir / f"bucket-{index}.json"
+    stderr_path = scratch_dir / f"bucket-{index}.stderr"
+    with stderr_path.open("wb") as stderr_handle:
+        process = subprocess.Popen(  # noqa: S603 - argv is this CLI plus fixed flags
+            worker_argv(root, bucket, report_path),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_handle,
+        )
+    return _Worker(bucket, report_path, stderr_path, process)
 
 
 def _collect(worker: _Worker, timed_out: set[str], timeout: float) -> PartialRun | str:
@@ -401,30 +419,34 @@ def run_parallel(
 ) -> RunReport:
     """Lint `root` with one worker process per bucket and merge the partials."""
     start = time.perf_counter()
+    partials: list[PartialRun] = []
+    failures: list[Failure] = []
     with tempfile.TemporaryDirectory(prefix="apm-arch-lint-") as scratch:
-        scratch_dir = Path(scratch)
         workers: list[_Worker] = []
-        for index, bucket in enumerate(buckets):
-            report_path = scratch_dir / f"bucket-{index}.json"
-            stderr_path = scratch_dir / f"bucket-{index}.stderr"
-            with stderr_path.open("wb") as stderr_handle:
-                process = subprocess.Popen(  # noqa: S603 - argv is this CLI plus fixed flags
-                    worker_argv(root, bucket, report_path),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=stderr_handle,
-                )
-            workers.append(_Worker(tuple(bucket), report_path, stderr_path, process))
-        timed_out = _wait_all(workers, timeout)
-        partials: list[PartialRun] = []
-        failures: list[Failure] = []
-        for worker in workers:
-            outcome = _collect(worker, timed_out, timeout)
-            if isinstance(outcome, PartialRun):
-                partials.append(outcome)
-                continue
-            failures.append(Failure(f"parallel:{worker.label}", outcome))
-            sys.stderr.write(worker.stderr_path.read_text(encoding="utf-8", errors="replace"))
+        try:
+            for index, bucket in enumerate(buckets):
+                try:
+                    workers.append(_start(root, tuple(bucket), Path(scratch), index))
+                except OSError as exc:
+                    label = "+".join(bucket)
+                    failures.append(
+                        Failure(f"parallel:{label}", f"could not start: {type(exc).__name__}")
+                    )
+                    break
+            if not failures:
+                timed_out = _wait_all(workers, timeout)
+                _reap(workers)
+                for worker in workers:
+                    outcome = _collect(worker, timed_out, timeout)
+                    if isinstance(outcome, PartialRun):
+                        partials.append(outcome)
+                        continue
+                    failures.append(Failure(f"parallel:{worker.label}", outcome))
+                    sys.stderr.write(
+                        worker.stderr_path.read_text(encoding="utf-8", errors="replace")
+                    )
+        finally:
+            _reap(workers)
     seconds = time.perf_counter() - start
     if failures:
         return _failed_report(failures, seconds)
