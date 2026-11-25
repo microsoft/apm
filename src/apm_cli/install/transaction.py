@@ -455,9 +455,7 @@ class InstallTransaction:
         if self._manifest_journal is not None:
             self._manifest_journal.publish(text)
             return
-        from apm_cli.utils.atomic_io import write_text_lf
-
-        write_text_lf(self.manifest_path, text)
+        self.manifest_path.write_text(text, encoding="utf-8")  # platform newlines, as before
 
     def record_validation(self, validation: _ValidationOutcome) -> None:
         """Attach the validation outcome produced after transaction creation."""

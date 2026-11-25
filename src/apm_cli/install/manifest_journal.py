@@ -247,12 +247,23 @@ def _retry(record: dict[str, Any]) -> str:
     return _quoted([*record["options"], *bootstrap, *record["packages"]])
 
 
-def _refuse_pending(record: dict[str, Any], target: Path, path: Path, logger: Any) -> None:
-    from apm_cli.core.remediation import INTERRUPTED_ADD_PENDING
+def _settle_other_source(record: dict[str, Any], target: Path, path: Path, logger: Any) -> None:
+    """Refuse while another source's live record can still be replayed there; else drop it."""
+    from apm_cli.core.remediation import INTERRUPTED_ADD_ORPHANED, INTERRUPTED_ADD_PENDING
     from apm_cli.install.errors import InstallFailureAlreadyRendered
     from apm_cli.utils.diagnostics import printable_ascii_text
 
     source = printable_ascii_text(str(target.parent))
+    if not target.parent.is_dir():
+        # Its source is gone: no command can replay the record there.
+        _remove(path)
+        if logger is not None:
+            logger.warning(
+                f"The interrupted 'apm install {_retry(record)}' from {source} can no longer "
+                f"be restored: {source} is gone, so its record {path} was dropped. "
+                f"{INTERRUPTED_ADD_ORPHANED.sentence()}"
+            )
+        return
     pending = INTERRUPTED_ADD_PENDING.bind(source=source)
     if scope := _scope_prefix(record["options"]):
         pending = pending.with_command(f"apm install {_quoted(scope)}")
@@ -291,16 +302,18 @@ def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> N
             )
         raise InstallFailureAlreadyRendered(f"unreadable manifest record {path}") from None
     target = Path(record["manifest"])
-    if target != Path(os.path.abspath(manifest)):
-        # Never trust the record's own path, and never let another source's
-        # install overwrite this record: refuse until that source replays it.
-        _refuse_pending(record, target, path, logger)
     lock = _lock_identity(workspace)
     if (record.get("commit") is not None and lock == record["commit"]) or lock != record.get(
         "lock"
     ):
-        # The killed install's lockfile reached disk, or a later command changed it.
+        # The killed install's lockfile reached disk, or a later command changed
+        # it: nothing is left to restore, whichever source the record names.
         _remove(path)
+        return
+    if target != Path(os.path.abspath(manifest)):
+        # Never trust the record's own path, and never let another source's
+        # install overwrite a live record: refuse until that source replays it.
+        _settle_other_source(record, target, path, logger)
         return
     prior = record["prior"]
     current = target.read_bytes() if target.is_file() else None

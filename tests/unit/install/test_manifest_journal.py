@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -191,3 +192,49 @@ def test_a_record_from_another_source_refuses_and_names_that_source(
     message = logger.error.call_args.args[0]
     assert f"'apm install --root {deploy} ./x' from {source} is still pending" in message
     assert f"Change to {source}, then run 'apm install --root {deploy}'" in message
+
+
+def _other_source_record(tmp_path: Path) -> tuple[ManifestJournal, Path, Path]:
+    """Source A's add into the --root workspace *deploy*, killed after it wrote apm.yml."""
+    source, deploy = tmp_path / "source-a", tmp_path / "deploy"
+    source.mkdir()
+    deploy.mkdir()
+    (deploy / "apm.lock.yaml").write_text("lockfile_version: '1'\ndependencies: []\n", "utf-8")
+    (source / "apm.yml").write_bytes(_PRIOR)
+    journal = ManifestJournal(
+        source / "apm.yml", deploy, _PRIOR, ["./x"], (["--root", str(deploy)], [])
+    )
+    journal.publish(_PRIOR.decode() + "dependencies:\n  apm: [./x]\n")
+    return journal, source, deploy
+
+
+def test_a_stale_record_from_another_source_is_dropped_not_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A changed lock means nothing is left to restore: no source may be blocked by it."""
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    journal, source, deploy = _other_source_record(tmp_path)
+    (deploy / "apm.lock.yaml").write_text("lockfile_version: '1'\ndependencies: [x]\n", "utf-8")
+
+    replay_abandoned_manifest(deploy, MagicMock(), tmp_path / "source-b" / "apm.yml")
+
+    assert not journal.path.exists()
+    assert (source / "apm.yml").read_bytes() != _PRIOR, "a stale record restored apm.yml"
+
+
+def test_a_record_whose_source_is_gone_is_dropped_and_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record no command can replay never blocks the workspace forever."""
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    journal, source, deploy = _other_source_record(tmp_path)
+    shutil.rmtree(source)
+    logger = MagicMock()
+
+    replay_abandoned_manifest(deploy, logger, tmp_path / "source-b" / "apm.yml")
+
+    assert not journal.path.exists()
+    message = logger.warning.call_args.args[0]
+    assert f"from {source} can no longer be restored" in message
+    assert str(journal.path) in message
+    assert message.endswith("Run 'apm install' to continue.")
