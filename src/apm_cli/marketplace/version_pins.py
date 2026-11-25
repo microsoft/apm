@@ -44,6 +44,7 @@ import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.remediation import MARKETPLACE_REF_SWAP_ACCEPT
@@ -85,6 +86,33 @@ class RefPinMismatchError(MarketplaceError):
         super().__init__(
             f"Plugin {plugin}@{marketplace} ref changed: was '{previous_ref}', now "
             f"'{current_ref}'. This may indicate a ref swap attack; refusing to install. "
+            f"{MARKETPLACE_REF_SWAP_ACCEPT.bind(key=key).sentence()}"
+        )
+
+
+class RefPinConflictError(MarketplaceError):
+    """Legacy ref pins from multiple aliases naming the same catalog conflict."""
+
+    def __init__(
+        self,
+        plugin: str,
+        catalog: str,
+        conflicting_pins: dict[str, str],
+        key: str,
+        version: str = "",
+    ):
+        self.plugin = plugin
+        self.catalog = catalog
+        self.conflicting_pins = conflicting_pins
+        self.key = key
+        self.version = version
+        details = ", ".join(
+            f"'{alias}' pinned '{ref}'" for alias, ref in sorted(conflicting_pins.items())
+        )
+        plugin_desc = f"{plugin}/{version}" if version else plugin
+        super().__init__(
+            f"Plugin {plugin_desc} has conflicting legacy ref pins across aliases "
+            f"naming catalog {catalog}: {details}. Refusing to resolve. "
             f"{MARKETPLACE_REF_SWAP_ACCEPT.bind(key=key).sentence()}"
         )
 
@@ -221,18 +249,19 @@ def _pins_mutation(pins_dir: str | None, *, strict: bool = False) -> Iterator[bo
         lock.release()
 
 
-def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = False) -> None:
+def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = False) -> bool:
     """Persist *pins* to disk atomically.
 
     Writes to a temporary file first, then uses ``os.replace`` to move
     it into place so readers never see a partial write.  Errors are
     logged and swallowed (advisory system), unless *strict*, which raises
-    :class:`RefPinWriteError`. A preview writes nothing.
+    :class:`RefPinWriteError`. A preview writes nothing. Returns whether the
+    pins were written.
     """
     from apm_cli.config import user_state_writes_suppressed
 
     if user_state_writes_suppressed():
-        return
+        return False
     path = _pins_path(pins_dir)
     tmp_path = path + ".tmp"
     try:
@@ -244,6 +273,8 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = Fal
         if strict:
             raise RefPinWriteError(path, type(exc).__name__) from exc
         logger.debug("Failed to save version-pins: %s", exc)
+        return False
+    return True
 
 
 # ------------------------------------------------------------------
@@ -272,10 +303,21 @@ def check_ref_pin(
         plugin/version or the ref matches.
     """
     pins = load_ref_pins(pins_dir)
-    previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version, catalog))
-    if previous_ref is None and catalog and _owns_legacy_pins(marketplace_name, catalog):
-        # A legacy alias pin belongs to the catalog the alias's registration names.
-        previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version))
+    key = _pin_key(marketplace_name, plugin_name, version, catalog)
+    previous_ref = pins.get(key)
+    if previous_ref is None and catalog:
+        aliases = _aliases_naming_catalog(catalog)
+        legacy_pins: dict[str, str] = {}
+        for alias in aliases:
+            legacy_key = _pin_key(alias, plugin_name, version)
+            val = pins.get(legacy_key)
+            if isinstance(val, str):
+                legacy_pins[alias] = val
+        if legacy_pins:
+            unique_refs = set(legacy_pins.values())
+            if len(unique_refs) > 1:
+                raise RefPinConflictError(plugin_name, catalog, legacy_pins, key, version=version)
+            previous_ref = next(iter(unique_refs))
     if previous_ref is None:
         return None
     if not isinstance(previous_ref, str):
@@ -308,28 +350,45 @@ def record_ref_pin(
         save_ref_pins(pins, pins_dir)
 
 
+def _aliases_naming_catalog(catalog: str) -> list[str]:
+    """Return all registered marketplace aliases that name *catalog*."""
+    from .registry import get_registered_marketplaces
+    from .source_identity import catalog_pin_identity
+
+    seen: set[str] = set()
+    aliases: list[str] = []
+    for source in get_registered_marketplaces():
+        try:
+            if catalog_pin_identity(source) == catalog:
+                name = source.name
+                if name.lower() not in seen:
+                    seen.add(name.lower())
+                    aliases.append(name)
+        except ValueError:
+            continue
+    return aliases
+
+
 def _owns_legacy_pins(marketplace_name: str, catalog: str) -> bool:
     """Whether *marketplace_name*'s persisted registration names *catalog*.
 
     Legacy pins are keyed by the alias of a registration; a project map that
     shadows the alias with another catalog never reads or consumes them.
     """
-    from .registry import get_registered_marketplaces
-    from .source_identity import catalog_pin_identity
-
-    for source in get_registered_marketplaces():
-        if source.name.lower() == marketplace_name.lower():
-            try:
-                return catalog_pin_identity(source) == catalog
-            except ValueError:
-                return False
-    return False
+    return any(
+        alias.lower() == marketplace_name.lower() for alias in _aliases_naming_catalog(catalog)
+    )
 
 
 def _put(pins: dict, marketplace: str, plugin: str, version: str, catalog: str, ref: str) -> None:
+    if not ref:
+        return
     pins[_pin_key(marketplace, plugin, version, catalog)] = ref
-    if catalog and _owns_legacy_pins(marketplace, catalog):
-        pins.pop(_pin_key(marketplace, plugin, version), None)
+    if catalog:
+        for alias in _aliases_naming_catalog(catalog):
+            pins.pop(_pin_key(alias, plugin, version), None)
+        if _owns_legacy_pins(marketplace, catalog):
+            pins.pop(_pin_key(marketplace, plugin, version), None)
 
 
 def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) -> None:
@@ -361,11 +420,24 @@ def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) 
 # ------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class StagedPinRepair:
+    """Details of a staged marketplace ref-pin repair for display and summary."""
+
+    marketplace_name: str
+    plugin_name: str
+    version: str
+    new_ref: str
+    previous_ref: str | None = None
+    conflicting_pins: tuple[tuple[str, str], ...] = ()
+
+
 class RefPinStage:
     """Ref pins resolved during one install attempt, written only on commit."""
 
     def __init__(self) -> None:
         self._pins: dict[tuple[str, str, str], tuple[str, str]] = {}
+        self._repairs: dict[tuple[str, str, str], StagedPinRepair] = {}
         self._lock = threading.Lock()
 
     def add(
@@ -375,27 +447,59 @@ class RefPinStage:
         ref: str,
         version: str = "",
         catalog: str = "",
+        repair: bool = False,
+        previous_ref: str | None = None,
+        conflicting_pins: dict[str, str] | None = None,
     ) -> None:
         """Stage one plugin-to-ref mapping for :meth:`commit`."""
         with self._lock:
-            self._pins[(marketplace_name, plugin_name, version)] = (ref, catalog)
+            key = (marketplace_name, plugin_name, version)
+            self._pins[key] = (ref, catalog)
+            if repair:
+                self._repairs[key] = StagedPinRepair(
+                    marketplace_name=marketplace_name,
+                    plugin_name=plugin_name,
+                    version=version,
+                    new_ref=ref,
+                    previous_ref=previous_ref,
+                    conflicting_pins=tuple(sorted((conflicting_pins or {}).items())),
+                )
 
     def keys(self) -> frozenset[tuple[str, str, str]]:
         """Return the ``(marketplace, plugin, version)`` keys staged so far."""
         with self._lock:
             return frozenset(self._pins)
 
+    def repairs(self) -> frozenset[tuple[str, str, str]]:
+        """Return keys of pins that repair a conflict or mismatch."""
+        with self._lock:
+            return frozenset(self._repairs)
+
+    def repair_details(self) -> tuple[StagedPinRepair, ...]:
+        """Return details of pins staged as repairs."""
+        with self._lock:
+            return tuple(self._repairs.values())
+
     def drop(self, keys: frozenset[tuple[str, str, str]]) -> None:
         """Withdraw staged pins of a package that will not install (#4322)."""
         with self._lock:
             for key in keys:
                 self._pins.pop(key, None)
+                self._repairs.pop(key, None)
 
     def commit(self, pins_dir: str | None = None) -> None:
-        """Write every staged pin in one save and close this stage."""
+        """Write every staged pin in one save and close this stage.
+
+        Records which staged repairs the save actually persisted, so a
+        skipped or failed advisory write is never reported as a repair.
+        """
+        global _committed_repairs
         with self._lock:
             staged, self._pins = self._pins, {}
+            repairs = tuple(self._repairs.values())
+            self._repairs.clear()
         self._close()
+        _committed_repairs = ()
         if not staged:
             return
         with _pins_mutation(pins_dir) as held:
@@ -404,12 +508,14 @@ class RefPinStage:
             pins = load_ref_pins(pins_dir)
             for (marketplace_name, plugin_name, version), (ref, catalog) in staged.items():
                 _put(pins, marketplace_name, plugin_name, version, catalog, ref)
-            save_ref_pins(pins, pins_dir)
+            if save_ref_pins(pins, pins_dir):
+                _committed_repairs = repairs
 
     def discard(self) -> None:
         """Drop every staged pin and close this stage."""
         with self._lock:
             self._pins = {}
+            self._repairs.clear()
         self._close()
 
     def _close(self) -> None:
@@ -423,9 +529,19 @@ _stage_lock = threading.Lock()
 _active_stage: RefPinStage | None = None
 
 
+# Repairs the last committed stage actually wrote (#5243).
+_committed_repairs: tuple[StagedPinRepair, ...] = ()
+
+
+def committed_ref_pin_repairs() -> tuple[StagedPinRepair, ...]:
+    """Return the staged repairs the last commit persisted to the pins file."""
+    return _committed_repairs
+
+
 def open_ref_pin_stage() -> RefPinStage:
     """Open the stage that receives pins resolved by this install attempt."""
-    global _active_stage
+    global _active_stage, _committed_repairs
+    _committed_repairs = ()
     stage = RefPinStage()
     with _stage_lock:
         _active_stage = stage
@@ -438,12 +554,24 @@ def stage_ref_pin(
     ref: str,
     version: str = "",
     catalog: str = "",
+    repair: bool = False,
+    previous_ref: str | None = None,
+    conflicting_pins: dict[str, str] | None = None,
 ) -> None:
     """Stage a pin for the open install attempt; no attempt means no write."""
     with _stage_lock:
         stage = _active_stage
     if stage is not None:
-        stage.add(marketplace_name, plugin_name, ref, version, catalog)
+        stage.add(
+            marketplace_name,
+            plugin_name,
+            ref,
+            version,
+            catalog,
+            repair=repair,
+            previous_ref=previous_ref,
+            conflicting_pins=conflicting_pins,
+        )
 
 
 def enforce_ref_pin(
@@ -465,13 +593,33 @@ def enforce_ref_pin(
     Returns:
         The previously pinned ref when an accepted change replaces it, else ``None``.
     """
-    previous_ref = check_ref_pin(
-        marketplace_name, plugin_name, ref, version, pins_dir, catalog=catalog
-    )
+    repair = False
+    conflicting_pins: dict[str, str] | None = None
+    try:
+        previous_ref = check_ref_pin(
+            marketplace_name, plugin_name, ref, version, pins_dir, catalog=catalog
+        )
+    except RefPinConflictError as exc:
+        if not accept_change:
+            raise
+        previous_ref = None
+        conflicting_pins = exc.conflicting_pins
+        repair = True
     if previous_ref is not None and not accept_change:
         key = _pin_key(marketplace_name, plugin_name, version, catalog)
         raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
-    stage_ref_pin(marketplace_name, plugin_name, ref, version, catalog)
+    if previous_ref is not None and accept_change:
+        repair = True
+    stage_ref_pin(
+        marketplace_name,
+        plugin_name,
+        ref,
+        version,
+        catalog,
+        repair=repair,
+        previous_ref=previous_ref,
+        conflicting_pins=conflicting_pins,
+    )
     return previous_ref
 
 
@@ -480,6 +628,25 @@ def staged_ref_pin_keys() -> frozenset[tuple[str, str, str]]:
     with _stage_lock:
         stage = _active_stage
     return stage.keys() if stage is not None else frozenset()
+
+
+def staged_ref_pin_repairs() -> frozenset[tuple[str, str, str]]:
+    """Return the pin keys staged as repairs by the open install attempt."""
+    with _stage_lock:
+        stage = _active_stage
+    return stage.repairs() if stage is not None else frozenset()
+
+
+def staged_ref_pin_repair_details() -> tuple[StagedPinRepair, ...]:
+    """Return details of pin repairs staged by the open install attempt."""
+    with _stage_lock:
+        stage = _active_stage
+    return stage.repair_details() if stage is not None else ()
+
+
+def has_pending_pin_repairs() -> bool:
+    """Whether the open install attempt has staged pin repairs."""
+    return bool(staged_ref_pin_repairs())
 
 
 def withdraw_ref_pins(keys: frozenset[tuple[str, str, str]]) -> None:
