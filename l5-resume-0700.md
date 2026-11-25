@@ -65,3 +65,15 @@
 - 07:44 measured preimport oracle requested: W perf-bench/5c6b22e8-1795589046-0382cc, L perf-bench/5c6b22e8-1795589055-87fb1e (journeys boot-version, install-frozen-noop, install-frozen-noop-preimport). Oracle W = preimport inner cpu + boot-version cpu; bar <= 1 s. #5429 post-tag (PM), Copilot r1 handled at c0483deb.
 
 - 07:50 MEASURED oracle: W 45562816715 new hit 1.281 cpu; preimport inner 0.453 + boot 0.203 = 0.656 cpu / 0.711 wall (CLEARS 1 s). L 45562834291 oracle 0.319. Proposed next: per-module ranking (importtime self x executed-code oracle) -> lazy-import PR. Awaiting VP go.
+
+- 08:00 ranking: beyond-boot 530 mods 0.407 s; executed 378 mods 0.346 s (85%); never-executed 152 mods 0.061 s. Lazy-import lane cannot reach W 1.0 s (~1.2 s best) -> recommended KILL; suggested next: W bench of the PyInstaller binary frozen hit. Awaiting VP ruling.
+
+- 07:54 CEO: 0.39 scope frozen; bugfix + red team. Binary bench DROPPED. START #5418 now (TRAIN 2, PR ~45 min). #5429/#5423 kept ready. Car 5/#5420 paused.
+
+## #5418 STOPPED 07:58 (regent: 0.40.0). Design findings, no code written:
+- Owner: deps/local_identity.portable_anchor_identity; resolver call apm_resolver.py:1186 (root=root_package.source_path).
+- Repo boundary: nearest ancestor of resolved base with a .git marker (same realpath owner as containment); no repo -> absolute (VP-approved default). Perf monorepo-4 fixture (tests/fixtures/perf/generator.py build_monorepo) has NO .git: add git init for A/A.
+- PITFALL: install skips the lock write when semantically equal to a FRESH disk re-read (install/phases/lockfile.py:927, _write_if_changed), so a rekey inside LockFile.read never rewrites the file. Rekey must be on ctx.existing_lockfile (phases/resolve.py _load_lockfile; resolve.py at 997/1000 LOC).
+- Frozen: resolver yields relative keys vs legacy lock -> frozen mismatch unless the in-memory rekey also runs for --frozen (no write).
+- Total rename surfaces: dependency keys, anchored_local_path, declaring_parent, resolved_by, replacement request parents (_rekey_requests), ledger owners/active_owner (_rename_ledger_owners pattern), receipts: core/deployment_reanchor.reanchor_receipt_problems (precheck; any problem -> no rekey, today's behaviour) + rename_receipt_owners after the lock commits (uninstall precedent: commands/uninstall/local_reanchor.py apply_local_reanchor, _rename_reanchored_receipts). apm_modules/_local/<sha12> slot is keyed by identity (models/dependency/materialization.py:154).
+- VP conditions: containment on read refuses escaping ../ keys; POSIX keys, cross-drive/UNC stay absolute; upgrade cell then prune/uninstall deletes nothing; W3d walk.
