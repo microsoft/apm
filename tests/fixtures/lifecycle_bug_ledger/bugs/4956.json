@@ -1,0 +1,17 @@
+{
+  "issue": 4956,
+  "fixed_in": "Unreleased",
+  "summary": "Under unmanaged_files: deny, install did not count the MCP config files (for example .kiro/settings/mcp.json) and hook sidecars it creates, so the pipeline, apm install --mcp and local-bundle installs wrote them past the gate, and the bundle dry-run preview omitted the hook files a forced reinstall writes.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_counts_the_mcp_config_an_install_creates",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_warn_counts_the_mcp_config_an_install_creates",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_refuses_a_config_file_that_is_a_link_or_a_fifo",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes"
+  ]
+}

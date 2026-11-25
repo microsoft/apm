@@ -831,3 +831,135 @@ def test_unmanaged_files_deny_still_flags_a_user_file_beside_verified_hook_files
     assert ".claude/notes.md -- not tracked in apm.lock.yaml" in text, _evidence(audit)
     assert ".claude/settings.json" not in text, _evidence(audit)
     assert ".claude/apm-hooks.json" not in text, _evidence(audit)
+
+
+# #4956: the files an install writes through server ownership (MCP configs) and the
+# hook ownership sidecars carry no deployed_files claim, yet unmanaged_files judges them.
+_KIRO_MCP = ".kiro/settings/mcp.json"
+_KIRO_HOOKS = ".kiro/apm-hooks.json"
+_CONFIG_ENTRIES = ["pipeline", "mcp", "bundle"]
+
+
+def _kiro_workspace(world: World, variant: str) -> None:
+    """A policy-governed project that opted into Kiro and already holds a lockfile."""
+    use_policy(world, variant)
+    _seed(world)
+    (world.project / ".kiro").mkdir(exist_ok=True)
+
+
+def _park_and_approve_exec_bundle(world: World, target: str) -> str:
+    bundle = world.packages["p-exec:bundle"].spec
+    parked = _assert_ok(world, "install", "--target", target, bundle)
+    key = re.search(r"apm approve '([^']+)'", _text(parked))
+    assert key is not None, _evidence(parked)
+    _assert_ok(world, "approve", key.group(1))
+    return bundle
+
+
+def _config_entry_args(world: World, entry: str) -> tuple[str, ...]:
+    """The Kiro install arguments of one entry; the bundle is approved first."""
+    if entry == "mcp":
+        return (*_MCP_ENTRY, "--target", "kiro")
+    if entry == "bundle":
+        return ("--target", "kiro", _park_and_approve_exec_bundle(world, "kiro"))
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data.setdefault("dependencies", {})["mcp"] = [
+        {
+            "name": "srv",
+            "registry": False,
+            "transport": "http",
+            "url": "https://mcp.example.com/mcp",
+        }
+    ]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return ("--target", "kiro")
+
+
+@pytest.mark.parametrize("entry", _CONFIG_ENTRIES)
+def test_unmanaged_files_deny_counts_the_mcp_config_an_install_creates(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+) -> None:
+    world = lifecycle_world
+    _kiro_workspace(world, "unmanaged-deny")
+    args = _config_entry_args(world, entry)
+
+    text = _assert_refused(world, _UNMANAGED, *args)
+
+    assert _KIRO_MCP in text, text
+    assert "unmanaged_files.exclude" in text, text
+    assert not (world.project / _KIRO_MCP).exists()
+    if entry == "bundle":
+        assert _KIRO_HOOKS in text, text
+
+
+@pytest.mark.parametrize("entry", _CONFIG_ENTRIES)
+def test_unmanaged_files_warn_counts_the_mcp_config_an_install_creates(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+) -> None:
+    world = lifecycle_world
+    _kiro_workspace(world, "fields-warn")
+    args = _config_entry_args(world, entry)
+
+    text = _text(_assert_ok(world, "install", *args))
+
+    assert _UNMANAGED[0] in text, text
+    assert _KIRO_MCP in text, text
+    assert (world.project / _KIRO_MCP).is_file()
+
+
+def _symlink_config(world: World, path: Path) -> object:
+    outside = world.root / "outside-mcp.json"
+    outside.write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    path.symlink_to(outside)
+    return outside
+
+
+def _fifo_config(world: World, path: Path) -> object:
+    os.mkfifo(path)
+    return None
+
+
+@pytest.mark.parametrize("make", [_symlink_config, _fifo_config], ids=["symlink", "fifo"])
+def test_unmanaged_files_deny_refuses_a_config_file_that_is_a_link_or_a_fifo(
+    lifecycle_world: World,  # noqa: F811
+    make: object,
+) -> None:
+    world = lifecycle_world
+    _kiro_workspace(world, "unmanaged-deny")
+    config = world.project / _KIRO_MCP
+    config.parent.mkdir()
+    outside = make(world, config)
+    before = outside.read_bytes() if outside is not None else None
+
+    text = _assert_refused(world, _UNMANAGED, *_config_entry_args(world, "mcp"))
+
+    assert _KIRO_MCP in text, text
+    assert config.is_symlink() == (outside is not None)
+    assert outside is None or outside.read_bytes() == before
+
+
+def test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """The lock is lost, so every hook file the forced reinstall rewrites is a claim."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _park_and_approve_exec_bundle(world, "claude")
+    _assert_ok(world, "install", "--target", "claude", bundle)
+    (world.project / "apm.lock.yaml").unlink()
+    before = _state(world, None, keep_git_cache=False)
+
+    preview = _text(
+        _assert_ok(world, "install", "--force", "--dry-run", "--target", "claude", bundle)
+    )
+
+    assert "Would be blocked by policy" not in preview, preview
+    assert ".claude/settings.json" in preview, preview
+    assert ".claude/apm-hooks.json" in preview, preview
+    assert _state(world, None, keep_git_cache=False) == before
+    _assert_ok(world, "install", "--force", "--target", "claude", bundle)
+    _assert_ok(world, "audit", "--ci")
