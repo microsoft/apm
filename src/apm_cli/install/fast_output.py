@@ -86,8 +86,16 @@ def held_output() -> Iterator[HeldOutput]:
 
     held = HeldOutput()
     out, err = _Held(sys.stdout, held.tape), _Held(sys.stderr, held.tape)
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        yield held
+    view = "apm_cli.integration.mcp_config_view"
+    shown = getattr(sys.modules.get(view), "trust_notices_shown", frozenset)()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            yield held
+    except BaseException:
+        # Dropped output: a once-per-command notice it held is shown by the full run.
+        if (loaded := sys.modules.get(view)) is not None:
+            loaded.forget_trust_notices_since(shown)
+        raise
 
 
 def render(
@@ -167,8 +175,8 @@ def _frozen_preflight(project_root: Path, manifest: Any, logger: Any) -> None:
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService
 
-    request = InstallRequest(manifest, logger=logger, scope=InstallScope.PROJECT)
-    InstallService.enforce_frozen(request)
+    request = InstallRequest.frozen_preflight(manifest, scope=InstallScope.PROJECT, logger=logger)
+    InstallService.enforce_frozen(request, allow_pending_mcp=True)  # a bare install
 
 
 def _announce_targets(project_root: Path, manifest: Any, logger: Any) -> None:

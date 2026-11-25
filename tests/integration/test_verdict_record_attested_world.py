@@ -218,7 +218,8 @@ def test_the_first_frozen_install_after_an_install_is_an_attested_hit(world_inst
 
 
 @pytest.mark.parametrize(
-    "scenario", ["converged", "manifest drift", "lock-only edge", "local dependency"]
+    "scenario",
+    ["converged", "manifest drift", "lock-only edge", "local dependency", "only apm"],
 )
 def test_a_frozen_install_answers_as_the_full_frozen_pipeline(world_install, scenario) -> None:
     """W3d AF4: whatever the fast path decides, --frozen prints, exits and leaves the
@@ -228,6 +229,9 @@ def test_a_frozen_install_answers_as_the_full_frozen_pipeline(world_install, sce
         _add_local_dependency(project)
         first = install()
         assert first[0] == 0 and "attested" not in _traces(first[2]), first[2]  # unprovable
+    elif scenario == "only apm":
+        first = install("--only", "apm")  # argv-exact: never served, never attested
+        assert first[0] == 0 and not _traces(first[2]), first[2]
     else:
         _assert_attested(install())
     if scenario == "manifest drift":
@@ -240,6 +244,11 @@ def test_a_frozen_install_answers_as_the_full_frozen_pipeline(world_install, sce
     fast, full = install("--frozen"), install("--frozen", fast="0")
 
     _assert_same_frozen_answer(fast, full)
+    if scenario == "converged":  # the hit itself answered, its declared MCP gate live
+        _assert_attested_hit(fast)
+        assert "MCP 'pkg-000-mcp'" in fast[1], fast[1]
+    else:
+        assert "attested hit" not in _traces(fast[2]), fast[2]
     assert (lock.read_bytes(), lock.stat().st_mtime_ns) == before, "--frozen rewrote the lock"
 
 

@@ -1265,13 +1265,15 @@ def _target_line(project: Path) -> str:
     return format_provenance(resolve_targets(project, yaml_targets=restriction))
 
 
-def _frozen(argv: list[str]) -> None:
-    """The run's frozen decision, through its single reader (which notes it)."""
+def _frozen(argv: list[str], frozen: bool | None = None) -> None:
+    """The run's frozen decision, through its single reader (which notes it); *frozen*
+    stands for an environment-implied one (CI with a lockfile selects frozen)."""
     from types import SimpleNamespace
 
     from apm_cli.install.service import InstallService
 
-    InstallService.frozen_disposition(SimpleNamespace(frozen="--frozen" in argv))
+    decided = "--frozen" in argv if frozen is None else frozen
+    InstallService.frozen_disposition(SimpleNamespace(frozen=decided))
 
 
 def _attest(
@@ -1291,10 +1293,10 @@ def _attest(
             during()
 
 
-def _attested_hit(argv: list[str] | None = None) -> bool:
+def _attested_hit(argv: list[str] | None = None, frozen: bool | None = None) -> bool:
     """What the next install's engine sees, inside its own recorded run."""
     with verdict_record.recording(argv or ["install"]):
-        _frozen(argv or ["install"])
+        _frozen(argv or ["install"], frozen)
         return verdict_attest.attested_state(argv or ["install"], Path.cwd())
 
 
@@ -1476,6 +1478,20 @@ def _assert_keyed(project: Path, argv: list[str], disposition: str) -> None:
         argv,
         disposition,
     )
+
+
+def test_an_environment_implied_frozen_install_is_served_only_by_a_plain_record(
+    project: Path,
+) -> None:
+    """W3d R2(c): argv ["install"] with a CI-implied frozen disposition accepts a plain
+    ["install"] attestation and never one keyed ["install", "--frozen"]."""
+    _attest(project)
+    assert _attested_hit(["install"], frozen=True) is True
+
+    _attest(project, argv=tuple(_FROZEN))
+
+    assert _attested_hit(["install"], frozen=True) is False
+    _assert_keyed(project, _FROZEN, "frozen")
 
 
 @pytest.mark.parametrize("forged", [{"argv": ["install"]}, {"disposition": "plain"}])

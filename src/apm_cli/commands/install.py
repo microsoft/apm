@@ -1811,9 +1811,8 @@ def _install_apm_packages(ctx, outcome):
         from apm_cli.install.request import InstallRequest
 
         InstallService.enforce_frozen(
-            InstallRequest(
-                apm_package=apm_package,
-                frozen=True,
+            InstallRequest.frozen_preflight(
+                apm_package,
                 scope=ctx.scope,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,
