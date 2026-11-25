@@ -6,7 +6,7 @@
         "budget": 1404,
         "measured": 1337,
         "reason": "1819 -> 1404: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1950,
@@ -30,19 +30,19 @@
         "budget": 6848,
         "measured": 6521,
         "reason": "15059 -> 6848: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
         "budget": 658,
         "measured": 626,
         "reason": "1185 -> 658: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.stat_calls": {
         "budget": 13725,
         "measured": 13071,
         "reason": "21960 -> 13725: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 10,
@@ -54,7 +54,7 @@
         "budget": 3,
         "measured": 2,
         "reason": "13 -> 3: #5325/#5333 memoized git reads; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.var": {
         "budget": 5,
@@ -66,13 +66,13 @@
         "budget": 4,
         "measured": 3,
         "reason": "14 -> 4: #5330/#5353 in-process fetch and listing replace the git clones (#5339 request row); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "http.requests": {
         "budget": 21,
         "measured": 20,
         "reason": "42 -> 21: #5330/#5353 in-process fetch and listing replace the git clones (#5339 request row); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       }
     },
     "install-warm": {
@@ -80,7 +80,7 @@
         "budget": 440,
         "measured": 419,
         "reason": "856 -> 440: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1917,
@@ -104,25 +104,25 @@
         "budget": 7749,
         "measured": 7380,
         "reason": "15826 -> 7749: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
         "budget": 669,
         "measured": 637,
         "reason": "1201 -> 669: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.stat_calls": {
         "budget": 13764,
         "measured": 13108,
         "reason": "21844 -> 13764: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 9,
         "measured": 8,
         "reason": "13 -> 9: #5325/#5333 memoized git config reads; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.ls-tree": {
         "budget": 11,
@@ -184,19 +184,19 @@
         "budget": 3106,
         "measured": 2958,
         "reason": "23099 -> 3106: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
         "budget": 440,
         "measured": 419,
         "reason": "2762 -> 440: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.stat_calls": {
         "budget": 4672,
         "measured": 4449,
         "reason": "6999 -> 4672: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.remote": {
         "budget": 3,
@@ -278,7 +278,7 @@
         "budget": 355,
         "measured": 338,
         "reason": "376 -> 355: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 873,
@@ -308,13 +308,13 @@
         "budget": 222,
         "measured": 211,
         "reason": "243 -> 222: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.stat_calls": {
         "budget": 6676,
         "measured": 6358,
         "reason": "7819 -> 6676: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 9,
@@ -364,7 +364,7 @@
         "budget": 1174,
         "measured": 1118,
         "reason": "1572 -> 1174: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1979,
@@ -388,19 +388,19 @@
         "budget": 6929,
         "measured": 6599,
         "reason": "16774 -> 6929: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
         "budget": 672,
         "measured": 640,
         "reason": "1810 -> 672: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.stat_calls": {
         "budget": 13857,
         "measured": 13197,
         "reason": "21899 -> 13857: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 12,
@@ -438,7 +438,7 @@
         "budget": 438,
         "measured": 417,
         "reason": "868 -> 438: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1943,
@@ -462,19 +462,19 @@
         "budget": 7755,
         "measured": 7385,
         "reason": "16147 -> 7755: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
         "budget": 670,
         "measured": 638,
         "reason": "1757 -> 670: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "fs.stat_calls": {
         "budget": 13765,
         "measured": 13109,
         "reason": "21825 -> 13765: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
-        "pr": "#PRNUM"
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 9,
