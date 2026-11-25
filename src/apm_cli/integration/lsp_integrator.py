@@ -820,7 +820,8 @@ class LSPIntegrator:
         ``None`` (a caller without lock evidence) judges no entry. A *held*
         server, kept on another target, stays at its locked render here too.
         *locked_written* renders the locked configs at their locked package's
-        root: an entry equal to it is APM's too (#4872).
+        root: an entry equal to it is APM's too (#4872), and a held server
+        stays at it (#5437).
         """
         config_path = LSPIntegrator._target_config_path(
             spec,
@@ -918,7 +919,8 @@ class LSPIntegrator:
         for name, server_config in servers.items():
             if name in held:
                 # One recorded baseline per server: hold every target at it (#4626).
-                server_config = (locked_servers or {}).get(name)
+                # At the locked root: the render an untouched entry still holds (#5437).
+                server_config = (locked_written or {}).get(name) or (locked_servers or {}).get(name)
                 if server_config is None:
                     withheld.append(name)
                     continue
@@ -1085,7 +1087,10 @@ class LSPIntegrator:
     @staticmethod
     def _held_joiners(kept: builtins.set, servers: dict, options: dict) -> dict[str, dict]:
         """Held servers this target managed but the new config cannot express (#4871)."""
-        locked = options.get("locked_servers") or {}
+        locked = {
+            **(options.get("locked_servers") or {}),
+            **(options.get("locked_written") or {}),
+        }
         managed = options.get("managed_server_names") or builtins.set()
         return {
             name: locked[name]

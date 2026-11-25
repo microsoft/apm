@@ -703,27 +703,30 @@ class TestPackageMoveWithPluginRoot:
             plugin_root=str(root.resolve()) if "${" in command else None,
         )
 
-    def _deploy_from_a(self, tmp_path, runtime: str):
+    def _deploy_from_a(self, tmp_path, *runtimes: str):
         """Install srv from package A as a previous ``apm install`` would."""
         from apm_cli.integration.lsp_integrator import LSPIntegrator
 
         dep_a = self._dep(tmp_path, "pkg-a")
-        LSPIntegrator.install([dep_a], project_root=tmp_path, target_runtimes=[runtime])
+        LSPIntegrator.install([dep_a], project_root=tmp_path, target_runtimes=list(runtimes))
         lock = LockFile(
             lsp_servers=["srv"],
             lsp_configs=LSPIntegrator.get_server_configs([dep_a]),
             lsp_config_provenance={"srv": "package:acme/pkg-a"},
         )
-        DeploymentLedgerCodec.replace_lsp_target_servers(lock, {runtime: ["srv"]})
+        DeploymentLedgerCodec.replace_lsp_target_servers(
+            lock, {runtime: ["srv"] for runtime in runtimes}
+        )
         lock._lsp_target_servers_present = True
-        return tmp_path.joinpath(*self._PATHS[runtime]), lock
+        return tmp_path.joinpath(*self._PATHS[runtimes[0]]), lock
 
-    def _install(self, tmp_path, runtime: str, lock: LockFile, dep: LSPDependency):
+    def _install(self, tmp_path, runtime: str | list, lock: LockFile, dep: LSPDependency):
+        runtimes = [runtime] if isinstance(runtime, str) else runtime
         package = MagicMock()
         package.get_lsp_dependencies.return_value = [dep]
         diagnostics = MagicMock()
         # Copilot resolves only with its binary on PATH: pin the target.
-        with patch(f"{_PATCH_TARGET}.resolve_target_runtimes", return_value=[runtime]):
+        with patch(f"{_PATCH_TARGET}.resolve_target_runtimes", return_value=runtimes):
             run_lsp_integration(
                 apm_package=package,
                 apm_modules_path=tmp_path / "apm_modules",
@@ -734,7 +737,7 @@ class TestPackageMoveWithPluginRoot:
                 should_install=True,
                 logger=_mock_logger(),
                 diagnostics=diagnostics,
-                explicit_target=[runtime],
+                explicit_target=runtimes,
             )
         return diagnostics
 
@@ -774,6 +777,23 @@ class TestPackageMoveWithPluginRoot:
 
         assert json.loads(config.read_text())["lspServers"]["srv"]["command"] == "srv-v2"
         diagnostics.error.assert_not_called()
+
+    def test_a_held_untouched_target_keeps_its_expanded_root(self, tmp_path) -> None:
+        """An edit blocks an upgrade that drops the placeholder: no literal is held (#5437)."""
+        copilot, lock = self._deploy_from_a(tmp_path, "copilot", "claude")
+        claude = tmp_path.joinpath(*self._PATHS["claude"])
+        claude_before = json.loads(claude.read_text())["lspServers"]["srv"]
+        data = json.loads(copilot.read_text())
+        data["lspServers"]["srv"]["command"] = "my-srv"
+        copilot.write_text(json.dumps(data), encoding="utf-8")
+
+        dep = self._dep(tmp_path, "pkg-a", command="srv-v2")
+        diagnostics = self._install(tmp_path, ["copilot", "claude"], lock, dep)
+
+        assert json.loads(copilot.read_text())["lspServers"]["srv"]["command"] == "my-srv"
+        assert json.loads(claude.read_text())["lspServers"]["srv"] == claude_before
+        assert "${CLAUDE_PLUGIN_ROOT}" not in claude.read_text()
+        diagnostics.error.assert_called_once()
 
     def test_project_server_moved_into_a_package_updates_the_entry(self, tmp_path) -> None:
         from apm_cli.integration.lsp_integrator import LSPIntegrator
