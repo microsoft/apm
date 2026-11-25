@@ -45,6 +45,12 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     return portable_relpath(anchored, base)
 
 
+def resolve_local_dir(local_path: str, base: Path) -> Path:
+    """Resolve a local dependency path relative to *base*."""
+    raw = Path(local_path).expanduser()
+    return raw.resolve() if raw.is_absolute() else (base / raw).resolve()
+
+
 def root_local_dirs(
     root_refs: Iterable[DependencyReference], consumer_root: Path
 ) -> dict[Path, DependencyReference]:
@@ -52,10 +58,28 @@ def root_local_dirs(
     dirs: dict[Path, DependencyReference] = {}
     for ref in root_refs:
         if ref.is_local and ref.local_path and ref.replacement is None:
-            raw = Path(ref.local_path).expanduser()
-            anchored = raw.resolve() if raw.is_absolute() else (consumer_root / raw).resolve()
+            anchored = resolve_local_dir(ref.local_path, consumer_root)
             dirs.setdefault(anchored, ref)
     return dirs
+
+
+def root_local_identity(
+    dep_ref: DependencyReference,
+    *,
+    anchored: Path,
+    root_local_dirs: dict[Path, DependencyReference],
+) -> DependencyReference:
+    """Return *dep_ref* with the canonical root spelling for *anchored*.
+
+    When ``apm.yml`` declares the same directory twice with different
+    spellings (such as ``./vendor/a`` and ``./vendor/a/``), every root
+    declaration adopts the first declaration's spelling so resolution,
+    locking, ``--frozen`` verification, and reachability agree on one row.
+    """
+    root_ref = root_local_dirs.get(anchored)
+    if root_ref is not None and root_ref.local_path != dep_ref.local_path:
+        return replace(dep_ref, repo_url=root_ref.repo_url, local_path=root_ref.local_path)
+    return dep_ref
 
 
 def transitive_local_identity(

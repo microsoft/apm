@@ -86,8 +86,12 @@ def local_content_reasons(
     from dataclasses import replace
 
     from apm_cli.deps.apm_resolver import APMDependencyResolver
+    from apm_cli.deps.local_identity import (
+        resolve_local_dir,
+        root_local_identity,
+        transitive_local_identity,
+    )
     from apm_cli.deps.local_identity import root_local_dirs as collect_root_local_dirs
-    from apm_cli.deps.local_identity import transitive_local_identity
     from apm_cli.deps.path_anchoring import (
         LocalResolutionError,
         build_local_parent_index,
@@ -114,6 +118,17 @@ def local_content_reasons(
     reasons: list[str] = []
     while queue:
         declared = queue.popleft()
+        if (
+            declared.is_local
+            and declared.local_path
+            and declared.anchored_local_path is None
+            and declared.replacement is None
+        ):
+            declared = root_local_identity(
+                declared,
+                anchored=resolve_local_dir(declared.local_path, consumer_root),
+                root_local_dirs=root_local_dirs,
+            )
         key = declared.get_unique_key()
         if key in seen:
             continue

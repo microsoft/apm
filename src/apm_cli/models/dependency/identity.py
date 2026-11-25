@@ -376,3 +376,31 @@ def normalise_local_path_separators(local_path: str) -> str:
     if local_path.startswith(_BACKSLASH_LOCAL_PREFIXES):
         return local_path.replace("\\", "/")
     return local_path
+
+
+def normalize_local_path_spelling(local_path: str) -> str:
+    """Return *local_path* with trailing slashes and redundant ``.`` segments removed.
+
+    Preserves the path's anchor prefix (``./``, ``../``, ``~/``, ``/``, or
+    ``X:/``) and leaves ``..`` segments intact so traversal checks still see them.
+    """
+    normalized = normalise_local_path_separators(local_path.strip()).replace("\\", "/")
+    prefix = ""
+    rest = normalized
+    for candidate in ("./", "../", "~/"):
+        if rest.startswith(candidate):
+            prefix = candidate
+            rest = rest[len(candidate) :]
+            break
+    else:
+        if rest.startswith("/"):
+            prefix = "/"
+            rest = rest.lstrip("/")
+        elif len(rest) >= 3 and rest[1] == ":" and rest[2] == "/":
+            prefix = rest[:3]
+            rest = rest[3:]
+
+    parts = [part for part in rest.split("/") if part and part != "."]
+    if not parts:
+        return prefix.rstrip("/") or normalized
+    return f"{prefix}{'/'.join(parts)}"

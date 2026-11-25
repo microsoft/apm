@@ -528,7 +528,7 @@ def compute_forward_reachable_keys(
     unverifiable: list[tuple[str, str]] = []
     from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps.local_identity import root_local_dirs as collect_root_local_dirs
-    from apm_cli.deps.local_identity import transitive_local_identity
+    from apm_cli.deps.local_identity import root_local_identity, transitive_local_identity
     from apm_cli.deps.lockfile import lockfile_parent_identity
 
     replacement_index = build_replacement_index(parse_replace_block(lockfile.replacements))
@@ -609,14 +609,21 @@ def compute_forward_reachable_keys(
                 continue
             # The edge as declared: a file is admitted against it, not the node identity.
             edge = (ref.local_path, anchor)
-            if ref.replacement is None and parent_repo_url is not None:
-                ref = transitive_local_identity(
-                    ref,
-                    declaring_parent=parent_repo_url,
-                    anchored=real_dir,
-                    root=project_root,
-                    root_local_dirs=root_local_dirs,
-                )
+            if ref.replacement is None:
+                if parent_repo_url is not None:
+                    ref = transitive_local_identity(
+                        ref,
+                        declaring_parent=parent_repo_url,
+                        anchored=real_dir,
+                        root=project_root,
+                        root_local_dirs=root_local_dirs,
+                    )
+                else:
+                    ref = root_local_identity(
+                        ref,
+                        anchored=real_dir,
+                        root_local_dirs=root_local_dirs,
+                    )
             visit_key = ref.get_unique_key() if ref.replacement is not None else str(real_dir)
             exact = ref.get_unique_key()
             matched_key = (

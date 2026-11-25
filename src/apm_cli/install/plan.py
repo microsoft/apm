@@ -564,13 +564,29 @@ def lockfile_satisfies_manifest(
         ``satisfied`` is True.
     """
     from apm_cli.drift import detect_ref_change, revision_pin_mismatch
+    from apm_cli.models.dependency.identity import normalize_local_path_spelling
 
     marketplace_index = lockfile.marketplace_index()
+    local_syntax_index: dict[str, LockedDependency] | None = None
     reasons: list[str] = []
     for dep in manifest_deps:
         key = _dep_ref_key(dep)
         display = dep.get_display_name() if dep.is_marketplace else key
         locked_dep = lockfile.get_dependency(key, marketplace_index=marketplace_index)
+        local_path = getattr(dep, "local_path", None)
+        if (
+            locked_dep is None
+            and getattr(dep, "is_local", False)
+            and isinstance(local_path, str)
+            and local_path
+        ):
+            if local_syntax_index is None:
+                local_syntax_index = {
+                    normalize_local_path_spelling(entry.local_path): entry
+                    for entry in lockfile.dependencies.values()
+                    if entry.is_local_source and entry.local_path and not entry.declaring_parent
+                }
+            locked_dep = local_syntax_index.get(normalize_local_path_spelling(local_path))
         if locked_dep is None or key == ".":
             reasons.append(f"  - {display} is declared in apm.yml but missing from apm.lock.yaml")
             continue
