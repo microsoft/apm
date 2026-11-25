@@ -115,13 +115,8 @@ def _installed(tmp_path: Path, apm_binary_path: Path, packages: dict[str, list[s
     return scenario, consumer, manifest, env
 
 
-def _prune(scenario, consumer, env) -> tuple[dict[str, dict], str]:
-    pruned = scenario.runner.run(("prune",), scenario_id="prune", cwd=consumer.root, env=env)
-    output = " ".join((pruned.stdout + pruned.stderr).split())
-    assert pruned.returncode == 0, output
-    rows = _rows(consumer.root)
-    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
-    return rows, output
+def _prune(scenario, consumer, env):
+    return scenario.runner.run(("prune",), scenario_id="prune", cwd=consumer.root, env=env)
 
 
 def test_prune_keeps_every_recorded_parent_of_a_shared_child_it_keeps(
@@ -139,10 +134,16 @@ def test_prune_keeps_every_recorded_parent_of_a_shared_child_it_keeps(
     manifest["dependencies"]["apm"] = []
     dump_yaml(manifest, consumer.manifest_path)
 
-    rows, output = _prune(scenario, consumer, env)
+    pruned = _prune(scenario, consumer, env)
 
+    output = " ".join((pruned.stdout + pruned.stderr).split())
+    assert pruned.returncode == 0, output
+    assert "Retained _local/a: _local/c is still recorded under it" in output
+    assert "Retained _local/z: apm-fixture-org/guard-kit is still recorded under it" in output
+    rows = _rows(consumer.root)  # apm.lock.yaml on disk
     assert {"_local/a", "_local/z", "_local/c"} <= set(rows), output
-    assert "Retained _local/a:" in output, output
+    assert rows["_local/c"]["resolved_by"] == "_local/a", rows
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
 
 
 def test_prune_walks_a_kept_chain_from_its_root_declared_top(
@@ -159,10 +160,16 @@ def test_prune_walks_a_kept_chain_from_its_root_declared_top(
     manifest["dependencies"]["apm"] = []
     dump_yaml(manifest, consumer.manifest_path)
 
-    rows, output = _prune(scenario, consumer, env)
+    pruned = _prune(scenario, consumer, env)
 
+    output = " ".join((pruned.stdout + pruned.stderr).split())
+    assert pruned.returncode == 0, output
+    assert "Retained _local/a: apm-fixture-org/guard-kit is still recorded under it" in output
+    assert "Removed _local/u" in output, output
+    rows = _rows(consumer.root)  # apm.lock.yaml on disk
     assert {"_local/a", "_local/e", "_local/h"} <= set(rows), output
     assert "_local/u" not in rows, output
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
 
 
 def test_prune_keeps_what_a_kept_parent_declares_when_its_chain_no_longer_reaches_it(
@@ -182,6 +189,11 @@ def test_prune_keeps_what_a_kept_parent_declares_when_its_chain_no_longer_reache
     manifest["dependencies"]["apm"] = []
     dump_yaml(manifest, consumer.manifest_path)
 
-    rows, output = _prune(scenario, consumer, env)
+    pruned = _prune(scenario, consumer, env)
 
+    output = " ".join((pruned.stdout + pruned.stderr).split())
+    assert pruned.returncode == 0, output
+    assert f"Removed {h_key}" not in output, output
+    rows = _rows(consumer.root)  # apm.lock.yaml on disk
     assert {"_local/e", h_key} <= set(rows), output
+    assert all(row.get("resolved_by") in (None, *rows) for row in rows.values()), rows
