@@ -53,3 +53,5 @@
 02:38 | W on main+#5374 full 0.718 (-4.45s clears); L parse-once 0.914 (-0.82 misses); differential parse-once == A/A noise only; sec2 drafted | W3d review | none
 02:49 | #5382 9be8e258 W3d ACCEPT (T1/T2); lockfile delta -> #5418 filed; L skill-tree 0.899 (no gain); L ceiling profile running | ~20 min | none
 02:52 | L residual profile reported; sec2 verdict W yes / L no; #5382 benches running | ~20 min | none
+02:56 | #5382 9be8e258 M 0.900/0.897, L 1.002, Copilot@head 0 threads; waiting CI green -> QL re-H8 | <=05:00 | none
+03:09 | sec3 security table + sec4 build plan drafted | review | none
