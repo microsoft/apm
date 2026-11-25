@@ -74,6 +74,9 @@ def _record_after(
         # would deploy there, so this state is not a planner fixed point.
         vr._trace("no record (the target set changed during the install)")
         return
+    if attested and not _orphans_settled():
+        vr._trace("no record (the lock retains a dependency apm.yml no longer declares)")
+        return
     deployed = frozenset(
         rel
         for key, dep in lock.dependencies.items()
@@ -102,6 +105,41 @@ def _unsettled_line(text: str) -> str | None:
         if vr._WARNING_LINE.match(line) and not any(p.match(line) for p in vr._LIVE_NOTICES):
             return line.strip()
     return None
+
+
+def emitted() -> list[str]:
+    """The warning and error messages this run printed, unwrapped (utils/console.py)."""
+    import sys
+
+    return list(getattr(sys.modules.get("apm_cli.utils.console"), "EMITTED", ()))
+
+
+def unsettled_message() -> str | None:
+    """The first printed warning or error, unprefixed or wrapped alike, that is not a
+    live-rejudged notice (A2): any such message refuses the attestation."""
+    for message in emitted():
+        head = _SGR.sub("", message.partition("\n")[0]).strip()
+        line = head if head.startswith(("[!]", "[x]")) else f"[!] {head}"
+        if not any(p.match(line) for p in vr._LIVE_NOTICES):
+            return line
+    return None
+
+
+def _orphans_settled() -> bool:
+    """The audit's no-orphan baseline passes on the committed state (a frozen install
+    may retain a dependency apm.yml dropped; the hit would skip its notice)."""
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.policy.ci_checks import _check_no_orphans
+
+    root = Path.cwd()
+    try:
+        lock = LockFile.read(get_lockfile_path(root))
+        manifest = APMPackage.from_apm_yml(manifest_file(root))
+        return lock is not None and _check_no_orphans(manifest, lock).passed
+    except Exception:
+        return False
 
 
 def _targets_settled(announced: str) -> bool:
@@ -198,7 +236,8 @@ def _write(
         notice, due = verdict_inputs.notice_schedule(
             vr._ENTRY_TIME[0] if vr._ENTRY_TIME else 0.0,
             output=kind != ATTESTED,
-            notified=NEW_VERSION_NOTICE in stdout_text + stderr_text,
+            notified=NEW_VERSION_NOTICE in stdout_text + stderr_text
+            or any(NEW_VERSION_NOTICE in message for message in emitted()),
         )
         key = vr._key(create=True)
         if key is None:

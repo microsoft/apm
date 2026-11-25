@@ -887,6 +887,8 @@ def recording(argv: list[str]) -> Iterator[None]:
     from apm_cli.install.verdict_inputs import entry_stamp
 
     _ENTRY_TIME[:] = entry_stamp()
+    if (console := sys.modules.get("apm_cli.utils.console")) is not None:
+        console.EMITTED.clear()  # never imported here: the replay path stays light
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
     _ACTIVE.append(out)
@@ -906,12 +908,13 @@ def recording(argv: list[str]) -> Iterator[None]:
 
 def _settle(argv: list[str], entry: Any, out: _Tee, err: _Tee, code: object) -> None:
     """Write what this run proved, attested or recorded (install/verdict_write.py)."""
-    from apm_cli.install.verdict_write import _record_locked, _unsettled_line
+    from apm_cli.install.verdict_write import _record_locked, _unsettled_line, unsettled_message
 
     if code == 0 and _ATTESTED_INSTALL and not _VERIFIED_NOOP:
         # No output is recorded, so an unknown no-op form does not matter:
         # every attested hit renders its output live.
-        unsettled = _unsettled_line("".join(out.parts) + "".join(err.parts))
+        text = "".join(out.parts) + "".join(err.parts)
+        unsettled = _unsettled_line(text) or unsettled_message()
         if unsettled is None:
             _record_locked(argv, entry, out, err, attested=True)
         else:

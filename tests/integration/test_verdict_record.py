@@ -26,6 +26,8 @@ pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I2")]
 _REL = ".github/prompts/a.prompt.md"
 _BODY = b"# prompt\n"
 _COMMIT = "a" * 40
+# The lock's only package is declared: a lock row apm.yml dropped is an orphan.
+_MANIFEST = "name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - o/p\n"
 _OUTPUT = "[>] Installing dependencies from apm.yml...\n[i] No changes -- install state already up to date in 0.9s.\n"
 
 
@@ -45,7 +47,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (root / _REL).write_bytes(_BODY)
     (root / "apm_modules" / "o" / "p").mkdir(parents=True)
     (root / "apm_modules" / "o" / "p" / "apm.yml").write_text("name: p\n", encoding="utf-8")
-    (root / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+    (root / "apm.yml").write_text(_MANIFEST, encoding="utf-8")
     from apm_cli.utils.content_hash import compute_package_hash
 
     digest = "sha256:" + hashlib.sha256(_BODY).hexdigest()
@@ -969,6 +971,28 @@ def test_a_run_that_printed_the_update_notice_is_never_recorded(project: Path) -
     assert not (_home(project) / "verdicts").exists()
 
 
+def test_a_wrapped_update_notice_is_never_recorded(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Copilot #5383: a narrow terminal wraps the notice; it printed all the same."""
+    from apm_cli.update_notice import NEW_VERSION_NOTICE
+    from apm_cli.utils import console
+    from apm_cli.utils.version_checker import save_version_check_timestamp
+
+    for name, value in (("FORCE_COLOR", "1"), ("NO_COLOR", "1"), ("COLUMNS", "24")):
+        monkeypatch.setenv(name, value)  # a narrow terminal, as Rich reads it
+    console._reset_console()
+    with verdict_record.recording(["install"]):
+        console._rich_warning(f"{NEW_VERSION_NOTICE}9.9.9 (current: 0.1.0)", symbol="warning")
+        sys.stdout.write(_OUTPUT)
+        save_version_check_timestamp()
+        verdict_record.note_verified_noop()
+
+    console._reset_console()
+    assert NEW_VERSION_NOTICE not in capsys.readouterr().out, "the notice must wrap here"
+    assert not (_home(project) / "verdicts").exists()
+
+
 def _assert_no_notice(out: str) -> None:
     from apm_cli.update_notice import NEW_VERSION_NOTICE
 
@@ -1395,6 +1419,16 @@ def test_a_parked_mcp_notice_is_re_judged_live_and_still_attests(project: Path) 
     )
 
     _assert_attested_record(project)
+
+
+def test_an_unprefixed_warning_the_install_printed_is_never_attested(project: Path) -> None:
+    """Copilot #5383: a warning printed without a symbol (a hook file that contributes no
+    entries) still refuses the attestation, so the next install prints it again."""
+    from apm_cli.utils.console import _rich_warning
+
+    _attest(project, during=lambda: _rich_warning("Hook file h.json contributes no entries"))
+
+    _assert_proves_itself()
 
 
 def _assert_proves_itself() -> None:

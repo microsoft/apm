@@ -152,6 +152,35 @@ def test_every_fast_answer_prints_what_the_full_pipeline_prints(world_install) -
     assert _tree_bytes(project) == before
 
 
+def test_a_frozen_install_that_retains_an_orphan_never_attests(world_install) -> None:
+    """Copilot #5383: --frozen keeps a dependency apm.yml dropped and says so; that state
+    is never attested, so the next frozen install re-judges it and says so again."""
+    install, project, _world = world_install
+    _assert_attested(install())
+    dropped = _drop_a_dependency(project)
+
+    retained, again = install("--frozen"), install("--frozen")
+
+    assert retained[0] == again[0] == 0, retained[1] + retained[2]
+    assert "attested" not in _traces(retained[2]), retained[2]
+    assert "attested hit" not in _traces(again[2]), again[2]
+    _assert_names(dropped, retained[1], again[1])
+
+
+def _drop_a_dependency(project: Path) -> str:
+    import yaml
+
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    dropped = manifest["dependencies"]["apm"].pop()  # the last: no MCP server to restore
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    return str(dropped).rsplit("/", 1)[-1].split("#", 1)[0]
+
+
+def _assert_names(name: str, *outputs: str) -> None:
+    for output in outputs:
+        assert name in output, output
+
+
 def _tree_bytes(project: Path) -> dict[str, bytes]:
     return {
         path.relative_to(project).as_posix(): path.read_bytes()
