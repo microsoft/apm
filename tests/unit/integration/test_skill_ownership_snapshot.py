@@ -577,3 +577,25 @@ def test_standalone_drift_replay_uses_fresh_bounded_integrators(
     assert outputs[0] != outputs[1]
     assert ownership_work.dependencies == 0
     assert ownership_work.paths == 0
+
+
+@pytest.mark.parametrize(
+    "deployed",
+    [".claude/skills/demo", "agent-data/workflows/demo", ".claude/skills/demo/scripts/a.py"],
+)
+def test_the_projects_own_skill_dirs_are_named_in_every_target_layout(
+    tmp_path: Path, deployed: str
+) -> None:
+    """#5399: a project's own skill directory (grok-bot's agent-data/workflows too) is
+    PROJECT_SKILLS in the owner map; a file inside one is not a skill directory."""
+    from apm_cli.integration.skill_support import PROJECT_SKILLS, build_skill_ownership_maps
+
+    lockfile = LockFile()
+    lockfile.local_deployed_files = [deployed]
+    lockfile.write(get_lockfile_path(tmp_path))
+
+    owned_by, _native = build_skill_ownership_maps(tmp_path)
+
+    is_dir = not deployed.endswith(".py")
+    assert (owned_by.get("demo") == PROJECT_SKILLS) is is_dir
+    assert get_lockfile_path(tmp_path).is_file()

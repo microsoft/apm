@@ -747,3 +747,88 @@ def test_removal_after_branch_round_trip_needs_todays_deletion_evidence(
     assert result.returncode == 0, output
     assert {name: (world.project / _X / name).read_bytes() for name in kept} == kept, output
     assert "Cleaned" not in output, output
+
+
+# ---------------------------------------------------------------------------
+# #5399: an older lock taken back (a merge-conflict resolution) while SKILL.md
+# changes. The skill's own file that a later install deployed is still this
+# installation's write: one install records it and --frozen passes. A file APM
+# never wrote at that path stays unmanaged.
+# ---------------------------------------------------------------------------
+
+_DEMO = "---\nname: demo\ndescription: Demo skill for a lockfile repro. Use when testing.\n---\n\n# Demo\n"
+_DEMO_DIR = ".claude/skills/demo"
+_HELPER = f"{_DEMO_DIR}/scripts/helper.py"
+_UNMANAGED = "not managed by APM"
+
+
+def _restored_lock_project(world: _World, *, apm_wrote_helper: bool) -> None:
+    init = world.apm("init", "-y", "--target", "claude")
+    assert init.returncode == 0, _output(init)
+    _write(world.project / ".apm/skills/demo/SKILL.md", _DEMO)
+    first = world.apm("install")
+    assert first.returncode == 0, _output(first)
+    older_lock = (world.project / "apm.lock.yaml").read_bytes()
+    _write(world.project / ".apm/skills/demo/scripts/helper.py", "print(1)\n")
+    if apm_wrote_helper:
+        added = world.apm("install")
+        assert added.returncode == 0, _output(added)
+        assert _HELPER in _locked_files(world.project)
+    else:
+        _write(world.project / _HELPER, "print(1)\n")  # hand-made, the same bytes
+    (world.project / "apm.lock.yaml").write_bytes(older_lock)
+    source = world.project / ".apm/skills/demo/SKILL.md"
+    source.write_text(_DEMO + "\nEdited.\n", encoding="ascii")
+
+
+@pytest.mark.parametrize("sibling", [False, True])
+def test_restored_older_lock_records_the_skills_own_file_in_one_install(
+    tmp_path: Path, apm_binary_path: Path, sibling: bool
+) -> None:
+    """A hand-made sibling in the skill directory never blocks reclaiming APM's own file."""
+    world = _new_world(tmp_path, apm_binary_path)
+    _restored_lock_project(world, apm_wrote_helper=True)
+    notes = world.project / _DEMO_DIR / "personal-notes.txt"
+    if sibling:
+        notes.write_text("my notes\n", encoding="ascii")
+    before = _tree(world.project, ".claude")
+
+    installed = world.apm("install")
+
+    output = _output(installed)
+    _assert_nothing_deleted(before, world.project)
+    _assert_converged(world, installed, world.project)
+    assert _UNMANAGED not in output, output
+    assert "replaced" not in output, output
+    assert _HELPER in _locked_files(world.project), output
+    assert (world.project / _HELPER).read_text(encoding="ascii") == "print(1)\n"
+    assert (
+        (world.project / _DEMO_DIR / "SKILL.md").read_text(encoding="ascii").endswith("Edited.\n")
+    )
+    lock = (world.project / "apm.lock.yaml").read_bytes()
+    converged = _tree(world.project, ".claude")
+    frozen = world.apm("install", "--frozen")
+    assert frozen.returncode == 0, _output(frozen)
+    again = world.apm("install")
+    assert again.returncode == 0, _output(again)
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock
+    assert _tree(world.project, ".claude") == converged
+    if sibling:
+        assert notes.read_text(encoding="ascii") == "my notes\n"
+        assert f"{_DEMO_DIR}/personal-notes.txt" not in _locked_files(world.project)
+
+
+def test_restored_older_lock_keeps_a_hand_made_file_unmanaged(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """No receipt proves APM wrote the file, even with the source's own bytes."""
+    world = _new_world(tmp_path, apm_binary_path)
+    _restored_lock_project(world, apm_wrote_helper=False)
+    hand_made = (world.project / _HELPER).read_bytes()
+
+    installed = world.apm("install")
+
+    output = _output(installed)
+    assert _UNMANAGED in output, output
+    assert _HELPER not in _locked_files(world.project), output
+    assert (world.project / _HELPER).read_bytes() == hand_made
