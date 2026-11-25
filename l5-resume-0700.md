@@ -34,3 +34,21 @@
 - #5383 H8 SIGNED ddd81de1; train-ready rows posted (desk, OPS, VP). Warm +1.4-1.9% disclosed; writer shave row in #5384.
 - #5403 at f068b670: W3d ACCEPT, CI green, Copilot clean; asked QL for H8 (PR FROZEN: decline further threads unless security/data loss).
 - Follow-ups: W3d #5403 N1 (set-aside anchor depth, fail-safe); W3d #5383 N1-N3 (EMITTED growth, [x] prefix, subdir cwd lstat); dev-tree identity cache (#5384); delete wip/l5-bench-noattest after the train.
+
+- QL 02:49: train files at the 2100-line cap (deployment_ledger.py, policy_checks.py, discovery.py, deps/lockfile.py, contracts_test_taxonomy.py). Any #5383/#5403 train fix must be net-zero lines there; check on the merge-tree result with the train head.
+
+- 04:52 VP: #5420 (config.py import-time APM_HOME) for v0.40. Sized and sent: config.py-only, 8 src callers fine via __getattr__, 59 test files patch the constants (autouse leak fixture), guard + red-first cell; ETA ~60 min after the 06:15 read and the VP go; needs a human scope comment on #5420, W3d, H8.
+
+- 04:53 VP RULING: #5420 plan (1)-(4) approved as design; NOT on the perf critical path. Order after the 06:15 read: #5418 (v0.40 fix) -> Car 5 build -> #5420. No #5420 code before the human scope comment (regent morning batch). The 59-file test migration and the TLS/git/realpath audit are a separate follow-up.
+
+- 05:32 VP: report install-frozen-noop t10 (p50 wall + CPU + run ID) from the Writer 05:45 bench on final head 42878803 to the VP by 06:25 (PM due). Run IDs come via the VP. #4770 closes only after QL re-key.
+
+- 05:43 #4770 frozen read sent to VP: runs disagree (VP run 45547721768: t10 frozen 1.158 wall/1.145 CPU; Writer 45547807435: 0.957/0.929). All frozen samples "attested miss (argv)": install->install --frozen never fast-paths. Proposed v0.40: argv-class attestation (install|install --frozen), needs W3d. Awaiting VP ruling.
+
+- 06:10 #5423 draft (argv-class frozen attestation, stacked on #5383) at 4950ffdb; worktree ../l5-frozen branch danielmeppiel-perf-frozen-attest. W3d AF1-AF5 implemented; AF4 only-apm omission pending W3d meaning. Benches L perf-bench/2eff8ab3-1795582976-52162f, W perf-bench/2eff8ab3-1795582985-d4129f (bar t10 p50 <= 1 s both, cleanly).
+
+## 07:15 CET
+- #5423 READY at 5c6b22e8 (stacked on #5383; rebase onto main after #5406 lands, re-request Copilot). W3d ACCEPT thru 5b83654b; delta for Copilot r1 folds sent. Benches: L 45550882169 (t10 0.857 s PASS), W 45550899166 (t10 1.21 s FAIL). VP: lands on merit; #4770 closes Linux-only + ONE follow-up issue "Windows attested-hit fixed cost ~1.2 s at t10".
+- W attribution sent (imports ~577 modules beyond boot dominate; enforce_frozen x2 ~0.09 s local cut).
+- Pre-existing: plain install under decide migrates legacy approvals.yml -> report/issue.
+- Night automation cleared. Order: #5423 land -> #5418 -> Car 5 -> #5420 (accepted, low).
