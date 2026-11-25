@@ -133,3 +133,135 @@ def test_rt3_case_only_rename_of_a_deployed_dir_then_uninstall(
     leftovers = sorted(p.name for p in skills.iterdir()) if skills.is_dir() else []
     assert result.returncode == 0, f"{result.stdout[-1500:]}\n{result.stderr[-1500:]}"
     assert leftovers == [], f"left behind after a case-only rename: {leftovers}"
+
+
+_WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing modes")
+
+_HOLDER = """
+import ctypes, sys, time
+k = ctypes.WinDLL("kernel32", use_last_error=True)
+k.CreateFileW.restype = ctypes.c_void_p
+h = k.CreateFileW(sys.argv[1], 0x80000000, 0x1, None, 3, 0x80, None)  # GENERIC_READ, SHARE_READ
+print("held" if h not in (None, ctypes.c_void_p(-1).value) else "fail", flush=True)
+time.sleep(float(sys.argv[2]))
+"""
+
+
+def _hold(path: Path, seconds: float = 20):
+    """Another process (an editor, an AV scanner) holds *path* without delete sharing."""
+    import subprocess
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _HOLDER, str(path), str(seconds)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stdout is not None and proc.stdout.readline().strip() == "held"
+    return proc
+
+
+@_WINDOWS
+def test_rt3_uninstall_with_a_locked_deployed_file_recovers(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, _outside = _world(tmp_path, apm_binary_path)
+    world.apm("install")
+    skill = world.project / ".claude" / "skills" / "a-skill" / "SKILL.md"
+    holder = _hold(skill)
+    try:
+        first = world.apm("uninstall", "./vendor/a", expect=None)
+    finally:
+        holder.kill()
+        holder.wait()
+    lock = (world.project / "apm.lock.yaml").read_text(encoding="utf-8")
+    if skill.exists():
+        # The file survived the lock: the lockfile must still own it, or a
+        # later command can never clean it up (a silent orphan).
+        assert "a-skill" in lock, (
+            f"locked file left behind but forgotten by the lockfile (exit {first.returncode}):\n"
+            f"{first.stdout[-1500:]}\n{first.stderr[-1500:]}\n--- lock:\n{lock}"
+        )
+    again = world.apm("prune", expect=None) if skill.exists() else first
+    assert not skill.exists(), (
+        f"never recovered: first exit {first.returncode}, then {again.returncode}\n"
+        f"{again.stdout[-1500:]}\n{again.stderr[-1500:]}"
+    )
+
+
+@_WINDOWS
+def test_rt3_reinstall_with_a_locked_module_file_keeps_a_consistent_state(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, _outside = _world(tmp_path, apm_binary_path)
+    world.apm("install")
+    source = world.project / "vendor" / "a" / ".apm" / "skills" / "a-skill" / "SKILL.md"
+    source.write_text(_SKILL + "v2\n", encoding="utf-8")
+    module_files = [
+        p for p in (world.project / "apm_modules").rglob("SKILL.md") if p.is_file()
+    ] or [world.project / ".claude" / "skills" / "a-skill" / "SKILL.md"]
+    holder = _hold(module_files[0])
+    try:
+        first = world.apm("install", expect=None)
+    finally:
+        holder.kill()
+        holder.wait()
+    deployed = world.project / ".claude" / "skills" / "a-skill" / "SKILL.md"
+    second = world.apm("install", expect=None)
+    assert second.returncode == 0, f"{second.stdout[-1500:]}\n{second.stderr[-1500:]}"
+    assert deployed.read_text(encoding="utf-8").endswith("v2\n"), (
+        f"stale deploy after the lock cleared (first exit {first.returncode}):\n"
+        f"{first.stdout[-1500:]}\n{first.stderr[-1500:]}"
+    )
+
+
+@_WINDOWS
+def test_rt3_long_deployed_paths_install_and_uninstall(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, _outside = _world(tmp_path, apm_binary_path)
+    bundle = world.project / "vendor" / "a" / ".apm" / "skills" / "a-skill"
+    deep = bundle
+    while (
+        len(str(world.project / ".claude" / "skills" / "a-skill"))
+        + len(str(deep.relative_to(bundle)))
+        < 300
+    ):
+        deep = deep / "long-component-name"
+    try:
+        deep.mkdir(parents=True)
+        (deep / "ref.md").write_text("deep\n", encoding="utf-8")
+    except OSError as exc:
+        pytest.skip(f"long paths unavailable on this runner: {exc}")
+
+    first = world.apm("install", expect=None)
+    deployed = world.project / ".claude" / "skills" / "a-skill" / deep.relative_to(bundle)
+    if first.returncode == 0:
+        assert (deployed / "ref.md").is_file(), "install passed without deploying the deep file"
+    removal = world.apm("uninstall", "./vendor/a", expect=None)
+    assert removal.returncode == 0, f"{removal.stdout[-1500:]}\n{removal.stderr[-1500:]}"
+    assert not (world.project / ".claude" / "skills" / "a-skill").exists(), (
+        f"uninstall left the long tree (install exit {first.returncode}):\n"
+        f"{first.stdout[-800:]}\n{removal.stdout[-800:]}"
+    )
+
+
+@_WINDOWS
+def test_rt3_short_name_cwd_then_long_name_cwd_agree(tmp_path: Path, apm_binary_path: Path) -> None:
+    import ctypes
+
+    world, _outside = _world(tmp_path, apm_binary_path)
+    buffer = ctypes.create_unicode_buffer(1024)
+    ctypes.windll.kernel32.GetShortPathNameW(str(world.project), buffer, 1024)
+    short = Path(buffer.value)
+    if "~" not in str(short):
+        pytest.skip("no 8.3 alias on this volume")
+
+    world.apm("install", cwd=short)
+    lock = (world.project / "apm.lock.yaml").read_bytes()
+    again = world.apm("install", cwd=world.project)
+    assert again.returncode == 0
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock, (
+        "lockfile churned by cwd spelling"
+    )
+    world.apm("uninstall", "./vendor/a", cwd=world.project)
+    assert not (world.project / ".claude" / "skills" / "a-skill").exists()

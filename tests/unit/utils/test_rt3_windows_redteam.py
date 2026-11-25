@@ -327,4 +327,6 @@ def test_rt3_damaged_loose_object_heals_and_never_serves(tmp_path: Path, damage:
     result = _second_invocation(cache, origin, sha)
 
     assert result.returncode == 0, result.stderr.decode(errors="replace")[-2000:]
-    assert result.stdout == _BODY, f"served {result.stdout[:80]!r}"
+    # The heal warning goes to stdout first; the served bytes come last.
+    assert result.stdout.endswith(_BODY), f"served {result.stdout[-80:]!r}"
+    assert b"EVIL" not in result.stdout
