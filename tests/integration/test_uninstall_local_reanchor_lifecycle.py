@@ -415,6 +415,77 @@ def _fs_folds_case(tmp_path: Path) -> bool:
     return (tmp_path / "case-fold-probe").is_dir()
 
 
+def _as_pre_fix_lock(world: ReplayWorld) -> None:
+    """Rewrite the one-row lock as a pre-#5424 install wrote it: two rows for one directory.
+
+    The transitive spelling ``../e-pkg`` got its own row, deployment-ledger
+    owner and hashed ``_local/<slot>/e-pkg`` copy beside the root ``E-Pkg``.
+    """
+    import hashlib
+
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    root = next(row for row in lock["dependencies"] if row["repo_url"] == "_local/E-Pkg")
+    twin = {
+        "repo_url": "_local/e-pkg",
+        "name": "e",
+        "version": "1.0.0",
+        "depth": 2,
+        "resolved_by": "_local/d",
+        "package_type": root["package_type"],
+        "deployed_files": root.pop("deployed_files"),
+        "deployed_file_hashes": root.pop("deployed_file_hashes"),
+        "source": "local",
+        "local_path": "../e-pkg",
+        "declaring_parent": "./vendor/d",
+        "anchored_local_path": "vendor/e-pkg",
+        "content_hash": root["content_hash"],
+        "is_dev": True,
+    }
+    lock["dependencies"].append(twin)
+    for entry in lock.get("deployments", []):
+        entry["owners"] = [
+            "local:vendor/e-pkg" if owner == "./vendor/E-Pkg" else owner
+            for owner in entry.get("owners", [])
+        ]
+        if entry.get("active_owner") == "./vendor/E-Pkg":
+            entry["active_owner"] = "local:vendor/e-pkg"
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+    modules = world.project / "apm_modules" / "_local"
+    slot = hashlib.sha256(b"vendor/e-pkg").hexdigest()[:12]
+    shutil.copytree(modules / "E-Pkg", modules / slot / "e-pkg")
+
+
+@pytest.mark.windows_compat
+def test_a_pre_fix_lock_with_two_rows_for_one_folded_directory_upgrades(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5424 upgrade: a lock holding two rows for one folded directory keeps working.
+
+    ``--frozen`` accepts it with the lock bytes unchanged; a plain install
+    then records one row, and ``--frozen`` passes on that lock too.
+    """
+    if not _fs_folds_case(tmp_path):
+        pytest.skip("case-sensitive filesystem: the spellings name different directories")
+    world = ReplayWorld.create(tmp_path / "w", apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "E-Pkg", "e")
+    _skill_package(vendor / "d", "d", ("../e-pkg",))
+    _manifest(world, ["./vendor/E-Pkg"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _as_pre_fix_lock(world)
+    pre_fix = lock_bytes(world.project)
+    assert _lock_rows_named(world, "e") == ["_local/E-Pkg", "_local/e-pkg"]
+
+    world.apm("install", "--frozen")
+    assert lock_bytes(world.project) == pre_fix
+    world.apm("install")
+    assert len(_lock_rows_named(world, "e")) == 1, _lock_rows_named(world, "e")
+    collapsed = lock_bytes(world.project)
+    world.apm("install", "--frozen")
+    assert lock_bytes(world.project) == collapsed
+
+
 def _lock_rows_named(world: ReplayWorld, name: str) -> list[str]:
     """Every lock row (not deduplicated by key) of the package *name*."""
     lock = load_yaml(world.project / "apm.lock.yaml")
