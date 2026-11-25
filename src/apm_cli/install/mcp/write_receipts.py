@@ -757,12 +757,34 @@ def _supersede_other_installation(project_root: Path, *, user_scope: bool) -> Pa
         if not session.another_installation(data):
             return None  # this installation's own evidence, or not provably another's
         aside = _set_aside(path)
-        sibling = _regular_json(session.state_path)
-        if aside is not None and sibling is not None and session.another_installation(sibling):
-            _set_aside(session.state_path)
     except (OSError, ValueError, KeyError, TypeError, UnicodeError):
         return None
+    if aside is not None:
+        _set_aside_sibling(session)
     return aside
+
+
+def _set_aside_sibling(session: Any) -> None:
+    """Set aside the other installation's well-formed materialization receipt.
+
+    Anything unreadable, malformed or not provably another installation's stays
+    in place, where the ledger keeps reporting it; the MCP evidence already moved.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    try:
+        data = _regular_json(session.state_path)
+        if data is None or not session.another_installation(data):
+            return
+        records = DeploymentLedgerCodec.from_rows(data["records"]).records
+        if len(records) != len(data["records"]) or any(
+            not isinstance(data[name], dict) or set(data[name]) != set(records)
+            for name in ("destinations", "bindings")
+        ):
+            return
+        _set_aside(session.state_path)
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError):
+        return
 
 
 def _regular_json(path: Path) -> Any:

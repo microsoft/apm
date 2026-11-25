@@ -336,6 +336,33 @@ def test_a_reclone_sets_aside_the_sibling_receipt_its_new_identity_cannot_bind(
     assert not sibling.exists()
 
 
+@pytest.mark.parametrize("shape", ["not-json", "malformed-records"])
+def test_an_unusable_sibling_receipt_stays_while_the_evidence_is_set_aside(
+    project: Path, shape: str
+) -> None:
+    """Copilot #5403: a sibling receipt that is not well-formed is never archived (the
+    ledger keeps reporting it), and it never undoes the evidence set-aside or its warning."""
+    import shutil
+
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+
+    _install_write(project, _Logger())
+    session = DeploymentMaterializationSession(project, InstallScope.PROJECT, None)
+    evidence, sibling = session.mcp_state_path, session.state_path
+    old = evidence.read_bytes()
+    body = {**session.binding(), "records": [{"bad": 1}], "destinations": {}, "bindings": {}}
+    sibling.write_text("{not json" if shape == "not-json" else json.dumps(body), encoding="utf-8")
+    before = sibling.read_bytes()
+    shutil.rmtree(project / ".apm-local")
+    logger = _Logger()
+
+    _install_write(project, logger)
+
+    _assert_set_aside(logger.warnings, evidence, old)
+    assert sibling.read_bytes() == before, "an unusable sibling stays in place"
+
+
 def _null_root_identity(data: dict) -> None:
     data["root_identity"] = None
 
