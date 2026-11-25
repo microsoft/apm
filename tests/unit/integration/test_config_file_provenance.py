@@ -1181,3 +1181,161 @@ def test_a_file_whose_identity_cannot_be_read_is_kept(
 
     assert _apm_empties(config, root=project) is False
     assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+# -- #5270: two writers on one APM_HOME merge per record file ---------------------
+
+
+def _writers(*configs: Path) -> tuple:
+    """Two stores that each read the record files of *configs* before either saves."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    stores = (_Store.load(), _Store.load())
+    for store in stores:
+        for config in configs:
+            store.lookup(config)
+    return stores
+
+
+def _user_skeleton(config: Path) -> Path:
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(_SKELETON, encoding="utf-8")
+    return config
+
+
+def test_a_stale_writer_keeps_another_writers_preexisting_record(tmp_path, apm_home) -> None:
+    """#5270: the first writer records a user's file; the second, which read the same
+    record file before that, saves another record. The user's file keeps its record and
+    its deletion protection."""
+    project = tmp_path / "project"
+    _apm_writes(project / "apm.json", _WITH_ENTRY)  # the directory's record file exists
+    users = _user_skeleton(project / ".mcp.json")
+    first, second = _writers(users)
+
+    first.files[config_file_key(users)] = {"origin": "preexisting", "hash": _sha(_SKELETON)}
+    first.save()
+    second.files[config_file_key(project / "other.json")] = {"origin": "created", "hash": "x"}
+    second.save()
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(project / "other.json") is Origin.CREATED
+    assert config_file_origin(project / "apm.json") is Origin.CREATED
+    assert _apm_empties(users, root=project) is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
+
+
+@pytest.mark.parametrize("preexisting_saves_first", [True, False])
+def test_a_conflict_on_one_record_keeps_the_protective_origin(
+    tmp_path, apm_home, preexisting_saves_first
+) -> None:
+    """#5270: both writers change the same record; whichever saves last, the record that
+    protects the file wins and the conflict is reported."""
+    project = tmp_path / "project"
+    _apm_writes(project / "apm.json", _WITH_ENTRY)
+    users = _user_skeleton(project / ".mcp.json")
+    protective, other = _writers(users)
+    key = config_file_key(users)
+    protective.files[key] = {"origin": "preexisting", "hash": _sha(_SKELETON)}
+    other.files[key] = {"origin": "created", "hash": _sha(_SKELETON)}
+
+    order = (protective, other) if preexisting_saves_first else (other, protective)
+    for store in order:
+        store.save()
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert order[1].conflicts == [key]
+    assert _apm_empties(users, root=project) is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
+
+
+@pytest.mark.parametrize("remover_saves_first", [True, False])
+def test_a_removed_record_never_drops_a_concurrent_change_to_it(
+    tmp_path, apm_home, remover_saves_first
+) -> None:
+    """#5270 red team: one writer forgets a record while another marks it preexisting."""
+    project = tmp_path / "project"
+    users = project / ".mcp.json"
+    _apm_writes(users, _WITH_ENTRY)  # recorded as created
+    remover, keeper = _writers(users)
+    key = config_file_key(users)
+    remover.files.pop(key)
+    keeper.files[key] = {"origin": "preexisting", "hash": _sha(_WITH_ENTRY)}
+
+    for store in (remover, keeper) if remover_saves_first else (keeper, remover):
+        store.save()
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+
+
+def test_a_stale_writer_never_resurrects_a_record_another_removed(tmp_path, apm_home) -> None:
+    """#5270 red team: a record the other writer forgot stays forgotten when this writer
+    did not touch it."""
+    project = tmp_path / "project"
+    gone = project / ".mcp.json"
+    _apm_writes(gone, _WITH_ENTRY)
+    remover, other = _writers(gone)
+    remover.files.pop(config_file_key(gone))
+    remover.save()
+    other.files[config_file_key(project / "other.json")] = {"origin": "created", "hash": "x"}
+    other.save()
+
+    assert config_file_origin(gone) is None
+    assert config_file_origin(project / "other.json") is Origin.CREATED
+
+
+def test_a_record_file_corrupted_after_it_was_read_fails_the_save_closed(
+    tmp_path, apm_home
+) -> None:
+    """#5270 red team: a record file that cannot be re-read under the lock is never
+    overwritten with this writer's copy; the save refuses."""
+    from apm_cli.integration.config_file_provenance import _UnreadableStore
+
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    (writer,) = _writers(config)[:1]
+    held = _holding(apm_home, config)
+    held.write_text("{", encoding="utf-8")
+
+    writer.files[config_file_key(project / "other.json")] = {"origin": "created", "hash": "x"}
+    with pytest.raises(_UnreadableStore):
+        writer.save()
+
+    assert held.read_text(encoding="utf-8") == "{"
+
+
+def test_a_save_killed_after_its_re_read_keeps_the_other_writers_record(tmp_path, apm_home) -> None:
+    """#5270 red team: killed between re-reading and writing, then retried, the stale
+    writer still keeps the first writer's record."""
+    project = tmp_path / "project"
+    _apm_writes(project / "apm.json", _WITH_ENTRY)
+    users = _user_skeleton(project / ".mcp.json")
+    first, second = _writers(users)
+    first.files[config_file_key(users)] = {"origin": "preexisting", "hash": _sha(_SKELETON)}
+    first.save()
+    second.files[config_file_key(project / "other.json")] = {"origin": "created", "hash": "x"}
+    with _killed_at_write(apm_home, after=0), pytest.raises(OSError, match="killed"):
+        second.save()
+    assert config_file_origin(users) is Origin.PREEXISTING
+
+    second.save()
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(project / "other.json") is Origin.CREATED
+
+
+def test_a_stale_writer_keeps_a_record_file_another_listed(tmp_path, apm_home) -> None:
+    """#5270: the index a stale writer saves still lists the record file another writer
+    added, so losing that file fails closed instead of reading as unrecorded."""
+    _apm_writes(tmp_path / "seed" / ".mcp.json", _WITH_ENTRY)  # the index exists
+    users = _user_skeleton(tmp_path / "users" / ".mcp.json")
+    first, second = _writers()
+    first.files[config_file_key(users)] = {"origin": "preexisting", "hash": _sha(_SKELETON)}
+    first.save()
+    second.files[config_file_key(tmp_path / "b" / ".mcp.json")] = {"origin": "created"}
+    second.save()
+
+    _holding(apm_home, users).unlink()
+
+    assert _apm_empties(users, root=users.parent) is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
