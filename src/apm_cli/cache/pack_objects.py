@@ -293,7 +293,10 @@ def _loose(path: str, budget: list[int]) -> tuple[str, bytes] | None:
         swapped = os.name != "nt" and (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
         if not stat.S_ISREG(opened.st_mode) or swapped:
             raise _Refuse("loose object is not a regular file")
-        packed = handle.read(_MAX_OBJECT + 1)
+        if opened.st_size > _MAX_OBJECT:
+            raise _Refuse("object exceeds the size cap")
+        # Read what is there: read(n) reserves n bytes up front, which Windows commits.
+        packed = handle.read()
     inflater = zlib.decompressobj()
     head = inflater.decompress(packed, _LOOSE_HEADER_MAX)
     kind_size, nul, rest = head.partition(b"\0")
