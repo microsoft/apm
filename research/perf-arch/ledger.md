@@ -283,3 +283,5 @@
 03:40 | tick quiet | SoL schannel calib ~20 min + oracles; QL #5382 | none
 03:42 | #5382 QL re-H8 pending ~40 min -> VP nudge; default eject at 04:45 | QL; SoL calib | #5382 H8 latency
 03:43 | #5382 H8 already signed 03:07 (desk row 387, desk DB d42f94a1 inbox.db); my risk flag was wrong; check desk H8 rows first | SoL calib | none
+03:52 | tick; notes 1d723b4527730c6a50aea98dfd9dbd569d56c6d4 | SoL calib | none
+03:52 | W schannel calib 9V74 10.53 s x 0.568 = 5.98 s -> doc 'AT target' (3/4 classes) | SoL oracles | none
