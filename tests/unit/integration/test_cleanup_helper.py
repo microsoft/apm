@@ -994,7 +994,7 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
     tmp_path, diagnostics
 ):
     """A cowork skill dir relinked outside the cowork root while a file is held loses nothing."""
-    from apm_cli.integration.cleanup import AUTHORIZED, REJECTED_UNSAFE_PATH, DeploymentEvidence
+    from apm_cli.integration.cleanup import AUTHORIZED, REJECTED_UNSAFE_PATH
 
     cowork_root = tmp_path / "cowork-skills"
     skill_md = cowork_root / "my-skill" / "SKILL.md"
@@ -1007,6 +1007,9 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
     project_root.mkdir()
     real_unlink = Path.unlink
     calls = []
+    # Receipts are keyed by resolved path, so force proof of the swapped file too.
+    evidence = receipted_evidence(cowork_root, deploy_root=project_root)
+    evidence.verdict = lambda *_args, **_kwargs: AUTHORIZED
 
     def held_once_then_real(path, *args, **kwargs):
         if path.name != "SKILL.md":
@@ -1025,7 +1028,6 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
             "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
             return_value=cowork_root,
         ),
-        patch.object(DeploymentEvidence, "verdict", return_value=AUTHORIZED),
         patch("sys.platform", "win32"),
         patch("time.sleep"),
         patch.object(Path, "unlink", autospec=True, side_effect=held_once_then_real),
@@ -1036,7 +1038,7 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
-            evidence=receipted_evidence(cowork_root, deploy_root=project_root),
+            evidence=evidence,
         )
 
     assert len(calls) == 1
