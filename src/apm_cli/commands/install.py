@@ -80,9 +80,10 @@ from apm_cli.install.manifest_helpers import (
     _merge_packages_into_yml,
     _prepare_dry_run_manifest_path,
     _prepare_user_scope_for_install,
-    _report_bootstrap_manifest,
+    bootstrap_install_manifest,
     preflight_bootstrap_targets,
 )
+from apm_cli.install.manifest_journal import retry_options
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
 # names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
@@ -193,8 +194,6 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
     _rich_success,
 )
 from ._helpers import (
-    _create_minimal_apm_yml,
-    _get_bootstrap_config,
     ensure_project_root_is_not_user_scope,
     explicit_policy_option,
     setup_project_root_discovery,
@@ -810,7 +809,10 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
     from ..install.commit_gate import judge_mcp_install_files
 
-    judge_mcp_install_files(scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run)
+    entry = (runtime, exclude, target_decision)
+    judge_mcp_install_files(
+        scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run, mcp_entry=entry
+    )
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -1201,12 +1203,9 @@ def install(  # noqa: PLR0913
                         off in CI), always (force on -- never set in CI),
                         never (disable; also implied for non-TTY stdout).
     """
-    # C1 #856: defaults BEFORE try so the finally clause never sees an
-    # UnboundLocalError if InstallLogger(...) raises during construction.
+    # C1 #856: defaults BEFORE try so `finally` never sees an UnboundLocalError.
     _apm_verbose_prev = os.environ.get("APM_VERBOSE")
-    # F5 (#1116): elapsed wall time covers EVERY exit path. Captured
-    # before logger construction so `finally` can render a timing line
-    # even if logger init itself raised.
+    # F5 (#1116): captured before logger init so `finally` times EVERY exit path.
     install_started_at = time.perf_counter()
     summary_rendered = False
     logger = dry_run_manifest_tmp = command_result = transaction = None
@@ -1514,35 +1513,40 @@ def install(  # noqa: PLR0913
         # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
         auth_resolver.set_logger(logger)
 
-        # Capture manifest state before this attempt can auto-create apm.yml.
-        apm_yml_exists = manifest_path.exists()
         transaction = InstallTransaction(
             manifest_path=manifest_path,
             apm_modules_dir=get_modules_dir(scope),
             validation=None,
             logger=logger,
             acquire_lock=not dry_run,
+            journal_packages=packages,
+            journal_options=retry_options(
+                user_scope=scope is InstallScope.USER,
+                dev=dev,
+                skills=skill_names,
+                target=target,
+                root=root,
+            ),
         )
+        # Capture manifest state after a killed install's apm.yml was restored
+        # and before this attempt can auto-create apm.yml.
+        apm_yml_exists = manifest_path.exists()
 
         if not apm_yml_exists and packages:
             derived_project_name = (
-                Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
-            )
+                Path.cwd() if scope is InstallScope.PROJECT else Path.home()
+            ).name
             project_name = _resolve_bootstrap_project_name(derived_project_name)
-            if project_name != derived_project_name:
-                logger.verbose_detail(
-                    f'Using default project name "{project_name}" because '
-                    f"derived name {derived_project_name!a} is invalid"
-                )
-            config = _get_bootstrap_config(project_name) | (
-                {"targets": manifest_targets} if manifest_targets else {}
-            )
-            _create_minimal_apm_yml(config, target_path=manifest_path)
-            _report_bootstrap_manifest(
-                logger=logger,
+            bootstrap_install_manifest(
+                derived_project_name=derived_project_name,
+                project_name=project_name,
+                manifest_path=manifest_path,
                 manifest_display=manifest_display,
                 manifest_targets=manifest_targets,
+                target=target,
+                logger=logger,
                 dry_run=dry_run,
+                transaction=transaction,
             )
 
         if not apm_yml_exists and not packages:
@@ -1813,9 +1817,8 @@ def _install_apm_packages(ctx, outcome):
         from apm_cli.install.request import InstallRequest
 
         InstallService.enforce_frozen(
-            InstallRequest(
-                apm_package=apm_package,
-                frozen=True,
+            InstallRequest.frozen_preflight(
+                apm_package,
                 scope=ctx.scope,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,

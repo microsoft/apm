@@ -785,13 +785,17 @@ def try_apply(
         if user_scope or not targets:
             raise Decline("scope")
         _refuse_claude_carried_rules(project_root, targets, lock)
+        if frozen_disposition.replay:  # the frozen preflight owner, before any decision
+            verdict_attest.refuse_frozen_drift(project_root)
         from apm_cli.cache.deploy_store import DeployStore
 
         session = DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)
         deploy = DeployStore.open_default()
         if deploy is None:
             raise Decline("no deploy store")
-        if attested and verdict_attest.attested_gates(project_root, lock, fetch):
+        if attested and verdict_attest.attested_gates(
+            project_root, lock, fetch, frozen_disposition
+        ):
             if decide_only:
                 _trace("no-op (attested record)")
                 return True

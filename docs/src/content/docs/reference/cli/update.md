@@ -104,7 +104,7 @@ apm update
 
 ## Behavior
 
-- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
+- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are re-snapshotted, as `apm install` does: a changed local package is redeployed and its lock row updated, and an unchanged one is a no-op. A missing local source (direct or transitive) fails the update with exit 1 and names the fix; nothing is written.
 - **Refreshes preserve the active package.** Replacement content downloads and
   passes package validation in an isolated transaction path before publication.
   Failed downloads or validation keep the previous package active. Failed

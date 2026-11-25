@@ -5,15 +5,48 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+_last_shadow: dict[str, str] = {}
+
+
+def _entry_spelling(tool_path: str) -> str:
+    """Return the PATH entry as stored on disk, without following the entry itself."""
+    path = Path(tool_path)
+    parent = os.path.realpath(path.parent)
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        names = []
+    wanted = path.name
+    stored = (
+        wanted
+        if wanted in names
+        else next((n for n in names if n.lower() == wanted.lower()), wanted)
+    )
+    return os.path.join(parent, stored)
+
+
+def _within(path: str, root: Path) -> bool:
+    return Path(os.path.normcase(path)).is_relative_to(os.path.normcase(root))
+
 
 class ProjectShadowedExecutableError(FileNotFoundError):
     """A helper tool exists on PATH, but only inside the enclosing project."""
 
     def __init__(self, name: str, tool_path: str, root: Path) -> None:
+        shown = _entry_spelling(tool_path)
+        target = os.path.realpath(shown)
+        fix = f"Install {name} outside {root} or launch apm from outside it."
+        if os.path.normcase(target) == os.path.normcase(shown):
+            where = f"{name} at {shown} is inside the project {root}"
+        elif _within(shown, root):
+            where = f"{name} at {shown} (symlink to {target}) is inside the project {root}"
+        else:
+            where = f"{name} at {shown} links to {target}, which is inside the project {root}"
+            fix = (
+                f"Install {name} outside {root} (not a link into it) or launch apm from outside it."
+            )
         super().__init__(
-            f"{name} at {tool_path} is inside the project {root}; APM only runs "
-            f"helper tools from PATH outside the project. Install {name} outside "
-            f"{root} or launch apm from outside it."
+            f"{where}; APM only runs helper tools from PATH outside the project. {fix}"
         )
 
 
@@ -95,6 +128,24 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
         return any(same_directory(directory, level) for level in (home, *home.parents))
     verdict = _LEVEL_VERDICTS[(home, directory)] = (wanted.st_dev, wanted.st_ino) in chain
     return verdict
+
+
+def note_shadow(name: str, error: FileNotFoundError) -> None:
+    """Remember why the last lookup of *name* missed; return None for the caller."""
+    if isinstance(error, ProjectShadowedExecutableError):
+        _last_shadow[name] = str(error)
+    else:
+        _last_shadow.pop(name, None)
+
+
+def forget_shadow(name: str) -> None:
+    """Drop a stale shadow note before *name* is looked up again."""
+    _last_shadow.pop(name, None)
+
+
+def not_found_message(default: str, *names: str) -> str:
+    """Return the shadowed-in-project message for the first of *names* that has one."""
+    return next((_last_shadow[n] for n in names if n in _last_shadow), default)
 
 
 def executable_exclusion_root() -> Path | None:

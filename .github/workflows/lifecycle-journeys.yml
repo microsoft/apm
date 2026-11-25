@@ -240,13 +240,19 @@ jobs:
             tests/lifecycle/scenarios/test_engine_parity_invariants.py
 
   # PR integration shards keep only the per-group sample of the linter session
-  # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
-  # here, nightly and on every release-candidate dispatch.
+  # cache's byte-equality guard; the full owner-mutation replay runs here,
+  # nightly and on every release-candidate dispatch. Serially it outgrew its
+  # 40-minute cap (#5475), so it fans out round-robin: each shard replays
+  # every job-total-th case, and the shards together replay every case once.
   architecture-cache-full-matrix:
-    name: Architecture Cache Full Matrix (Linux)
+    name: Architecture Cache Full Matrix (Linux, shard ${{ matrix.shard }})
     needs: resolve-ref
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -269,10 +275,35 @@ jobs:
       - name: Replay the full owner mutation matrix through the session cache
         env:
           PYTEST_PERF: "1"
+          APM_ARCH_CACHE_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
         run: |
-          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+          set -o pipefail
+          # A dispatched ref that predates sharding (#5475) ignores the shard
+          # spec, so only shard 0 replays its full matrix there.
+          if ! grep -q APM_ARCH_CACHE_SHARD tests/integration/test_architecture_linter_session_cache.py; then
+            case "$APM_ARCH_CACHE_SHARD" in
+              0/*) echo "[i] Revision predates sharding; shard 0 replays the full matrix" ;;
+              *)
+                echo "- Architecture cache shard \`$APM_ARCH_CACHE_SHARD\`: skipped, revision predates sharding" \
+                  >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+            esac
+          fi
+          # Each shard records its wall time in the job summary, so growth
+          # shows up well before a shard reaches its cap.
+          start=$SECONDS
+          status=0
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers -s \
             -m benchmark \
-            tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix
+            tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix \
+            2>&1 | tee replay.log || status=$?
+          elapsed=$((SECONDS - start))
+          cases=$(grep -o 'cases=[0-9]*/[0-9]*' replay.log || echo 'cases=unknown')
+          printf -- '- Architecture cache shard `%s`: %s in %dm%02ds (cap 30m, exit %d)\n' \
+            "$APM_ARCH_CACHE_SHARD" "$cases" $((elapsed / 60)) $((elapsed % 60)) "$status" \
+            >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   signal:
     name: Lifecycle Journeys Nightly Signal

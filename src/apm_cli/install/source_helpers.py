@@ -349,6 +349,15 @@ def record_package_digests(ctx: Any, dep_key: str, digests: Any) -> str:
     return ctx.package_hashes[dep_key]
 
 
+def record_local_copy_digests(ctx: Any, dep_key: str, copy: Path) -> None:
+    """Hash an update's local copy before validation normalizes it (#5463).
+
+    That is the image install locks, so the update plan compares like with like.
+    """
+    if ctx.update_refs and copy.is_dir():
+        ctx.local_copy_digests[dep_key] = package_digests(ctx, copy)
+
+
 def record_carried_package_hash(
     ctx: Any,
     dep_key: str,

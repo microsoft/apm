@@ -6,6 +6,7 @@ import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from apm_cli.constants import APM_YML_FILENAME
 from apm_cli.core.command_logger import InstallLogger
@@ -81,9 +82,12 @@ def _merge_packages_into_yml(
     data[dep_section]["apm"] = current_deps
 
     try:
+        from apm_cli.install.manifest_journal import publish_journaled_manifest
         from apm_cli.utils.yaml_io import dump_yaml_roundtrip
 
-        dump_yaml_roundtrip(data, apm_yml_path)
+        # An install journaling this apm.yml publishes it atomically (#5454).
+        if not publish_journaled_manifest(apm_yml_path, data):
+            dump_yaml_roundtrip(data, apm_yml_path)
         if logger:
             logger.success(
                 f"Updated {APM_YML_FILENAME} with {len(validated_packages)} new package(s)"
@@ -177,6 +181,41 @@ def preflight_bootstrap_targets(
             return None  # The local-bundle path reports it.
     manifest_display = str(manifest_path) if global_ else APM_YML_FILENAME
     return bootstrap_manifest_targets(target, manifest_display)
+
+
+def bootstrap_install_manifest(
+    *,
+    derived_project_name: str,
+    project_name: str,
+    manifest_path: Path,
+    manifest_display: str,
+    manifest_targets: list[str] | None,
+    target: str | list[str] | None,
+    logger: InstallLogger,
+    dry_run: bool,
+    transaction: Any,
+) -> None:
+    """Create the apm.yml ``apm install <package>`` adds to, journaled first (#5454)."""
+    from apm_cli.models.manifest_bootstrap import bootstrap_config, write_minimal_manifest
+
+    if manifest_targets is None and target:
+        # The early preflight saw the apm.yml a killed install created; replay removed it.
+        manifest_targets = bootstrap_manifest_targets(target, manifest_display)
+    if project_name != derived_project_name:
+        logger.verbose_detail(
+            f'Using default project name "{project_name}" because '
+            f"derived name {derived_project_name!a} is invalid"
+        )
+    config = bootstrap_config(project_name) | (
+        {"targets": manifest_targets} if manifest_targets else {}
+    )
+    write_minimal_manifest(config, target_path=manifest_path, publish=transaction.publish_manifest)
+    _report_bootstrap_manifest(
+        logger=logger,
+        manifest_display=manifest_display,
+        manifest_targets=manifest_targets,
+        dry_run=dry_run,
+    )
 
 
 def bootstrap_manifest_targets(

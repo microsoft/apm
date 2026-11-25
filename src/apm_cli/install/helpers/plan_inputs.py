@@ -26,9 +26,18 @@ def confirm_update_plan(
     new targets), so an update refuses regardless of its plan. An install
     refuses when it adds or removes a dependency; an unchanged install still
     reads through it. Returns ``False`` when the caller
-    declined the plan.
+    declined the plan. A dependency of the selected graph, direct or
+    transitive, that failed to resolve (a deleted local path) fails the update
+    here, as install does, rather than being reported as current (#5463).
     """
     if plan_callback is not None:
+        from apm_cli.install.outcome import (
+            raise_selected_dependency_failure,
+            selected_dependency_failed,
+        )
+
+        if selected_dependency_failed(ctx):
+            raise_selected_dependency_failure(ctx)
         plan = build_resolved_update_plan(ctx, lockfile)
         if not plan_callback(plan):
             return False
@@ -69,17 +78,24 @@ def writes_lockfile(ctx: InstallContext, lockfile: LockFile, *, updating: bool) 
 
 
 def build_resolved_update_plan(ctx: InstallContext, lockfile: LockFile | None) -> UpdatePlan:
-    """Supply validated, staged local replacement hashes to the pure plan owner."""
+    """Supply validated, staged local package hashes to the pure plan owner.
+
+    An update hashes each local copy as resolve made it, before validation
+    normalizes it (the image install locks), so an edited local package is
+    a planned change and an unchanged one is not (#5463).
+    """
     from apm_cli.install.plan import build_update_plan
     from apm_cli.install.source_helpers import package_digests, record_package_digests
 
     for dependency in ctx.deps_to_install:
-        if dependency.replacement is not None and dependency.is_local:
-            record_package_digests(
-                ctx,
-                dependency.get_unique_key(),
-                package_digests(ctx, dependency.get_install_path(ctx.apm_modules_dir)),
-            )
+        if not dependency.is_local:
+            continue
+        key = dependency.get_unique_key()
+        digests = ctx.local_copy_digests.get(key)
+        if digests is None and dependency.replacement is not None:
+            digests = package_digests(ctx, dependency.get_install_path(ctx.apm_modules_dir))
+        if digests is not None:
+            record_package_digests(ctx, key, digests)
     return build_update_plan(
         lockfile,
         ctx.deps_to_install,

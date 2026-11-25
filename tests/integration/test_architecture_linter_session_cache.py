@@ -4,10 +4,12 @@ Owner: ``architecture-linter-performance`` (scripts/architecture_linter/session_
 
 * Guard 1 (transparency): every case's findings are byte-equal with and
   without the session. The always-on test covers the first owner case of
-  each rule group; the full-matrix replay (~15 min) runs on demand with
-  ``PYTEST_PERF=1 -m benchmark``. An explicit ``-m`` expression (as CI's
+  each rule group; the full-matrix replay (~45 min serial) runs on demand
+  with ``PYTEST_PERF=1 -m benchmark``. An explicit ``-m`` expression (as CI's
   integration lanes pass) overrides the default benchmark deselection, so
-  the env gate keeps it out of the time-capped shards.
+  the env gate keeps it out of the time-capped shards. The nightly lane
+  splits the replay round-robin with ``APM_ARCH_CACHE_SHARD=INDEX/TOTAL``
+  (0-based); the shards together replay every case exactly once (#5475).
 * Guard 2 (parse once): replaying the full mutation matrix in one session
   builds every ``(path, content)`` exactly once and walks the tree once.
 
@@ -52,6 +54,19 @@ def _findings_bytes(report: RunReport) -> bytes:
 _REPLAYED_CASES = tuple(
     case for case in EXECUTABLE_MUTATIONS if case.guard_id not in _CACHE_GUARD_IDS
 )
+
+
+def _shard_cases(cases: Sequence[MutationCase], spec: str | None) -> tuple[MutationCase, ...]:
+    """Return shard ``INDEX/TOTAL`` (0-based, round-robin) of `cases`; all cases if unset."""
+    if not spec:
+        return tuple(cases)
+    index_text, sep, total_text = spec.partition("/")
+    if not (sep and index_text.isdigit() and total_text.isdigit()):
+        raise ValueError(f"APM_ARCH_CACHE_SHARD must be INDEX/TOTAL, got {spec!r}")
+    index, total = int(index_text), int(total_text)
+    if not 0 <= index < total:
+        raise ValueError(f"APM_ARCH_CACHE_SHARD index out of range: {spec!r}")
+    return tuple(cases[index::total])
 
 
 def _sample_cases() -> tuple[MutationCase, ...]:
@@ -111,8 +126,25 @@ def test_session_cache_findings_match_uncached_runs_per_group() -> None:
 )
 def test_session_cache_findings_match_uncached_runs_full_matrix() -> None:
     """Guard 1 (full matrix): every owner mutation case is byte-equal cached and cold."""
-    digest = _assert_cache_transparent(_REPLAYED_CASES)
-    print(f"full-matrix cached findings sha256={digest} cases={len(_REPLAYED_CASES)}")
+    spec = os.environ.get("APM_ARCH_CACHE_SHARD")
+    cases = _shard_cases(_REPLAYED_CASES, spec)
+    assert cases, f"shard {spec!r} selected no cases"
+    digest = _assert_cache_transparent(cases)
+    print(
+        f"full-matrix cached findings sha256={digest} shard={spec or 'all'} "
+        f"cases={len(cases)}/{len(_REPLAYED_CASES)}"
+    )
+
+
+def test_full_matrix_shards_replay_every_case_exactly_once() -> None:
+    """Sharding the nightly replay never drops or duplicates a case (#5475)."""
+    for total in (1, 2, 4, 7):
+        shards = [_shard_cases(_REPLAYED_CASES, f"{index}/{total}") for index in range(total)]
+        replayed = sorted(id(case) for shard in shards for case in shard)
+        assert replayed == sorted(map(id, _REPLAYED_CASES)), f"{total} shards"
+    for bad in ("4/4", "1", "a/2", "-1/2", "0/0"):
+        with pytest.raises(ValueError):
+            _shard_cases(_REPLAYED_CASES, bad)
 
 
 def test_session_parses_each_file_content_at_most_once_over_full_matrix() -> None:

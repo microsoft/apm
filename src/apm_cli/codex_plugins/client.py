@@ -16,6 +16,7 @@ from typing import Any
 
 from apm_cli.core.remediation import CODEX_PLUGIN_USER_SCOPE
 from apm_cli.core.scope import InstallScope
+from apm_cli.utils import executable_exclusion as _exclusion
 from apm_cli.utils import git_env
 
 MINIMUM_CODEX_VERSION = "0.163.0"
@@ -231,8 +232,11 @@ class CodexNativeClient:
         executable = git_env.trusted_executable("codex")
         if executable is None:
             raise CodexNativeError(
-                f"Codex native registration requires Codex CLI {MINIMUM_CODEX_VERSION} "
-                "or later on PATH. Install a qualified client and retry."
+                _exclusion.not_found_message(
+                    f"Codex native registration requires Codex CLI {MINIMUM_CODEX_VERSION} "
+                    "or later on PATH. Install a qualified client and retry.",
+                    "codex",
+                )
             )
         try:
             result = subprocess.run(
