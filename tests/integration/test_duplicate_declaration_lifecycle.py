@@ -141,7 +141,7 @@ def test_cross_section_moves_keep_the_declared_pin(tmp_path: Path, apm_binary_pa
 def test_one_directory_spelled_two_ways_is_one_package(
     tmp_path: Path, apm_binary_path: Path, second_spelling: str
 ) -> None:
-    """#5455: trailing-slash and '.' spellings of one local directory fold into one lock row."""
+    """#5455: trailing-slash and '.' spellings of one local directory are refused before any write."""
     world = World.create(tmp_path, apm_binary_path)
     pkg = world.project / "vendor" / "a"
     skill = pkg / ".apm" / "skills" / "a-skill"
@@ -152,18 +152,11 @@ def test_one_directory_spelled_two_ways_is_one_package(
     (pkg / "apm.yml").write_text("name: a\nversion: 1.0.0\n", encoding="ascii")
 
     world.manifest(["./vendor/a", second_spelling])
-    install_result = world.apm("install", NO_POLICY)
-    assert "(files unchanged)" not in install_result.stdout
-    assert list(world.locked().keys()) == ["_local/a"]
-    assert world.locked()["_local/a"]["local_path"] == "./vendor/a"
-
-    lock_before = world.lock_bytes()
-    world.apm("install", "--frozen", NO_POLICY)
-    assert world.lock_bytes() == lock_before
-
-    world.apm("prune")
-    assert list(world.locked().keys()) == ["_local/a"]
-
-    world.apm("uninstall", "./vendor/a")
-    assert _sections(world) == ([], [])
+    install_result = world.apm("install", NO_POLICY, expect=None)
+    assert install_result.returncode != 0
+    output = install_result.stdout + install_result.stderr
+    assert "./vendor/a" in output
+    assert second_spelling in output
     assert not (world.project / "apm.lock.yaml").exists()
+    assert world.deployed() == set()
+    assert not (world.project / "apm_modules").exists()

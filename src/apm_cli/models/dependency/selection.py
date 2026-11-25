@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .identity import normalize_local_path_spelling
 from .reference import DependencyReference
 
 
@@ -73,7 +72,7 @@ class ManifestSelectionIndex:
                 text = entry if isinstance(entry, str) else str(entry)
                 self._unparsed.setdefault(text, []).append((index, entry))
                 continue
-            self._by_identity.setdefault(selection_identity(dependency), []).append((index, entry))
+            self._by_identity.setdefault(dependency.get_identity(), []).append((index, entry))
             if dependency.is_local:
                 key = dependency.get_unique_key()
                 self._local_by_key.setdefault(key, []).append((index, entry))
@@ -93,7 +92,7 @@ class ManifestSelectionIndex:
     def select(self, package: str) -> DependencySelection:
         """Select exactly one manifest entry for *package* (see the module function)."""
         try:
-            requested_identity = selection_identity(DependencyReference.parse(package))
+            requested_identity = DependencyReference.parse(package).get_identity()
         except (ValueError, TypeError, AttributeError, KeyError):
             requested_identity = package
         direct = sorted(
@@ -160,16 +159,9 @@ def _selection_from_matches(matches: list[object]) -> DependencySelection:
     )
 
 
-def selection_identity(dependency: DependencyReference) -> str:
-    """Return the manifest-selection identity, folding syntactic local spellings."""
-    if dependency.is_local and dependency.local_path:
-        return normalize_local_path_spelling(dependency.local_path)
-    return dependency.get_identity()
-
-
 def _declared_identity(dep_entry: object) -> str | None:
     try:
-        return selection_identity(parse_dependency_entry(dep_entry))
+        return parse_dependency_entry(dep_entry).get_identity()
     except (ValueError, TypeError, AttributeError, KeyError):
         return None
 

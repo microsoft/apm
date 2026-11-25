@@ -47,12 +47,6 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     return portable_relpath(anchored, base)
 
 
-def resolve_local_dir(local_path: str, base: Path) -> Path:
-    """Resolve a local dependency path relative to *base*."""
-    raw = Path(local_path).expanduser()
-    return raw.resolve() if raw.is_absolute() else (base / raw).resolve()
-
-
 def stored_directory(anchored: Path, root: Path | None) -> Path:
     """*anchored* spelled as the volume stores it: one directory, one spelling (#5424).
 
@@ -124,6 +118,13 @@ def locked_spelling(
     return ref
 
 
+def _canonical_root_local_dir(local_path: str, consumer_root: Path) -> Path:
+    """Resolve *local_path* relative to *consumer_root* and fold volume spelling."""
+    raw = Path(local_path).expanduser()
+    anchored = raw.resolve() if raw.is_absolute() else (consumer_root / raw).resolve()
+    return stored_directory(anchored, consumer_root)
+
+
 def root_local_dirs(
     root_refs: Iterable[DependencyReference], consumer_root: Path
 ) -> dict[Path, DependencyReference]:
@@ -131,28 +132,29 @@ def root_local_dirs(
     dirs: dict[Path, DependencyReference] = {}
     for ref in root_refs:
         if ref.is_local and ref.local_path and ref.replacement is None:
-            anchored = resolve_local_dir(ref.local_path, consumer_root)
-            dirs.setdefault(stored_directory(anchored, consumer_root), ref)
+            dirs.setdefault(_canonical_root_local_dir(ref.local_path, consumer_root), ref)
     return dirs
 
 
-def root_local_identity(
-    dep_ref: DependencyReference,
-    *,
-    anchored: Path,
-    root_local_dirs: dict[Path, DependencyReference],
-) -> DependencyReference:
-    """Return *dep_ref* with the canonical root spelling for *anchored*.
-
-    When ``apm.yml`` declares the same directory twice with different
-    spellings (such as ``./vendor/a`` and ``./vendor/a/``), every root
-    declaration adopts the first declaration's spelling so resolution,
-    locking, ``--frozen`` verification, and reachability agree on one row.
-    """
-    root_ref = root_local_dirs.get(anchored)
-    if root_ref is not None and root_ref.local_path != dep_ref.local_path:
-        return replace(dep_ref, repo_url=root_ref.repo_url, local_path=root_ref.local_path)
-    return dep_ref
+def find_duplicate_local_declarations(
+    root_refs: Iterable[DependencyReference], consumer_root: Path
+) -> list[tuple[str, str]]:
+    """Return pairs of local_path spellings that resolve to the same directory (#5455)."""
+    seen: dict[Path, str] = {}
+    duplicates: list[tuple[str, str]] = []
+    for ref in root_refs:
+        if not (ref.is_local and ref.local_path and ref.replacement is None):
+            continue
+        try:
+            canonical = _canonical_root_local_dir(ref.local_path, consumer_root)
+        except (OSError, RuntimeError):
+            continue
+        first = seen.get(canonical)
+        if first is None:
+            seen[canonical] = ref.local_path
+        else:
+            duplicates.append((first, ref.local_path))
+    return duplicates
 
 
 def transitive_local_identity(

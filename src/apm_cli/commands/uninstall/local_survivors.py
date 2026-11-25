@@ -72,12 +72,10 @@ def read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     if apm_yml_path is None:
         return [], []
 
-    from ...models.dependency.selection import selection_identity
-
     removed_identities = set()
     for pkg in packages_to_remove:
         try:
-            removed_identities.add(selection_identity(_parse_dependency_entry(pkg)))
+            removed_identities.add(_parse_dependency_entry(pkg).get_identity())
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
 
@@ -100,7 +98,7 @@ def read_survivor_direct_refs(apm_yml_path, packages_to_remove):
                 ref = _parse_dependency_entry(dep_entry)
             except (ValueError, TypeError, AttributeError, KeyError):
                 continue
-            if selection_identity(ref) not in removed_identities:
+            if ref.get_identity() not in removed_identities:
                 section_refs.append(ref)
     return refs["dependencies"], refs["devDependencies"]
 

@@ -41,8 +41,6 @@ from .immutable_requirements import (
 )
 from .local_identity import (
     portable_anchor_identity,
-    resolve_local_dir,
-    root_local_identity,
     transitive_local_identity,
     with_declaring_edge,
 )
@@ -903,50 +901,65 @@ class APMDependencyResolver:
         queued_keys: set[str] = set()
         winner_candidates: list[DependencyNode] = []
 
-        # Bind root dependencies and devDependencies, then fold multiple spellings
-        # of the same local directory onto the first root declaration (#5455).
-        bound_root_refs: list[tuple[DependencyReference, bool]] = []
-        for is_dev, deps in (
-            (False, root_package.get_apm_dependencies()),
-            (True, root_package.get_dev_apm_dependencies()),
-        ):
-            for dep_ref in deps:
-                if dep_ref.is_parent_repo_inheritance:
-                    raise ValueError(
-                        "git: parent cannot be used in the root apm.yml manifest; "
-                        "specify an explicit repository URL. "
-                        "The git: parent form is only valid for transitive dependencies."
-                    )
-                if dep_ref.is_marketplace:
-                    resolved = self._resolve_marketplace_or_record_error(dep_ref, tree, "")
-                    if resolved is not None:
-                        dep_ref = resolved
-                    else:
-                        continue
-                dep_ref = self.replacement_index.bind(
-                    dep_ref,
-                    consumer_root=consumer_root,
-                    modules_dir=modules_dir,
-                    parent=None,
-                    is_dev=is_dev,
+        # Add root dependencies to queue
+        root_deps = root_package.get_apm_dependencies()
+        for dep_ref in root_deps:
+            if dep_ref.is_parent_repo_inheritance:
+                raise ValueError(
+                    "git: parent cannot be used in the root apm.yml manifest; "
+                    "specify an explicit repository URL. "
+                    "The git: parent form is only valid for transitive dependencies."
                 )
-                bound_root_refs.append((dep_ref, is_dev))
+            if dep_ref.is_marketplace:
+                resolved = self._resolve_marketplace_or_record_error(dep_ref, tree, "")
+                if resolved is not None:
+                    dep_ref = resolved
+                else:
+                    continue
+            dep_ref = self.replacement_index.bind(
+                dep_ref,
+                consumer_root=consumer_root,
+                modules_dir=modules_dir,
+                parent=None,
+                is_dev=False,
+            )
+            self._record_edge_selection(dep_ref, None)
+            processing_queue.append((dep_ref, 1, None, False))
+            queued_keys.add(dep_ref.get_resolution_key())
 
-        root_local_dirs = collect_root_local_dirs(
-            [ref for ref, _ in bound_root_refs], consumer_root
-        )
-        for dep_ref, is_dev in bound_root_refs:
-            if dep_ref.is_local and dep_ref.local_path and dep_ref.replacement is None:
-                anchored = resolve_local_dir(dep_ref.local_path, consumer_root)
-                dep_ref = root_local_identity(
-                    dep_ref, anchored=anchored, root_local_dirs=root_local_dirs
+        # Add root devDependencies to queue (marked is_dev=True)
+        root_dev_deps = root_package.get_dev_apm_dependencies()
+        for dep_ref in root_dev_deps:
+            if dep_ref.is_parent_repo_inheritance:
+                raise ValueError(
+                    "git: parent cannot be used in the root apm.yml manifest; "
+                    "specify an explicit repository URL. "
+                    "The git: parent form is only valid for transitive dependencies."
                 )
-            # Record before the dedup / prod-wins skip: every edge still selects skills.
+            if dep_ref.is_marketplace:
+                resolved = self._resolve_marketplace_or_record_error(dep_ref, tree, "")
+                if resolved is not None:
+                    dep_ref = resolved
+                else:
+                    continue
+            dep_ref = self.replacement_index.bind(
+                dep_ref,
+                consumer_root=consumer_root,
+                modules_dir=modules_dir,
+                parent=None,
+                is_dev=True,
+            )
+            # Record before the prod-wins skip: a dev edge still selects skills.
             self._record_edge_selection(dep_ref, None)
             key = dep_ref.get_resolution_key()
             if key not in queued_keys:
-                processing_queue.append((dep_ref, 1, None, is_dev))
+                processing_queue.append((dep_ref, 1, None, True))
                 queued_keys.add(key)
+            # If already queued as prod, prod wins — skip
+
+        root_local_dirs = collect_root_local_dirs(
+            [item[0] for item in processing_queue], consumer_root
+        )
         if self._reject_nested_root_declarations(
             tree, [item[0] for item in processing_queue], modules_dir
         ):

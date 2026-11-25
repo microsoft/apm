@@ -562,6 +562,46 @@ class TestOneAnchoredDirectoryIsOneDependency:
 
         assert edge.get_unique_key() == "local:vendor/a\\b"
 
+    @pytest.mark.parametrize(
+        "second_spelling",
+        ["./vendor/a/", "./vendor/./a"],
+        ids=["trailing-slash", "dot"],
+    )
+    def test_find_duplicate_local_declarations_flags_same_directory(
+        self, tmp_path: Path, second_spelling: str
+    ) -> None:
+        """#5455: two spellings of the same local directory are reported as a pair."""
+        from apm_cli.deps.local_identity import find_duplicate_local_declarations
+
+        (tmp_path / "vendor" / "a").mkdir(parents=True)
+        refs = [
+            DependencyReference.parse("./vendor/a"),
+            DependencyReference.parse(second_spelling),
+        ]
+
+        assert find_duplicate_local_declarations(refs, tmp_path) == [
+            ("./vendor/a", second_spelling)
+        ]
+
+    def test_find_duplicate_local_declarations_allows_distinct_or_single(
+        self, tmp_path: Path
+    ) -> None:
+        """#5455: distinct directories or a single declaration produce no duplicates."""
+        from apm_cli.deps.local_identity import find_duplicate_local_declarations
+
+        (tmp_path / "vendor" / "a").mkdir(parents=True)
+        (tmp_path / "vendor" / "b").mkdir(parents=True)
+        refs = [
+            DependencyReference.parse("./vendor/a"),
+            DependencyReference.parse("./vendor/b"),
+        ]
+
+        assert find_duplicate_local_declarations(refs, tmp_path) == []
+        assert (
+            find_duplicate_local_declarations([DependencyReference.parse("./vendor/a")], tmp_path)
+            == []
+        )
+
     @staticmethod
     def _lockfile(*rows: tuple[str, str, str | None]) -> LockFile:
         lockfile = LockFile()
@@ -712,70 +752,3 @@ def test_production_reaches_a_shared_leaf_in_either_dev_order(
     assert dev_flags["./packages/lib"] is False, dev_flags
     assert dev_flags["local:packages/leaf"] is False, dev_flags
     assert dev_flags["./packages/a"] is True, dev_flags
-
-
-@pytest.mark.parametrize(
-    ("first_spelling", "second_spelling"),
-    [
-        ("./vendor/a", "./vendor/a/"),
-        ("./vendor/a", "./vendor/./a"),
-        ("./vendor/a/", "./vendor/a"),
-    ],
-    ids=["trailing-slash", "dot-segment", "trailing-slash-first"],
-)
-def test_two_spellings_of_one_root_local_directory_fold_into_one_node(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    first_spelling: str,
-    second_spelling: str,
-) -> None:
-    """#5455: trailing-slash and '.' spellings of one local directory fold into one node."""
-    monkeypatch.chdir(tmp_path)
-    pkg = tmp_path / "vendor" / "a"
-    pkg.mkdir(parents=True)
-    (pkg / "apm.yml").write_text("name: a\nversion: 1.0.0\n", encoding="utf-8")
-    (tmp_path / "apm.yml").write_text(
-        f"name: root\nversion: 1.0.0\ndependencies:\n  apm:\n"
-        f"    - {first_spelling}\n    - {second_spelling}\n",
-        encoding="utf-8",
-    )
-    resolver = APMDependencyResolver(
-        apm_modules_dir=tmp_path / "apm_modules", download_callback=_copy_local([])
-    )
-    resolver._project_root = tmp_path
-
-    tree = resolver.build_dependency_tree(tmp_path / "apm.yml")
-
-    assert not tree.resolution_errors, tree.resolution_errors
-    assert len(tree.nodes) == 1, list(tree.nodes.keys())
-    assert next(iter(tree.nodes)) == first_spelling
-    flat = resolver.flatten_dependencies(tree)
-    assert len(flat.dependencies) == 1
-
-
-def test_prod_and_dev_spellings_of_one_local_directory_fold_with_prod_winning(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """#5455: prod ./vendor/a and dev ./vendor/a/ fold into one production node."""
-    monkeypatch.chdir(tmp_path)
-    pkg = tmp_path / "vendor" / "a"
-    pkg.mkdir(parents=True)
-    (pkg / "apm.yml").write_text("name: a\nversion: 1.0.0\n", encoding="utf-8")
-    (tmp_path / "apm.yml").write_text(
-        "name: root\nversion: 1.0.0\n"
-        "dependencies:\n  apm:\n    - ./vendor/a\n"
-        "devDependencies:\n  apm:\n    - ./vendor/a/\n",
-        encoding="utf-8",
-    )
-    resolver = APMDependencyResolver(
-        apm_modules_dir=tmp_path / "apm_modules", download_callback=_copy_local([])
-    )
-    resolver._project_root = tmp_path
-
-    tree = resolver.build_dependency_tree(tmp_path / "apm.yml")
-
-    assert not tree.resolution_errors, tree.resolution_errors
-    assert len(tree.nodes) == 1, list(tree.nodes.keys())
-    node = next(iter(tree.nodes.values()))
-    assert node.dependency_ref.get_unique_key() == "./vendor/a"
-    assert node.is_dev is False

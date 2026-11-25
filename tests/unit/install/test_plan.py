@@ -968,27 +968,6 @@ class TestLockfileSatisfiesManifest:
         assert ok is False
         assert reasons == ["  - ./vendor/pkg is declared in apm.yml but missing from apm.lock.yaml"]
 
-    def test_local_dep_trailing_slash_or_dot_matches_folded_lock_entry(self):
-        """#5455: ./vendor/a/ and ./vendor/./a match a folded ./vendor/a lock row."""
-        from apm_cli.deps.lockfile import LockedDependency
-
-        lock = _new_lockfile()
-        lock.add_dependency(
-            LockedDependency(
-                repo_url="_local/a",
-                source="local",
-                local_path="./vendor/a",
-                content_hash="sha256:abc",
-            )
-        )
-        manifest = [
-            DependencyReference.parse("./vendor/a"),
-            DependencyReference.parse("./vendor/a/"),
-            DependencyReference.parse("./vendor/./a"),
-        ]
-
-        assert lockfile_satisfies_manifest(lock, manifest) == (True, [])
-
     def test_orphan_lockfile_entries_do_not_fail_check(self):
         """Lock has extra entries not in manifest -- structural check passes."""
         lock = _new_lockfile()
