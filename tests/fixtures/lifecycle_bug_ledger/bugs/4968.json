@@ -6,7 +6,7 @@
     "reference"
   ],
   "properties": [
-    "reference.depth_reuses_canonical_first_wins_identity"
+    "reference.depth_reuses_canonical_shallowest_node_identity"
   ],
   "regression_tests": [
     "tests/lifecycle/scenarios/test_graph_version.py::test_max_depth_reuses_a_direct_dependency_across_declared_refs",
