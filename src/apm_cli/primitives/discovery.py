@@ -619,7 +619,16 @@ def find_primitive_files(
     if inventory is None:
         from ..compilation.inventory import CompileInventory
 
-        inventory = CompileInventory.collect(base_path, exclude_patterns=exclude_patterns)
+        from apm_cli.core.invocation_memo import invocation_memo
+
+        _m = invocation_memo("research-plan-once-inventory")
+        _key = (str(base_path), tuple(exclude_patterns or ()))
+        if _m is not None and _key in _m:
+            inventory = _m[_key]
+        else:
+            inventory = CompileInventory.collect(base_path, exclude_patterns=exclude_patterns)
+            if _m is not None:
+                _m[_key] = inventory
     return _find_primitive_inventory_files(
         inventory,
         base_path,

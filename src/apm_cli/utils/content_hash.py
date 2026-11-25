@@ -98,7 +98,19 @@ def _hash_package_tree(
     )
 
 
-def compute_package_hash(
+def compute_package_hash(*_a, **_k):
+    from apm_cli.core.invocation_memo import invocation_memo
+
+    _m = invocation_memo('research-plan-once')
+    if _m is None:
+        return _compute_package_hash_impl(*_a, **_k)
+    _key = ('compute_package_hash', tuple(str(x) for x in _a), tuple(sorted((k, str(v)) for k, v in _k.items())))
+    if _key not in _m:
+        _m[_key] = _compute_package_hash_impl(*_a, **_k)
+    return _m[_key]
+
+
+def _compute_package_hash_impl(
     package_path: Path, *, exclude: Collection[str] = (), framed: bool = True
 ) -> str:
     """Compute a deterministic SHA-256 hash of a package's file tree.
