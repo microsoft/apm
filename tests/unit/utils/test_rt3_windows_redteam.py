@@ -307,10 +307,14 @@ def test_rt3_damaged_loose_object_heals_and_never_serves(tmp_path: Path, damage:
     cache = tmp_path / "cache"
     checkout = GitCache(cache).get_checkout(str(origin), sha, locked_sha=sha)
     loose = _explode_to_loose(checkout, blob)
+    # A local-path clone hardlinks origin objects: replace the name, never
+    # write through the shared inode (that would poison the origin itself).
+    original = loose.read_bytes()
     os.chmod(loose, 0o644)
+    loose.unlink()
     evil = b"---\nname: demo\n---\nEVIL\n"
     if damage == "truncated":
-        loose.write_bytes(loose.read_bytes()[:8])
+        loose.write_bytes(original[:8])
     elif damage == "garbage":
         loose.write_bytes(b"\x00" * 64)
     elif damage == "coherent-tamper":
