@@ -146,21 +146,20 @@ def integrate_local_bundle_hooks(
 
         retire_merged_bundle_entries(project_root, targets, slug)
         integrator = HookIntegrator()
-        for target in hook_targets:
-            outcome = integrator.integrate_hooks_for_target(
-                target,
-                package_info,
-                project_root,
-                force=force,
-                managed_files=managed_files,
-                diagnostics=diagnostics,
-                scope=scope,
-                user_scope=user_scope,
-            )
+        for outcome in _integrate_hook_targets(
+            integrator,
+            hook_targets,
+            package_info,
+            project_root,
+            slug,
+            approval_key,
+            user_scope,
+            force=force,
+            managed_files=managed_files,
+            diagnostics=diagnostics,
+            scope=scope,
+        ):
             result.hook_files += outcome.files_integrated
-            _record_per_file_approval(
-                target, project_root, slug, approval_key, outcome.target_paths, user_scope
-            )
             for target_path in outcome.target_paths:
                 dest = Path(target_path)
                 record = _record_path(dest, project_root, user_scope=user_scope)
@@ -176,6 +175,27 @@ def integrate_local_bundle_hooks(
     if result.hook_files and logger is not None:
         logger.verbose_detail(f"Registered {result.hook_files} hook file(s) from bundle '{slug}'")
     return result
+
+
+def _integrate_hook_targets(
+    integrator: Any,
+    hook_targets: Any,
+    package_info: Any,
+    root: Path,
+    slug: str,
+    approval_key: str | None,
+    user_scope: bool,
+    **options: Any,
+):
+    """Register the bundle's hooks per target under *root*; the one integrator call site."""
+    for target in hook_targets:
+        outcome = integrator.integrate_hooks_for_target(
+            target, package_info, root, user_scope=user_scope, **options
+        )
+        _record_per_file_approval(
+            target, root, slug, approval_key, outcome.target_paths, user_scope
+        )
+        yield outcome
 
 
 def _preview_hook_claims(
@@ -218,15 +238,23 @@ def _preview_hook_claims(
         package_info.local_bundle_approval = approval_key
         integrator = HookIntegrator()
         scripts: set[str] = set()
-        for target in hook_targets:
-            with replay_render():  # a preview records no receipts
-                outcome = integrator.integrate_hooks_for_target(
-                    target, package_info, scratch, force=True, managed_files=set(), scope=scope
+        with replay_render():  # a preview records no receipts
+            outcomes = list(
+                _integrate_hook_targets(
+                    integrator,
+                    hook_targets,
+                    package_info,
+                    scratch,
+                    slug,
+                    approval_key,
+                    False,
+                    force=True,
+                    managed_files=set(),
+                    scope=scope,
                 )
-                _record_per_file_approval(
-                    target, scratch, slug, approval_key, outcome.target_paths, False
-                )
-            for target_path in outcome.target_paths:
+            )
+        for preview in outcomes:
+            for target_path in preview.target_paths:
                 record = portable_relpath(Path(target_path), scratch)
                 scripts.add(record)
                 if record not in result.script_hashes:
