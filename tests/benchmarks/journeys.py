@@ -77,6 +77,7 @@ NETWORK_JOURNEYS = (
     "install-noop-replay",
     "install-frozen-noop",
     "install-frozen-noop-imports",
+    "install-frozen-noop-preimport",
     "install-frozen",
     "install-locked-warm",
     "install-frozen-warm",
@@ -491,6 +492,7 @@ class Context:
     replay_supported: bool = False
     locks: dict[str, bytes] | None = None
     imports: dict | None = None
+    inner_wall: float | None = None
 
     def run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -516,13 +518,17 @@ class Context:
             env["PYTHONPATH"] = str(_SPAWN_COUNTER_DIR)
             if self.count_fs:
                 env["APM_PERF_COUNT_FS"] = "1"
+        oracle = env.get("APM_ORACLE_PREIMPORT") == "1"
+        command = self._oracle_command(argv, cwd, env) if oracle else [*self.apm, *argv]
         with (
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
         ):
             returncode, cpu = _run_measured(
-                [*self.apm, *argv], _COMMAND_TIMEOUT_S, cwd=cwd, env=env, stdout=out, stderr=err
+                command, _COMMAND_TIMEOUT_S, cwd=cwd, env=env, stdout=out, stderr=err
             )
+            if oracle:
+                cpu = self._oracle_result()
             out.seek(0)
             err.seek(0)
             err_text = err.read().decode(errors="replace")
@@ -532,6 +538,43 @@ class Context:
             tail = _redact(out.read().decode(errors="replace"))[-3000:] + "\n"
             tail += _redact(err_text)[-3000:]
         return returncode, tail, cpu
+
+    def _oracle_paths(self) -> tuple[Path, Path, Path]:
+        apm = Path(self.apm[-1])
+        python = apm.with_name("python.exe" if os.name == "nt" else "python")
+        return python, self.work / "oracle-modules.json", self.work / "oracle-result.json"
+
+    def _oracle_command(self, argv: list[str], cwd: Path, env: dict) -> list[str]:
+        """Research: a pre-imported in-process run; the first call records the module set."""
+        import shutil
+
+        python, modules, result = self._oracle_paths()
+        runner = str(Path(__file__).resolve().parent / "oracle" / "preimport_runner.py")
+        if not modules.exists():
+            home = Path(env["APM_HOME"]) / "verdicts"
+            saved = self.work / "oracle-verdicts"
+            shutil.rmtree(saved, ignore_errors=True)
+            if home.exists():
+                shutil.copytree(home, saved)
+            subprocess.run(
+                [str(python), runner, str(modules), str(result), *argv],
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                timeout=_COMMAND_TIMEOUT_S,
+                check=False,
+            )
+            shutil.rmtree(home, ignore_errors=True)  # the dump run leaves no verdict state
+            if saved.exists():
+                shutil.copytree(saved, home)
+        result.unlink(missing_ok=True)
+        return [str(python), runner, str(modules), str(result), *argv]
+
+    def _oracle_result(self) -> float:
+        _python, _modules, result = self._oracle_paths()
+        data = json.loads(result.read_text(encoding="utf-8"))
+        self.inner_wall = (self.inner_wall or 0.0) + float(data["wall_s"])
+        return float(data["cpu_s"])
 
     def _note_imports(self, err_text: str) -> str:
         """Sum the import self times of one run (research: hit-path import oracle)."""
@@ -849,6 +892,12 @@ JOURNEYS: dict[str, Journey] = {
             (*_REPLAY_TRACE, ("PYTHONPROFILEIMPORTTIME", "1")),
         ),
         Journey(
+            "install-frozen-noop-preimport",
+            Context.installed,
+            lambda c: _per_root(c, ["install", "--frozen"]),
+            (*_REPLAY_TRACE, ("APM_ORACLE_PREIMPORT", "1")),
+        ),
+        Journey(
             "install-noop-replay",
             _setup_replay,
             lambda c: _per_root(c, ["install"]),
@@ -945,6 +994,7 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     cpu = 0.0
     replays: list[str] = []
     ctx.imports = None
+    ctx.inner_wall = None
     start = time.perf_counter()
     for argv, cwd in journey.steps(ctx):
         code, tail, step_cpu = ctx.timed_run(argv, cwd)
@@ -955,6 +1005,8 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
             output = f"$ apm {' '.join(argv)}\n{tail}"
             break
     wall = time.perf_counter() - start
+    if ctx.inner_wall is not None:
+        wall = ctx.inner_wall  # research oracle: the in-process timed window only
     counters = read_spawn_log(ctx.spawn_log)
     spawns, modules = counters["spawns"], counters["modules"]
     sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
