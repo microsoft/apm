@@ -153,3 +153,20 @@ def test_a_package_on_another_windows_drive_keeps_its_absolute_path(
     assert resolve_cli_packages_for_project_root(("./pkg",), sub, root) == (
         (sub.resolve() / "pkg").as_posix(),
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlinked_ancestor_apm_yml_is_named_with_its_target(tmp_path: Path, capsys) -> None:
+    """A symlinked ancestor manifest is used, and the notice names its real file (#4545)."""
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    project = tmp_path / "project"
+    work = project / "src"
+    work.mkdir(parents=True)
+    target = tmp_path / "shared-apm.yml"
+    target.write_text("name: shared\nversion: 0.0.1\n", encoding="utf-8")
+    (project / "apm.yml").symlink_to(target)
+
+    assert _find_apm_yml(work) == project / "apm.yml"
+    out = " ".join(capsys.readouterr().out.split())
+    assert f"a symlink to {target.resolve()}" in out, out

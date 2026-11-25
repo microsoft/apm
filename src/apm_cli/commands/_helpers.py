@@ -577,6 +577,12 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
                 symbol="warning",
             )
             continue
+        if candidate != cwd and stat.S_ISLNK(info.st_mode):
+            # Read through the link: name where the manifest really lives.
+            _rich_info(
+                f"Using {manifest}, a symlink to {manifest.resolve()}, as this project's apm.yml.",
+                symbol="info",
+            )
         return manifest
     return None
 
