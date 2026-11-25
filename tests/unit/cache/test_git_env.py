@@ -382,6 +382,20 @@ class TestTrustedExecutableUnderHome:
             _assert_resolves_to(_resolve_trusted_executable("git"), git)
 
     @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
+    def test_dotfiles_git_keeps_cwd_guard_for_unmarked_dir_below_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        (home / ".git").mkdir()
+        git = _tool(home / tool_dir, "git")
+        cwd = home / "Downloads" / "x"
+        _tool(cwd / "bin", "git")
+        monkeypatch.chdir(cwd)
+
+        with patch("os.get_exec_path", return_value=[str(cwd / "bin"), str(home / tool_dir)]):
+            _assert_resolves_to(_resolve_trusted_executable("git"), git)
+
+    @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
     def test_nearest_marker_wins_over_dotfiles_git(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
     ) -> None:

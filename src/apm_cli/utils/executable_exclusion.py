@@ -20,9 +20,9 @@ def executable_exclusion_root() -> Path | None:
     """Return the nearest project root containing the cwd, or None to exclude nothing.
 
     The nearest directory holding ``.git`` or the APM manifest wins; with no
-    marker the cwd is the root. A root that is HOME or an ancestor of it (a
-    dotfiles repo, a stray manifest, ``/``) is not a project, so PATH entries
-    under HOME stay usable.
+    marker the cwd is the root. A marker at HOME or above (a dotfiles repo, a
+    stray manifest, ``/``) is not a project: the cwd is the root instead, and
+    when the cwd is HOME or above nothing is excluded.
     """
     from apm_cli.core.scope import manifest_file
 
@@ -33,4 +33,6 @@ def executable_exclusion_root() -> Path | None:
             root = directory
             break
     home = Path.home().resolve()
+    if root == home or root in home.parents:
+        root = cwd  # a dotfiles repo at HOME is not a project: keep the cwd guard
     return None if root == home or root in home.parents else root
