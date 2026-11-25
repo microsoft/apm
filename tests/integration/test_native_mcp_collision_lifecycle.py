@@ -931,12 +931,17 @@ def test_a_skipped_runtime_baseline_never_masks_a_native_key_change(
     assert set(scenario.servers("codex")) == {"io.example/registered"}
     assert "codex" in scenario.lock().mcp_target_servers
     assert scenario.lock().mcp_configs["io.example/registered"].get("registry") is False
+    assert "io.example/registered" not in scenario.lock().mcp_target_servers.get("cursor", [])
+    cursor_file = scenario.project / ".cursor" / "mcp.json"
+    cursor_before = cursor_file.read_bytes()
+    assert "registered" in cursor_before.decode("utf-8")
 
     scenario.declare([])
     _success(scenario.install(targets=every))
     assert scenario.servers("codex") == {}
     assert scenario.servers("claude")["registered"] == edited
     assert "codex" not in scenario.lock().mcp_target_servers
+    assert cursor_file.read_bytes() == cursor_before
 
 
 def test_a_skipped_runtime_claim_still_guards_a_shared_file_entry_a_peer_retires(

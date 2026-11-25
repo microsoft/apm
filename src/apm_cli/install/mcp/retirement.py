@@ -196,8 +196,6 @@ def reconcile_skipped_baseline(
     for runtime in stale:
         managed_target_servers[runtime].discard(name)
         native_hashes.get(runtime, {}).pop(name, None)
-        if not managed_target_servers[runtime]:
-            del managed_target_servers[runtime]
 
 
 def _concrete_retirements(
