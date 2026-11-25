@@ -332,6 +332,74 @@ def materialize_tree(
     ``.gitattributes``/``.gitmodules`` and any attribute or core/filter config
     source refuse before the first write.
     """
+    if _switched_off("APM_NO_INPROCESS_CHECKOUT", env):
+        return None
+    planned = _plan_tree(repo, sha, env, inflate_budget)
+    if planned is None:
+        return None
+    root = str(repo)
+    try:
+        files = _write_sealed(root, *planned)
+        _write_index(root, files)
+        from ..utils.atomic_io import atomic_write_text
+
+        # The clone's HEAD stays valid until the pin replaces it whole.
+        atomic_write_text(Path(root) / ".git" / "HEAD", sha + "\n", normalize_line_endings=False)
+    except Exception:
+        _discard_worktree(root)
+        return None
+    return {path: (oid, executable) for path, oid, executable in files}
+
+
+def materialize_into(
+    source: Path,
+    sha: str,
+    dest: Path,
+    env: dict[str, str],
+    *,
+    subdir: str = "",
+    inflate_budget: int = _MAX_INFLATED,
+) -> dict[str, tuple[str, bool]] | None:
+    """Write commit *sha*'s tree (or its *subdir*) from *source*'s objects into the empty *dest*.
+
+    The one write of each file in its final place: every object is re-hashed
+    against its id as it is read (MS1/MS6), each file is created exclusively
+    without following links with the mode of its tree entry (MS3/MS4), and the
+    C8 seal proves *dest* holds exactly what this call wrote. ``None`` means
+    *dest* is left empty and the caller materializes it as before (MS5).
+    """
+    if _switched_off("APM_NO_INPROCESS_CHECKOUT", env):
+        return None
+    try:
+        if os.listdir(dest):
+            return None
+    except OSError:
+        return None
+    planned = _plan_tree(source, sha, env, inflate_budget, subdir=subdir)
+    if planned is None:
+        return None
+    root = str(dest)
+    try:
+        files = _write_sealed(root, *planned)
+    except Exception:
+        _discard_worktree(root)
+        return None
+    return {path: (oid, executable) for path, oid, executable in files}
+
+
+_Plan = tuple[list[str], list[tuple[str, str, bool]], dict[str, bytes]]
+
+
+def _plan_tree(
+    repo: Path, sha: str, env: dict[str, str], inflate_budget: int, *, subdir: str = ""
+) -> _Plan | None:
+    """The tree of *sha* (or its *subdir*) from *repo*'s objects, every object re-hashed.
+
+    ``None`` when anything is not provably what git's checkout would write.
+
+    Links, gitlinks, ``.gitattributes``/``.gitmodules`` and any attribute or
+    core/filter config source that could make git's checkout differ refuse.
+    """
     from ..utils.git_object_id import git_object_id
     from .inprocess_fetch import (
         _MAX_ENTRIES,
@@ -340,8 +408,6 @@ def materialize_tree(
     )
     from .inprocess_fetch import _tree_entries as entries_of
 
-    if _switched_off("APM_NO_INPROCESS_CHECKOUT", env):
-        return None
     objects = PackObjects(repo, "sha1", env)
     # One inflate budget for the whole tree: every blob is held until written.
     budget = [inflate_budget]
@@ -356,9 +422,20 @@ def materialize_tree(
         first = read(sha, "commit").split(b"\n", 1)[0]
         if not first.startswith(b"tree "):
             raise _Refuse("commit names no tree")
+        root_tree = first[5:].decode("ascii")
+        for component in [part for part in subdir.split("/") if part]:
+            found_tree = None
+            for mode, raw_name, oid in entries_of(read(root_tree, "tree")):
+                if _safe_name(raw_name) == component:
+                    if mode != "40000":
+                        raise _Refuse("subdirectory is not a tree")
+                    found_tree = oid
+            if found_tree is None:
+                raise _Refuse("subdirectory missing")
+            root_tree = found_tree
         dirs: list[str] = []
         files: list[tuple[str, str, bool]] = []
-        stack = [("", first[5:].decode("ascii"))]
+        stack = [("", root_tree)]
         count = 0
         while stack:
             prefix, tree_id = stack.pop()
@@ -390,26 +467,21 @@ def materialize_tree(
         _require_inert_conditional_attributes(env, repo)
     except Exception:
         return None
-    root = str(repo)
-    manifest: dict[str, tuple[str, bool]] = {}
-    made: dict[str, tuple[int, int]] = {}
-    try:
-        # C8: the staged root holds only .git, so mkdir (never exist_ok) and
-        # O_EXCL|O_NOFOLLOW prove every component is one this call created.
-        writer = _write_anchored if _ANCHORED else _write_by_path
-        writer(root, dirs, files, blobs, made)
-        manifest = {path: (oid, executable) for path, oid, executable in files}
-        if not _sealed(root, made, set(manifest)):
-            raise _Refuse("the staged tree changed while it was written")
-        _write_index(root, files)
-        from ..utils.atomic_io import atomic_write_text
+    return dirs, files, blobs
 
-        # The clone's HEAD stays valid until the pin replaces it whole.
-        atomic_write_text(Path(root) / ".git" / "HEAD", sha + "\n", normalize_line_endings=False)
-    except Exception:
-        _discard_worktree(root)
-        return None
-    return manifest
+
+def _write_sealed(
+    root: str, dirs: list[str], files: list[tuple[str, str, bool]], blobs: dict[str, bytes]
+) -> list[tuple[str, str, bool]]:
+    """Write the plan under *root*; raise unless the C8 seal holds afterwards."""
+    made: dict[str, tuple[int, int]] = {}
+    # C8: the root holds nothing else (bar .git), so mkdir (never exist_ok) and
+    # O_EXCL|O_NOFOLLOW prove every component is one this call created.
+    writer = _write_anchored if _ANCHORED else _write_by_path
+    writer(root, dirs, files, blobs, made)
+    if not _sealed(root, made, {path for path, _oid, _exec in files}):
+        raise _Refuse("the staged tree changed while it was written")
+    return files
 
 
 # POSIX: every write is anchored on a directory fd this call opened (no-follow), so

@@ -677,6 +677,41 @@ def require_verified_copy(
         raise CheckoutVerificationError(f"{missing[0]} is missing from the copy")
 
 
+def materialize_verified_copy(
+    dest: Path,
+    repo: Path,
+    sha: str | None,
+    subdir: str = "",
+    env: dict[str, str] | None = None,
+) -> None:
+    """Fill the empty *dest* with *repo*'s commit (or its *subdir*): every byte verified.
+
+    M2 (materialize once): each file is written once, from *repo*'s objects,
+    re-hashed against its tree entry as it is written; nothing is read back.
+    Anything that path cannot prove equal to git's checkout (links, attributes,
+    a missing object) leaves *dest* empty, and the files are copied from the
+    checkout and checked against the verified commit as before.
+    """
+    from .pack_objects import materialize_into
+
+    prefix = subdir.strip("/")
+    full = _full_sha(repo, sha)
+    if len(full) == 40:
+        written = materialize_into(
+            repo, full, dest, dict(env if env is not None else os.environ), subdir=prefix
+        )
+        if written is not None:
+            return
+    from ..utils.file_ops import robust_copy_entry
+
+    source = repo / prefix if prefix else repo
+    for item in source.iterdir():
+        if not prefix and item.name == ".git":
+            continue
+        robust_copy_entry(source / item.name, dest / item.name)
+    require_verified_copy(dest, repo, sha, subdir, env)
+
+
 def read_verified_file(
     repo: Path, rel: str, sha: str | None = None, *, env: dict[str, str] | None = None
 ) -> bytes:

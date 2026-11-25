@@ -21,7 +21,7 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 # These cases mock the cached checkout and the copy into apm_modules, so there
 # are no copied bytes to check; real copies are checked in test_checkout_verify.
 _COPIES_ARE_MOCKED = patch(
-    "apm_cli.deps.github_downloader.require_verified_copy", new=lambda *_a, **_k: None
+    "apm_cli.deps.github_downloader.materialize_verified_copy", new=lambda *_a, **_k: None
 )
 
 # ---------------------------------------------------------------------------

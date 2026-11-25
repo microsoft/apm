@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Union
 import requests
 
 from ..cache.cached_repo import validate_cached_links
-from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
+from ..cache.checkout_verify import materialize_verified_copy, require_verified_checkout
 from ..cache.commit_reachability import name_a_lost_admitted_commit
 from ..cache.git_cache import dir_size, raise_if_tampered
 from ..core.auth import AuthContext, AuthResolver
@@ -1668,13 +1668,8 @@ class GitHubPackageDownloader:
                 _rmtree(target_path)
                 target_path.mkdir(parents=True, exist_ok=True)
 
-            # Copy subdirectory contents to target (retry on transient
-            # file-lock errors caused by antivirus scanning on Windows).
-            from ..utils.file_ops import robust_copy_entry
-
-            for item in source_subdir.iterdir():
-                robust_copy_entry(source_subdir / item.name, target_path / item.name)
-            require_verified_copy(
+            # Write the subdirectory once into the target, verified (M2).
+            materialize_verified_copy(
                 target_path, temp_clone_path, _ws2_resolved_commit, subdir_path, _env
             )
             # Sparse cones keep ancestor-directory files, so read the repository
@@ -1918,13 +1913,7 @@ class GitHubPackageDownloader:
                 # A shard keeps unresolvable links as text; the clone path
                 # below then raises the strict diagnostic (#3457).
                 validate_cached_links(_cached, None, self._git_env_dict())
-                from ..utils.file_ops import robust_copy_entry
-
-                for item in _cached.iterdir():
-                    if item.name == ".git":
-                        continue
-                    robust_copy_entry(_cached / item.name, target_path / item.name)
-                require_verified_copy(target_path, _cached, _cached.parent.name)
+                materialize_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)

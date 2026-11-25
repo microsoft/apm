@@ -457,7 +457,7 @@ class TestDownloadSubdirectoryPackageErrors:
             patch("apm_cli.deps.package_validator.stamp_plugin_version"),
             patch("apm_cli.utils.file_ops.robust_copytree"),
             patch("apm_cli.utils.file_ops.robust_copy2"),
-            patch("apm_cli.deps.github_downloader.require_verified_copy"),  # nothing is copied
+            patch("apm_cli.deps.github_downloader.materialize_verified_copy"),  # nothing is copied
         ):
             pkg_info = downloader.download_subdirectory_package(dep, tmp_path / "out")
         # ws2 path — resolved_commit comes from _materialize_from_bare, not Repo()
@@ -1052,7 +1052,7 @@ class TestPersistentGitCacheInDownloadPackage:
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.file_ops.robust_copytree"),
             patch("apm_cli.utils.file_ops.robust_copy2"),
-            patch("apm_cli.deps.github_downloader.require_verified_copy"),  # nothing is copied
+            patch("apm_cli.deps.github_downloader.materialize_verified_copy"),  # nothing is copied
             patch.object(downloader, "_git_env_dict", return_value={}),
         ):
             result = downloader.download_package(dep, tmp_path / "out")
