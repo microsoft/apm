@@ -517,9 +517,33 @@ def forget_trust_notices_since(shown: frozenset[str]) -> None:
     _TRUST_NOTICES_SHOWN.intersection_update(shown)
 
 
+class PreflightNoticeTape:
+    """Records each output call of the frozen preflight, in order (#5491).
+
+    Only the view's output methods exist (_McpViewLogger), so any other use
+    raises and the fast path declines. A once-per-command trust notice is taped
+    as such: its replay (install/verdict_attest.replay_frozen_notices) applies
+    the dedupe at the print point. Matched by exact type, never by attribute,
+    so a permissive silent logger still marks a notice shown.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def progress(self, message: str) -> None:
+        self.calls.append(("progress", message))
+
+    def warning(self, message: str) -> None:
+        self.calls.append(("warning", message))
+
+    def verbose_detail(self, message: str) -> None:
+        self.calls.append(("verbose_detail", message))
+
+
 def _progress_trust_once(logger: Any, message: str) -> None:
-    if (tape := getattr(logger, "tape_trust_once", None)) is not None:
-        tape(message)  # a taped preflight: its replay applies the dedupe (#5491)
+    inner = logger._logger if type(logger) is _ParkedNoticeSilenced else logger
+    if type(inner) is PreflightNoticeTape:
+        inner.calls.append(("trust_once", message))
         return
     if message in _TRUST_NOTICES_SHOWN:
         return
