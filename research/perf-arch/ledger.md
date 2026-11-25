@@ -216,3 +216,15 @@
 01:14 | FINDING locked-warm: wasted diff-apply attempt = W 0.885/L 0.919 -> VP default SoL early-decline car; records re-read W 0.968 | SoL trace + W cache-hit; Bets probe 03:00 | none
 01:14 | VP approved locked-warm early-decide car (SoL; stop if bug; measure on #5383) -> SoL | SoL pulse 02:00; Bets 03:00 | none
 01:15 | design headline -> integrate redesign (records re-sized sub-part) -> VP | SoL 02:00; Bets 03:00 | none
+01:18 | tick; notes 2285afadfcb89808f477482b3eac1507637bff86 | SoL 02:00; Bets 03:00 | none
+01:19 | locked-warm: fast path ENGAGES (667 files) and is slower for whole-project diffs; GO SoL 'no receipts -> full pipeline' before staging, on #5383, differential first -> VP | SoL build ~20 min; Bets 03:00 | none
+01:19 | VP confirmed no-receipts routing; base on MAIN (not #5383), cells on main+#5383, order either -> SoL | SoL build; Bets 03:00 | none
+01:24 | PULSE VP: locked-warm car built 75d0cbb4 (diff 45517507017, benches, W3d ping); warm cache-hit W in flight; Bets probe 03:00 | SoL ~60 min to train-ready | none
+01:28 | quiet tick | SoL car ~60 min; Bets probe 03:00 | none
+01:34 | FINDING: schannel B1 engages for real default-GfW (harness artifact, fix = open_world carries system TLS) -> VP default lift hold; #5382 macOS 0.900; Bets SSH key failing | #5377 W real re-bench 20 min | Bets SSH publickey
+01:35 | VP lifted default-W hold; Bets folds TLS carry into nongithub-host + ceo-report (05:45) harnesses; #5377 W only if <1.0 | Bets SHAs | none
+01:38 | #5414 opened (diff clean) but BLOCKER: with #5383 locked-warm 2.21x worse -> VP default conditional on #5383; warm cache-hit ~0.5 s 9V74 no car | SoL trace; Bets harness SHAs | #5414/#5383 composition
+01:39 | VP: #5414 conditional on #5383 (check 04:45); warm cache-hit -> design doc | SoL; Bets harness SHAs | none
+01:39 | harness fold ceo-report a4998801 / nongithub-host 3a93e3d9; #5377 W real 0.542 (fixed harness) -> body; both Bets PRs H8-ready ~30 min -> VP | Bets 30 min; 04:45 #5383 check | none
+01:44 | #5414 killed (regresses on main alone; diff-apply now 2.2x cheaper; locked-warm regression gone) -> VP; SoL re-grounds phase map on main by 04:30 | SoL; Bets H8 ~30 min | none
+01:46 | VP clock correction (VP stamps ~1h ahead since 01:00); relayed to SoL/Bets; real cutoffs H8 05:00, train 05:30, bench 05:45, build 06:30 | - | none
