@@ -250,9 +250,7 @@ def _ledger_hashes(apm_dir: Path) -> dict[str, str | None]:
     return ledger
 
 
-def replay_abandoned_deploys(
-    apm_modules_dir: Path, logger: Any, manifest_path: Path | None = None
-) -> None:
+def replay_abandoned_deploys(apm_modules_dir: Path, logger: Any, manifest_path: Path) -> None:
     """Replay the deploy journal and manifest record a killed install left (#4863, #5454).
 
     The one recovery owner: every install entry that mutates deployed state

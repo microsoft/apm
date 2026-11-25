@@ -234,11 +234,12 @@ def _retry(record: dict[str, Any]) -> str:
     return _quoted([*record["options"], *bootstrap, *record["packages"]])
 
 
-def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path | None = None) -> None:
+def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> None:
     """Restore the ``apm.yml`` an install killed before its lock commit left (#5454).
 
-    Call under the lifecycle lock, before the command reads *manifest* (the
-    command's source ``apm.yml``; a record for another source is left alone).
+    Call under the lifecycle lock, before the command reads *manifest*, the
+    command's source ``apm.yml`` and the only file it may restore; a record
+    naming any other file is left alone.
     Raises ``InstallFailureAlreadyRendered`` when the record cannot be read.
     """
     from apm_cli.core.remediation import INTERRUPTED_ADD_KEPT, INTERRUPTED_ADD_RETRY
@@ -260,7 +261,8 @@ def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path | Non
             )
         raise InstallFailureAlreadyRendered(f"unreadable manifest record {path}") from None
     target = Path(record["manifest"])
-    if manifest is not None and target != Path(os.path.abspath(manifest)):
+    if target != Path(os.path.abspath(manifest)):
+        # Never trust the record's own path: only the command's apm.yml is restored.
         return  # Another source's apm.yml (--root): its own next install replays it.
     lock = _lock_identity(workspace)
     if (record.get("commit") is not None and lock == record["commit"]) or lock != record.get(

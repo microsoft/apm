@@ -60,7 +60,7 @@ def test_a_record_naming_another_file_is_refused_and_nothing_is_written(
     logger = MagicMock()
 
     with pytest.raises(InstallFailureAlreadyRendered):
-        replay_abandoned_manifest(workspace, logger)
+        replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
 
     assert victim.read_bytes() == b"user data\n"
     message = logger.error.call_args.args[0]
@@ -74,7 +74,7 @@ def test_control_and_ansi_bytes_in_a_recorded_package_never_reach_the_terminal(
     _killed_add(workspace, ["./x\x1b[31mred\x07"])
     logger = MagicMock()
 
-    replay_abandoned_manifest(workspace, logger)
+    replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
 
     assert (workspace / "apm.yml").read_bytes() == _PRIOR
     message = logger.warning.call_args.args[0]
@@ -90,7 +90,7 @@ def test_a_kill_between_publication_and_seal_still_restores(workspace: Path) -> 
     write_text_lf(workspace / "apm.yml", text)  # killed here, before any seal
     logger = MagicMock()
 
-    replay_abandoned_manifest(workspace, logger)
+    replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
 
     assert (workspace / "apm.yml").read_bytes() == _PRIOR
     assert not journal.path.exists()
@@ -104,7 +104,7 @@ def test_a_killed_lockfile_migration_still_restores(workspace: Path) -> None:
     (workspace / "apm.lock").rename(workspace / "apm.lock.yaml")
     logger = MagicMock()
 
-    replay_abandoned_manifest(workspace, logger)
+    replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
 
     assert (workspace / "apm.yml").read_bytes() == _PRIOR
 
@@ -124,12 +124,12 @@ def test_the_advice_repeats_the_interrupted_command_exactly(
     (workspace / "apm.yml").write_bytes(_PRIOR + b"dependencies:\n  apm: [./x]\n")
     journal.seal()
     logger = MagicMock()
-    replay_abandoned_manifest(workspace, logger)
+    replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
     assert f"Run '{retry}' to add it again." in logger.warning.call_args.args[0]
 
     journal = ManifestJournal(workspace / "apm.yml", workspace, _PRIOR, ["./x"], options)
     (workspace / "apm.yml").write_bytes(b"# hand edit\n")
-    replay_abandoned_manifest(workspace, logger)
+    replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
     assert f"Run '{kept}' to lock what apm.yml declares." in logger.warning.call_args.args[0]
 
 
@@ -152,3 +152,22 @@ def test_a_root_record_restores_its_source_manifest_only(
     replay_abandoned_manifest(deploy, MagicMock(), source / "apm.yml")
     assert (source / "apm.yml").read_bytes() == _PRIOR
     assert not journal.path.exists()
+
+
+def test_a_record_naming_another_apm_yml_never_writes_it(workspace: Path, tmp_path: Path) -> None:
+    """The record's own path is never trusted: only the command's apm.yml is restored."""
+    journal = _killed_add(workspace, ["./x"])
+    victim = tmp_path / "elsewhere" / "apm.yml"
+    victim.parent.mkdir()
+    victim.write_bytes(b"name: theirs\n")
+    record = json.loads(journal.path.read_text(encoding="utf-8"))
+    record["manifest"] = str(victim)
+    journal.path.write_text(json.dumps(record), encoding="utf-8")
+    ours = (workspace / "apm.yml").read_bytes()
+
+    with pytest.raises(TypeError):  # no caller may replay without naming its manifest
+        replay_abandoned_manifest(workspace, MagicMock())  # type: ignore[call-arg]
+    replay_abandoned_manifest(workspace, MagicMock(), workspace / "apm.yml")
+
+    assert victim.read_bytes() == b"name: theirs\n"
+    assert (workspace / "apm.yml").read_bytes() == ours
