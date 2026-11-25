@@ -80,9 +80,10 @@ from apm_cli.install.manifest_helpers import (
     _merge_packages_into_yml,
     _prepare_dry_run_manifest_path,
     _prepare_user_scope_for_install,
-    _report_bootstrap_manifest,
+    bootstrap_install_manifest,
     preflight_bootstrap_targets,
 )
+from apm_cli.install.manifest_journal import retry_options
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
 # names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
@@ -193,8 +194,6 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
     _rich_success,
 )
 from ._helpers import (
-    _create_minimal_apm_yml,
-    _get_bootstrap_config,
     explicit_policy_option,
     trust_transitive_mcp_option,
 )
@@ -1515,35 +1514,40 @@ def install(  # noqa: PLR0913
         # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
         auth_resolver.set_logger(logger)
 
-        # Capture manifest state before this attempt can auto-create apm.yml.
-        apm_yml_exists = manifest_path.exists()
         transaction = InstallTransaction(
             manifest_path=manifest_path,
             apm_modules_dir=get_modules_dir(scope),
             validation=None,
             logger=logger,
             acquire_lock=not dry_run,
+            journal_packages=packages,
+            journal_options=retry_options(
+                user_scope=scope is InstallScope.USER,
+                dev=dev,
+                skills=skill_names,
+                target=target,
+                root=root,
+            ),
         )
+        # Capture manifest state after a killed install's apm.yml was restored
+        # and before this attempt can auto-create apm.yml.
+        apm_yml_exists = manifest_path.exists()
 
         if not apm_yml_exists and packages:
             derived_project_name = (
-                Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
-            )
+                Path.cwd() if scope is InstallScope.PROJECT else Path.home()
+            ).name
             project_name = _resolve_bootstrap_project_name(derived_project_name)
-            if project_name != derived_project_name:
-                logger.verbose_detail(
-                    f'Using default project name "{project_name}" because '
-                    f"derived name {derived_project_name!a} is invalid"
-                )
-            config = _get_bootstrap_config(project_name) | (
-                {"targets": manifest_targets} if manifest_targets else {}
-            )
-            _create_minimal_apm_yml(config, target_path=manifest_path)
-            _report_bootstrap_manifest(
-                logger=logger,
+            bootstrap_install_manifest(
+                derived_project_name=derived_project_name,
+                project_name=project_name,
+                manifest_path=manifest_path,
                 manifest_display=manifest_display,
                 manifest_targets=manifest_targets,
+                target=target,
+                logger=logger,
                 dry_run=dry_run,
+                transaction=transaction,
             )
 
         if not apm_yml_exists and not packages:
