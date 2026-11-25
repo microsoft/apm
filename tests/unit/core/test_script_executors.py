@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -333,6 +334,25 @@ class TestCommandExecutor:
             time.sleep(0.05)
         os.killpg(shell, signal.SIGKILL)
         pytest.fail("a script spawned as the interrupt landed outlived the APM command")
+
+    @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX signals")
+    def test_a_second_sigterm_while_spawning_still_terminates(self, tmp_path: Path) -> None:
+        """Deferring the first SIGTERM keeps the CLI contract: a second one terminates (#5303)."""
+        code = (
+            "import os, signal, sys, time\n"
+            "from apm_cli.cli import _interrupt_on_sigterm\n"
+            "from apm_cli.core.script_executors import _interrupts_deferred\n"
+            "signal.signal(signal.SIGTERM, _interrupt_on_sigterm)\n"
+            "with _interrupts_deferred():\n"
+            "    os.kill(os.getpid(), signal.SIGTERM)\n"
+            "    os.kill(os.getpid(), signal.SIGTERM)\n"
+            "    time.sleep(5)\n"
+            "    sys.exit(3)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+        )
+        assert result.returncode == -signal.SIGTERM, (result.returncode, result.stderr)
 
 
 # -- _expand_env_vars ------------------------------------------------------
