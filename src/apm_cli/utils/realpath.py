@@ -99,7 +99,9 @@ def _proven_answer(text: str, proofs: dict) -> str | None:
 def proven_link_free(directory: Path) -> bool:
     """Whether this command proved *directory* has no link on its path (see module doc)."""
     proofs = _memo(_PROOFS)
-    return proofs is not None and os.path.abspath(str(directory)) in proofs
+    text = str(directory)
+    # abspath() collapses ``..`` lexically, which a link before it would not.
+    return proofs is not None and ".." not in _components(text) and os.path.abspath(text) in proofs
 
 
 # Whether /proc names reach the objects this process opens (they would not
@@ -302,26 +304,18 @@ def _record_proof(text: str, resolved: str, proofs: dict) -> None:
 
 
 def forget_proofs(under: object = None) -> None:
-    """Drop the proofs at or below *under* (``None``: all of them).
+    """Drop every proof of this command (*under* names the path APM is about to change).
 
     APM calls this (through ``realpath_win.release_held``) before it renames,
     deletes or recreates a tree, so a proof never outlives the directory it saw.
+    All proofs go, not only those spelled below *under*: a link or case alias
+    (``/alias/sub`` for ``/real/sub``) would escape a prefix match, and a dropped
+    proof only costs the next resolve its full walk.
     """
-    for name in (_PROOFS,):
-        memo = _memo(name)
-        if not memo:
-            continue
-        if under is None:
-            memo.clear()
-            continue
-        try:
-            base = os.path.abspath(os.fspath(under))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            memo.clear()
-            continue
-        prefix = base if base.endswith(os.sep) else base + os.sep
-        for key in [k for k in list(memo) if k == base or k.startswith(prefix)]:
-            memo.pop(key, None)
+    del under
+    memo = _memo(_PROOFS)
+    if memo:
+        memo.clear()
 
 
 def _platform_resolve(path: Path, text: str) -> Path:

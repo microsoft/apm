@@ -307,10 +307,37 @@ def test_apm_replacing_a_tree_drops_its_proofs(tree: Path) -> None:
         assert realpath.proven_link_free(tree / "dir" / "sub")
         release_held(tree / "dir" / "sub")
         assert not realpath.proven_link_free(tree / "dir" / "sub")
-        assert realpath.proven_link_free(tree / "dir")
+        assert not realpath.proven_link_free(tree / "dir")  # every proof goes (aliases)
         shutil.rmtree(tree / "dir" / "sub")
         (tree / "dir" / "sub").symlink_to(tree / "outside", target_is_directory=True)
         assert resolve_path(leaf) == leaf.resolve() == tree / "outside" / "x.md"
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_mutation_spelled_through_an_alias_drops_the_proof(tree: Path) -> None:
+    """``/root/link_dir/sub`` names ``/root/dir/sub``: a prefix match would keep its proof."""
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.integration import write_seam
+
+    sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
+    with invocation_scope():
+        assert resolve_path(leaf) == leaf
+        write_seam.rmtree(tree / "link_dir" / "sub")
+        sub.symlink_to(tree / "outside", target_is_directory=True)
+        _expect_link_refused(tree, leaf)
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_dotdot_spelling_is_never_proven(tree: Path) -> None:
+    """``link_dir/..`` is lexically ``root`` but resolves to ``root``'s parent's view."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    with invocation_scope():
+        assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
+        assert realpath.proven_link_free(tree / "dir")
+        assert not realpath.proven_link_free(tree / "link_dir" / ".." / "dir")
 
 
 def _expect_link_refused(tree: Path, leaf: Path) -> None:
