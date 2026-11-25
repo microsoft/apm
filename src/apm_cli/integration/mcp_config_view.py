@@ -49,6 +49,10 @@ if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
+# What a lock-admitted server's refusal says when org policy now withholds it.
+POLICY_WITHHELD = "org policy now withholds it"
+
+
 class _McpViewLogger(Protocol):
     """Output methods used while deriving the current MCP view."""
 
@@ -354,7 +358,7 @@ class CurrentMcpConfigView:
             if reason == REASON_POLICY_TRANSITIVE:
                 # An approval cannot lift org mcp.trust_transitive: name the policy fields.
                 problems[name] = (
-                    "admitted in apm.lock.yaml but org policy now withholds it "
+                    f"admitted in apm.lock.yaml but {POLICY_WITHHELD} "
                     "(mcp.trust_transitive is false and mcp.allow does not list it); "
                     "ask the policy owner to add it to mcp.allow or set "
                     "mcp.trust_transitive: true"

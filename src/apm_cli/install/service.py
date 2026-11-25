@@ -633,8 +633,10 @@ class InstallService:
 
         satisfied = satisfied and not reasons
         if not satisfied:
+            from apm_cli.install.frozen_mcp_drift import frozen_drift_headline
+
             raise FrozenInstallError(
-                "--frozen: apm.lock.yaml is out of sync with apm.yml.",
+                frozen_drift_headline(reasons),
                 reasons=reasons,
             )
         # A deny of a local bundle refuses before its LSP server is retired (RA-041).

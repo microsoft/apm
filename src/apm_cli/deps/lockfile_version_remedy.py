@@ -32,3 +32,18 @@ def with_version_remedy(exc: Exception, path: Path) -> Exception:
     error.remediations = (regen, upgrade)
     error.__cause__ = exc
     return error
+
+
+def with_regenerate_remedy(exc: Exception, path: Path) -> Exception:
+    """Return *exc* ending with how to regenerate *path* when its YAML did not parse."""
+    from ..core import remediation
+    from ..core.scope import is_user_scope_root
+
+    if not getattr(exc, "unparseable", False):
+        return exc
+    regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.name)
+    if is_user_scope_root(path.parent):
+        regen = regen.with_command("apm install -g")
+    error = type(exc)(f"{exc}\n{regen.sentence()}")
+    error.__cause__ = exc
+    return error
