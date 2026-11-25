@@ -39,6 +39,13 @@ _MAX_MISSING_DEPTH = 32
 _PROC_FD = "/proc/self/fd/"
 _STOCK_RESOLVE = Path.resolve
 _PROOFS = "realpath-link-free-directories"
+# Proof generation: forget_proofs bumps it under _proof_publish; a resolver captures
+# it before its lstat or platform resolve and publishes a proof only if it is still
+# current, so a release_held racing the resolve can never be undone by a late publish.
+_proof_publish = threading.Lock()
+_generation = [0]
+# Test seam: called between a resolve's observation and its publish (None in production).
+_before_publish: list = []
 _WINDOWS = sys.platform == "win32"
 # Any reparse point (symbolic link, junction, mount point) leaves the fast form.
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
@@ -75,7 +82,16 @@ def _volatile(text: str) -> bool:
     return False
 
 
-def _proven_answer(text: str, proofs: dict) -> str | None:
+def _publish(proofs: dict, key: str, seen: int) -> None:
+    """Record *key* as proven unless a forget ran since generation *seen* was captured."""
+    for hook in _before_publish:
+        hook()
+    with _proof_publish:
+        if _generation[0] == seen:
+            proofs[key] = True
+
+
+def _proven_answer(text: str, proofs: dict, seen: int) -> str | None:
     """The resolved form of *text* when its directory is proven link-free, else ``None``."""
     if ".." in _components(text):
         return None
@@ -92,7 +108,7 @@ def _proven_answer(text: str, proofs: dict) -> str | None:
     if _leaf_is_link(info):
         return None
     if stat.S_ISDIR(info.st_mode):
-        proofs[absolute] = True  # an existing, non-link directory under a proven one
+        _publish(proofs, absolute, seen)  # an existing, non-link directory under a proven one
     return absolute
 
 
@@ -277,17 +293,18 @@ def resolve_path(path: Path) -> Path:
     stock = type(path) is PosixPath and PosixPath.resolve is _STOCK_RESOLVE
     proofs = None if _WINDOWS or not stock or kernel_resolves() else _memo(_PROOFS)
     text = str(path)
+    seen = _generation[0]
     if proofs is not None:
-        answer = _proven_answer(text, proofs)
+        answer = _proven_answer(text, proofs, seen)
         if answer is not None:
             return type(path)(answer)
     resolved = _platform_resolve(path, text)
     if proofs is not None:
-        _record_proof(text, str(resolved), proofs)
+        _record_proof(text, str(resolved), proofs, seen)
     return resolved
 
 
-def _record_proof(text: str, resolved: str, proofs: dict) -> None:
+def _record_proof(text: str, resolved: str, proofs: dict, seen: int) -> None:
     """Prove the leaf's directory when resolution kept the exact text (R1: it must exist now)."""
     if ".." in _components(text):
         return
@@ -300,7 +317,7 @@ def _record_proof(text: str, resolved: str, proofs: dict) -> None:
     except OSError:
         return  # a missing directory is never proven before it exists
     if stat.S_ISDIR(info.st_mode) and not _leaf_is_link(info):
-        proofs[head] = True
+        _publish(proofs, head, seen)
 
 
 def forget_proofs(under: object = None) -> None:
@@ -314,8 +331,10 @@ def forget_proofs(under: object = None) -> None:
     """
     del under
     memo = _memo(_PROOFS)
-    if memo:
-        memo.clear()
+    with _proof_publish:
+        _generation[0] += 1
+        if memo:
+            memo.clear()
 
 
 def _platform_resolve(path: Path, text: str) -> Path:

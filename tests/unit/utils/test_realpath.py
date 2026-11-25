@@ -330,6 +330,37 @@ def test_a_mutation_spelled_through_an_alias_drops_the_proof(tree: Path) -> None
 
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
+def test_a_release_racing_a_resolve_is_never_undone_by_its_late_publish(tree: Path) -> None:
+    """The resolve observed ``dir/sub`` as a real directory; before it publishes, APM
+    releases and replaces it with a link. The stale proof must not be recorded."""
+    import shutil
+
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.realpath_win import release_held
+
+    sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
+    fired: list[bool] = []
+
+    def swap() -> None:
+        if fired:
+            return
+        fired.append(True)
+        release_held(sub)
+        shutil.rmtree(sub)
+        sub.symlink_to(tree / "outside", target_is_directory=True)
+
+    with invocation_scope():
+        realpath._before_publish.append(swap)
+        try:
+            resolve_path(leaf)
+        finally:
+            realpath._before_publish.remove(swap)
+        assert fired and not realpath.proven_link_free(sub)
+        _expect_link_refused(tree, leaf)
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
 def test_a_dotdot_spelling_is_never_proven(tree: Path) -> None:
     """``link_dir/..`` is lexically ``root`` but resolves to ``root``'s parent's view."""
     from apm_cli.core.invocation_memo import invocation_scope
