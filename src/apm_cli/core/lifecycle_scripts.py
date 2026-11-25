@@ -615,6 +615,9 @@ class LifecycleScriptRunner:
             if script.script_type == "http":
                 http_scripts.append(script)
                 continue
+            from apm_cli.utils.realpath_win import release_held
+
+            release_held()  # user code may rename or delete what APM holds
             try:
                 execute_script(
                     script,

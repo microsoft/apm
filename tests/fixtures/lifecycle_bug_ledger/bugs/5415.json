@@ -1,0 +1,15 @@
+{
+  "issue": 5415,
+  "fixed_in": "Unreleased",
+  "summary": "Frozen skills-only replay accepts matching local package MCP omission evidence without changing the lockfile or enabling MCP.",
+  "failure_modes": [
+    "routing",
+    "idempotency"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_frozen_only_apm_omission.py::test_frozen_only_apm_replays_local_omission"
+  ]
+}

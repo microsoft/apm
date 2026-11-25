@@ -247,3 +247,80 @@ def test_a_long_tab_quoted_value_keeps_the_python_emitter() -> None:
     data = {"mcp": {"args": ["\t" + "}} b] " * 30]}}
     assert yaml_io._emitter_agnostic(data) is False
     assert yaml_io.machine_yaml_to_str(data) == yaml_io.yaml_to_str(data)
+
+
+_GENERATOR_CASES = {
+    "absent": "lockfile_version: '1'\ndependencies: []\n",
+    "one": "apm_version: 0.38.0\nlockfile_version: '1'\n",
+    "duplicate": "apm_version: 0.38.0\nlockfile_version: '1'\napm_version: 9.9.9\n",
+    "flow": "{apm_version: 0.38.0, lockfile_version: '1', apm_version: '1.0'}\n",
+    "null": "apm_version: null\n",
+    "non-scalar": "apm_version: [1, 2]\n",
+    "merge-key": "base: &b {apm_version: 1}\n<<: *b\n",
+    "not-a-mapping": "- apm_version: 1\n",
+    "empty": "",
+    "malformed": "apm_version: [unclosed\n",
+    "tab-indent": "apm_version:\t0.38.0\n",
+    "bom-unicode": "\ufeffapm_version: '\u00fc'\n",
+    "alias-value": "v: &v 0.38.0\napm_version: *v\n",
+    "alias-key": "k: &k apm_version\n*k : 0.38.0\n",
+    "huge-plain-scalar": "apm_version: " + "x" * 200_000 + "\n",
+    "crlf": "apm_version: 0.38.0\r\nlockfile_version: '1'\r\n",
+    "nul": "apm_version: 0.38.0\x00\n",
+    "directive": "%YAML 1.1\n---\napm_version: 0.38.0\n",
+    "two-documents": "apm_version: 1\n---\napm_version: 2\n",
+    "question-in-flow": "apm_version: 0.38.0\nx: [a?b]\n",
+    **BOMBS,
+}
+
+
+def _pure_top_level(
+    text: str, loader: type = yaml_io._BoundedSafeLoader
+) -> list[str | None] | None:
+    try:
+        node = yaml.compose(text, Loader=loader)
+    except (yaml.YAMLError, ValueError, RecursionError):
+        return None
+    if not isinstance(node, yaml.MappingNode):
+        return []
+    values: list[str | None] = []
+    for key_node, value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            return None
+        if isinstance(key_node, yaml.ScalarNode) and key_node.value == "apm_version":
+            scalar = isinstance(value_node, yaml.ScalarNode)
+            null = scalar and value_node.tag == "tag:yaml.org,2002:null"
+            values.append(value_node.value if scalar and not null else None)
+    return values
+
+
+@pytest.mark.parametrize(
+    "text",
+    [*_GENERATOR_CASES.values(), *(p.read_text(encoding="utf-8") for p in _LOCKFILES)],
+    ids=[*_GENERATOR_CASES, *(str(p.relative_to(ROOT)) for p in _LOCKFILES)],
+)
+def test_the_generator_check_reads_what_the_pure_parser_or_the_reader_reads(text: str) -> None:
+    """Both scanners accept: identical. Only libyaml accepts: the reader's scan (#4939).
+
+    Tab text is judged by the pure scanner only, as before.
+    """
+    got = yaml_io._top_level_scalar_values(text, "apm_version")
+    pure = _pure_top_level(text)
+    if pure is not None or "\t" in text:
+        assert got == pure
+    else:
+        assert got == _pure_top_level(text, yaml_io._BoundedCSafeLoader)
+
+
+@pytest.mark.skipif(
+    yaml_io._BoundedCSafeLoader is yaml_io._BoundedSafeLoader, reason="PyYAML without libyaml"
+)
+def test_an_admitted_lockfile_is_composed_without_the_pure_scanner() -> None:
+    from tests.unit.deps.test_lockfile_read_cost import _count_calls
+
+    text = _LOCKFILES[0].read_text(encoding="utf-8")
+    scans = _count_calls(
+        yaml.scanner.Scanner.fetch_more_tokens.__code__,
+        lambda: yaml_io._top_level_scalar_values(text, "apm_version"),
+    )
+    assert scans == 0

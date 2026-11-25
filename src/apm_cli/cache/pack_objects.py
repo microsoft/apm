@@ -2,11 +2,12 @@
 
 Serves ``checkout_verify``: every object it returns is re-hashed by the caller
 against the id asked for, so the pack is a byte source, never a trust root.
-Anything outside the plain case answers ``None`` and the caller asks
-``git cat-file`` instead: SHA-256, a ``.git`` file, nested alternates, a
-multi-pack index, replace refs or grafts, a loose or missing object, a
-64-bit offset, a REF_DELTA base outside its pack, a delta chain past 50, or
-any parse or size-cap refusal.
+Loose objects (what the in-process fetch writes) are read too. Anything
+outside the plain case answers ``None`` and the caller asks ``git cat-file``
+instead: SHA-256, a ``.git`` file, nested alternates, a multi-pack index,
+replace refs or grafts, a missing object, a loose object that is not a
+regular file, a 64-bit offset, a REF_DELTA base outside its pack, a delta
+chain past 50, or any parse or size-cap refusal.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from pathlib import Path
 from .inprocess_fetch import (
     _MAX_DELTA_DEPTH,
     _MAX_INFLATED,
+    _MAX_OBJECT,
     _TRUE,
     _TYPES,
     _apply_delta,
@@ -31,6 +33,14 @@ from .inprocess_fetch import (
 )
 
 _IDX_MAGIC = b"\xfftOc"
+_LOOSE_KINDS = frozenset(_TYPES.values())
+_LOOSE_HEADER_MAX = 32
+_LOOSE_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
 _BASE_CACHE_BYTES = 32 * 1024 * 1024
 
 
@@ -162,11 +172,13 @@ class PackObjects:
 
     def __init__(self, repo: Path, algorithm: str, env=None) -> None:
         self._packs: list[_Pack] | None = None
+        self._loose_dirs: list[str] = []
         if algorithm != "sha1" or _switched_off("APM_NO_INPROCESS_VERIFY", env):
             return
         packs: list[_Pack] = []
         try:
-            for objects in _objects_dirs(Path(repo)):
+            dirs = _objects_dirs(Path(repo))
+            for objects in dirs:
                 pack_dir = os.path.join(objects, "pack")
                 if os.path.lexists(os.path.join(pack_dir, "multi-pack-index")):
                     raise _Unsupported("multi-pack index")
@@ -181,10 +193,11 @@ class PackObjects:
                 pack.close()
             return
         self._packs = packs
+        self._loose_dirs = dirs
 
     def read(self, oid: str, budget: list[int] | None = None) -> tuple[str, bytes] | None:
         """One object, inflating within *budget* (shared by the caller) or a fresh cap."""
-        if not self._packs:
+        if self._packs is None:
             return None
         try:
             raw = bytes.fromhex(oid)
@@ -192,12 +205,17 @@ class PackObjects:
             return None
         if len(raw) != 20:
             return None
+        cap = budget if budget is not None else [_MAX_INFLATED]
         try:
             for pack in self._packs:
                 offset = pack.offset(raw)
                 if offset is not None:
-                    cap = budget if budget is not None else [_MAX_INFLATED]
                     return self._at(pack, offset, 0, cap)
+            # Git looks up loose objects in the same object directories.
+            for objects in self._loose_dirs:
+                found = _loose(os.path.join(objects, oid[:2], oid[2:]), cap)
+                if found is not None:
+                    return found
         except (_Refuse, IndexError, ValueError, struct.error, OSError, zlib.error):
             return None
         return None
@@ -254,6 +272,54 @@ class PackObjects:
         for pack in self._packs or ():
             pack.close()
         self._packs = None
+
+
+def _loose(path: str, budget: list[int]) -> tuple[str, bytes] | None:
+    """A loose object ``<kind> <size>\\0<data>`` (zlib), or ``None`` when absent.
+
+    Only a regular file is read; a header or size that is not exactly what git
+    writes is refused. The caller re-hashes the bytes against the id it asked for.
+    """
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        raise _Refuse("loose object is not a regular file")
+    # Never through a link, a pipe or a device swapped in after the lstat.
+    fd = os.open(path, _LOOSE_READ_FLAGS)
+    with os.fdopen(fd, "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        swapped = os.name != "nt" and (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+        if not stat.S_ISREG(opened.st_mode) or swapped:
+            raise _Refuse("loose object is not a regular file")
+        if opened.st_size > _MAX_OBJECT:
+            raise _Refuse("object exceeds the size cap")
+        # Bounded by the opened size (read(n) reserves n bytes up front, which
+        # Windows commits): a file that grew after the fstat is refused.
+        packed = handle.read(opened.st_size + 1)
+        if len(packed) > opened.st_size:
+            raise _Refuse("loose object changed while read")
+    inflater = zlib.decompressobj()
+    head = inflater.decompress(packed, _LOOSE_HEADER_MAX)
+    kind_size, nul, rest = head.partition(b"\0")
+    if not nul:
+        raise _Refuse("loose object header")
+    kind, _, digits = kind_size.decode("ascii").partition(" ")
+    if kind not in _LOOSE_KINDS or not digits.isdigit() or digits != str(int(digits)):
+        raise _Refuse("loose object header")
+    size = int(digits)
+    if size > _MAX_OBJECT:
+        raise _Refuse("object exceeds the size cap")
+    if len(rest) > size:
+        raise _Refuse("loose object size mismatch")
+    budget[0] -= size
+    if budget[0] < 0:
+        raise _Refuse("objects inflate past the total cap")
+    data = rest + inflater.decompress(inflater.unconsumed_tail, size + 1 - len(rest))
+    if len(data) != size or not inflater.eof or inflater.unused_data:
+        raise _Refuse("loose object size mismatch")
+    return kind, data
 
 
 def materialize_tree(

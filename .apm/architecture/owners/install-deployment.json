@@ -104,6 +104,7 @@
       "owner": "install/service.py (InstallService; frozen_disposition is the single frozen-flag reader and its FrozenDisposition is what cleanup, lockfile and service integration consume); install/plan.py (manifest_requires_lockfile) decides whether a missing lockfile is converged, for frozen install and audit lockfile-exists; deployed-file presence and hash verification shared with audit deployed-files-present and content-integrity through policy/ci_checks.py (find_missing_deployed_files, verify_deployed_file_hashes); install/local_content_verdict.py local_content_reasons is the one local-dependency content verdict, asked by the frozen preflight and the audit content-integrity check (#4447)",
       "selectors": [
         "src/apm_cli/install/service.py",
+        "src/apm_cli/install/frozen_mcp_drift.py",
         "src/apm_cli/install/frozen_retirement.py",
         "src/apm_cli/install/frozen_selection.py",
         "src/apm_cli/install/frozen_withdrawal.py",

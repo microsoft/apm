@@ -20,6 +20,9 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
   path is written, before its post-write seal.
 * ``retire+kill``: exit right after the first journaled delete is sealed
   (a retire killed partway, #5130).
+* ``stage+kill``: exit once an atomic write staged ``APM_TEST_DEPLOY_KILL_PATH``
+  (POSIX, relative) beside it, before the rename publishes it, so the staging
+  file is left behind (#5395).
 
 Python runs only the first ``sitecustomize`` on its path, so this one runs
 the next one (the isolated environment's network guard) before anything else.
@@ -81,6 +84,17 @@ if _FAULT:
                 os._exit(_KILLED_EXIT)
 
         deploy_snapshot.DeployJournal.after_write = _seal_then_kill
+    elif "stage" in faults:
+        _target = os.environ["APM_TEST_DEPLOY_KILL_PATH"]
+        _replace = os.replace
+
+        def _replace_or_kill(src, dst, *args, **kwargs):
+            staged = os.path.basename(os.fspath(src)).startswith("apm-atomic-")
+            if staged and os.fspath(dst).replace(os.sep, "/").endswith(f"/{_target}"):
+                os._exit(_KILLED_EXIT)
+            return _replace(src, dst, *args, **kwargs)
+
+        os.replace = _replace_or_kill
     elif "unsealed" in faults:
         _after = int(os.environ["APM_TEST_DEPLOY_KILL_AFTER"])
         _seal = deploy_snapshot.DeployJournal.after_write

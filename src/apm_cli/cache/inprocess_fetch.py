@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import stat
 import subprocess
 import threading
@@ -26,6 +27,7 @@ import time
 import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 _log = logging.getLogger(__name__)
 
@@ -947,25 +949,30 @@ def _post(
         kind = response.headers.get("Content-Type", "").split(";")[0].strip()
         if kind != "application/x-git-upload-pack-result":
             raise _Refuse("not an upload-pack result")
-        if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
-            raise _Refuse("encoded response")
-        read1 = getattr(response.raw, "read1", None)
-        if not callable(read1):
-            raise _Refuse("no single-read body access")
-        # One socket read per step, so a trickling server costs at most the
-        # deadline plus one read timeout.
-        chunks = []
-        total = 0
-        while True:
-            if time.monotonic() > deadline:
-                raise _Refuse("fetch exceeds the wall deadline")
-            chunk = read1(65536, decode_content=False)
-            if not chunk:
-                return b"".join(chunks)
-            total += len(chunk)
-            if total > _MAX_BODY:
-                raise _Refuse("pack exceeds the size cap")
-            chunks.append(chunk)
+        return _read_capped(response, _MAX_BODY, deadline)
+
+
+def _read_capped(response: Any, cap: int, deadline: float) -> bytes:
+    """The identity-encoded body, at most *cap* bytes, read before *deadline*."""
+    if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+        raise _Refuse("encoded response")
+    read1 = getattr(response.raw, "read1", None)
+    if not callable(read1):
+        raise _Refuse("no single-read body access")
+    # One socket read per step, so a trickling server costs at most the
+    # deadline plus one read timeout.
+    chunks = []
+    total = 0
+    while True:
+        if time.monotonic() > deadline:
+            raise _Refuse("fetch exceeds the wall deadline")
+        chunk = read1(65536, decode_content=False)
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > cap:
+            raise _Refuse("response exceeds the size cap")
+        chunks.append(chunk)
 
 
 _SETTLED_MEMO = "inprocess-fetch-settled"
@@ -1114,3 +1121,383 @@ def _redact(value: object) -> str:
     from ..utils.git_env import redact_git_diagnostic
 
     return redact_git_diagnostic(str(value))
+
+
+# --- Sparse (monorepo subdirectory) deps: the pin's trees, then exactly the cone's blobs ---
+
+_CAPS_MEMO = "inprocess-fetch-v2-caps"
+_CAPS_MAX_BODY = 64 * 1024
+_CAPS_DEADLINE_SECONDS = 30.0
+_MAX_WANTS = 200_000
+
+
+def _wants_body(oids: list[str], *, trees_only: bool) -> bytes:
+    lines = [_pkt("no-progress\n"), _pkt("ofs-delta\n")]
+    if trees_only:
+        lines += [_pkt("deepen 1\n"), _pkt("filter blob:none\n")]
+    lines += [_pkt(f"want {oid}\n") for oid in oids]
+    return _pkt("command=fetch\n") + b"0001" + b"".join(lines) + _pkt("done\n") + b"0000"
+
+
+_caps_lock = threading.Lock()
+
+
+def _caps_get(
+    upload_url: str,
+    proxy: str | None,
+    trust: tuple[str, str],
+    _body: bytes,
+    credential: str | None = None,
+) -> bytes:
+    """GET the protocol-v2 capability advertisement for *upload_url*'s repository.
+
+    A' (#5353): APM's managed header goes per request, exact origin, no redirect
+    hop, exactly as :func:`_post` sends it.
+    """
+    from ..utils.http_credentials import origin_bounded_request
+
+    deadline = time.monotonic() + _CAPS_DEADLINE_SECONDS
+    refs_url = upload_url.removesuffix("/git-upload-pack") + "/info/refs?service=git-upload-pack"
+    headers = {"Git-Protocol": "version=2"}
+    if credential is not None:
+        from ..utils.http_credentials import (
+            credential_header_value,
+            per_request_credential_headers,
+        )
+
+        headers.update(per_request_credential_headers(credential_header_value(credential)))
+    with origin_bounded_request(
+        _session(trust),
+        "GET",
+        refs_url,
+        base_url=refs_url,
+        headers=headers,
+        max_hops=0,
+        ambient_credentials=False,
+        proxies={"https": proxy} if proxy else {},
+        verify=_requests_verify(trust[1]),
+        timeout=_TIMEOUT,
+        stream=True,
+    ) as response:
+        _admit(response.status_code, response.headers)
+        return _read_capped(response, _CAPS_MAX_BODY, deadline)
+
+
+def _fetch_caps(
+    upload_url: str, proxy: str | None, trust: tuple[str, str], credential: str | None = None
+) -> frozenset[str]:
+    """S1: the ``fetch=`` features the server advertises, one GET per repository per command.
+
+    The GET goes through :func:`_admitted_post`'s first-answer gate and breaker, and
+    the memo is filled under a lock, so concurrent sparse dependencies of one cold
+    repository send one request, and a throttle sends the rest to git.
+    """
+    from ..core.invocation_memo import invocation_memo
+
+    memo = invocation_memo(_CAPS_MEMO)
+    with _caps_lock:
+        if memo is not None and upload_url in memo:
+            return memo[upload_url]
+        body = _admitted_post(upload_url, proxy, trust, b"", credential, post=_caps_get)
+        features: frozenset[str] = frozenset()
+        for line in body.split(b"\n"):
+            text = line[4:].decode("ascii", "replace").strip() if len(line) >= 4 else ""
+            if text.startswith("fetch="):
+                features = frozenset(text[len("fetch=") :].split())
+        if memo is not None:
+            memo[upload_url] = features
+    if _rate_limited():
+        raise _Refuse("rate limited earlier in this command")
+    return features
+
+
+def _in_cone(path: str, cones: tuple[str, ...]) -> bool:
+    """``git sparse-checkout --cone``: files directly in the root or in any ancestor
+    of a cone (the cone itself included), and every file under a cone."""
+    parent = path.rpartition("/")[0]
+    for cone in cones:
+        if path.startswith(cone + "/"):
+            return True
+        if not parent or cone == parent or cone.startswith(parent + "/"):
+            return True
+    return False
+
+
+def sparse_checkout_file(cones: tuple[str, ...]) -> str:
+    """The ``.git/info/sparse-checkout`` git writes for ``sparse-checkout set --cone``."""
+    parents: set[str] = set()
+    for cone in cones:
+        parts = cone.split("/")
+        for i in range(1, len(parts)):
+            parents.add("/".join(parts[:i]))
+    leaves = set(cones)
+    lines = ["/*", "!/*/"]
+    for directory in sorted(parents | leaves):
+        lines.append(f"/{directory}/")
+        if directory in parents and directory not in leaves:
+            lines.append(f"!/{directory}/*/")
+    return "\n".join(lines) + "\n"
+
+
+_KNOWN_ATTRIBUTES = frozenset(
+    {"text", "eol", "crlf", "filter", "ident", "working-tree-encoding", *_INERT_ATTRIBUTES}
+)
+
+
+def _attribute_name(token: str) -> str:
+    """The attribute a ``.gitattributes`` token names: one ``-`` or ``!`` prefix, then ``name[=value]``."""
+    bare = token[1:] if token[:1] in ("-", "!") else token
+    return bare.split("=", 1)[0].lower()
+
+
+class _PlannedObjects:
+    """``checkout_verify``'s object source over objects whose ids were computed in process."""
+
+    def __init__(self, objects: dict[str, tuple[str, bytes]]) -> None:
+        self._objects = objects
+
+    def read(self, oid: str, kind: str) -> bytes:
+        from .checkout_verify import CheckoutVerificationError
+
+        found = self._objects.get(oid)
+        if found is None or found[0] != kind:
+            raise CheckoutVerificationError(f"object {oid[:12]} is not a planned {kind}")
+        return found[1]
+
+
+def _attributes_source_ok(data: bytes) -> bool:
+    """U2: wholesale refusals of one ``.gitattributes`` before any matching."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if any(c.isspace() and c not in " \t\n" for c in text.replace("\r\n", "\n")):
+        # git splits records only on LF and fields only on " \t\r\n"; Python's
+        # splitlines()/split() also break on CR, VT, FF, NEL, NBSP and the like.
+        return False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(("[attr]", '"')):
+            return False
+        for token in line.split()[1:]:
+            name = _attribute_name(token)
+            if name not in _KNOWN_ATTRIBUTES and not name.startswith("linguist-"):
+                return False
+    return True
+
+
+def _cone_attributes_ok(
+    objects: dict[str, tuple[str, bytes]], sha: str, files: list[tuple[str, str, bool]]
+) -> bool:
+    """T1'/U1-U5: no written file's attribute state can change its checkout bytes."""
+
+    from .checkout_verify import _Attributes, _FoldedAttributes, _Tree
+
+    sources = [
+        objects[oid][1] for rel, oid, _ in files if rel.rpartition("/")[2] == ".gitattributes"
+    ]
+    if not sources:
+        return True
+    if not all(_attributes_source_ok(data) for data in sources):
+        return False
+    root = objects[sha][1].split(b"\n", 1)[0][5:].decode("ascii")
+    source = _PlannedObjects(objects)
+
+    engines = (
+        _Attributes(_Tree(source, root, 20), source),
+        _FoldedAttributes(_Tree(source, root, 20), source),
+    )
+    transforms = ("filter", "ident", "working-tree-encoding")
+    for rel, _, _ in files:
+        for engine in engines:
+            state = engine.state(rel)
+            if state is None:
+                return False
+            if state.get("eol") not in (None, "lf") or "crlf" in state:
+                return False
+            if any(state.get(name) not in (None, False) for name in transforms):
+                return False
+    return True
+
+
+_IGNORABLE = dict.fromkeys(
+    map(
+        ord,
+        "\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u206a\u206b\u206c\u206d\u206e\u206f\ufeff",
+    )
+)
+
+
+def _aliases_gitattributes(raw: bytes) -> bool:
+    """T3: a name some filesystem resolves to ``.gitattributes`` (case, 8.3, dots, HFS ignorables)."""
+    try:
+        name = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    folded = re.sub(r"[. ]+$", "", name.translate(_IGNORABLE).lower())
+    if folded == ".gitattributes":
+        return True
+    short = name.lower()
+    return short.startswith("gitatt~") and short[7:8].isdigit()
+
+
+def _reaches_cone(directory: str, cones: tuple[str, ...]) -> bool:
+    """Whether *directory* is a cone, inside one, or an ancestor of one."""
+    return any(
+        cone == directory or cone.startswith(directory + "/") or directory.startswith(cone + "/")
+        for cone in cones
+    )
+
+
+def _check_cone_dir(prefix: str, raw_name: bytes, path: str, cones: tuple[str, ...]) -> None:
+    """R1/R2: directories that can hold a written file, or sit beside the cone path, are safe.
+
+    R1: a directory on the way to or inside a cone passes the same name refusals as
+    written files. R2: ``core.ignorecase`` folds case in cone matching, so a sibling
+    that differs from the cone's next component only in case would be written by git
+    and not here.
+    """
+    if _reaches_cone(path, cones):
+        _safe_name(raw_name)
+    try:
+        name = raw_name.decode("utf-8")
+    except UnicodeDecodeError:
+        return
+    for cone in cones:
+        if not (cone + "/").startswith(prefix):
+            continue
+        component = cone[len(prefix) :].split("/", 1)[0]
+        if component and name != component and name.casefold() == component.casefold():
+            raise _Refuse("a directory differs from the cone only in case")
+
+
+def _sparse_plan(
+    objects: dict[str, tuple[str, bytes]], sha: str, cones: tuple[str, ...]
+) -> tuple[list[tuple[str, str, bool]], set[str]]:
+    """``([(path, blob id, exec)] in the cone, every tree id)`` of the pinned commit."""
+    commit = objects.get(sha)
+    if commit is None or commit[0] != "commit":
+        raise _Refuse("pinned commit not in pack")
+    first = commit[1].split(b"\n", 1)[0]
+    if not first.startswith(b"tree "):
+        raise _Refuse("commit names no tree")
+    files: list[tuple[str, str, bool]] = []
+    trees = {sha}
+    stack = [("", first[5:].decode("ascii"))]
+    entries = 0
+    while stack:
+        prefix, tree_id = stack.pop()
+        trees.add(tree_id)
+        tree = objects.get(tree_id)
+        if tree is None or tree[0] != "tree":
+            raise _Refuse("tree missing")
+        for mode, raw_name, oid in _tree_entries(tree[1]):
+            entries += 1
+            if entries > _MAX_ENTRIES:
+                raise _Refuse("worktree entry count exceeds the cap")
+            if len(prefix) + len(raw_name) > _MAX_PATH:
+                raise _Refuse("worktree path exceeds the length cap")
+            path = prefix + raw_name.decode("utf-8", "replace")
+            if mode == "40000":
+                _check_cone_dir(prefix, raw_name, path, cones)
+                stack.append((path + "/", oid))
+                continue
+            if not _in_cone(path, cones):
+                continue
+            if raw_name == b".gitattributes":
+                # T3/T4: only the exact name, only as a regular blob.
+                if mode not in ("100644", "100755"):
+                    raise _Refuse(".gitattributes is not a regular blob")
+                files.append((prefix + ".gitattributes", oid, mode == "100755"))
+                continue
+            if _aliases_gitattributes(raw_name):
+                raise _Refuse("an alias of .gitattributes needs git's handling")
+            name = _safe_name(raw_name)
+            if mode not in ("100644", "100755"):
+                raise _Refuse(f"mode {mode} in the cone needs git's handling")
+            files.append((prefix + name, oid, mode == "100755"))
+    if len(files) > _MAX_WANTS:
+        raise _Refuse("cone blob count exceeds the cap")
+    return files, trees
+
+
+def fetch_sparse_worktree(
+    url: str,
+    sha: str,
+    staged: Path,
+    env: Mapping[str, str] | None,
+    pins: tuple[tuple[str, str], ...],
+    cones: tuple[str, ...],
+) -> dict[str, tuple[str, bool]] | None:
+    """Write the cone of commit *sha* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``.
+
+    Two requests, after the same gate as :func:`fetch_worktree`: the pinned commit
+    and all its trees (``deepen 1``, ``filter blob:none``), then exactly the blobs
+    ``git sparse-checkout --cone`` would write. Every object id is computed here; a
+    response that is not exactly the wanted set, a link, gitlink or ``.gitattributes``
+    alias in the cone, or an in-cone attribute that could change bytes sends the
+    dependency to git.
+    """
+    if len(sha) != 40 or not cones or os.environ.get("APM_NO_INPROCESS_SPARSE"):
+        return None
+    if _rate_limited():
+        return None
+    credential: str | None = None
+    try:
+        credential, env = _split_managed_auth(env if env is not None else os.environ)
+        upload_url, proxy, trust = _gate(url, env)
+        features = _fetch_caps(upload_url, proxy, trust, credential)
+        if "filter" not in features or "shallow" not in features:
+            raise _Refuse("server does not advertise fetch filter and shallow")
+        trees_body = _wants_body([sha], trees_only=True)
+        body = _admitted_post(upload_url, proxy, trust, trees_body, credential)
+        objects = parse_pack(_pack_from_response(body))
+        files, trees = _sparse_plan(objects, sha, cones)
+        objects = {oid: objects[oid] for oid in trees}
+        wanted = sorted({oid for _, oid, _ in files})
+        if wanted:
+            blobs_body = _wants_body(wanted, trees_only=False)
+            body = _admitted_post(upload_url, proxy, trust, blobs_body, credential)
+            blobs = parse_pack(_pack_from_response(body))
+            if set(blobs) != set(wanted) or any(kind != "blob" for kind, _ in blobs.values()):
+                raise _Refuse("blob response differs from the wanted set")
+            objects.update(blobs)
+        if not _cone_attributes_ok(objects, sha, files):
+            raise _Refuse("an in-cone .gitattributes may change checkout bytes")
+        root = str(staged)
+        made = {root}
+        manifest: dict[str, tuple[str, bool]] = {}
+        for rel, oid, executable in files:
+            parts = rel.split("/")
+            directory = root
+            for part in parts[:-1]:
+                directory = os.path.join(directory, part)
+                if directory not in made:
+                    os.mkdir(directory, 0o755)
+                    made.add(directory)
+            _write_file(os.path.join(directory, parts[-1]), objects[oid][1], executable)
+            manifest[rel] = (oid, executable)
+        sparse_pins = (
+            *pins,
+            ("core.sparseCheckout", "true"),
+            ("core.sparseCheckoutCone", "true"),
+            ("apm.sparseMaterialization", "complete"),
+        )
+        _write_git_dir(staged, url, sha, objects, set(objects), sparse_pins)
+        info = os.path.join(root, ".git", "info")
+        os.makedirs(info, exist_ok=True)
+        _write_file(
+            os.path.join(info, "sparse-checkout"), sparse_checkout_file(cones).encode(), False
+        )
+        _note(url, "sparse hit")
+        return manifest
+    except _Refuse as reason:
+        _note(url, f"sparse fallback: {reason}")
+        return None
+    except Exception as exc:
+        _note(url, f"sparse fallback: {type(exc).__name__}: {exc}")
+        return None
+    finally:
+        del credential  # every path, exceptions included (W3d)

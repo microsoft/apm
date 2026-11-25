@@ -290,8 +290,11 @@ def test_a_kept_record_is_forgotten_once_its_entry_is_removed(project: Path) -> 
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
 
 
-def test_evidence_bound_to_another_installation_is_unusable(project: Path) -> None:
+def test_evidence_bound_to_another_installation_is_set_aside_once(project: Path) -> None:
+    """#5396: evidence another installation wrote is renamed once, never trusted or deleted."""
     _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    old = path.read_bytes()
     identity = project / ".apm-local" / "installation"
     identity.write_text("0" * 32 + "\n")
     logger = _Logger()
@@ -299,10 +302,128 @@ def test_evidence_bound_to_another_installation_is_unusable(project: Path) -> No
     with pytest.raises(ValueError, match="Invalid MCP write evidence"):
         McpWriteReceipts.open(project, user_scope=False)
     _retire(project, logger)
+    _retire(project, again := _Logger())
 
-    assert SERVER in _servers(project), "unusable evidence must not remove anything"
-    assert logger.warnings and "Kept every MCP entry" in logger.warnings[0]
+    assert SERVER in _servers(project), "set-aside evidence must not remove anything"
+    _assert_set_aside(logger.warnings, path, old)
+    assert again.warnings == [], "the set-aside is reported once"
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
+
+
+def test_a_reclone_sets_aside_the_sibling_receipt_its_new_identity_cannot_bind(
+    project: Path,
+) -> None:
+    """Copilot #5403: fresh MCP evidence creates this checkout's identity; the old
+    checkout's materialization receipt beside it must not then fail every ledger load."""
+    import shutil
+
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+
+    _install_write(project, _Logger())
+    session = DeploymentMaterializationSession(project, InstallScope.PROJECT, None)
+    sibling = session.state_path
+    sibling.write_text(
+        json.dumps({**session.binding(), "records": [], "destinations": {}, "bindings": {}}),
+        encoding="utf-8",
+    )
+    shutil.rmtree(project / ".apm-local")  # a re-clone: the identity is not committed
+
+    _install_write(project, _Logger())
+
+    DeploymentMaterializationSession(project, InstallScope.PROJECT, None)  # loads, no raise
+    assert sibling.with_name(sibling.name + ".superseded").is_file(), "kept, never deleted"
+    assert not sibling.exists()
+
+
+@pytest.mark.parametrize("shape", ["not-json", "malformed-records"])
+def test_an_unusable_sibling_receipt_stays_while_the_evidence_is_set_aside(
+    project: Path, shape: str
+) -> None:
+    """Copilot #5403: a sibling receipt that is not well-formed is never archived (the
+    ledger keeps reporting it), and it never undoes the evidence set-aside or its warning."""
+    import shutil
+
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+
+    _install_write(project, _Logger())
+    session = DeploymentMaterializationSession(project, InstallScope.PROJECT, None)
+    evidence, sibling = session.mcp_state_path, session.state_path
+    old = evidence.read_bytes()
+    body = {**session.binding(), "records": [{"bad": 1}], "destinations": {}, "bindings": {}}
+    sibling.write_text("{not json" if shape == "not-json" else json.dumps(body), encoding="utf-8")
+    before = sibling.read_bytes()
+    shutil.rmtree(project / ".apm-local")
+    logger = _Logger()
+
+    _install_write(project, logger)
+
+    _assert_set_aside(logger.warnings, evidence, old)
+    assert sibling.read_bytes() == before, "an unusable sibling stays in place"
+
+
+def _null_root_identity(data: dict) -> None:
+    data["root_identity"] = None
+
+
+def _string_root_identity(data: dict) -> None:
+    data["root_identity"] = "corrupt"
+
+
+def _device_only_change(data: dict) -> None:
+    """Same UUID and inode, another device and no matching birth time: ambiguous."""
+    data["root_identity"][0] += 1
+    data["root_birth_time"] = 1.0
+
+
+def _another_uuid_no_writes(data: dict) -> None:
+    data["installation"] = "0" * 32
+    del data["writes"]
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        "text",
+        _null_root_identity,
+        _string_root_identity,
+        _device_only_change,
+        _another_uuid_no_writes,
+    ],
+    ids=[
+        "not-json",
+        "null-root-identity",
+        "string-root-identity",
+        "device-only-change",
+        "another-uuid-no-writes",
+    ],
+)
+def test_corrupt_evidence_is_never_set_aside_by_an_install(project: Path, corrupt) -> None:
+    """Only well-formed evidence with positive proof of another installation rotates."""
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    if corrupt == "text":
+        path.write_text("{not json")
+    else:
+        data = json.loads(path.read_text())
+        corrupt(data)
+        path.write_text(json.dumps(data))
+    before = path.read_bytes()
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert SERVER in _servers(project)
+    assert path.read_bytes() == before, "corrupt evidence stays in place"
+    assert not path.with_name(path.name + ".superseded").exists()
+    assert logger.warnings and "Kept every MCP entry" in logger.warnings[0]
+
+
+def _assert_set_aside(warnings: list[str], path: Path, old: bytes) -> None:
+    aside = path.with_name(path.name + ".superseded")
+    assert len(warnings) == 1 and "Set aside MCP write evidence" in warnings[0], warnings
+    assert aside.read_bytes() == old, "the old evidence is kept byte for byte"
 
 
 def test_a_corrupt_evidence_file_is_rejected(project: Path) -> None:

@@ -473,7 +473,7 @@ unchanged.
 | Code | Meaning |
 |------|---------|
 | 0 | Compilation succeeded (or `--validate` passed). |
-| 1 | No `apm.yml`, no primitives to compile, validation failure, hidden-Unicode finding, an installed package the org policy no longer allows, or compilation error. |
+| 1 | No `apm.yml`, no primitives to compile, validation failure, hidden-Unicode finding, an installed package the org policy no longer allows, or compilation error. Native `CLAUDE.md`, `AGENTS.md`, or `GEMINI.md` files are not APM content: with only those, compile reports `No APM content found to compile`. Hand-authored root context files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are never overwritten. |
 | 2 | Conflicting flags (e.g. `--all` combined with `--target`, or `--root` combined with `--watch`). |
 
 ## Related

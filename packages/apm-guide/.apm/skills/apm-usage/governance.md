@@ -620,7 +620,7 @@ relax an ancestor that requires an explicit `includes:` list.
 
 ### 4. What gets enforced
 
-- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth (resolution stops at the limit; the resolved graph is judged, not the old lockfile), require_pinned_constraint
+- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth (resolution stops at the limit; canonical source identities are ref-insensitive and first-wins, different origins remain distinct, and the resolved graph is judged, not the old lockfile), require_pinned_constraint
 - **Registry source:** require, allow_non_registry
 - **MCP:** allow, deny, transport.allow, self_defined (`trust_transitive` is parsed but not enforced)
 - **Compilation:** target.allow / target.enforce (target-aware). `target:`, `targets:`, and CSV forms are one declaration; aliases resolve before comparison (`vscode`/`agents` are `copilot`); `all` in `allow` allows everything. Install judges its effective selection; audit judges the targets `apm.yml` declares.

@@ -142,6 +142,7 @@ class CurrentMcpConfigView:
             diagnostics=diagnostics,
             logger=logger,
             include_dependency_mcp=include_dependency_mcp,
+            verify_admitted=exact and recorded is not None,
             allow_pending=allow_pending,
             active_package_keys=active_package_keys,
             claude_native_keys=claude_native_keys,
@@ -163,6 +164,7 @@ class CurrentMcpConfigView:
         diagnostics: DiagnosticCollector | None = None,
         logger: _McpViewLogger | None = None,
         include_dependency_mcp: bool = True,
+        verify_admitted: bool = False,
         allow_pending: bool | None = None,
         active_package_keys: frozenset[str] | None = None,
         claude_native_keys: frozenset[str] = frozenset(),
@@ -188,6 +190,7 @@ class CurrentMcpConfigView:
                 diagnostics=diagnostics,
                 logger=logger,
                 include_dependency_mcp=include_dependency_mcp,
+                verify_admitted=verify_admitted,
                 allow_pending=allow_pending,
                 active_package_keys=active_package_keys,
                 claude_native_keys=claude_native_keys,
@@ -936,6 +939,7 @@ def _collect_locked_dependencies(
     diagnostics: DiagnosticCollector | None,
     logger: _McpViewLogger | None = None,
     include_dependency_mcp: bool = True,
+    verify_admitted: bool = False,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
     claude_native_keys: frozenset[str] = frozenset(),
@@ -962,6 +966,7 @@ def _collect_locked_dependencies(
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
     native_ownership_cache: dict[Path, frozenset[str]] = {}
+    admitted = _admitted_names(lockfile) if verify_admitted else set()
     for package_key, dependency in lockfile.dependencies.items():
         if package_key == "." or (
             active_package_keys is not None and package_key not in active_package_keys
@@ -1133,7 +1138,7 @@ def _collect_locked_dependencies(
                 refusable.add(mcp_dependency.name)
             if mcp_dependency.is_self_defined:
                 result.gated.add(mcp_dependency.name)
-            if not include_dependency_mcp:
+            if not include_dependency_mcp and mcp_dependency.name not in admitted:
                 omissions.setdefault(
                     mcp_dependency.name, {"declaration": fingerprint, "reason": "only-apm"}
                 )

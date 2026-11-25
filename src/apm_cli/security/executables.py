@@ -105,6 +105,9 @@ class ExecutableDeclaration:
     install_path: str | None = None
     depth: int = 1
     content_verified: bool = True
+    # The lockfile row the scanner read this package from (its unique key),
+    # so org dependency policy judges that row (#5407).
+    lock_key: str | None = None
     # A natively loaded plugin is approved as one item over its whole root.
     native_plugin: bool = False
     # The native gate's type set (trust owner), which the counts above miss
