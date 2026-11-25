@@ -68,3 +68,39 @@ def attested_state(argv: list[str], root: Path) -> bool:
         vr._ENTRY_ENV, vr._ENTRY_PRESENTATION = None, None
     vr._trace("attested hit")
     return True
+
+
+def attested_gates(project_root: Path, lock: Any, fetch: Any) -> bool:
+    """The gates that re-judge every run, for a state an attested record proves.
+
+    A successful full install attested the state it committed; the record's
+    HMAC over every live input and the no-follow re-hash of every deployed file
+    and package copy hold (A7), so planning and staging would find nothing.
+    Scripts, executables and policy still re-judge this run.
+    """
+    from apm_cli.install import noop_diff
+    from apm_cli.install.diff_apply import (
+        Decline,
+        _refuse_lifecycle_scripts,
+        _refuse_unsilent_executables,
+    )
+
+    _refuse_lifecycle_scripts(project_root)
+    _refuse_unsilent_executables(lock)
+    from apm_cli.install.fast_output import quiet
+
+    with quiet():
+        if not noop_diff._policy_checks_pass(project_root, fetch):
+            raise Decline("policy checks")
+    return True
+
+
+def release_attested(held: Any) -> bool:
+    """Print a committed attested no-op; a failure propagates, never the full pipeline."""
+    from apm_cli.install.diff_apply import _trace
+
+    held.release()
+    _trace("no-op (attested record)")
+    # Provenance never upgrades (W3d A5): this run's output record stays attested.
+    vr.note_verified_noop(vr.ATTESTED)
+    return True

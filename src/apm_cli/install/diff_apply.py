@@ -784,7 +784,7 @@ def try_apply(
         deploy = DeployStore.open_default()
         if deploy is None:
             raise Decline("no deploy store")
-        if attested and _attested_gates(project_root, lock, fetch):
+        if attested and verdict_attest.attested_gates(project_root, lock, fetch):
             if decide_only:
                 _trace("no-op (attested record)")
                 return True
@@ -840,7 +840,7 @@ def try_apply(
         raise  # the tree is not the pre-run tree: never run the full pipeline on it
     except _AttestedCommitted as committed:
         # Committed: as below, the held output is printed outside the fallback.
-        return _release_attested(committed.args[0])
+        return verdict_attest.release_attested(committed.args[0])
     except Exception as exc:
         _trace(f"full run (error: {type(exc).__name__})")
         return False
@@ -857,25 +857,6 @@ def try_apply(
 
         # An applied diff holds its service output, so only a no-op is recorded (#4977).
         verdict_record.note_verified_noop()
-    return True
-
-
-def _attested_gates(project_root: Path, lock: Any, fetch: Any) -> bool:
-    """The gates that re-judge every run, for a state an attested record proves.
-
-    A successful full install attested the state it committed; the record's
-    HMAC over every live input and the no-follow re-hash of every deployed file
-    and package copy hold (A7), so planning and staging would find nothing.
-    Scripts, executables and policy still re-judge this run.
-    """
-    _refuse_lifecycle_scripts(project_root)
-    _refuse_unsilent_executables(lock)
-    from apm_cli.install import noop_diff
-    from apm_cli.install.fast_output import quiet
-
-    with quiet():
-        if not noop_diff._policy_checks_pass(project_root, fetch):
-            raise Decline("policy checks")
     return True
 
 
@@ -898,17 +879,6 @@ def _commit_attested(
         _render(project_root, lock, [], [], [], started, frozen_disposition)
 
     return _commit(project_root, fetch, [], [], targets, session, False, render)
-
-
-def _release_attested(held: Any) -> bool:
-    """Print a committed attested no-op; a failure propagates, never the full pipeline."""
-    held.release()
-    _trace("no-op (attested record)")
-    from apm_cli.install import verdict_record
-
-    # Provenance never upgrades (W3d A5): this run's output record stays attested.
-    verdict_record.note_verified_noop(verdict_record.ATTESTED)
-    return True
 
 
 def _render(
