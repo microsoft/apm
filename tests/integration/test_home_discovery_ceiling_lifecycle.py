@@ -269,3 +269,21 @@ def test_a_home_project_with_a_manifest_and_a_lockfile_reinstalls_with_one_warni
     assert "apm install -g" in output, _describe(result)
     assert (deployed.read_bytes(), manifest.read_bytes()) == before, _describe(result)
     assert lock.is_file(), _describe(result)
+
+
+def test_a_walk_from_the_user_metadata_directory_never_edits_the_global_manifest(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    isolated, environment, _ = _world(tmp_path)
+    scratch = isolated.home / ".apm" / "cache" / "scratch"
+    scratch.mkdir(parents=True)
+    manifest, lock = isolated.home / ".apm" / "apm.yml", isolated.home / ".apm" / "apm.lock.yaml"
+    manifest.write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
+    lock.write_text("lockfile_version: '4'\ndependencies: []\n", encoding="utf-8")
+    before = (manifest.read_bytes(), lock.read_bytes())
+
+    result = _run(apm_engine_command, ("install",), scratch, environment)
+
+    assert result.returncode == 1, _describe(result)
+    assert "No apm.yml found" in result.stdout + result.stderr, _describe(result)
+    assert (manifest.read_bytes(), lock.read_bytes()) == before, _describe(result)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from pathlib import Path
 
@@ -27,11 +28,19 @@ def _same_directory(first: Path, second: Path) -> bool:
         return False
 
 
+@functools.lru_cache(maxsize=4)
+def _resolve(path: Path) -> Path | None:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
 def resolved_home() -> Path | None:
     """Return the resolved home directory, or None when it cannot be determined."""
     try:
-        return Path.home().resolve()
-    except (OSError, RuntimeError):
+        return _resolve(Path.home())
+    except RuntimeError:
         return None
 
 
@@ -41,12 +50,25 @@ def is_home(directory: Path) -> bool:
     return home is not None and _same_directory(directory, home)
 
 
+@functools.lru_cache(maxsize=4)
+def _home_chain_identities(home: Path) -> frozenset[tuple[int, int]]:
+    """(dev, ino) of *home* and each ancestor, stat'ed once per resolved home."""
+    identities = set()
+    for level in (home, *home.parents):
+        try:
+            info = os.stat(level)
+        except OSError:
+            continue
+        identities.add((info.st_dev, info.st_ino))
+    return frozenset(identities)
+
+
 def is_home_or_above(directory: Path) -> bool:
     """Whether *directory* is HOME or one of its ancestors (``/``, ``/home``, ...).
 
     The single HOME ceiling predicate: a marker there (a dotfiles repo, a stray
-    manifest) is not a project. Identity-based: HOME's chain is stat'ed once and
-    *directory* once.
+    manifest) is not a project. Identity-based, so a case-variant or symlinked
+    spelling matches; HOME's chain is stat'ed once, then one stat per query.
     """
     home = resolved_home()
     if home is None:
@@ -55,10 +77,9 @@ def is_home_or_above(directory: Path) -> bool:
         return True
     try:
         wanted = os.stat(directory)
-        chain = {(info.st_dev, info.st_ino) for info in map(os.stat, (home, *home.parents))}
     except OSError:
         return False
-    return (wanted.st_dev, wanted.st_ino) in chain
+    return (wanted.st_dev, wanted.st_ino) in _home_chain_identities(home)
 
 
 def executable_exclusion_root() -> Path | None:

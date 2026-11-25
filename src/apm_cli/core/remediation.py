@@ -924,7 +924,22 @@ FROZEN_UPDATE_CONFLICT = _entry(
 )
 HOME_ROOT_USER_SCOPE = _entry(
     "home-root-user-scope",
-    "apm {command} -g",
+    "apm install -g",
+    "use user scope",
+)
+HOME_ROOT_USER_SCOPE_UPDATE = _entry(
+    "home-root-user-scope-update",
+    "apm update -g",
+    "use user scope",
+)
+HOME_ROOT_USER_SCOPE_LOCK = _entry(
+    "home-root-user-scope-lock",
+    "apm lock -g",
+    "use user scope",
+)
+HOME_ROOT_USER_SCOPE_UNINSTALL = _entry(
+    "home-root-user-scope-uninstall",
+    "apm uninstall -g",
     "use user scope",
 )
 HOME_ROOT_PICK_DIR = _entry(

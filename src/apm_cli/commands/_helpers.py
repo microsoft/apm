@@ -562,16 +562,25 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     in a parent directory that is ``$HOME`` or above it (the same predicate as
     helper-executable lookup, ``utils.executable_exclusion``), so a stray
     ``~/apm.yml`` or ``/apm.yml`` cannot capture a project folder. The start
-    directory's own manifest is always considered.
+    directory's own manifest is always considered. An implicit walk (no
+    ``start``) also stops at the user metadata root (``~/.apm`` or ``$APM_HOME``),
+    whose ``apm.yml`` is the global manifest, never a project's.
     """
     import stat
 
     cwd = (start or Path.cwd()).resolve()
     geteuid = getattr(os, "geteuid", None)
+    from ..core.scope import USER_APM_DIR, is_user_scope_root
     from ..utils.executable_exclusion import is_home_or_above
 
     for candidate in (cwd, *cwd.parents):
-        if candidate != cwd and is_home_or_above(candidate):
+        if candidate != cwd and (
+            is_home_or_above(candidate)
+            or (
+                start is None
+                and (is_user_scope_root(candidate) or candidate == Path.home() / USER_APM_DIR)
+            )
+        ):
             break
         manifest = manifest_file(candidate)
         try:
@@ -604,7 +613,13 @@ def ensure_project_root_is_not_user_scope(
     working with a warning. The other commands only warn, and only when a manifest
     is found at ``$HOME``; they never create a project.
     """
-    from ..core.remediation import HOME_ROOT_PICK_DIR, HOME_ROOT_USER_SCOPE
+    from ..core.remediation import (
+        HOME_ROOT_PICK_DIR,
+        HOME_ROOT_USER_SCOPE,
+        HOME_ROOT_USER_SCOPE_LOCK,
+        HOME_ROOT_USER_SCOPE_UNINSTALL,
+        HOME_ROOT_USER_SCOPE_UPDATE,
+    )
     from ..core.scope import manifest_file
     from ..deps.lockfile import LOCKFILE_NAME
     from ..utils.executable_exclusion import is_home
@@ -612,7 +627,11 @@ def ensure_project_root_is_not_user_scope(
     if user_scope or not is_home(project_root):
         return
     home = project_root.resolve()
-    user_scope_advice = HOME_ROOT_USER_SCOPE.bind(command=command)
+    user_scope_advice = {
+        "update": HOME_ROOT_USER_SCOPE_UPDATE,
+        "lock": HOME_ROOT_USER_SCOPE_LOCK,
+        "uninstall": HOME_ROOT_USER_SCOPE_UNINSTALL,
+    }.get(command, HOME_ROOT_USER_SCOPE)
     has_manifest = manifest_file(home).exists()
     if has_manifest or (command == "install" and (home / LOCKFILE_NAME).exists()):
         _rich_warning(
@@ -637,6 +656,8 @@ def resolve_cli_packages_for_project_root(
     project_root: Path,
 ) -> tuple[str, ...]:
     """Resolve relative CLI package paths from invoking_dir relative to project_root (#4545)."""
+    from ..bundle.local_bundle import looks_like_local_bundle
+
     invoking, root = invoking_dir.resolve(), project_root.resolve()
     if invoking == root:
         return packages
@@ -645,23 +666,10 @@ def resolve_cli_packages_for_project_root(
         # Only an explicit relative path names the invoking directory; a bare
         # name (``foo``, ``name@market``) never depends on what the subdir holds.
         if not pkg.startswith(("./", "../", ".\\", "..\\")):
-            resolved.append(str(invoking / pkg) if _is_local_bundle_source(invoking / pkg) else pkg)
+            resolved.append(str(invoking / pkg) if looks_like_local_bundle(invoking / pkg) else pkg)
             continue
         resolved.append(_rebase_relative_package(pkg, invoking, root))
     return tuple(resolved)
-
-
-def _is_local_bundle_source(path: Path) -> bool:
-    """Whether a bare CLI source names a local bundle (archive or plugin dir) at *path* (#4545).
-
-    install probes a bare source against the working directory, which discovery
-    has moved to the project root; a bundle beside the invoking directory is
-    pinned to that directory first. The archive suffixes and ``plugin.json``
-    marker match ``bundle.local_bundle.detect_local_bundle``, without extracting.
-    """
-    if path.is_dir():
-        return (path / "plugin.json").is_file()
-    return path.is_file() and path.name.lower().endswith((".zip", ".tgz", ".tar.gz"))
 
 
 def _rebase_relative_package(pkg: str, invoking: Path, root: Path) -> str:

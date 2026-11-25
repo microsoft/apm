@@ -1251,7 +1251,7 @@ def install(  # noqa: PLR0913
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _created_root = _root_redirect.__enter__()
     try:
-        ensure_project_root_is_not_user_scope(Path.cwd(), user_scope=global_, command="install")
+        ensure_project_root_is_not_user_scope(Path.cwd(), command="install", user_scope=global_)
         check_current_cli(
             _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
             command="apm install",

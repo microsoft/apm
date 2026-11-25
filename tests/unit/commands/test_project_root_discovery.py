@@ -334,3 +334,44 @@ def test_the_scope_guard_warns_once_for_an_existing_home_project(
 
     out = " ".join(capsys.readouterr().out.split())
     assert out.count("[!]") == 1 and "apm lock -g" in out, out
+
+
+# -- the implicit walk stops at the user metadata root (#5448 class) --
+
+
+@pytest.mark.parametrize("override", [False, True], ids=["default-apm-dir", "apm-home-override"])
+def test_an_implicit_walk_never_adopts_the_global_manifest(
+    tmp_path: Path, monkeypatch, override: bool
+) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home, _ = _home_world(tmp_path, monkeypatch)
+    metadata = home / "custom-apm" if override else home / ".apm"
+    scratch = metadata / "cache" / "scratch"
+    scratch.mkdir(parents=True)
+    (metadata / "apm.yml").write_text("name: global\nversion: 1.0.0\n", encoding="utf-8")
+    if override:
+        monkeypatch.setenv("APM_HOME", str(metadata))
+    monkeypatch.chdir(scratch)
+
+    assert _find_apm_yml() is None
+    assert _find_apm_yml(scratch) == (metadata / "apm.yml").resolve()  # explicit start unchanged
+
+
+def test_a_plugin_json_source_package_is_not_pinned_as_a_bundle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+
+    root, sub = tmp_path / "proj", tmp_path / "proj" / "sub"
+    plugin = sub / "pkg"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text("{}", encoding="utf-8")
+    (plugin / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n", encoding="utf-8")
+    bundle = sub / "bundle.zip"
+    bundle.write_bytes(b"PK")
+
+    assert resolve_cli_packages_for_project_root(("pkg", "bundle.zip"), sub, root) == (
+        "pkg",
+        str(bundle.resolve()),
+    )

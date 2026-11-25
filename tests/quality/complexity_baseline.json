@@ -64,11 +64,6 @@
         "PLR0915"
       ]
     },
-    "src/apm_cli/bundle/local_bundle.py": {
-      "detect_local_bundle": [
-        "PLR0911"
-      ]
-    },
     "src/apm_cli/bundle/packer.py": {
       "pack_bundle": [
         "C901",
