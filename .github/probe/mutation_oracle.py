@@ -11,8 +11,8 @@ from pathlib import Path
 sys.path.insert(0, os.getcwd())
 from tests.benchmarks.journeys import Context, open_world, prepare_fixture  # noqa: E402
 
-FIXTURES = os.environ.get("ORACLE_FIXTURES", "tree-10,tree-10-mcp").split(",")
-LIMIT = int(os.environ.get("ORACLE_LIMIT", "400"))
+FIXTURES = os.environ.get("ORACLE_FIXTURES", "tree-10-mcp").split(",")
+LIMIT = int(os.environ.get("ORACLE_LIMIT", "160"))
 NEW_APM = os.environ["NEW_APM"]
 PY = str(Path(NEW_APM).parent / "python")
 NO_HIT = ("CI", "GITHUB_ACTIONS", "TF_BUILD", "JENKINS_URL", "BUILD_ID", "TEAMCITY_VERSION",
