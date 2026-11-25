@@ -12,6 +12,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import warnings
 
 import click
@@ -733,6 +734,62 @@ def _route_sigterm_to_interrupt() -> None:
     """Install :func:`_interrupt_on_sigterm` for this process (main thread)."""
     with contextlib.suppress(ValueError, OSError, AttributeError):
         signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
+
+
+@contextlib.contextmanager
+def _signals_blocked(signums: tuple[int, ...]):
+    """Block *signums* at the OS level (POSIX) while handlers are swapped."""
+    if not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, signums)
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+@contextlib.contextmanager
+def interrupts_deferred():
+    """Hold Ctrl+C and SIGTERM across a spawn whose handle must exist before an interrupt.
+
+    A child started in its own session can be stopped only through its handle,
+    and Popen returns only after the child has exec'd: an interrupt raised
+    inside it leaves nothing to reap (#5303). A deferred signal is replayed
+    through the saved handler on exit. Only signals with a Python handler are
+    deferred, so SIG_IGN and SIG_DFL keep their meaning; under
+    ``_interrupt_on_sigterm`` a second SIGTERM still terminates at once.
+    Handlers are swapped with both signals blocked, so an interrupt during the
+    swap cannot leave one bound to the deferral; the spawn itself runs
+    unblocked, so the child never inherits a blocked mask.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    signums = (signal.SIGINT, signal.SIGTERM)
+    pending: list[int] = []
+    saved: dict[int, object] = {}
+
+    def _defer(num: int, _frame: object) -> None:
+        if num in pending and saved.get(num) is _interrupt_on_sigterm:
+            signal.signal(num, signal.SIG_DFL)
+            signal.raise_signal(num)
+        pending.append(num)
+
+    with _signals_blocked(signums):
+        for signum in signums:
+            handler = signal.getsignal(signum)
+            if callable(handler):
+                saved[signum] = handler
+                signal.signal(signum, _defer)
+    try:
+        yield
+    finally:
+        with _signals_blocked(signums):
+            for signum, handler in saved.items():
+                signal.signal(signum, handler)
+        if pending:
+            signal.raise_signal(pending[0])
 
 
 def main():

@@ -336,23 +336,29 @@ class TestCommandExecutor:
         pytest.fail("a script spawned as the interrupt landed outlived the APM command")
 
     @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX signals")
-    def test_a_second_sigterm_while_spawning_still_terminates(self, tmp_path: Path) -> None:
-        """Deferring the first SIGTERM keeps the CLI contract: a second one terminates (#5303)."""
+    @pytest.mark.parametrize(
+        ("policy", "returncode"),
+        [("_interrupt_on_sigterm", -signal.SIGTERM), ("signal.SIG_IGN", 3)],
+        ids=["cli-policy-terminates", "ignored-stays-ignored"],
+    )
+    def test_two_sigterms_while_spawning_keep_the_callers_policy(
+        self, policy: str, returncode: int
+    ) -> None:
+        """Deferral keeps the SIGTERM policy: the CLI's second one terminates, SIG_IGN ignores."""
         code = (
             "import os, signal, sys, time\n"
-            "from apm_cli.cli import _interrupt_on_sigterm\n"
-            "from apm_cli.core.script_executors import _interrupts_deferred\n"
-            "signal.signal(signal.SIGTERM, _interrupt_on_sigterm)\n"
-            "with _interrupts_deferred():\n"
+            "from apm_cli.cli import _interrupt_on_sigterm, interrupts_deferred\n"
+            f"signal.signal(signal.SIGTERM, {policy})\n"
+            "with interrupts_deferred():\n"
             "    os.kill(os.getpid(), signal.SIGTERM)\n"
             "    os.kill(os.getpid(), signal.SIGTERM)\n"
-            "    time.sleep(5)\n"
-            "    sys.exit(3)\n"
+            "    time.sleep(1)\n"
+            "sys.exit(3)\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
         )
-        assert result.returncode == -signal.SIGTERM, (result.returncode, result.stderr)
+        assert result.returncode == returncode, (result.returncode, result.stderr)
 
 
 # -- _expand_env_vars ------------------------------------------------------

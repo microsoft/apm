@@ -157,9 +157,9 @@
     },
     {
       "id": "process-interrupt-signals",
-      "decision": "SIGTERM takes the same interrupt (Ctrl+C) path as SIGINT; a second SIGTERM terminates",
-      "owner": "cli.py (main, _route_sigterm_to_interrupt)",
-      "selectors": ["src/apm_cli/cli.py"],
+      "decision": "SIGTERM takes the same interrupt (Ctrl+C) path as SIGINT; a second SIGTERM terminates; a session-isolated spawn defers both until its handle exists",
+      "owner": "cli.py (main, _route_sigterm_to_interrupt, interrupts_deferred)",
+      "selectors": ["src/apm_cli/cli.py", "src/apm_cli/core/script_executors.py"],
       "guards": ["registry-delegation-process-interrupt-signals"]
     },
     {

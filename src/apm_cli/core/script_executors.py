@@ -1537,60 +1537,6 @@ def dispatch_http_batch(
 # -- Command executor ------------------------------------------------------
 
 
-@contextlib.contextmanager
-def _signals_blocked(signums: tuple[int, ...]):
-    """Block *signums* at the OS level (POSIX) while handlers are swapped."""
-    if not hasattr(signal, "pthread_sigmask"):
-        yield
-        return
-    previous = signal.pthread_sigmask(signal.SIG_BLOCK, signums)
-    try:
-        yield
-    finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
-
-
-@contextlib.contextmanager
-def _interrupts_deferred():
-    """Hold Ctrl+C and SIGTERM until the spawned script's handle is assigned.
-
-    The script runs in its own session, so only APM can stop it. Popen
-    returns after the child has exec'd; an interrupt raised inside Popen would
-    leave no handle to reap, and the script would outlive the command (#5303).
-    A deferred signal is re-raised through the restored handler on exit. A
-    second SIGTERM still terminates at once, as it does outside the deferral.
-    Handlers are swapped with both signals blocked, so an interrupt during the
-    swap cannot leave one of them bound to the deferral; the spawn itself runs
-    unblocked, so the script never inherits a blocked mask.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    signums = (signal.SIGINT, signal.SIGTERM)
-    pending: list[int] = []
-
-    def _defer(num: int, _frame: object) -> None:
-        if num == signal.SIGTERM and num in pending:
-            signal.signal(signal.SIGTERM, signal.SIG_DFL)
-            signal.raise_signal(signal.SIGTERM)
-        pending.append(num)
-
-    saved: dict[int, object] = {}
-    with _signals_blocked(signums):
-        for signum in signums:
-            with contextlib.suppress(ValueError, OSError):
-                saved[signum] = signal.signal(signum, _defer)
-    try:
-        yield
-    finally:
-        with _signals_blocked(signums):
-            for signum, handler in saved.items():
-                if handler is not None:
-                    signal.signal(signum, handler)
-        if pending:
-            signal.raise_signal(pending[0])
-
-
 def _execute_command(
     script: ScriptEntry,
     event: LifecycleEvent,
@@ -1622,7 +1568,9 @@ def _execute_command(
         # spawns) in its OWN process group, so a timeout can reap the
         # whole tree via killpg instead of orphaning backgrounded
         # grandchildren (subprocess.run's timeout kills only the shell).
-        with _interrupts_deferred():
+        from ..cli import interrupts_deferred
+
+        with interrupts_deferred():
             proc = subprocess.Popen(
                 cmd,
                 shell=True,
