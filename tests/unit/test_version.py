@@ -51,6 +51,28 @@ class TestGetVersionImportlibMetadata:
                 with patch("importlib.metadata.version", return_value="3.1.4"):
                     assert get_version() == "3.1.4"
 
+    def test_the_metadata_lookup_runs_once_per_lookup_function(self) -> None:
+        """#5496: repeated calls scan the installed distributions once; a replaced
+        lookup function is asked again, so a patched lookup is never shadowed."""
+        calls: list[str] = []
+
+        def first(name: str) -> str:
+            calls.append(name)
+            return "3.1.4"
+
+        def second(name: str) -> str:
+            calls.append(name)
+            return "2.7.1"
+
+        with patch.object(version_mod, "__BUILD_VERSION__", None):
+            with patch("sys.frozen", False, create=True):
+                with patch("importlib.metadata.version", first):
+                    assert [get_version() for _ in range(3)] == ["3.1.4"] * 3
+                assert calls == ["apm-cli"]
+                with patch("importlib.metadata.version", second):
+                    assert get_version() == "2.7.1"
+                assert calls == ["apm-cli", "apm-cli"]
+
     def test_importlib_metadata_legacy_pre38_path(self) -> None:
         """Line 34: Python < 3.8 falls back to importlib_metadata backport."""
         import types
