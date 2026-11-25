@@ -18,7 +18,10 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
 - **Result** (stacked measured ceiling, ONE head = integrate ceiling ea0ec45e + M2 bound c2, unsafe upper bounds):
   - L 0.701 (~4.3 s on 9V74 vs 3.5; miss ~0.8 s) [45530064444].
   - M 0.663 [45530082924].
-  - W 0.568 vs main+#5374 (bench 15.09 -> 8.44 s) [45532025700] = ~7-8 s on 9V74 (13.2 x ~0.95-0.96 for #5374 x 0.568 = ~7.1 s): AT OR NEAR the 7.5 s target, CALIBRATION PENDING. The 13.2 s base is the OpenSSL-world calibration; a default-schannel 9V74 A/A is being measured.
+  - W 0.568 vs main+#5374 (bench 15.09 -> 8.44 s) [45532025700] = ~6.0 s on 9V74: AT TARGET (7.5 s).
+    - Calibration: default-schannel world, main+#5374, cold t50, direct per-VM runs [45534359514]: 9V74 base 10.53 s x 0.568 = 5.98 s.
+    - Per runner class: 9V45 4.5 s, 9V74 6.0 s, Xeon 8573C 6.4 s, EPYC 7763 8.3-8.6 s. So the target holds on 3 of 4 classes; on the slowest (7763) it is ~1 s over.
+    - One VM per class, except 3 for 7763.
   - The levers stack slightly better than paper (0.701 vs 0.716-0.734).
 - **Native-core gate on Linux:** MET.
   - walk+stat+hash+copy = 45.5% of L CPU on main [45520769932] and 45.2% at the stacked head [45530101839] (65% with realpath).
@@ -150,13 +153,14 @@ L/M: perf-research/arch-stack-ceiling-L d3881480 vs main 1e4a208e. W: perf-resea
 | OS | paired ratio | base -> new (bench runner) | ~s at 9V74 | target | run |
 |---|---|---|---|---|---|
 | L | 0.701 | 7.18 -> 5.03 s | 6.1 x 0.701 = **4.3 s** | 3.5 s (miss by ~0.8 s) | 45530064444 |
-| W | **0.568** (vs main+#5374; head W2 6d67f5aa) | 15.09 -> 8.44 s | 13.2 x 0.95 (#5374, its changelog) x 0.568 = **~7.1 s** | 7.5 s (MET by ~0.4 s, see caveat) | 45532025700 |
+| W | **0.568** (vs main+#5374; head W2 6d67f5aa) | 15.09 -> 8.44 s | 10.53 (schannel 9V74 base, main+#5374) x 0.568 = **~6.0 s** | 7.5 s (MET by ~1.5 s; 3 of 4 runner classes) | 45532025700 / calib 45534359514 |
 | M | 0.663 | 8.18 -> 5.37 s | n/a (no 9V74 class) | - | 45530082924 |
 W correction: the first W head (2a69add2, 0.719) lacked the lexical-resolve ceiling on Windows, because
 realpath.py redefines resolve_path inside `if sys.platform == "win32":` and the L ceiling's stub sat in
 the generic function. W2 6d67f5aa = Bets' W ceiling 8efedece (lexical override at end of file) + c2 +
-parse-once + skill tree. Caveat: the 13.2 s W reference is the OpenSSL-world calibration (F16); the default
-schannel world may run higher, so read W as ~7-8 s against 7.5.
+parse-once + skill tree. W seconds use the default-schannel calibration [45534359514]: main+#5374 cold t50 is
+10.53 s on 9V74 (9V45 8.0, Xeon 8573C 11.3, EPYC 7763 14.6-15.1). Stacked W is ~6.0 s on 9V74 and
+8.3-8.6 s on 7763, the only class over 7.5 s.
 Overlap vs paper (L): c2 alone 0.817, ceiling alone 0.899 (Bets 45528038721). Paper additive = 0.716,
 multiplicative = 0.734; measured 0.701. They stack slightly better than the paper (removing the copy also
 removes integrate-side walks of the copied tree). Per-shard ratios within +-1.5%.
@@ -459,7 +463,7 @@ W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
 - The native-core gate is MET: walk+stat+hash+copy = 45% of L CPU (65% with realpath; hash 0.2%) [45520769932 / 45530101839].
 - The native filesystem-op core is a RESEARCH lane (Lane N, section 7). It is not part of the v0.40 commitment.
 - Alternative considered, not chosen: revise the L bar to ~4.3 s with no native lane.
-W: stacked ceiling 0.568 vs main+#5374 [45532025700]; ~7-8 s on 9V74, at or near the 7.5 s target (calibration pending).
+W: stacked ceiling 0.568 vs main+#5374 [45532025700]; ~6.0 s on 9V74 (schannel calibration [45534359514]): AT the 7.5 s target. On the slowest runner class (7763) it is ~8.3-8.6 s.
 
 ## 7. Build plan (PERF-Bets; owners per PERF VP)
 
