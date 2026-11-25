@@ -1265,6 +1265,8 @@ def test_a_removed_record_never_drops_a_concurrent_change_to_it(
         store.save()
 
     assert config_file_origin(users) is Origin.PREEXISTING
+    on_disk = json.loads(_holding(apm_home, users).read_text(encoding="utf-8"))
+    assert [row["origin"] for row in on_disk["files"] if row["path"] == key] == ["preexisting"]
 
 
 def test_a_stale_writer_never_resurrects_a_record_another_removed(tmp_path, apm_home) -> None:
@@ -1281,6 +1283,9 @@ def test_a_stale_writer_never_resurrects_a_record_another_removed(tmp_path, apm_
 
     assert config_file_origin(gone) is None
     assert config_file_origin(project / "other.json") is Origin.CREATED
+    on_disk = [state[2] for state in _store_files(apm_home).values()]
+    assert not any(config_file_key(gone).encode() in data for data in on_disk)
+    assert _holding(apm_home, project / "other.json").is_file()
 
 
 def test_a_record_file_corrupted_after_it_was_read_fails_the_save_closed(
