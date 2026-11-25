@@ -32,6 +32,7 @@ from typing import Any
 _FORMAT = "apm-manifest-journal"
 _VERSION = 1
 _PREFIX = "manifest-"
+_NAMES = ("apm.yml", "apm.yaml")
 
 
 def _digest(data: bytes) -> str:
@@ -54,7 +55,10 @@ def _write(path: Path, record: dict[str, Any]) -> None:
 
 
 def _packages(packages: list[str]) -> str:
-    return " ".join(shlex.quote(p) for p in packages)
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    # The record is data on disk: never echo control or ANSI bytes to the terminal.
+    return " ".join(shlex.quote(printable_ascii_text(p)) for p in packages)
 
 
 def _fix(packages: list[str]) -> str:
@@ -126,8 +130,8 @@ def _load(path: Path, workspace: Path) -> dict[str, Any]:
         record.get("packages"),
         record.get("manifest"),
     )
-    if not isinstance(manifest, str) or Path(manifest).parent != workspace:
-        raise ValueError("the record names a manifest outside its workspace")
+    if not isinstance(manifest, str) or Path(manifest) not in {workspace / n for n in _NAMES}:
+        raise ValueError("the record names a file other than the workspace apm.yml")
     if not isinstance(written, list):
         raise ValueError("the record is malformed")
     if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):

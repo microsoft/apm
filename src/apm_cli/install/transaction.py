@@ -443,7 +443,7 @@ class InstallTransaction:
         workspace = Path(os.path.abspath(self.apm_modules_dir)).parent
         manifest = Path(os.path.abspath(self.manifest_path))
         if self._workspace_lock is None or manifest.parent != workspace:
-            return
+            return  # replay restores only the workspace root apm.yml
         self._manifest_journal = ManifestJournal(
             manifest, workspace, self._manifest_snapshot, packages
         )
