@@ -2,20 +2,21 @@ name: Perf SoL trace (research)
 
 on:
   push:
-    branches: [perf-research/arch-trace]
+    branches: [perf-research/arch-trace2]
 
 permissions:
   contents: read
 
 jobs:
   trace:
-    name: trace ${{ matrix.os }}
+    name: trace ${{ matrix.os }} ${{ matrix.product }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        os: [ubuntu-24.04]
+        product: [693df2196af5271b8423d7eb1b468bf3da7d4070, 480b061f42abbc62b90936b67ba02fd4c5b404da, 1e4a208e073a3ea1484f71ceba8d065f23a815ec]
     defaults:
       run:
         shell: bash
@@ -33,7 +34,7 @@ jobs:
       - name: Install product e62f520f
         run: |
           set -euo pipefail
-          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git e62f520f4bfc569d7a07e02d93d8273613742678
+          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git ${{ matrix.product }}
           git -C harness worktree add --quiet --detach ../side FETCH_HEAD
           (cd side && uv sync --frozen --no-editable --quiet)
           if [ "$RUNNER_OS" = Windows ]; then APM=side/.venv/Scripts/apm.exe; else APM=side/.venv/bin/apm; fi
@@ -52,5 +53,5 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: trace-${{ matrix.os }}
+          name: trace-${{ matrix.os }}-${{ matrix.product }}
           path: out/
