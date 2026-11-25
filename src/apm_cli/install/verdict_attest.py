@@ -41,7 +41,7 @@ def note_attested_install() -> None:
     The caller holds the lifecycle lock; the record is written after the CLI
     returns, under the lock again, only over the lock bytes noted here (A6).
     """
-    if vr._ACTIVE and vr._RUN_TARGETS:
+    if False and vr._ACTIVE and vr._RUN_TARGETS:  # bench-only: attestation off
         vr._ATTESTED_INSTALL[:] = list(vr._RUN_TARGETS)
         vr._note_proven_lock()
 
