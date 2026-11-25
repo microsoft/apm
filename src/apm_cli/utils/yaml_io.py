@@ -15,8 +15,10 @@ Public API::
 """
 
 import copy
+import hashlib
 import threading
-from io import StringIO
+from collections import OrderedDict
+from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -393,6 +395,41 @@ def load_yaml(path: str | Path) -> dict[str, Any] | None:
     """
     with open(path, encoding="utf-8") as fh:
         return _bounded_load(fh)
+
+
+# One install re-reads every locked package's apm.yml once per MCP view (#5491).
+# The bounded parse is a pure function of the file bytes, so it is memoized per
+# process on their sha256: the bytes are read once and that same buffer is both
+# keyed and parsed. A failed parse is never stored, every hit returns a private
+# copy, and nothing is persisted. Callers still interpret the mapping themselves.
+_PARSED_FILES_LIMIT = 256
+_parsed_files: OrderedDict[bytes, Any] = OrderedDict()
+_parsed_files_lock = threading.Lock()
+
+
+def load_yaml_memoized(path: str | Path) -> dict[str, Any] | None:
+    """:func:`load_yaml`, memoized per process by the exact bytes of *path*.
+
+    Same decoding (UTF-8, universal newlines) and the same bounded loader, so a
+    hit equals a fresh :func:`load_yaml` of those bytes; the same errors raise.
+    """
+    with open(path, "rb") as fh:
+        data = fh.read()
+    key = hashlib.sha256(data).digest()
+    with _parsed_files_lock:
+        parsed = _parsed_files.get(key, _parsed_files)
+        if parsed is not _parsed_files:
+            _parsed_files.move_to_end(key)
+    if parsed is _parsed_files:
+        parsed = _bounded_load(TextIOWrapper(BytesIO(data), encoding="utf-8"))
+        with _parsed_files_lock:
+            _parsed_files[key] = parsed
+            while len(_parsed_files) > _PARSED_FILES_LIMIT:
+                _parsed_files.popitem(last=False)
+    if b"&" not in data and b"*" not in data:
+        # No anchor or alias: the tree shares no node, so a plain copy equals deepcopy.
+        return copy_plain_tree(parsed)
+    return copy.deepcopy(parsed)
 
 
 def load_yaml_str(text: str) -> dict[str, Any] | None:

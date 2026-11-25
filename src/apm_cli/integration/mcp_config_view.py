@@ -1123,9 +1123,9 @@ def _collect_locked_dependencies(
             continue
 
         try:
-            from apm_cli.utils.yaml_io import load_yaml
+            from apm_cli.utils.yaml_io import load_yaml_memoized
 
-            manifest = load_yaml(manifest_path)
+            manifest = load_yaml_memoized(manifest_path)
             if not isinstance(manifest, dict):
                 raise ValueError("package manifest must be a mapping")
             # Collecting declarations only reads: never create user config.

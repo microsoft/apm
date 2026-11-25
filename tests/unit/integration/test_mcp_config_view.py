@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -450,18 +451,78 @@ def test_omission_declaration_and_config_share_one_manifest_read(
         LockedDependency(repo_url="_local/package", source="local", local_path=str(source))
     )
     reads: list[Path] = []
-    original = yaml_io.load_yaml
+    original = yaml_io.load_yaml_memoized
 
     def counted_load(path: Path) -> object:
         reads.append(path)
         return original(path)
 
-    monkeypatch.setattr(yaml_io, "load_yaml", counted_load)
+    monkeypatch.setattr(yaml_io, "load_yaml_memoized", counted_load)
     view = _derive(root, lock, tmp_path / "apm_modules")
     assert view.problems == ()
     assert view.configs["service"]["command"] == "inert"
     assert set(view.declaration_fingerprints) == {"service"}
     assert reads == [source / "apm.yml"]
+
+
+def test_a_memoized_manifest_parse_is_a_private_copy(tmp_path: Path) -> None:
+    """#5491 lever 4b (W3b 3): a caller mutating its parse never changes the next one."""
+    from apm_cli.utils.yaml_io import load_yaml_memoized
+
+    _write_manifest(tmp_path, name="package", mcp=[_self_defined("service", "inert")])
+    first = load_yaml_memoized(tmp_path / "apm.yml")
+    first["name"] = "changed"
+    first["dependencies"]["mcp"][0]["command"] = "changed"
+    first["dependencies"]["mcp"].append("extra")
+
+    again = load_yaml_memoized(tmp_path / "apm.yml")
+
+    assert again["name"] == "package"
+    assert again["dependencies"]["mcp"] == [_self_defined("service", "inert")]
+
+
+def test_the_manifest_parse_memo_keys_on_exact_bytes(tmp_path: Path) -> None:
+    """#5491 lever 4b (W3b 1, 4): the same path and mtime with other bytes is parsed
+    again, and a failed parse is never stored as a success or the reverse."""
+    from apm_cli.utils.yaml_io import load_yaml_memoized
+
+    path = tmp_path / "apm.yml"
+    path.write_text("name: aaaa\n", encoding="utf-8")
+    stamp = path.stat().st_mtime_ns
+    assert load_yaml_memoized(path) == {"name": "aaaa"}
+    path.write_text("name: bbbb\n", encoding="utf-8")
+    os.utime(path, ns=(stamp, stamp))
+    assert load_yaml_memoized(path) == {"name": "bbbb"}
+
+    path.write_text("name: [unclosed\n", encoding="utf-8")
+    for _ in range(2):
+        with pytest.raises(yaml.YAMLError):
+            load_yaml_memoized(path)
+    path.write_text("name: aaaa\n", encoding="utf-8")
+    assert load_yaml_memoized(path) == {"name": "aaaa"}
+
+
+def test_admission_judges_every_view_of_a_memoized_manifest(tmp_path: Path) -> None:
+    """#5491 lever 4b (W3b 6): the memo sits below admission. The same manifest bytes
+    under a different trust decision reach a different verdict."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "package"
+    _write_manifest(source, name="firebase", mcp=[_self_defined("firebase", "inert")])
+    lock = _lock(
+        LockedDependency(
+            repo_url="_local/firebase", source="local", local_path=str(source), depth=2
+        )
+    )
+    modules = tmp_path / "apm_modules"
+
+    trusted = CurrentMcpConfigView.derive(
+        root, lock, modules, admission=McpAdmission(None, one_off=True)
+    )
+    untrusted = CurrentMcpConfigView.derive(root, lock, modules, admission=McpAdmission(None))
+
+    assert [dep.name for dep in trusted.dependencies] == ["firebase"]
+    assert untrusted.dependencies == ()
+    assert set(untrusted.omissions) == {"firebase"}
 
 
 def _write_manifest(
