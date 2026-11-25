@@ -22,6 +22,10 @@ def detect_platform():
         return "unknown"
 
 
+from apm_cli.utils.research_passmemo import passmemo as _passmemo
+
+
+@_passmemo("find_plugin_json")
 def find_plugin_json(plugin_path: Path, *, include_codex: bool = False) -> Path | None:
     """Find plugin.json in a plugin directory.
 
