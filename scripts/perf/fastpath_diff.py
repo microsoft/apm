@@ -54,11 +54,6 @@ def main() -> int:
         ctx.work.mkdir(parents=True, exist_ok=True)
         for mode, value in (("fast", "trace"), ("full", "off"), ("fast2", "trace")):
             J._locked_project(ctx)
-            receipts = Path(world.apm_home) / "deployment-receipts"
-            if receipts.exists():
-                import shutil
-
-                shutil.rmtree(receipts)
             env = dict(world.env, APM_INSTALL_FAST_PATH=value)
             traces = []
             for root in ctx.roots():
