@@ -68,3 +68,16 @@ Base: main 1e4a208e. Fixture tree-50, install-cold.
 ## Pick
 
 A first. It is the largest measured family, it shrinks containment call counts on W without new trust, and its invariants reuse K's seams. Then B. C stays on #5374 plus #5382.
+
+## Measured ceilings (main 1e4a208e, tree-50 cold, 6 pairs, paired CPU)
+
+| head | W | L |
+|---|---|---|
+| A memo only (576929fa) | 0.970, -0.9 s [45524106186] | 0.976, -0.15 s [45524085463] |
+| A + journal off ONLY (532d7a1f) | 0.969 [45525632628] | 0.936 [45525615896] |
+| A + lexical resolve / no link scan ONLY (893b7b89) | 0.752 [45525667777] | 0.947 [45525650620] |
+| A + both, full ceiling (ea46241b) | 0.688, -5.8 s [45524926467] | 0.901, -0.54 s [45524908282] |
+
+- W clears the bar (-3.3 s); L misses it (-1.35 s).
+- On W the win is containment: redesign it as by-construction proofs for APM-created destination trees plus one resolve per deploy root. Do not remove it. The journal costs ~0 on W and ~4% on L.
+- L's remainder is content transforms: frontmatter re-parsed ~19x per package (950 calls), write_text_lf, and copies. Parse once per file in the plan, render per target, and land skills as one tree op.

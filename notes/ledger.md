@@ -48,3 +48,5 @@
 02:05 | #5382 H8 SIGNED f755bf58 (after #5374); #5377 a81928ff Copilot@head, 0 threads, green -> QL pinged for H8 | train | none
 02:06 | H8 SIGNED #5377 a81928ff + #5382 f755bf58; both admitted to train (CI&MQ) | landing | none
 02:08 | v0.40 integrate-shape prep started; profiles main W/L t50 dispatched (PROFILE=1) | shapes 03:30 | none
+02:20 | shapes interim sent (notes ab3d2eca); plan-once W 0.970 L 0.976; bulk ceiling ea46241b benching | ~25 min | none
+02:30 | integrate ceiling: A+B W 0.688 (clears), L 0.901 (misses); W win = containment; reported | next: lead | none
