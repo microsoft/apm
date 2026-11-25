@@ -228,3 +228,15 @@
 01:39 | harness fold ceo-report a4998801 / nongithub-host 3a93e3d9; #5377 W real 0.542 (fixed harness) -> body; both Bets PRs H8-ready ~30 min -> VP | Bets 30 min; 04:45 #5383 check | none
 01:44 | #5414 killed (regresses on main alone; diff-apply now 2.2x cheaper; locked-warm regression gone) -> VP; SoL re-grounds phase map on main by 04:30 | SoL; Bets H8 ~30 min | none
 01:46 | VP clock correction (VP stamps ~1h ahead since 01:00); relayed to SoL/Bets; real cutoffs H8 05:00, train 05:30, bench 05:45, build 06:30 | - | none
+01:51 | tick; notes 78d3c9ee8a9e68a85ff43eebc663413dec41ffc8 | SoL map 04:30; Bets H8 | none
+02:02 | PULSE: #5382 H8-ready; #5377 Copilot stale (6d19e856 vs a81928ff) -> re-request; SoL map 04:30 | Bets H8 30 min | none
+02:05 | #5382 H8 SIGNED (after #5374); #5377 Copilot at head, QL pinged -> VP | Bets QL H8 #5377; SoL 04:30 | none
+02:06 | re-grounded map on main: integrate W 0.499/L 0.551, lock phase 0.789/0.770, policy ~0.97; no-op engine may not engage in bench (tracing) | SoL families 03:00 + trace3 | none
+02:06 | #5377 + #5382 H8 signed, admitted to train; Bets -> integrate-redesign shapes 03:30 + upper-bound hack 05:00 -> VP | Bets; SoL families 03:00 + trace3 | none
+02:06 | VP lead for trace3: no-op record refused when update check fires (fresh APM home each sample) -> SoL confirm/refute | SoL trace3; families 03:00 | none
+02:06 | VP constraints for Bets shapes (current main; rank containment > shared pipeline > skills; cost + W3d) relayed | Bets 03:30; SoL trace3 | none
+02:12 | tick quiet | SoL trace3/families 03:00; Bets shapes 03:30 | none
+02:14 | no-op mechanism refuted (label holds); frozen-warm MCP decline lead -> VP | SoL families 03:00 then frozen MCP sizing | none
+02:14 | VP: frozen+MCP car only if W3d-trivial predicate + >=5% + all signed by 05:00, else v0.40; correctness wins -> SoL | SoL families 03:00 | none
+02:16 | integrate split on main: skills 14.6% W, shared 18.8%, lock phase 21%; phase-map-main.md; frozen MCP sizing afe0c87a running | SoL frozen 30 min; Bets shapes 03:30 | none
+02:20 | Bets shapes interim: A plan-once W 0.970 (misses alone); A+B upper bound in flight | Bets 25 min; SoL frozen MCP | none
