@@ -165,5 +165,5 @@ def _holds_pending_bytes(
     try:
         staged = os.lstat(base / rel).st_size
     except OSError:
-        return True
+        return False
     return all(staged < size for size in sizes)

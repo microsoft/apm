@@ -207,7 +207,7 @@ def write_json_config(path: Path, data: Any, **kwargs: Any) -> bool:
     text = json_config_text(
         path, data, default_trailing_newline=kwargs.get("default_trailing_newline", True)
     )
-    record_before_write(path, expected=_text_hash(text))
+    record_before_write(path, expected=_text_hash(text), size=_text_size(text, lf=False))
     written = _write(path, data, **kwargs)
     record_after_write(path)
     return written
