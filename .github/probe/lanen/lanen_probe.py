@@ -50,7 +50,7 @@ def deployed_digest(root: Path) -> str:
     return h.hexdigest()[:12]
 
 
-work = Path(tempfile.mkdtemp())
+work = Path(tempfile.mkdtemp()).resolve()  # W: long form, not RUNNER~1
 fixture = prepare_fixture(FIX, work)
 with open_world(fixture, work / "world") as world:
     ctx = Context(fixture=fixture, world=world, apm=[str(NEW)], work=work / "ctx")
@@ -70,7 +70,7 @@ with open_world(fixture, work / "world") as world:
             return rc, cpu, err
 
     modfile = work / "modules.txt"
-    if "imports" not in PARTS and "fork" not in PARTS:
+    if PARTS == {"counts"}:
         root = cold()
         out = work / "counts.json"
         rc, _, _ = measured([str(PY), str(HERE / "runner.py"), "count", str(out)], root)
@@ -110,7 +110,7 @@ with open_world(fixture, work / "world") as world:
         rc, cpu_count, _ = measured([str(PY), str(HERE / "runner.py"), "count", str(out)], root)
         say("counts", {"rc": rc, **json.loads(out.read_text())})
 
-    if os.name != "nt":
+    if os.name != "nt" and "fork" in PARTS:
         env = dict(world.env, OBJC_DISABLE_INITIALIZE_FORK_SAFETY="YES")  # both modes get exactly this env
         srv = subprocess.Popen([str(PY), str(HERE / "server.py"), str(modfile)], cwd=root, env=env,
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
@@ -141,3 +141,52 @@ with open_world(fixture, work / "world") as world:
         print(f"| ORACLE | {FIX} | fork-server (imports deleted) | {osname} | pairs {len(base)} | "
               f"{statistics.median(base):.3f} -> {statistics.median(fork):.3f} | "
               f"{statistics.median(ratios):.3f} |", flush=True)
+
+    if "combo" in PARTS:
+        parts_ = list(NEW.parts)
+        i = len(parts_) - 1 - parts_[::-1].index("new")
+        parts_[i] = "base"
+        BASE = Path(*parts_)
+        env = dict(world.env, OBJC_DISABLE_INITIALIZE_FORK_SAFETY="YES")  # every side gets exactly this env
+        osname = {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform, sys.platform)
+        sides = ["base_sub", "new_sub"] + (["new_fork"] if os.name != "nt" else [])
+        srv = None
+        if "new_fork" in sides:
+            srv = subprocess.Popen([str(PY), str(HERE / "server.py"), str(modfile)], cwd=root, env=env,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            say("forkserver", json.loads(srv.stdout.readline()))
+        cpu = {k: [] for k in sides}
+        digests = set()
+        for i in range(PAIRS):
+            order = sides[i % len(sides):] + sides[:i % len(sides)]
+            for side in order:
+                root = cold()
+                if side == "new_fork":
+                    srv.stdin.write(json.dumps({"cwd": str(root), "env": env}) + "\n")
+                    srv.stdin.flush()
+                    r = json.loads(srv.stdout.readline())
+                    rc, c = r["rc"], r["cpu"]
+                else:
+                    exe = BASE if side == "base_sub" else NEW
+                    rc, c, _ = measured([str(exe), "install"], root, env=env)
+                if rc != 0:
+                    say("error", {"side": side, "rc": rc})
+                cpu[side].append(c)
+                digests.add((side, lock_digest(root), deployed_digest(root)))
+        if srv:
+            srv.stdin.close()
+        med = {k: statistics.median(v) for k, v in cpu.items()}
+        def paired(a, b):
+            return statistics.median([x / y for x, y in zip(cpu[a], cpu[b])])
+        res = {"pairs": PAIRS, "cpu_p50": {k: round(v, 3) for k, v in med.items()},
+               "digests": sorted(digests), "base": str(BASE)}
+        rows = [("B pass memos (new_sub/base_sub)", "base_sub", "new_sub")]
+        if "new_fork" in sides:
+            rows += [("fork on B (new_fork/new_sub)", "new_sub", "new_fork"),
+                     ("COMBINED B+fork (new_fork/base_sub)", "base_sub", "new_fork")]
+        for label, b, n in rows:
+            res[label] = round(paired(n, b), 3)
+        say("combo", res)
+        for label, b, n in rows:
+            print(f"| ORACLE | {FIX} | {label} | {osname} | pairs {PAIRS} | "
+                  f"{med[b]:.3f} -> {med[n]:.3f} | {paired(n, b):.3f} |", flush=True)
