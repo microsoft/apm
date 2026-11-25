@@ -838,8 +838,6 @@ class TestReflinkIntegration:
 class TestRetryOnSharingViolation:
     """Bounded retry for a removal blocked by another process's handle (#5441)."""
 
-    path = Path("/tmp/apm-root/deployed.md")
-
     @staticmethod
     def _remover(error: OSError, failures: int):
         calls = {"n": 0}
@@ -870,10 +868,7 @@ class TestRetryOnSharingViolation:
             patch("sys.platform", "win32"),
             patch("time.sleep"),
         ):
-            assert (
-                retry_on_sharing_violation(remove, "unlink", path=self.path, root=self.path.parent)
-                == "removed"
-            )
+            assert retry_on_sharing_violation(remove, "unlink") == "removed"
         assert calls["n"] == 3
 
     def test_still_held_after_the_budget_raises_the_original_error(self):
@@ -883,7 +878,7 @@ class TestRetryOnSharingViolation:
             patch("time.sleep"),
             pytest.raises(OSError, match="in use"),
         ):
-            retry_on_sharing_violation(remove, "unlink", path=self.path, root=self.path.parent)
+            retry_on_sharing_violation(remove, "unlink")
         assert calls["n"] == 1 + 5
 
     def test_other_errors_raise_immediately(self):
@@ -893,7 +888,7 @@ class TestRetryOnSharingViolation:
             patch("time.sleep"),
             pytest.raises(OSError, match="denied"),
         ):
-            retry_on_sharing_violation(remove, "unlink", path=self.path, root=self.path.parent)
+            retry_on_sharing_violation(remove, "unlink")
         assert calls["n"] == 1
 
     def test_non_windows_does_not_retry(self):
@@ -903,29 +898,5 @@ class TestRetryOnSharingViolation:
             patch("time.sleep"),
             pytest.raises(OSError, match="in use"),
         ):
-            retry_on_sharing_violation(remove, "unlink", path=self.path, root=self.path.parent)
-        assert calls["n"] == 1
-
-    def test_parent_swapped_out_of_the_root_stops_the_retry(self, tmp_path):
-        root = tmp_path / "root"
-        (root / "skills").mkdir(parents=True)
-        outside = tmp_path / "outside"
-        outside.mkdir()
-        target = root / "skills" / "deployed.md"
-        calls = {"n": 0}
-
-        def remove() -> None:
-            calls["n"] += 1
-            (root / "skills").rename(root / "moved")
-            os.symlink(outside, root / "skills", target_is_directory=True)
-            exc = OSError(13, "in use", str(target))
-            exc.winerror = 32
-            raise exc
-
-        with (
-            patch("sys.platform", "win32"),
-            patch("time.sleep"),
-            pytest.raises(OSError, match="in use"),
-        ):
-            retry_on_sharing_violation(remove, "unlink", path=target, root=root)
+            retry_on_sharing_violation(remove, "unlink")
         assert calls["n"] == 1

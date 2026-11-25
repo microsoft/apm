@@ -86,44 +86,15 @@ def _is_sharing_violation(exc: OSError) -> bool:
     return sys.platform == "win32" and getattr(exc, "winerror", None) == 32
 
 
-def _parent_within(path: Path, root: Path) -> bool:
-    """True while the real parent of *path* is still inside the real *root*."""
-    try:
-        base = os.path.realpath(root)
-        return os.path.commonpath([os.path.realpath(path.parent), base]) == base
-    except (OSError, ValueError):
-        return False
-
-
-def retry_on_sharing_violation(
-    operation: Callable[[], T], description: str, *, path: Path, root: Path
-) -> T:
-    """Run the removal of *path*, retrying only a Windows sharing violation.
+def retry_on_sharing_violation(operation: Callable[[], T], description: str) -> T:
+    """Run a file removal, retrying only a Windows sharing violation.
 
     Uses the same bounded backoff as ``robust_rmtree``; any other error, and
-    any platform other than Windows, raises on the first failure. Before each
-    retry the real parent of *path* must still be inside *root*; if it moved
-    out, retrying stops and the original error is raised.
+    any platform other than Windows, raises on the first failure. Callers that
+    must re-prove authority to delete put that check inside *operation*, which
+    runs again before every retry.
     """
-    last: list[OSError] = []
-    stopped = False
-
-    def guarded() -> T:
-        nonlocal stopped
-        if last and not _parent_within(path, root):
-            stopped = True
-            raise last[0]
-        try:
-            return operation()
-        except OSError as exc:
-            last[:] = [exc]
-            raise
-
-    return _retry_on_lock(
-        guarded,
-        description,
-        is_retryable=lambda exc: not stopped and _is_sharing_violation(exc),
-    )
+    return _retry_on_lock(operation, description, is_retryable=_is_sharing_violation)
 
 
 # EEXIST matches only when a non-directory ancestor is found below the root.

@@ -13,6 +13,7 @@ local-package stale-file deletion. These tests pin its invariants:
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -900,3 +901,90 @@ def test_hook_sync_unlinks_agrees_with_the_hook_sync_under_consent(
     assert predicted is (rel in result.deleted)
     assert predicted is not consent
     assert link.is_symlink() is consent
+
+
+def test_file_rewritten_during_sharing_retry_is_kept(project_root, diagnostics, logger):
+    """A held file saved with new bytes while the retry waits is not deleted (#5441)."""
+    rel = ".github/prompts/held.prompt.md"
+    target = _make_managed_file(project_root, rel, "as deployed\n")
+    recorded = _recorded(project_root, rel)
+    calls = []
+
+    def held_then_edited(path, *_args, **_kwargs):
+        if path != target:
+            return None
+        calls.append(path)
+        path.write_text("user saved while held\n", encoding="utf-8")
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_then_edited),
+    ):
+        result = remove_stale_deployed_files(
+            [rel],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
+            recorded_hashes=recorded,
+        )
+
+    assert len(calls) == 1
+    assert result.deleted == []
+    assert result.failed == []
+    assert target.read_text(encoding="utf-8") == "user saved while held\n"
+
+
+def _held_once_then_real(real_unlink, held_path):
+    """A Path.unlink double: *held_path* is held (winerror 32) once, then removed."""
+    calls = []
+
+    def unlink(path, *args, **kwargs):
+        if path != held_path:
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        if len(calls) == 1:
+            exc = OSError(13, "in use", str(path))
+            exc.winerror = 32
+            raise exc
+        return real_unlink(path, *args, **kwargs)
+
+    return unlink, calls
+
+
+def test_cowork_target_held_once_then_released_is_removed(tmp_path, diagnostics):
+    """A managed-root target outside the project gets the retry too (#5441)."""
+    cowork_root = tmp_path / "cowork-skills"
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    unlink, calls = _held_once_then_real(Path.unlink, skill_md)
+
+    with (
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ),
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=unlink),
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(cowork_root, deploy_root=project_root),
+        )
+
+    assert len(calls) == 2
+    assert not skill_md.exists()
+    assert result.deleted == ["cowork://skills/my-skill/SKILL.md"]

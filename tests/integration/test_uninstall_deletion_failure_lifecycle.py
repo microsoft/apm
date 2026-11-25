@@ -49,6 +49,15 @@ def rename(path, target):
     return original_rename(path, target)
 shutil.rmtree = remove
 Path.rename = rename
+
+import apm_cli.utils.file_ops as file_ops
+original_sleep = file_ops._retry_sleep
+def noted_sleep(seconds):
+    marker = os.environ.get("APM_TEST_RETRY_MARKER")
+    if marker:
+        Path(marker).write_text("retried", encoding="utf-8")
+    original_sleep(seconds)
+file_ops._retry_sleep = noted_sleep
 cli()
 """
 
@@ -452,7 +461,7 @@ def _installed_skill_world(tmp_path: Path) -> tuple[ApmLifecycleRunner, dict, Pa
         env=env,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
-    deployed = next((consumer.root / ".github" / "skills").rglob("SKILL.md"))
+    deployed = next((consumer.root / ".agents" / "skills").rglob("SKILL.md"))
     return runner, env, consumer.root, deployed
 
 
@@ -460,21 +469,32 @@ def _installed_skill_world(tmp_path: Path) -> tuple[ApmLifecycleRunner, dict, Pa
 def test_uninstall_waits_out_a_briefly_held_deployed_file(tmp_path: Path) -> None:
     """A file released inside the retry window no longer fails the uninstall (#5441)."""
     import threading
+    import time
 
     runner, env, root, deployed = _installed_skill_world(tmp_path)
+    marker = root.parent / "retry-marker"
     held = _HeldFile(deployed)
-    timer = threading.Timer(1.0, held.release)
-    timer.start()
+
+    def release_once_retrying() -> None:
+        deadline = time.monotonic() + 60
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        held.release()
+
+    releaser = threading.Thread(target=release_once_retrying)
+    releaser.start()
     try:
         result = runner.run(
             ("uninstall", "_local/held-package"),
             scenario_id="held-file-uninstall-released",
             cwd=root,
-            env=env,
+            env={**env, "APM_TEST_RETRY_MARKER": str(marker)},
         )
     finally:
-        timer.cancel()
+        marker.touch()
+        releaser.join()
         held.release()
+    assert marker.read_text(encoding="utf-8") == "retried", "uninstall never hit the sharing retry"
     assert result.returncode == 0, result.stdout + result.stderr
     assert not deployed.exists()
 
@@ -490,10 +510,11 @@ def test_uninstall_of_a_still_held_file_fails_closed_then_recovers(tmp_path: Pat
             ("uninstall", "_local/held-package"),
             scenario_id="held-file-uninstall-blocked",
             cwd=root,
-            env=env,
+            env={**env, "APM_TEST_RETRY_MARKER": str(root.parent / "blocked-marker")},
         )
     finally:
         held.release()
+    assert (root.parent / "blocked-marker").exists(), "the held file was never retried"
     assert failed.returncode == 1, failed.stdout + failed.stderr
     assert "Uninstall complete" not in failed.stdout + failed.stderr
     assert deployed.exists()

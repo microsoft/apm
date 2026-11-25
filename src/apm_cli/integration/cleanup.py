@@ -1298,20 +1298,8 @@ def _remove_proven_members(
     complete = True
     for member_rel, member in proven:
         if not (_member_still_safe(skill_dir, member) and path_gate(member_rel, False)):
-            if (
-                _member_parents_safe(skill_dir, member)
-                and path_gate(member_rel, True)
-                and evidence.consent_kept_link(member_rel, member)
-            ):
-                # A final link whose every ancestor is safe is consent retention (#4815).
-                _keep_consent_link(result, diagnostics, member_rel, dep_key)
-                complete = False
-                continue
-            result.reject(member_rel, REJECTED_REPLACED)
-            diagnostics.warn(
-                f"Skipped removing {member_rel}: it was replaced or moved since APM "
-                "checked it. Inspect it and delete it manually if no longer needed.",
-                package=dep_key,
+            _record_unsafe_member(
+                skill_dir, member_rel, member, evidence, result, diagnostics, dep_key, path_gate
             )
             complete = False
             continue
@@ -1320,12 +1308,24 @@ def _remove_proven_members(
             _keep_without_evidence(result, diagnostics, member_rel, verdict, dep_key)
             complete = False
             continue
+
+        def recheck(member_rel=member_rel, member=member) -> Callable[[], None] | None:
+            if not (_member_still_safe(skill_dir, member) and path_gate(member_rel, False)):
+                return lambda: _record_unsafe_member(
+                    skill_dir, member_rel, member, evidence, result, diagnostics, dep_key, path_gate
+                )
+            changed = evidence.verdict(member_rel, member)
+            if changed == AUTHORIZED:
+                return None
+            return lambda: _keep_without_evidence(result, diagnostics, member_rel, changed, dep_key)
+
         try:
-            retry_on_sharing_violation(
-                partial(write_seam.unlink, member), "unlink", path=member, root=skill_dir
-            )
+            _unlink_rechecked(member, recheck)
             result.deleted.append(member_rel)
             result.deleted_targets.append(member)
+        except _GateChanged as changed:
+            changed.record()
+            complete = False
         except OSError as exc:
             complete = False
             result.failed.append(member_rel)
@@ -1334,6 +1334,62 @@ def _remove_proven_members(
                 package=dep_key,
             )
     return complete
+
+
+def _record_unsafe_member(
+    skill_dir: Path,
+    member_rel: str,
+    member: Path,
+    evidence: DeploymentEvidence,
+    result: CleanupResult,
+    diagnostics,
+    dep_key: str,
+    path_gate: Callable[[str, bool], bool],
+) -> None:
+    """Record the kept/rejected outcome of a member that failed the safety gate."""
+    if (
+        _member_parents_safe(skill_dir, member)
+        and path_gate(member_rel, True)
+        and evidence.consent_kept_link(member_rel, member)
+    ):
+        # A final link whose every ancestor is safe is consent retention (#4815).
+        _keep_consent_link(result, diagnostics, member_rel, dep_key)
+        return
+    result.reject(member_rel, REJECTED_REPLACED)
+    diagnostics.warn(
+        f"Skipped removing {member_rel}: it was replaced or moved since APM "
+        "checked it. Inspect it and delete it manually if no longer needed.",
+        package=dep_key,
+    )
+
+
+class _GateChanged(Exception):
+    """A deletion gate failed on a retry; ``record`` writes the kept/rejected outcome."""
+
+    def __init__(self, record: Callable[[], None]) -> None:
+        super().__init__("deletion gate changed during retry")
+        self.record = record
+
+
+def _unlink_rechecked(target: Path, recheck: Callable[[], Callable[[], None] | None]) -> None:
+    """Unlink *target*, re-running the deletion gates before every retry (#5441).
+
+    A held file may be rewritten while the retry waits, so the same gates that
+    authorized the first attempt must authorize each later one. *recheck*
+    returns None while they pass, else the callable recording the outcome.
+    """
+    attempts = 0
+
+    def attempt() -> None:
+        nonlocal attempts
+        if attempts:
+            record = recheck()
+            if record is not None:
+                raise _GateChanged(record)
+        attempts += 1
+        write_seam.unlink(target)
+
+    retry_on_sharing_violation(attempt, "unlink")
 
 
 def _member_still_safe(skill_dir: Path, member: Path) -> bool:
@@ -1609,7 +1665,7 @@ def remove_stale_deployed_files(
 
                 # Never follow a final symlink to the file it points at.
                 stale_target = cowork_locator(stale_path, _cowork_root_cached)
-                deploy_root = _cowork_root_cached
+                cowork_path = True
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -1639,7 +1695,7 @@ def remove_stale_deployed_files(
                 result.reject(stale_path, REJECTED_UNSAFE_PATH)
                 continue
             stale_target = project_root / stale_path
-            deploy_root = project_root
+            cowork_path = False
 
         if _stale_target_absent(stale_target, allow_final_symlink=allow_final_symlink):
             # File already gone -- treat as cleaned (no-op success).
@@ -1714,15 +1770,34 @@ def remove_stale_deployed_files(
                 continue
 
         # All gates passed -- safe to delete.
+        recheck = partial(
+            _recheck_stale_gates,
+            stale_path,
+            stale_target,
+            result=result,
+            diagnostics=diagnostics,
+            dep_key=dep_key,
+            evidence=evidence,
+            recorded_hashes=recorded_hashes,
+            path_gate=None
+            if cowork_path
+            else partial(
+                _stale_gate_passes,
+                stale_path,
+                project_root,
+                targets=targets,
+                user_scope=user_scope,
+                allow_final_symlink=allow_final_symlink,
+            ),
+            allow_final_symlink=allow_final_symlink,
+        )
+
         try:
-            retry_on_sharing_violation(
-                partial(write_seam.unlink, stale_target),
-                "unlink",
-                path=stale_target,
-                root=deploy_root,
-            )
+            _unlink_rechecked(stale_target, recheck)
             result.deleted.append(stale_path)
             result.deleted_targets.append(stale_target)
+        except _GateChanged as changed:
+            changed.record()
         except Exception as exc:
             result.failed.append(stale_path)
             if failed_path_retained:
@@ -1839,6 +1914,31 @@ def remove_synced_files(
     )
     diagnostics.render_summary()
     return result
+
+
+def _recheck_stale_gates(
+    stale_path: str,
+    stale_target: Path,
+    *,
+    result: CleanupResult,
+    diagnostics,
+    dep_key: str,
+    evidence: DeploymentEvidence,
+    recorded_hashes: Mapping[str, str],
+    path_gate: Callable[[], bool] | None,
+    allow_final_symlink: bool,
+) -> Callable[[], None] | None:
+    """Re-run the stale-file deletion gates; None while they pass, else the outcome recorder."""
+    if path_gate is not None and not path_gate():
+        return lambda: result.reject(stale_path, REJECTED_UNSAFE_PATH)
+    if allow_final_symlink and stale_target.is_symlink():
+        if _managed_link_unlinkable(recorded_hashes.get(stale_path.replace("\\", "/"))):
+            return None
+        return lambda: result.skipped_user_edit.append(stale_path)
+    changed = evidence.verdict(stale_path, stale_target)
+    if changed == AUTHORIZED:
+        return None
+    return lambda: _keep_without_evidence(result, diagnostics, stale_path, changed, dep_key)
 
 
 def _stale_gate_passes(
