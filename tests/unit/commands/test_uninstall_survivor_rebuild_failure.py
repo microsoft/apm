@@ -14,7 +14,10 @@ from apm_cli.commands.uninstall.engine import _sync_integrations_after_uninstall
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.yaml_io import dump_yaml
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-post-uninstall-dependency-reachability")]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-post-uninstall-dependency-reachability"),
+]
 
 
 def _survivor_plan() -> list[tuple[MagicMock, object]]:
