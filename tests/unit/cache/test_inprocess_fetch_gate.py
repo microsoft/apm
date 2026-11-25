@@ -392,36 +392,104 @@ def test_the_caps_get_and_the_post_share_one_verify_owner(monkeypatch, ca) -> No
     assert seen == [fetch._requests_verify(trust[1])] * 2
 
 
-def test_a_sparse_fetch_sends_the_managed_header_on_every_request(monkeypatch, tmp_path) -> None:
-    """The gate sees the env without the header; the caps GET and the pack POSTs carry it."""
+class _Raw:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    def read1(self, _size: int, decode_content: bool = True) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+class _Streamed(_Response):
+    def __init__(self, chunks: list[bytes], headers: dict[str, str] | None = None) -> None:
+        super().__init__(200, headers or {})
+        self.raw = _Raw(chunks)
+
+
+def _caps_server(monkeypatch, chunks: list[bytes], headers: dict[str, str] | None = None):
+    sent: list[dict] = []
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        sent.append(dict(kwargs, method=method, session=session_arg))
+        yield _Streamed(chunks, headers)
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+    return sent
+
+
+def test_the_caps_get_carries_the_managed_header_through_the_gate(monkeypatch) -> None:
+    """A' on the sparse path: the caps GET goes through _admitted_post with the header."""
     import certifi
 
-    gated: list = []
-    calls: list = []
-
-    def fake_gate(url, env):
-        gated.append(dict(env))
-        return "https://github.com/o/r/git-upload-pack", None, ("file", certifi.where())
-
-    def fake_admitted(upload_url, proxy, trust, body, credential=None, *, post=None):
-        calls.append((post, credential))
-        if post is fetch._caps_get:
-            return b"0000fetch=shallow filter\n"
-        raise fetch._Refuse("stop after the trees request")
-
-    monkeypatch.setattr(fetch, "_gate", fake_gate)
-    monkeypatch.setattr(fetch, "_admitted_post", fake_admitted)
-    env = _managed_env()
-
-    assert (
-        fetch.fetch_sparse_worktree("https://github.com/o/r", "a" * 40, tmp_path, env, (), ("pkg",))
-        is None
+    sent = _caps_server(monkeypatch, [b"0013fetch=shallow filter\n0000"])
+    features = fetch._fetch_caps(
+        "https://github.com/o/r/git-upload-pack",
+        None,
+        ("file", certifi.where()),
+        "Authorization: Basic eA==",
     )
-    (header,) = {credential for _, credential in calls}
-    assert header is not None and header.startswith("Authorization: Basic ")
-    assert [post for post, _ in calls] == [fetch._caps_get, None]
-    assert fetch._MANAGED_INTENT not in gated[0]
-    assert not any("Authorization" in value for value in gated[0].values())
+
+    assert features == frozenset({"shallow", "filter"})
+    (request,) = sent
+    assert request["method"] == "GET" and request["stream"] is True
+    assert request["headers"]["Authorization"] == "Basic eA=="
+    assert "Authorization" not in request["session"].headers
+
+
+@pytest.mark.parametrize(
+    ("chunks", "headers", "reason"),
+    [
+        ([b"x" * 65536, b"x"], None, "size cap"),
+        ([b"0000"], {"Content-Encoding": "gzip"}, "encoded response"),
+    ],
+)
+def test_an_oversized_or_encoded_caps_answer_falls_back(monkeypatch, chunks, headers, reason):
+    """The caps GET streams under the same cap and deadline discipline as _post."""
+    import certifi
+
+    _caps_server(monkeypatch, chunks, headers)
+    with pytest.raises(fetch._Refuse, match=reason):
+        fetch._caps_get(
+            "https://github.com/o/r/git-upload-pack", None, ("file", certifi.where()), b""
+        )
+
+
+def test_a_lone_carriage_return_in_a_cone_attributes_record_refuses() -> None:
+    """git reads ``* diff\\reol=crlf`` as one record with eol=crlf; splitlines() would not."""
+    data = b"* diff\reol=crlf\n"
+    oid = "a" * 40
+
+    assert not fetch._cone_attributes_ok(
+        {oid: ("blob", data)}, "b" * 40, [(".gitattributes", oid, False)]
+    )
+
+
+def test_an_executable_cone_gitattributes_keeps_its_mode() -> None:
+    import hashlib
+
+    def obj(kind: str, data: bytes) -> str:
+        raw = b"%s %d\x00" % (kind.encode(), len(data)) + data
+        return hashlib.new("sha1", raw, usedforsecurity=False).hexdigest()
+
+    blob = b"*.md diff\n"
+    blob_id = obj("blob", blob)
+    inner = b"100755 .gitattributes\x00" + bytes.fromhex(blob_id)
+    inner_id = obj("tree", inner)
+    root = b"40000 pkg\x00" + bytes.fromhex(inner_id)
+    root_id = obj("tree", root)
+    commit = b"tree %s\n\nmsg\n" % root_id.encode()
+    sha = obj("commit", commit)
+    objects = {
+        sha: ("commit", commit),
+        root_id: ("tree", root),
+        inner_id: ("tree", inner),
+        blob_id: ("blob", blob),
+    }
+
+    files, _ = fetch._sparse_plan(objects, sha, ("pkg",))
+
+    assert files == [("pkg/.gitattributes", blob_id, True)]
 
 
 def test_a_carriage_return_in_an_attributes_record_refuses(tmp_path: Path) -> None:

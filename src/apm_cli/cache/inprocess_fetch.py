@@ -27,6 +27,7 @@ import time
 import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 _log = logging.getLogger(__name__)
 
@@ -948,25 +949,30 @@ def _post(
         kind = response.headers.get("Content-Type", "").split(";")[0].strip()
         if kind != "application/x-git-upload-pack-result":
             raise _Refuse("not an upload-pack result")
-        if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
-            raise _Refuse("encoded response")
-        read1 = getattr(response.raw, "read1", None)
-        if not callable(read1):
-            raise _Refuse("no single-read body access")
-        # One socket read per step, so a trickling server costs at most the
-        # deadline plus one read timeout.
-        chunks = []
-        total = 0
-        while True:
-            if time.monotonic() > deadline:
-                raise _Refuse("fetch exceeds the wall deadline")
-            chunk = read1(65536, decode_content=False)
-            if not chunk:
-                return b"".join(chunks)
-            total += len(chunk)
-            if total > _MAX_BODY:
-                raise _Refuse("pack exceeds the size cap")
-            chunks.append(chunk)
+        return _read_capped(response, _MAX_BODY, deadline)
+
+
+def _read_capped(response: Any, cap: int, deadline: float) -> bytes:
+    """The identity-encoded body, at most *cap* bytes, read before *deadline*."""
+    if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+        raise _Refuse("encoded response")
+    read1 = getattr(response.raw, "read1", None)
+    if not callable(read1):
+        raise _Refuse("no single-read body access")
+    # One socket read per step, so a trickling server costs at most the
+    # deadline plus one read timeout.
+    chunks = []
+    total = 0
+    while True:
+        if time.monotonic() > deadline:
+            raise _Refuse("fetch exceeds the wall deadline")
+        chunk = read1(65536, decode_content=False)
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > cap:
+            raise _Refuse("response exceeds the size cap")
+        chunks.append(chunk)
 
 
 _SETTLED_MEMO = "inprocess-fetch-settled"
@@ -1120,6 +1126,8 @@ def _redact(value: object) -> str:
 # --- Sparse (monorepo subdirectory) deps: the pin's trees, then exactly the cone's blobs ---
 
 _CAPS_MEMO = "inprocess-fetch-v2-caps"
+_CAPS_MAX_BODY = 64 * 1024
+_CAPS_DEADLINE_SECONDS = 30.0
 _MAX_WANTS = 200_000
 
 
@@ -1148,6 +1156,7 @@ def _caps_get(
     """
     from ..utils.http_credentials import origin_bounded_request
 
+    deadline = time.monotonic() + _CAPS_DEADLINE_SECONDS
     refs_url = upload_url.removesuffix("/git-upload-pack") + "/info/refs?service=git-upload-pack"
     headers = {"Git-Protocol": "version=2"}
     if credential is not None:
@@ -1168,9 +1177,10 @@ def _caps_get(
         proxies={"https": proxy} if proxy else {},
         verify=_requests_verify(trust[1]),
         timeout=_TIMEOUT,
+        stream=True,
     ) as response:
         _admit(response.status_code, response.headers)
-        return response.content[:65536]
+        return _read_capped(response, _CAPS_MAX_BODY, deadline)
 
 
 def _fetch_caps(
@@ -1255,6 +1265,28 @@ class _PlannedObjects:
         return found[1]
 
 
+def _attributes_source_ok(data: bytes) -> bool:
+    """U2: wholesale refusals of one ``.gitattributes`` before any matching."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if "\r" in text.replace("\r\n", "\n"):
+        # git splits records only on LF and reads a lone CR as whitespace.
+        return False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(("[attr]", '"')):
+            return False
+        for token in line.split()[1:]:
+            name = _attribute_name(token)
+            if name not in _KNOWN_ATTRIBUTES and not name.startswith("linguist-"):
+                return False
+    return True
+
+
 def _cone_attributes_ok(
     objects: dict[str, tuple[str, bytes]], sha: str, files: list[tuple[str, str, bool]]
 ) -> bool:
@@ -1267,21 +1299,8 @@ def _cone_attributes_ok(
     ]
     if not sources:
         return True
-    for data in sources:  # U2: wholesale refusals before any matching
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            return False
-        for raw in text.splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith(("[attr]", '"')):
-                return False
-            for token in line.split()[1:]:
-                name = _attribute_name(token)
-                if name not in _KNOWN_ATTRIBUTES and not name.startswith("linguist-"):
-                    return False
+    if not all(_attributes_source_ok(data) for data in sources):
+        return False
     root = objects[sha][1].split(b"\n", 1)[0][5:].decode("ascii")
     source = _PlannedObjects(objects)
 
@@ -1390,7 +1409,7 @@ def _sparse_plan(
                 # T3/T4: only the exact name, only as a regular blob.
                 if mode not in ("100644", "100755"):
                     raise _Refuse(".gitattributes is not a regular blob")
-                files.append((prefix + ".gitattributes", oid, False))
+                files.append((prefix + ".gitattributes", oid, mode == "100755"))
                 continue
             if _aliases_gitattributes(raw_name):
                 raise _Refuse("an alias of .gitattributes needs git's handling")
