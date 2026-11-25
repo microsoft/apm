@@ -39,6 +39,12 @@ on:
       profile:
         description: 1 adds one cProfile run per cell on the new side.
         default: '0'
+      oracle:
+        description: Comma list of oracle fixtures (non-empty runs the S93 oracle instead of the bench).
+        default: ''
+      modes:
+        description: Comma list of oracle modes.
+        default: replay,attested,attested-frozen
 
 permissions:
   contents: read
@@ -80,13 +86,15 @@ jobs:
         IN_PAIRS: ${{ inputs.pairs }}
         IN_OS: ${{ inputs.os }}
         IN_PROFILE: ${{ inputs.profile }}
+        IN_ORACLE: ${{ inputs.oracle }}
+        IN_MODES: ${{ inputs.modes }}
       run: |
         set -euo pipefail
         BASE="$IN_BASE"; NEW="$IN_NEW"; FIXTURES="${IN_FIXTURES:-tree-10}"
         JOURNEYS="${IN_JOURNEYS:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
         RTT="${IN_RTT:-30}"; PAIRS="${IN_PAIRS:-3}"; OS="${IN_OS:-linux}"
         PROFILE="${IN_PROFILE:-0}"
-        ORACLE=""; MODES="replay,attested,attested-frozen"
+        ORACLE="${IN_ORACLE:-}"; MODES="${IN_MODES:-replay,attested,attested-frozen}"
         if [ "${GITHUB_EVENT_NAME}" = push ]; then
           # KEY=VALUE lines only; never sourced, so the file cannot run code.
           while IFS='=' read -r key value; do
