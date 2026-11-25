@@ -823,6 +823,12 @@ class APMDependencyResolver:
             return None
 
     @staticmethod
+    def _resolved_no_deeper(tree, dep_ref: DependencyReference, depth: int) -> bool:
+        """Whether *dep_ref*'s package, under any ref, already has a node no deeper (#4968)."""
+        same_origin = tree.get_node(dep_ref.get_unique_key())
+        return same_origin is not None and same_origin.depth <= depth
+
+    @staticmethod
     def _depth_limit_chain(dep_ref: DependencyReference, parent_node: DependencyNode | None) -> str:
         """Name the chain that reached ``max_depth`` (req-rs-006), root first."""
         chain = [dep_ref.to_display_reference()]
@@ -1004,7 +1010,7 @@ class APMDependencyResolver:
                 queued_keys.discard(dep_ref.get_resolution_key())
 
                 # Check if we already processed this dependency at this level or higher
-                existing_node = tree.get_node(dep_ref.get_unique_key())
+                existing_node = tree.nodes.get(dep_ref.get_resolution_key())
                 if existing_node and existing_node.depth <= depth:
                     # Prod wins over dev: if existing was dev and this is prod, promote it
                     if existing_node.is_dev and not is_dev:
@@ -1037,7 +1043,10 @@ class APMDependencyResolver:
                 # the cap fails resolution naming the chain (req-rs-006, #4277).
                 # An edge to a node already resolved no deeper reuses it above,
                 # so only a node that would be created past the cap is refused.
-                if depth > self.max_depth:
+                # The same package already resolved no deeper under another ref
+                # (#4968) is not refused either: the edge is still walked and its
+                # ref reaches conflict selection like any other.
+                if depth > self.max_depth and not self._resolved_no_deeper(tree, dep_ref, depth):
                     chain = self._depth_limit_chain(dep_ref, parent_node)
                     self.depth_limit_chains.append(chain)
                     tree.resolution_errors.append(
