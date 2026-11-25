@@ -28,7 +28,7 @@ from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy, ExecutablesPolicy
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-executable-item-admission")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-executable-item-admission")]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1020,9 +1020,7 @@ def _hook_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_tex
 
 
 _ORG_DENY = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
-_EMPTY_DEPENDENCY_ALLOW = ApmPolicy(
-    enforcement="block", dependencies=DependencyPolicy(allow=())
-)
+_EMPTY_DEPENDENCY_ALLOW = ApmPolicy(enforcement="block", dependencies=DependencyPolicy(allow=()))
 
 
 def _org_denies():
@@ -1036,10 +1034,9 @@ def test_approve_refuses_unlocked_package_under_empty_org_dependency_allowlist(
     """A no-lockfile fallback package cannot get an approval under an empty org allowlist."""
     manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
     before = manifest.read_bytes()
+    assert not (manifest.parent / "apm.lock.yaml").exists()
 
-    with patch(
-        "apm_cli.commands.approve._load_org_policy", return_value=_EMPTY_DEPENDENCY_ALLOW
-    ):
+    with patch("apm_cli.commands.approve._load_org_policy", return_value=_EMPTY_DEPENDENCY_ALLOW):
         result = CliRunner().invoke(approve_cmd, ["org-denied"])
 
     assert result.exit_code == 1, result.output
@@ -1075,6 +1072,7 @@ def test_bulk_approval_skips_unlocked_package_under_empty_org_dependency_allowli
     """Bulk approval names and skips no-lockfile packages outside an org allowlist."""
     manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
     before = manifest.read_bytes()
+    assert not (manifest.parent / "apm.lock.yaml").exists()
 
     with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
         result = CliRunner().invoke(approve_cmd, args)
@@ -1082,9 +1080,92 @@ def test_bulk_approval_skips_unlocked_package_under_empty_org_dependency_allowli
     assert result.exit_code == 0, result.output
     assert manifest.read_bytes() == before
     flat = " ".join(result.output.split())
-    assert "Skipped org-denied" in flat
+    assert "Skipped: org-denied is denied by org policy" in flat
     assert "dependency-allowlist" in flat
     assert "Updated apm.yml" not in flat
+
+
+@pytest.mark.parametrize(
+    ("policy", "check"),
+    [
+        pytest.param(_EMPTY_DEPENDENCY_ALLOW, "dependency-allowlist", id="allowlist"),
+        pytest.param(
+            ApmPolicy(
+                enforcement="block",
+                dependencies=DependencyPolicy(deny=("github.com/untrusted/**",)),
+            ),
+            "dependency-denylist",
+            id="denylist",
+        ),
+    ],
+)
+def test_approve_refuses_unlocked_package_when_blocking_dependency_policy_cannot_be_checked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: ApmPolicy,
+    check: str,
+) -> None:
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    before = manifest.read_bytes()
+
+    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+        result = CliRunner().invoke(approve_cmd, ["org-denied"])
+
+    flat = " ".join(result.output.split())
+    assert result.exit_code == 1, result.output
+    assert manifest.read_bytes() == before
+    assert f"({check}:" in flat
+    assert "Nothing written." in flat
+
+
+@pytest.mark.parametrize("enforcement", ["warn", "off"])
+def test_approve_keeps_unlocked_package_behavior_outside_block_enforcement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enforcement: str
+) -> None:
+    _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    policy = ApmPolicy(enforcement=enforcement, dependencies=DependencyPolicy(allow=()))
+
+    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+        result = CliRunner().invoke(approve_cmd, ["org-denied"])
+
+    assert result.exit_code == 0, result.output
+    assert "Approved org-denied" in result.output
+
+
+def test_approve_checks_unlocked_package_against_its_manifest_dependency_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.models.apm_package import APMPackage
+
+    project = tmp_path / "project"
+    project.mkdir()
+    apm_home = tmp_path / "home" / ".apm"
+    apm_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(apm_home.parent))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(apm_home / "config.json"))
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        "name: consumer\nversion: '1.0'\ndependencies:\n  apm:\n    - ./local-hook\n",
+        encoding="utf-8",
+    )
+    reference = APMPackage.from_apm_yml(manifest, create_config=False).get_apm_dependencies()[0]
+    package_dir = reference.get_install_path(project / "apm_modules")
+    hooks = package_dir / ".apm" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "guard.json").write_text("{}", encoding="utf-8")
+    (package_dir / "apm.yml").write_text("name: local-hook\nversion: '1.0'\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+    policy = ApmPolicy(
+        enforcement="block",
+        dependencies=DependencyPolicy(allow=(reference.get_canonical_dependency_string(),)),
+    )
+
+    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+        result = CliRunner().invoke(approve_cmd, ["local-hook"])
+
+    assert result.exit_code == 0, result.output
+    assert "Approved local-hook" in result.output
 
 
 def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(

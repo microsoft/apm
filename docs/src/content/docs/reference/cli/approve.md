@@ -224,8 +224,12 @@ unreachable policy under `policy.fetch_failure_default: block`); run
 `apm policy status --no-cache` to diagnose. When a blocking org policy denies
 the package itself (its dependency deny list or allow list), approve names the
 package and the check, says approving cannot lift it, and exits 1 writing
-nothing. The first pinned approval in a project also
-prints `Teammates need APM 0.37 or later to read pinned approvals.`
+nothing. If a scanned package has no lockfile reference, approve uses a
+matching root `apm.yml` dependency reference when available; under a blocking
+dependency allow or deny policy, it otherwise refuses the named approval and
+bulk approval skips and names the package because its source cannot be checked.
+The first pinned approval in a project also prints
+`Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,
 `[changed since approval]`, `[denied]`, or `[not approved]`. Before any layer
