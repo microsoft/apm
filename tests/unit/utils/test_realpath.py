@@ -23,6 +23,11 @@ pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-portability.byte_dete
 _LINKS = pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 
 
+_PROOF_RACE = pytest.mark.skipif(
+    not realpath._K_PROOFS, reason="K proofs are off (#5443 standby): no publish to race"
+)
+
+
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     root = tmp_path / "root"
@@ -328,6 +333,7 @@ def test_a_mutation_spelled_through_an_alias_drops_the_proof(tree: Path) -> None
         _expect_link_refused(tree, leaf)
 
 
+@_PROOF_RACE
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
 def test_a_release_racing_a_resolve_is_never_undone_by_its_late_publish(tree: Path) -> None:
@@ -372,6 +378,7 @@ def _swap_once(sub: Path, target: Path, fired: list) -> None:
     sub.symlink_to(target, target_is_directory=True)
 
 
+@_PROOF_RACE
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
 def test_a_subdirectory_proof_racing_a_release_is_dropped(tree: Path) -> None:
@@ -395,6 +402,7 @@ def test_a_subdirectory_proof_racing_a_release_is_dropped(tree: Path) -> None:
         _expect_link_refused(tree, sub / "x.md")
 
 
+@_PROOF_RACE
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
 def test_a_worker_resolve_parked_at_publish_loses_to_a_release_on_another_thread(

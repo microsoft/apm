@@ -32,6 +32,11 @@ pytestmark = [
 ]
 
 
+_PROOF_RACE = pytest.mark.skipif(
+    not realpath._K_PROOFS, reason="K proofs are off (#5443 standby): no publish to race"
+)
+
+
 @pytest.fixture
 def k_applies():
     """K runs where no kernel form does: refuse the kernel form for this process."""
@@ -100,6 +105,7 @@ def test_a_nested_link_copied_over_a_proven_directory_is_still_contained(tree: P
         _expect_refused(tree, leaf, inner)
 
 
+@_PROOF_RACE
 @pytest.mark.parametrize("forget", ["forget_invocation_memos", "release_held", "forget_proofs"])
 @pytest.mark.usefixtures("k_applies")
 def test_a_publish_parked_across_a_forget_and_a_swap_never_lands(tree: Path, forget: str) -> None:
