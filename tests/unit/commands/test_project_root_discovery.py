@@ -153,3 +153,56 @@ def test_a_package_on_another_windows_drive_keeps_its_absolute_path(
     assert resolve_cli_packages_for_project_root(("./pkg",), sub, root) == (
         (sub.resolve() / "pkg").as_posix(),
     )
+
+
+# -- $HOME is a discovery ceiling (#5448) --
+
+
+def _home_world(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+    home = tmp_path / "home"
+    work = home / "work" / "newproj"
+    work.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home, work
+
+
+def test_a_walk_below_home_never_adopts_the_home_manifest(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home, work = _home_world(tmp_path, monkeypatch)
+    (home / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+
+    assert _find_apm_yml(work) is None
+
+
+def test_a_manifest_between_home_and_the_start_is_still_found(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home, work = _home_world(tmp_path, monkeypatch)
+    (home / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+    project = home / "work" / "apm.yml"
+    project.write_text("name: mid\nversion: 1.0.0\n", encoding="utf-8")
+
+    assert _find_apm_yml(work) == project.resolve()
+
+
+def test_a_project_rooted_exactly_at_home_still_works(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home, _ = _home_world(tmp_path, monkeypatch)
+    (home / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+
+    assert _find_apm_yml(home) == (home / "apm.yml").resolve()
+
+
+def test_a_walk_outside_home_still_adopts_an_ancestor_manifest(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    _home_world(tmp_path, monkeypatch)
+    outside = tmp_path / "elsewhere"
+    work = outside / "src"
+    work.mkdir(parents=True)
+    (outside / "apm.yml").write_text("name: o\nversion: 1.0.0\n", encoding="utf-8")
+
+    assert _find_apm_yml(work) == (outside / "apm.yml").resolve()
