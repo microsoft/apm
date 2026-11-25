@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.39.0] - 2026-11-25
+## [0.39.1] - 2026-11-25
+
+The first published 0.39 release. It includes everything planned for 0.39.0 (tagged, not published) plus the fixes below.
 
 ### Highlights
 
