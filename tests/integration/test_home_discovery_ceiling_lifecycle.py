@@ -231,3 +231,23 @@ def test_a_home_project_never_reads_or_writes_a_manifest_above_home(
     assert str(package) in (isolated.home / "apm.yml").read_text(encoding="utf-8")
     assert above.read_bytes() == above_before, _describe(result)
     assert not (isolated.home.parent / "apm.lock.yaml").exists(), _describe(result)
+
+
+def test_a_home_project_with_a_manifest_and_a_lockfile_reinstalls_with_one_warning(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    isolated, environment, package = _world(tmp_path)
+    (isolated.home / "apm.yml").write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
+    seed = _run(apm_engine_command, ("install", str(package)), isolated.home, environment)
+    assert seed.returncode == 0, _describe(seed)
+    assert (isolated.home / "apm.lock.yaml").is_file(), _describe(seed)
+    deployed = isolated.home / ".claude" / "skills" / "a-skill" / "SKILL.md"
+    before = deployed.read_bytes()
+
+    result = _run(apm_engine_command, ("install",), isolated.home, environment)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, _describe(result)
+    assert output.count("user-scope directories") == 1, _describe(result)
+    assert "apm install -g" in output, _describe(result)
+    assert deployed.read_bytes() == before, _describe(result)
