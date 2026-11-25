@@ -1234,15 +1234,7 @@ def _check_unmanaged_files(
 
     dir_prefix_tuple = tuple(deployed_dir_prefixes)
 
-    try:
-        scan = unmanaged_scan.scan_governed_files(project_root, policy.directories)
-    except unmanaged_scan.EntryOutsideProject as exc:
-        return CheckResult(
-            name="unmanaged-files",
-            passed=policy.effective_action != "deny",
-            message=str(exc),
-            details=[str(exc)],
-        )
+    scan = unmanaged_scan.scan_governed_files(project_root, policy.directories)
     if scan.capped:
         return CheckResult(
             name="unmanaged-files",
@@ -1269,7 +1261,7 @@ def _check_unmanaged_files(
     unmanaged_count = len(details)
     notes = tuple(scan.notes)
 
-    if not details:
+    if not details and not scan.refused:
         return CheckResult(
             name="unmanaged-files",
             passed=True,
@@ -1277,14 +1269,18 @@ def _check_unmanaged_files(
             notes=notes,
         )
 
-    # One report carries a single next-action hint after the per-file lines.
-    details.append(_UNMANAGED_NEXT_ACTION)
+    # One report carries a single next-action hint after the per-file lines;
+    # a refused entry (outside the project) leads and names its own fix.
+    if details:
+        details.append(_UNMANAGED_NEXT_ACTION)
+    details[:0] = scan.refused
+    refusal = scan.refused[0] if scan.refused and not unmanaged_count else None
 
     if policy.effective_action == "warn":
         return CheckResult(
             name="unmanaged-files",
             passed=True,
-            message=f"{unmanaged_count} unmanaged file(s) found (warn)",
+            message=refusal or f"{unmanaged_count} unmanaged file(s) found (warn)",
             details=details,
             notes=notes,
         )
@@ -1293,7 +1289,7 @@ def _check_unmanaged_files(
     return CheckResult(
         name="unmanaged-files",
         passed=False,
-        message=f"{unmanaged_count} unmanaged file(s) in governance directories",
+        message=refusal or f"{unmanaged_count} unmanaged file(s) in governance directories",
         details=details,
         notes=notes,
     )

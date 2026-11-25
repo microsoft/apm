@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import textwrap  # noqa: F401
 from pathlib import Path
 
@@ -357,9 +358,11 @@ class TestUnmanagedFiles:
     def test_naming_a_path_through_a_symlinked_dir_never_governs_the_root_local_file(
         self, tmp_path
     ):
-        """#5472: ``.claude/link/../settings.local.json`` (link -> commands/deep) names
-        ``.claude/commands/settings.local.json``; the root local file stays skipped and
-        the named file is reported once, under one label."""
+        """#5472: ``.claude/link/../settings.local.json`` (link -> commands/deep) governs
+        the file it physically names, reported once. POSIX follows the link before
+        ``..`` (``commands/settings.local.json``), so the root local file stays
+        skipped; Windows collapses ``..`` first, so the entry names the root local
+        file and governs it. The filesystem decides which (``samefile``)."""
         self._write(tmp_path, self._LOCAL, ".claude/commands/settings.local.json")
         (tmp_path / ".claude" / "commands" / "deep").mkdir()
         try:
@@ -368,26 +371,35 @@ class TestUnmanagedFiles:
             )
         except OSError:
             pytest.skip("symlinks unavailable")
-        policy = UnmanagedFilesPolicy(
-            action="deny", directories=[".claude", ".claude/link/../settings.local.json"]
-        )
+        entry = ".claude/link/../settings.local.json"
+        names_root = os.path.samefile(tmp_path / entry, tmp_path / self._LOCAL)
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".claude", entry])
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert not result.passed
-        [flagged] = self._flagged(result)
-        assert flagged in {
-            ".claude/commands/settings.local.json",
-            ".claude/link/../settings.local.json",
-        }, result.details
-        assert result.notes == (self._NOTE,)
+        flagged = self._flagged(result)
+        assert len(flagged) == len(set(flagged)), result.details
+        if names_root:
+            assert sorted(flagged) == [".claude/commands/settings.local.json", self._LOCAL]
+            assert result.notes == ()
+        else:
+            [only] = flagged
+            assert only in {".claude/commands/settings.local.json", entry}, result.details
+            assert result.notes == (self._NOTE,)
 
-    @pytest.mark.parametrize("form", ["dotdot", "absolute"])
+    @pytest.mark.parametrize("form", ["dotdot", "absolute", "link"])
     @pytest.mark.parametrize("action", ["deny", "warn"])
     def test_an_entry_outside_the_project_is_refused_by_name(self, tmp_path, form, action):
-        """#5472: an entry outside the project is refused with the fix, never walked."""
+        """#5472: an entry outside the project (``..``, absolute, or a link out of it)
+        is refused with the fix, never walked."""
         project = tmp_path / "proj"
         self._write(project, ".claude/commands/mine.md")
         self._write(tmp_path, "elsewhere/x.md")
-        entry = "../elsewhere" if form == "dotdot" else str(tmp_path / "elsewhere")
+        entry = {"dotdot": "../elsewhere", "absolute": str(tmp_path / "elsewhere")}.get(form, "out")
+        if form == "link":
+            try:
+                (project / "out").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+            except OSError:
+                pytest.skip("symlinks unavailable")
         policy = UnmanagedFilesPolicy(action=action, directories=[entry])
         result = _check_unmanaged_files(project, None, policy)
         expected = (
@@ -397,6 +409,38 @@ class TestUnmanagedFiles:
         assert result.passed is (action == "warn")
         assert result.message == expected
         assert result.details == [expected]
+
+    @pytest.mark.parametrize("action", ["deny", "warn"])
+    def test_an_outside_entry_is_refused_while_the_other_entries_are_scanned(
+        self, tmp_path, action
+    ):
+        """#5472: only the outside entry is refused; the remaining entries still scan."""
+        project = tmp_path / "proj"
+        self._write(project, ".claude/commands/mine.md")
+        self._write(tmp_path, "elsewhere/x.md")
+        policy = UnmanagedFilesPolicy(action=action, directories=["../elsewhere", ".claude"])
+        result = _check_unmanaged_files(project, None, policy)
+        assert result.passed is (action == "warn")
+        assert result.details[0] == (
+            "unmanaged_files.directories entry '../elsewhere' is outside the project; "
+            "use a path relative to the project root"
+        )
+        assert result.details[1].startswith(".claude/commands/mine.md -- not tracked")
+        assert not any("x.md" in line for line in result.details), result.details
+
+    def test_a_default_governance_dir_linked_out_of_the_project_is_never_walked(self, tmp_path):
+        """#5472: a default dir (``.claude``) that links outside the project is not
+        walked, so nothing outside is read or reported."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        self._write(tmp_path, "elsewhere/commands/x.md")
+        try:
+            (project / ".claude").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks unavailable")
+        result = _check_unmanaged_files(project, None, UnmanagedFilesPolicy(action="deny"))
+        assert result.passed, result.details
+        assert result.details == []
 
     def test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file(self, tmp_path):
         """#5472: a symlinked local settings file skips its link path only; the governed
