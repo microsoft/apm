@@ -18,6 +18,8 @@ NEW = Path(os.environ["NEW_APM"])
 VENV = NEW.parent.parent
 PY = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 FIX = os.environ.get("PROBE_FIXTURE", "tree-50")
+_pf = Path(__file__).with_name("parts")
+PARTS = set((_pf.read_text().split() if _pf.exists() else ["imports", "counts", "fork"]))
 PAIRS = int(os.environ.get("PROBE_PAIRS", "6"))
 
 
@@ -68,6 +70,12 @@ with open_world(fixture, work / "world") as world:
             return rc, cpu, err
 
     modfile = work / "modules.txt"
+    if "imports" not in PARTS and "fork" not in PARTS:
+        root = cold()
+        out = work / "counts.json"
+        rc, _, _ = measured([str(PY), str(HERE / "runner.py"), "count", str(out)], root)
+        say("counts", {"rc": rc, **json.loads(out.read_text())})
+        sys.exit(0)
     root = cold()
     rc, cpu_dump, _ = measured([str(PY), str(HERE / "runner.py"), "dump", str(modfile)], root)
     mods = modfile.read_text().split()
