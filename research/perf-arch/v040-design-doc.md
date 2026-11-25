@@ -21,7 +21,8 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
   - W 0.568 vs main+#5374 (bench 15.09 -> 8.44 s) [45532025700] = ~6.0 s on 9V74: AT TARGET (7.5 s).
     - Calibration: default-schannel world, main+#5374, cold t50, direct per-VM runs [45534359514]: 9V74 base 10.53 s x 0.568 = 5.98 s.
     - Per runner class: 9V45 4.5 s, 9V74 6.0 s, Xeon 8573C 6.4 s, EPYC 7763 8.3-8.6 s. So the target holds on 3 of 4 classes; on the slowest (7763) it is ~1 s over.
-    - One VM per class, except 3 for 7763.
+    - Base = CPU p50 (cpu_p50_s), not wall (wall p50 on 9V74 is 12.26 s), from artifact calib-windows-2025-vm4/direct/*.json. CPU base x paired CPU ratio keeps the units consistent.
+    - Caveats: n = 1 VM per class (3 for 7763), 3 runs each; the paired ratio was measured on the bench's VM mix and is applied to one VM's base.
   - The levers stack slightly better than paper (0.701 vs 0.716-0.734).
 - **Native-core gate on Linux:** MET.
   - walk+stat+hash+copy = 45.5% of L CPU on main [45520769932] and 45.2% at the stacked head [45530101839] (65% with realpath).
