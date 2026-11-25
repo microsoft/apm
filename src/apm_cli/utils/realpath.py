@@ -39,6 +39,9 @@ _MAX_MISSING_DEPTH = 32
 _PROC_FD = "/proc/self/fd/"
 _STOCK_RESOLVE = Path.resolve
 _PROOFS = "realpath-link-free-directories"
+# K proofs off (#5443): resolve_path neither records nor consults a link-free proof,
+# so every resolve takes the full walk, as before containment-once.
+_K_PROOFS = False
 # Proof generation: forget_proofs bumps it under _proof_publish; a resolver captures
 # it before its lstat or platform resolve and publishes a proof only if it is still
 # current, so a release_held racing the resolve can never be undone by a late publish.
@@ -114,6 +117,8 @@ def _proven_answer(text: str, proofs: dict, seen: int) -> str | None:
 
 def proven_link_free(directory: Path) -> bool:
     """Whether this command proved *directory* has no link on its path (see module doc)."""
+    if not _K_PROOFS:
+        return False
     proofs = _memo(_PROOFS)
     text = str(directory)
     # abspath() collapses ``..`` lexically, which a link before it would not.
@@ -291,7 +296,7 @@ def resolve_path(path: Path) -> Path:
     and any failure of a fast form leaves the answer (or the error) to it.
     """
     stock = type(path) is PosixPath and PosixPath.resolve is _STOCK_RESOLVE
-    proofs = None if _WINDOWS or not stock or kernel_resolves() else _memo(_PROOFS)
+    proofs = None if not _K_PROOFS or _WINDOWS or not stock or kernel_resolves() else _memo(_PROOFS)
     text = str(path)
     seen = _generation[0]
     if proofs is not None:

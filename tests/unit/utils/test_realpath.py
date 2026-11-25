@@ -23,6 +23,11 @@ pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-portability.byte_dete
 _LINKS = pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 
 
+_PROOF_RACE = pytest.mark.skipif(
+    not realpath._K_PROOFS, reason="K proofs are off (#5443 standby): no publish to race"
+)
+
+
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     root = tmp_path / "root"
@@ -199,7 +204,7 @@ def test_a_link_planted_by_user_code_is_seen_after_the_memo_drops(tree: Path) ->
     target = tree / "dir" / "sub" / "deployed.md"
     with invocation_scope():
         assert resolve_path(target) == target.resolve()
-        assert realpath.proven_link_free(tree / "dir" / "sub")
+        assert realpath.proven_link_free(tree / "dir" / "sub") is realpath._K_PROOFS
         (tree / "dir" / "sub").rename(tree / "dir" / "sub-moved")
         (tree / "dir" / "sub").symlink_to(tree / "outside", target_is_directory=True)
         forget_invocation_memos()
@@ -231,7 +236,7 @@ def test_a_leaf_link_under_a_proven_directory_is_still_found(tree: Path) -> None
 
     with invocation_scope():
         assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
-        assert realpath.proven_link_free(tree / "dir")
+        assert realpath.proven_link_free(tree / "dir") is realpath._K_PROOFS
         assert (
             first_symlink_component(tree, tree / "dir" / "link_file") == tree / "dir" / "link_file"
         )
@@ -304,7 +309,7 @@ def test_apm_replacing_a_tree_drops_its_proofs(tree: Path) -> None:
     with invocation_scope():
         assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
         assert resolve_path(leaf) == leaf
-        assert realpath.proven_link_free(tree / "dir" / "sub")
+        assert realpath.proven_link_free(tree / "dir" / "sub") is realpath._K_PROOFS
         release_held(tree / "dir" / "sub")
         assert not realpath.proven_link_free(tree / "dir" / "sub")
         assert not realpath.proven_link_free(tree / "dir")  # every proof goes (aliases)
@@ -328,6 +333,7 @@ def test_a_mutation_spelled_through_an_alias_drops_the_proof(tree: Path) -> None
         _expect_link_refused(tree, leaf)
 
 
+@_PROOF_RACE
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
 def test_a_release_racing_a_resolve_is_never_undone_by_its_late_publish(tree: Path) -> None:
@@ -372,6 +378,7 @@ def _swap_once(sub: Path, target: Path, fired: list) -> None:
     sub.symlink_to(target, target_is_directory=True)
 
 
+@_PROOF_RACE
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
 def test_a_subdirectory_proof_racing_a_release_is_dropped(tree: Path) -> None:
@@ -395,6 +402,7 @@ def test_a_subdirectory_proof_racing_a_release_is_dropped(tree: Path) -> None:
         _expect_link_refused(tree, sub / "x.md")
 
 
+@_PROOF_RACE
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
 def test_a_worker_resolve_parked_at_publish_loses_to_a_release_on_another_thread(
@@ -436,7 +444,7 @@ def test_a_dotdot_spelling_is_never_proven(tree: Path) -> None:
 
     with invocation_scope():
         assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
-        assert realpath.proven_link_free(tree / "dir")
+        assert realpath.proven_link_free(tree / "dir") is realpath._K_PROOFS
         assert not realpath.proven_link_free(tree / "link_dir" / ".." / "dir")
 
 
@@ -485,7 +493,7 @@ def test_a_proven_directory_apm_replaces_with_a_link_is_refused(tree: Path, repl
     sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
     with invocation_scope():
         assert resolve_path(leaf) == leaf
-        assert realpath.proven_link_free(sub)
+        assert realpath.proven_link_free(sub) is realpath._K_PROOFS
         replace(sub, tree / "outside")
         assert not realpath.proven_link_free(sub)
         _expect_link_refused(tree, leaf)
