@@ -21,3 +21,11 @@
 - #5394 still OPEN (2b7107aa): re-merge + ordering cell after it lands.
 - #5366 a32ef51a waits QL H8.
 - ValueError fix parked on l5-valueerror-fix (63fab420); MCP WIP l5-mcp 01d60f36.
+
+## night (after 23:15)
+- #5366 H8 SIGNED a32ef51a, train-ready rows posted.
+- #5403 (#5396 MCP re-clone): head 1270075f (main merged, ledger 2100 lines). W3d ACCEPT thru 50368af1 (+ narrowing 64c1d5ed). QL verified merge; H8 on CI green + Copilot clean.
+- #5383: merged main 1e4a208e (#5394); ordering cell; ValueError fix; verbatim move to verdict_attest; #4770 exec-gate cells + differential (693df219, W3d ACCEPT R1); Copilot r3 fold ddd81de1 (console.EMITTED sink, orphan refusal). Benches: 45514821064 at 1a5cc0c2 noop .547 cold .988 warm 1.018; warm rerun perf-bench/693df219-1795565733-7b0f3f; noop+warm perf-bench/ddd81de1-1795566712-032774.
+- VP rulings: warm >1.010 with band crossing 1.0 -> disclose and ship; band fully >1.0 -> stop. H8 by 05:00 or next window.
+- Backlog row posted on #5384 (dev-tree identity cost).
+- W3d N1 on notice flag: done structurally in ddd81de1.
