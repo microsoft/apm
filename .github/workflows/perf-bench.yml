@@ -185,7 +185,7 @@ jobs:
         if [[ "$ORACLE_MODE" == lintrow ]]; then
           git -C "$GITHUB_WORKSPACE/harness" fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$BASE_SHA"
           git -C "$GITHUB_WORKSPACE/harness" worktree add --quiet --detach "$GITHUB_WORKSPACE/base" FETCH_HEAD
-          BASE_ROOT="$GITHUB_WORKSPACE/base" NEW_ROOT="$GITHUB_WORKSPACE/new" PAIRS=3 python3 .github/probe/lint_row.py 2>&1 | tee oracle.log | tail -60
+          BASE_ROOT="$GITHUB_WORKSPACE/base" NEW_ROOT="$GITHUB_WORKSPACE/new" PAIRS=3 uv run --frozen python .github/probe/lint_row.py 2>&1 | tee oracle.log | tail -60
         elif [[ "$ORACLE_MODE" == lintprof ]]; then
           LINT_ROOT="$GITHUB_WORKSPACE/new" "$GITHUB_WORKSPACE/new/$(dirname "$VENV_APM_REL")/python" .github/probe/lint_profile.py 2>&1 | tee oracle.log | tail -120
         elif [[ "$ORACLE_MODE" == census-* ]]; then
