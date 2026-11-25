@@ -607,6 +607,36 @@ def test_a_staging_file_left_by_a_killed_atomic_write_is_restored(
     assert chain.run("audit", "--ci").returncode == 0
 
 
+def test_a_staging_file_a_user_edits_after_the_kill_is_kept_and_reported(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5411: a complete staging file is forgiven only while it holds the pending bytes."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    _write_package(chain, revision="v2", description="agent helper v2", extra=True)
+    new_skill = chain.project / "pkg" / ".apm" / "skills" / "pkg-new-skill"
+    new_skill.mkdir(parents=True)
+    (new_skill / "SKILL.md").write_text(
+        "---\nname: pkg-new-skill\ndescription: new skill\n---\n# new skill\n",
+        encoding="utf-8",
+    )
+    _kill_mid_refusal(
+        chain, "stage+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_PATH="pkg-new-skill/SKILL.md"
+    )
+    _abandoned(chain)
+    staged = [p for p in chain.project.rglob("apm-atomic-*") if "pkg-new-skill" in p.parts]
+    assert len(staged) == 1, "the kill left no single staging file in the new skill"
+    staged[0].write_text("my notes, written after the crash\n", encoding="utf-8")
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert "it changed after the interrupted install" in _text(result), _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+    assert staged[0].read_text(encoding="utf-8") == "my notes, written after the crash\n"
+
+
 def test_a_shared_config_without_its_baseline_is_kept_and_reported(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

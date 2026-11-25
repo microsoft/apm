@@ -2952,3 +2952,43 @@ def test_a_staging_file_is_apms_only_beside_an_unsealed_write(
     assert skill.exists() is not restored
     if not restored:
         assert (skill / name).read_bytes() == b"partial bytes"
+
+
+def _staged_beside_write(tmp_path: Path, content: bytes, expected: bytes, size: int | None):
+    from apm_cli.install.deploy_snapshot import _decide, _Replay
+    from apm_cli.install.deploy_state import file_mode
+    from apm_cli.utils.content_hash import exact_hash_of_bytes
+
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / _STAGED).write_bytes(content)
+    whole = {"dir": {}, "mode": file_mode(skill)}
+    write = ("pending", exact_hash_of_bytes(expected), None, size)
+    unit = _Replay("skill", skill, "absent", None, {}, (), events={"": whole, "SKILL.md": write})
+    return skill, _decide([unit])
+
+
+@pytest.mark.parametrize(
+    ("content", "size", "restored"),
+    [
+        (b"# new skill\n", 12, True),
+        (b"my notes, written after the crash\n", 12, False),
+        (b"# new", 12, True),
+        (b"my notes", None, True),
+    ],
+    ids=["complete-matching", "complete-edited", "partial-write", "no-recorded-size"],
+)
+def test_a_complete_staging_file_is_forgiven_only_when_it_holds_the_pending_bytes(
+    tmp_path: Path, content: bytes, size: int | None, restored: bool
+) -> None:
+    """#5411: complete staged bytes must equal the pending write's hash; a partial write is #5395's."""
+    from apm_cli.install.deploy_snapshot import _apply
+
+    skill, (apply, kept) = _staged_beside_write(tmp_path, content, b"# new skill\n", size)
+    for decided in apply:
+        _apply(decided)
+
+    assert kept == ([] if restored else [("skill", "it changed after the interrupted install")])
+    assert skill.exists() is not restored
+    if not restored:
+        assert (skill / _STAGED).read_bytes() == content
