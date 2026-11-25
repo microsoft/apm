@@ -1,0 +1,37 @@
+name: macOS unit control (research)
+
+on:
+  push:
+    branches: [perf-research/macos-unit-control]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: ${{ matrix.part }} ${{ matrix.product }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        product: [8225ec64b01efece30f22c6785b292d5dd583a02, 7d4014594e49b0893a74f76c5585861982d81ccb]
+        part: [paths, full]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ matrix.product }}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: false
+      - name: Unit (${{ matrix.part }})
+        run: |
+          if [ "${{ matrix.part }}" = paths ]; then
+            uv run --extra dev python -m pytest -n auto -q -p no:cacheprovider tests/unit -k "path or realpath or link or contain or symlink or security or deploy or integrat"
+          else
+            uv run --extra dev python -m pytest -n auto -q -p no:cacheprovider tests/unit tests/test_console.py tests/red_team tests/fixtures/policy
+          fi
