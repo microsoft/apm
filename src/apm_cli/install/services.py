@@ -446,6 +446,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         if _entry.multi_target:
             continue  # skills handled separately
         if _prim_name in {"prompts", "commands"}:
+            _research_count()
             continue  # RESEARCH: family deleted
         # Executable approval gate: skip hooks if not approved, and retire
         # the hooks this package deployed before it was gated (#3924).
@@ -1199,3 +1200,15 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
+
+
+_RESEARCH_SKIPS = [0]
+
+
+def _research_count() -> None:
+    import atexit
+    import sys as _s
+
+    if _RESEARCH_SKIPS[0] == 0:
+        atexit.register(lambda: _s.stderr.write(f"[oracle-dmap] {__name__} skipped {_RESEARCH_SKIPS[0]}\n"))
+    _RESEARCH_SKIPS[0] += 1
