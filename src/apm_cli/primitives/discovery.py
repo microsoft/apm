@@ -154,15 +154,11 @@ def discover_primitives(
     collection = PrimitiveCollection()
     safe_patterns = validate_exclude_patterns(exclude_patterns)
 
-    # Find and parse files for each primitive type
-    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():  # noqa: B007
-        files = find_primitive_files(
-            base_dir,
-            patterns,
-            exclude_patterns=safe_patterns,
-            inventory=inventory,
-        )
-
+    # One walk and one classification pass for every primitive type (#4939).
+    classified = classify_primitive_files(
+        base_dir, LOCAL_PRIMITIVE_PATTERNS, exclude_patterns=safe_patterns, inventory=inventory
+    )
+    for files in classified.values():
         for file_path in files:
             try:
                 primitive = parse_primitive_file(file_path, source="local")
@@ -237,15 +233,11 @@ def scan_local_primitives(
         collection (PrimitiveCollection): Collection to add primitives to.
         exclude_patterns (Optional[List[str]]): Pre-validated exclude patterns.
     """
-    # Find and parse files for each primitive type
-    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():  # noqa: B007
-        files = find_primitive_files(
-            base_dir,
-            patterns,
-            exclude_patterns=exclude_patterns,
-            inventory=inventory,
-        )
-
+    # One walk and one classification pass for every primitive type (#4939).
+    classified = classify_primitive_files(
+        base_dir, LOCAL_PRIMITIVE_PATTERNS, exclude_patterns=exclude_patterns, inventory=inventory
+    )
+    for files in classified.values():
         # Filter out files from apm_modules to avoid conflicts with dependency scanning
         local_files = []
         base_path = Path(base_dir)
@@ -608,57 +600,78 @@ def find_primitive_files(
     Returns:
         List[Path]: List of file paths found.
     """
-    if not os.path.isdir(base_dir):
-        return []
+    return classify_primitive_files(
+        base_dir, {"files": patterns}, exclude_patterns=exclude_patterns, inventory=inventory
+    ).get("files", [])
 
+
+def classify_primitive_files(
+    base_dir: str | Path,
+    patterns_by_type: dict[str, list[str]],
+    exclude_patterns: list[str] | None = None,
+    inventory: CompileInventory | None = None,
+) -> dict[str, list[Path]]:
+    """The one primitive classifier: every type's files from one walk and one pass.
+
+    Returns, per type in *patterns_by_type* order, exactly what
+    :func:`find_primitive_files` returned for that type's patterns alone: the
+    inventory's files (in inventory order) under no skipped directory that
+    match one of the type's globs, are not excluded, and are regular files
+    (never symlinks). A file matching several types is listed under each.
+    """
+    if not os.path.isdir(base_dir):
+        return {}
     started = time.perf_counter()
     base_path = Path(base_dir).resolve()
-    pattern_tuples: list[tuple[str, ...]] = [
-        tuple(p for p in pat.split("/") if p) for pat in patterns
-    ]
+    typed = {
+        primitive_type: [tuple(p for p in pat.split("/") if p) for pat in patterns]
+        for primitive_type, patterns in patterns_by_type.items()
+    }
     if inventory is None:
         from ..compilation.inventory import CompileInventory
 
         inventory = CompileInventory.collect(base_path, exclude_patterns=exclude_patterns)
-    return _find_primitive_inventory_files(
-        inventory,
-        base_path,
-        pattern_tuples,
-        exclude_patterns,
-        started,
-    )
+    return _classify_inventory_files(inventory, base_path, typed, exclude_patterns, started)
 
 
-def _find_primitive_inventory_files(
+def _classify_inventory_files(
     inventory: CompileInventory,
     base_path: Path,
-    pattern_tuples: list[tuple[str, ...]],
+    typed_patterns: dict[str, list[tuple[str, ...]]],
     exclude_patterns: list[str] | None,
     started: float,
-) -> list[Path]:
-    """Classify a compile inventory with the existing primitive glob grammar."""
+) -> dict[str, list[Path]]:
+    """Classify a compile inventory with the primitive glob grammar, once per file."""
     candidates = inventory.files_within(base_path)
-    valid_files: list[Path] = []
+    found: dict[str, list[Path]] = {primitive_type: [] for primitive_type in typed_patterns}
     for file_path in candidates:
         relative_path = file_path.relative_to(base_path)
         if any(part in DEFAULT_SKIP_DIRS for part in relative_path.parts[:-1]):
             continue
         path_parts = relative_path.parts
-        if not any(_glob_match_parts(path_parts, pattern) for pattern in pattern_tuples):
+        matched = [
+            primitive_type
+            for primitive_type, pattern_tuples in typed_patterns.items()
+            if any(_glob_match_parts(path_parts, pattern) for pattern in pattern_tuples)
+        ]
+        if not matched:
             continue
         if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
             continue
         if file_path.is_file() and not file_path.is_symlink():
-            valid_files.append(file_path)
+            for primitive_type in matched:
+                found[primitive_type].append(file_path)
 
-    perf_stats.record_walk(
-        base_dir=str(base_path),
-        pattern_count=len(pattern_tuples),
-        duration_s=time.perf_counter() - started,
-        files_visited=len(candidates),
-        files_matched=len(valid_files),
-    )
-    return valid_files
+    duration = time.perf_counter() - started
+    for primitive_type, pattern_tuples in typed_patterns.items():
+        perf_stats.record_walk(
+            base_dir=str(base_path),
+            pattern_count=len(pattern_tuples),
+            duration_s=duration / max(len(typed_patterns), 1),
+            files_visited=len(candidates),
+            files_matched=len(found[primitive_type]),
+        )
+    return found
 
 
 def _exclude_matches_dir(
