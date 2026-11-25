@@ -49,6 +49,9 @@ from scripts.architecture_linter.checks.transport_platform_shared import (
     _require_subs,
     _src_python,
 )
+from scripts.architecture_linter.checks.transport_verdict_link_kind import (
+    verdict_link_routing as _verdict_link_routing,
+)
 from scripts.architecture_linter.checks.tree_index import FUNCTION_NODES
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, checked_facts, violation
@@ -1852,6 +1855,7 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
             exempt=False,
         )
     )
+    findings.extend(_verdict_link_routing(provider, inv, _RID_URL_PATH))
 
     # AC10a -- strict percent-encoded URL-path decoding authority.
     findings.extend(

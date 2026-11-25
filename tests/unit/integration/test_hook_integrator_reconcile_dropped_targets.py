@@ -40,6 +40,20 @@ def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def _apm_creates_json(path: Path, data: dict) -> None:
+    """APM created *path*: only a creation record lets cleanup delete it (#4962)."""
+    from apm_cli.integration.config_file_provenance import recorded_config_write
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with recorded_config_write(path, manifest_root=path.parent):
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_apm_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+
+
 class TestReconcileDroppedTargetsNormalCleanup:
     def test_codex_native_and_sidecar_cleaned_together(self, tmp_path: Path) -> None:
         """The real-world shape for every current merge-hook target:
@@ -49,7 +63,7 @@ class TestReconcileDroppedTargetsNormalCleanup:
         ``_clean_apm_entries_from_json`` primitive to re-associate and strip
         it -- content-keyed re-injection, not raw event-name presence."""
         codex_dir = tmp_path / ".codex"
-        _write_json(
+        _apm_creates_json(
             codex_dir / "hooks.json",
             {
                 "hooks": {
@@ -281,7 +295,7 @@ class TestReconcileDroppedTargetsMalformedNative:
         install, since every target defaults schema_strict=True), the
         shared _clean_apm_entries_from_json primitive still strips it."""
         native = tmp_path / ".codex" / "hooks.json"
-        _write_json(
+        _apm_creates_json(
             native,
             {
                 "hooks": {

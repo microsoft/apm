@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.utils import executable_exclusion as _exclusion
 from apm_cli.utils import git_config_once as _config_once
 from apm_cli.utils.path_security import filesystem_containment
 from apm_cli.utils.subprocess_env import external_process_env
@@ -278,60 +279,56 @@ def _run_git_config_probe(
     raise GitUrlRewriteProbeError(timeout_category)
 
 
-def _executable_exclusion_root() -> Path:
-    """Return the nearest repository or APM project root containing the cwd."""
-    cwd = Path.cwd().resolve()
-    ancestors = (cwd, *cwd.parents)
-    for directory in ancestors:
-        if (directory / ".git").exists():
-            return directory
-    from apm_cli.core.scope import manifest_file
-
-    for directory in ancestors:
-        if manifest_file(directory).is_file():
-            return directory
-    return cwd
-
-
-def _inside_project(path: Path, root: Path) -> bool:
+def _inside_project(path: Path, root: Path | None) -> bool:
     """Exclusion policy: a path whose containment can't be verified counts as inside."""
-    return filesystem_containment(path, root) is not False
+    return root is not None and filesystem_containment(path, root) is not False
+
+
+def _which_in(directory: Path, name: str) -> str | None:
+    # Qualified lookups skip the Windows cwd; Python < 3.12 needs explicit PATHEXT.
+    candidate = shutil.which(str(directory / name))
+    if candidate is None and os.name == "nt" and sys.version_info < (3, 12):
+        extensions = os.environ.get("PATHEXT") or (
+            ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
+        )
+        for extension in extensions.split(os.pathsep):
+            if not extension.startswith(".") or any(c in extension for c in "/\\:"):
+                continue
+            candidate = shutil.which(str(directory / f"{name}{extension}"))
+            if candidate is not None:
+                break
+    return candidate
 
 
 def _resolve_trusted_executable(name: str) -> str:
     """Resolve an executable from PATH directories outside the project."""
-    exclusion_root = _executable_exclusion_root()
+    exclusion_root = _exclusion.executable_exclusion_root()
+    skipped_dirs: list[Path] = []
+    skipped_hit: str | None = None
     for entry in os.get_exec_path():
         if not entry:
             continue
         directory = Path(entry).expanduser().resolve()
         try:
             if _inside_project(directory, exclusion_root):
+                skipped_dirs.append(directory)
                 continue
         except (OSError, ValueError):
             continue
-        # A qualified lookup never searches the implicit Windows cwd. Python
-        # before 3.12 needs explicit PATHEXT candidates for qualified commands.
-        candidate = shutil.which(str(directory / name))
-        if candidate is None and os.name == "nt" and sys.version_info < (3, 12):
-            extensions = os.environ.get("PATHEXT") or (
-                ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
-            )
-            for extension in extensions.split(os.pathsep):
-                if not extension.startswith(".") or any(c in extension for c in "/\\:"):
-                    continue
-                candidate = shutil.which(str(directory / f"{name}{extension}"))
-                if candidate is not None:
-                    break
+        candidate = _which_in(directory, name)
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()
         try:
             if _inside_project(resolved, exclusion_root):
+                skipped_hit = skipped_hit or str(resolved)
                 continue
         except (OSError, ValueError):
             continue
         return str(resolved)
+    hit = skipped_hit or next((h for d in skipped_dirs if (h := _which_in(d, name))), None)
+    if hit is not None and exclusion_root is not None:
+        raise _exclusion.ProjectShadowedExecutableError(name, hit, exclusion_root)
     raise FileNotFoundError(f"{name} executable not found on trusted PATH directories")
 
 
@@ -406,7 +403,7 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
     Raises ``FileNotFoundError`` when no entry remains, rather than launching
     with an empty PATH.
     """
-    exclusion_root = _executable_exclusion_root()
+    exclusion_root = _exclusion.executable_exclusion_root()
     result = dict(env)
     # A missing PATH counts as empty: the child shell's built-in default search
     # path has not passed the project check, so the refusal below applies.
@@ -421,7 +418,7 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
                 directory = expanded.resolve(strict=True)
                 if _inside_project(directory, exclusion_root):
                     continue
-                if _links_into(directory, exclusion_root):
+                if exclusion_root is not None and _links_into(directory, exclusion_root):
                     continue
             except (OSError, RuntimeError, ValueError):
                 continue
@@ -472,6 +469,8 @@ def get_git_executable() -> str:
 
     try:
         _git_executable = _resolve_trusted_executable("git")
+    except _exclusion.ProjectShadowedExecutableError:
+        raise
     except FileNotFoundError:
         raise FileNotFoundError(  # noqa: B904
             "git executable not found on PATH. Please install git: https://git-scm.com/downloads"
@@ -485,6 +484,8 @@ def get_gh_executable() -> str:
     if _gh_executable is None:
         try:
             _gh_executable = _resolve_trusted_executable("gh")
+        except _exclusion.ProjectShadowedExecutableError:
+            raise
         except FileNotFoundError:
             raise FileNotFoundError(  # noqa: B904
                 "GitHub CLI executable not found on PATH. "

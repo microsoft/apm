@@ -873,7 +873,7 @@ Native generated JSON and repository registration retain their existing flow.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace init` | Append a `marketplace:` block to `apm.yml` (scaffolds `apm.yml` if missing; does not create `.claude-plugin/`) | `--force`, `--no-gitignore-check`, `--name`, `--owner`, `-v` |
+| `apm marketplace init` | Append a `marketplace:` block to `apm.yml` (scaffolds `apm.yml` if missing; does not create `.claude-plugin/`) | `--force`, `--no-gitignore-check`, `--name` (with an existing `apm.yml`, a different name is written as `marketplace.name`), `--owner`, `-v` |
 | `apm marketplace migrate` | Fold a legacy `marketplace.yml` into `apm.yml`'s `marketplace:` block; deletes `marketplace.yml` on success | `--force`/`--yes`/`-y`, `--dry-run`, `-v` |
 | `apm marketplace outdated` | Report upgradable plugins, range-aware; respects `tag_pattern` and common monorepo tag layouts | `--offline`, `--include-prerelease`, `-v` |
 | `apm marketplace check` | Validate the `marketplace:` block and verify refs resolve | `--offline`, `-v` |

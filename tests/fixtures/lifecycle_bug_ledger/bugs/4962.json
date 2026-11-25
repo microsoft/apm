@@ -1,0 +1,14 @@
+{
+  "issue": 4962,
+  "fixed_in": "Unreleased",
+  "summary": "Hook cleanup deleted a Claude settings file it emptied on the #4852 content rule alone, even when the user created the file; only a record that APM created the file now deletes it, and a kept empty file is named in a warning.",
+  "failure_modes": [
+    "cleanup"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/unit/integration/test_hook_settings_delete_evidence.py::test_an_emptied_settings_file_is_deleted_only_when_apm_created_it"
+  ]
+}

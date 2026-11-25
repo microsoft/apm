@@ -115,7 +115,10 @@ def entry_matches_expected(fingerprint: str, expected: str | None) -> bool:
 
 
 def interrupted_staging(
-    events: Mapping[str, Any], entries: Mapping[str, str], known: Collection[str]
+    events: Mapping[str, Any],
+    entries: Mapping[str, str],
+    known: Collection[str],
+    base: Path | None = None,
 ) -> set[str]:
     """Staging files an atomic write left when killed before its rename (#5395).
 
@@ -125,14 +128,18 @@ def interrupted_staging(
     directory, below the unit, never sealed. A directory creation or removal
     is no such write. Anything else is judged as before, so a recorded file
     a user edited is still kept.
+
+    A complete staging file (at least the size a pending write recorded) is forgiven only
+    when it holds that write's expected bytes (#5411). A shorter one is a write killed
+    partway, and a write that recorded no size is judged by the name alone.
     """
     from apm_cli.utils.atomic_io import STAGING_NAME
 
-    pending = {
-        posixpath.dirname(rel)
-        for rel, event in events.items()
-        if rel and isinstance(event, tuple) and str(event[1]).startswith("sha256:")
-    }
+    pending: dict[str, list[tuple[str, int | None]]] = {}
+    for rel, event in events.items():
+        if rel and isinstance(event, tuple) and str(event[1]).startswith("sha256:"):
+            size = event[3] if len(event) > 3 else None
+            pending.setdefault(posixpath.dirname(rel), []).append((event[1], size))
     return {
         rel
         for rel, fingerprint in entries.items()
@@ -142,4 +149,21 @@ def interrupted_staging(
         # A regular file: "<hash>:<mode>", never a directory, link or other entry.
         and ":" in fingerprint
         and not fingerprint.startswith(("dir:", "link:"))
+        and _holds_pending_bytes(base, rel, fingerprint, pending[posixpath.dirname(rel)])
     }
+
+
+def _holds_pending_bytes(
+    base: Path | None, rel: str, fingerprint: str, writes: list[tuple[str, int | None]]
+) -> bool:
+    """Whether the staging file is a partial write or holds a pending write's bytes."""
+    if any(fingerprint.rsplit(":", 1)[0] == expected for expected, _ in writes):
+        return True
+    sizes = [size for _, size in writes if size is not None]
+    if base is None or not sizes:
+        return True
+    try:
+        staged = os.lstat(base / rel).st_size
+    except OSError:
+        return False
+    return all(staged < size for size in sizes)

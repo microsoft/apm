@@ -1,0 +1,16 @@
+{
+  "issue": 4949,
+  "fixed_in": "Unreleased",
+  "summary": "A narrowed install that skipped a runtime but kept its MCP claim overwrote the new declaration with the old baseline, so a refused retirement compared the old declaration with itself and a later removal left the new entry unowned; a skipped claim with an incompatible native key is now dropped and the written declaration is kept.",
+  "failure_modes": [
+    "ownership",
+    "transaction"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_mcp_collision_lifecycle.py::test_a_skipped_runtime_baseline_never_masks_a_native_key_change"
+  ]
+}

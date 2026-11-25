@@ -2,6 +2,7 @@
 
 import builtins
 import contextlib
+import json
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -16,6 +17,7 @@ from apm_cli.core.remediation import (
     MARKETPLACE_REF_UNRESOLVED,
     MCP_DEPENDENCY_DECLARED,
     REGISTRY_CANONICAL_UNRECORDED,
+    kept_note,
 )
 
 from ...bundle.local_bundle import looks_like_local_bundle
@@ -1678,6 +1680,7 @@ def _sync_integrations_after_uninstall(
             # Survivors redeploy exactly the selection install deployed (#3760).
             selection = effective_dependency_selection(dep_ref)
 
+            failures_before = reintegration_diagnostics.failed_package_count
             try:
                 integration_result = integrate_package_primitives(
                     pkg_info,
@@ -1703,10 +1706,18 @@ def _sync_integrations_after_uninstall(
                     f"Best-effort re-integration skipped for {pkg_id}. "
                     f"{INTEGRATED_FILES_STALE.sentence()}"
                 )
+                # Count the failed rebuild once so uninstall exits non-zero (#4954);
+                # an error the rebuild already recorded for it counts already.
+                if reintegration_diagnostics.failed_package_count == failures_before:
+                    reintegration_diagnostics.error(
+                        "Could not rebuild the surviving package's integrated files",
+                        package=pkg_id,
+                    )
                 logger.verbose_detail(
                     f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
                 )
 
+    _warn_emptied_hook_files_kept(logger, result.get("kept_paths", []))
     reintegration_diagnostics.render_summary()
     return IntegrationCleanupOutcome(
         counts=counts,
@@ -1716,6 +1727,23 @@ def _sync_integrations_after_uninstall(
         materialization_session=materialization_session,
         package_failures=reintegration_diagnostics.failed_package_count,
     )
+
+
+def _warn_emptied_hook_files_kept(logger, kept_paths) -> None:
+    """Name each emptied hook file kept without deletion evidence and still hook-free (#4962)."""
+    for kept_path in sorted(kept_paths):
+        try:
+            data = json.loads(Path(kept_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and not data.get("hooks"):
+            logger.warning(
+                kept_note(
+                    kept_path,
+                    "it holds no hooks, but APM cannot show it created this file",
+                    "Delete it manually if it is no longer needed.",
+                )
+            )
 
 
 def _restage_changed_local_survivors(

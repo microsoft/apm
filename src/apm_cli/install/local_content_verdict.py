@@ -87,6 +87,7 @@ def local_content_reasons(
 
     from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps.local_identity import (
+        locked_spelling,
         resolve_local_dir,
         root_local_identity,
         transitive_local_identity,
@@ -194,14 +195,15 @@ def local_content_reasons(
                     anchored = APMDependencyResolver._compute_dep_source_path(
                         child, package, source
                     )
+                    root = apm_package.source_path or package_root
                     child = transitive_local_identity(
                         child,
                         declaring_parent=key,
                         anchored=anchored,
-                        root=apm_package.source_path or package_root,
+                        root=root,
                         root_local_dirs=root_local_dirs,
                     )
-                    queue.append(child)
+                    queue.append(locked_spelling(child, lockfile.dependencies, root))
         except (LocalResolutionError, OSError, ValueError) as exc:
             reasons.append(
                 f"  - local dependency {declared.local_path!r} cannot be verified: {exc}"

@@ -338,7 +338,12 @@ _IO_REPARSE_TAG_NAME_SURROGATE = 0x20000000
 
 def _is_link(path: Path) -> bool:
     """Whether *path* is a link of any kind (never its target), from one ``lstat``."""
-    info = path.lstat()
+    return is_link_stat(path.lstat())
+
+
+def is_link_stat(info: os.stat_result) -> bool:
+    """Whether an ``lstat`` result is a link of any kind: a symlink or a name-surrogate
+    reparse point (a Windows junction)."""
     if S_ISLNK(info.st_mode):
         return True
     attributes = getattr(info, "st_file_attributes", 0)
