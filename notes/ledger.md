@@ -56,3 +56,4 @@
 02:56 | #5382 9be8e258 M 0.900/0.897, L 1.002, Copilot@head 0 threads; waiting CI green -> QL re-H8 | <=05:00 | none
 03:09 | sec3 security table + sec4 build plan drafted | review | none
 03:10 | sec3+4 accepted; owner table added (Car 3 = me, start after WED 12:00) | #5382 standby | none
+03:11 | sec3 G1-G4 RESOLVED folded (w3d:ruling:v040-gaps) | #5382 standby | none

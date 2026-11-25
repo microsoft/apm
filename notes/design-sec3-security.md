@@ -45,21 +45,32 @@ The threat model, unchanged from containment-once:
 | **MD4 / K8 / IR9** single owners | one classifier (fed the manifest path set, content-reading classes keep reading); proof recording only in the containment owner + plan owner; arch guard + MutationCase | A, C, MD | class(manifest paths) == today's classification on L/W/M; guard mutation cases | test only |
 | **K9** differential | today's verdict, lockfile and receipts under planted links (dir/intermediate/leaf), W junction/8.3, case alias, in-root link, mid-install script, warm planted leaf, hardlinked leaf, old `apm_modules` link, git checkout with a symlink | all | `perf-research/arch-render-diff` + a K9 cell set | test only |
 
-## 3.2 Conflicts and gaps between rulings (to resolve before the cars build)
+## 3.2 Conflicts and gaps between rulings: RESOLVED
 
-1. **K2 vs IR1 (scope of "created this invocation").** K2 lists "a fresh activation rename" and "in-process worktrees" as by-construction. IR1 narrows this to trees whose every entry APM wrote no-follow-exclusive, and excludes git checkouts and cache copies made with links preserved. Today's activation copies the cache checkout with `robust_copytree(symlinks=True)` (MS3 forbids that shape), so an activated tree is NOT by-construction under IR1.
-   - **Resolution:** IR1 governs; K2's activation clause is superseded. M2 fixes it at the root: activation becomes a per-file staged landing (MS3), which IS by-construction.
-2. **The manifest proof is missing from IR9's owner list.** IR9 allows only `realpath.py` + `package_plan.py` to record or consume proofs. MD2 introduces a manifest landing proof.
-   - **Resolution:** the manifest proof's owner (the in-process landing, `cache/checkout_verify.register_inprocess_manifest` today) must be added to IR9's allow-list, behind the same generation guard (T1/T2). Needs a W3d row.
-3. **The T1/T2 generation guard isn't stated in MS/MD.** The race W3d ruled must-fix on #5382 applies to any memoized proof published after an observation: plan link-free sets and manifest landing proofs too.
-   - **Resolution:** one publish helper (generation under lock) for every proof kind. Add it to the A/MD cars' cells.
-4. **IR6 vs MS4 (mode of staged deploy files).** MS4 sets mode only from the tree entry for `apm_modules`. IR6 is silent on mode for deploy targets. Today a deployed file gets the destination default (umask), not the package's exec bit, except where integrators preserve it.
-   - **Resolution:** Shape B's stage applies today's deploy-mode rule exactly. The differential compares modes (extend `render_diff` to snapshot `st_mode & 0o777`).
-5. **MD3 vs today's post-write hash.** Hash-while-writing replaces `compute_file_hash` after the write. MD3 requires the hash over the bytes written to the target.
-   - **Resolution:** hash the buffer passed to the write, then re-check size on close. No re-read; receipts stay identical (differential).
-6. **#5418 (lockfile portability).** Monorepo lockfiles embed absolute paths for sibling locals (`portable_anchor_identity`'s absolute fallback). MS7 and IR7 demand byte-identical lockfiles, and the A/A differential shows this delta even main vs main.
-   - **Resolution:** until #5418 lands, the differential treats exactly those three fields (`anchored_local_path`, `declaring_parent: local:`, ledger `owners`/`active_owner` with `local:` absolute) as known-variant, and nothing else.
-7. **Warm path.** MD(b) re-derives the manifest from pinned tree objects (MS6) and binds `apm_modules` with `verify_locked_package`. K2/IR1 say a warm tree is NOT by construction. These agree: on warm, C takes the I2 walk once per root, and MD saves only the re-walk/re-classify.
+W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
+
+- **G1 (K2 vs IR1): RESOLVED.**
+  - IR1 governs. K2 "by construction" means every entry was created by APM with an exclusive, no-follow, per-file create in this invocation.
+  - That covers: the lever-C in-process landing (C8-sealed), M2 per-file materialization, an M1 per-file clone into an exclusive stage, and IR6 per-file skill stages.
+  - Any activation built with copytree(symlinks=True), a directory clonefile or a git checkout is NOT by construction and takes the I2 walk. Today's "fresh activation rename" is therefore I2 until it is rebuilt per-file.
+- **G2 (IR9 owner list): RESOLVED.**
+  - The MD2 manifest landing proof joins the K8/IR9 allow-list as a proof kind, with the IR2 lifetime (dropped by `forget_invocation_memos` and `release_held`).
+  - Its only producer is the fetch landing; its only consumers are package_plan/integrate.
+  - It is published through the same guarded publish path (G3), not a separate dict write. The arch guard and its MutationCase cover it.
+- **G3 (publish-race guard): RESOLVED as one rule.**
+  - EVERY proof kind (link-free directories, the plan's link-free file set, the manifest landing proof) is published only if no forget ran since its observation began.
+  - One shared generation, bumped by `forget_proofs`/`release_held` and by `forget_invocation_memos`, under one lock together with the clear; the #5382 9be8e258 shape.
+  - Any forget invalidates ALL kinds: clear-all, never per-kind or prefix.
+  - The proof that observed is the one checked: capture the generation before the first lstat/read/hash the proof rests on.
+- **G4 (IR6 vs MS4 mode): RESOLVED, scoped.**
+  - MS4 governs `apm_modules` materialization: mode from the git tree entry (0644/0755), set explicitly.
+  - Deployed TARGET files keep today's deploy-mode rule exactly (whatever the current integrators apply per file, umask-derived included). It is set explicitly with fchmod on the staged file BEFORE the IR6 seal, and the seal checks mode too.
+  - The differential compares modes per deployed file on L/M. On W, compare ACL inheritance under the #5388 rules (no explicit ACE added, none carried).
+  - Never take a mode from the cache entry, the stage's umask default or a reflink source.
+- **#5418 (lockfile portability): ACCEPTED.** The differential lists EXACTLY these three fields as known-variant: `anchored_local_path`, `declaring_parent: local:`, and the ledger `owners`/`active_owner` with absolute `local:` paths. It asserts byte equality on everything else. The #5418 fix removes the exemption and asserts it removed.
+- **Warm path (MD(b) vs K2/IR1):** no conflict. On warm, C takes the I2 walk once per root; MD saves only the re-walk/re-classify.
+- **MD3 hash-while-writing:** no conflict. Hash the buffer written to the target and re-check size on close; receipts stay byte-identical (differential).
+- cost (W3d): 0 for each. G3 is one shared int + the lock already in #5382; G4 is one fchmod per staged file, which today's deploy already pays.
 
 ## 3.3 Cost summary
 
