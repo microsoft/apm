@@ -9,6 +9,8 @@
     "reference.depth_reuses_canonical_first_wins_identity"
   ],
   "regression_tests": [
-    "tests/lifecycle/scenarios/test_graph_version.py::test_max_depth_reuses_a_direct_dependency_across_declared_refs"
+    "tests/lifecycle/scenarios/test_graph_version.py::test_max_depth_reuses_a_direct_dependency_across_declared_refs",
+    "tests/lifecycle/scenarios/test_graph_version.py::test_max_depth_refuses_a_dependency_reached_only_at_depth_two",
+    "tests/lifecycle/scenarios/test_graph_version.py::test_max_depth_does_not_reuse_a_different_origin_with_the_same_repo_name"
   ]
 }

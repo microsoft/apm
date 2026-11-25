@@ -218,6 +218,84 @@ def test_max_depth_reuses_a_direct_dependency_across_declared_refs(lifecycle_wor
     scenario.finish()
 
 
+def test_max_depth_refuses_a_dependency_reached_only_at_depth_two(lifecycle_world) -> None:
+    factory = LocalPackageFactory(lifecycle_world.root / "depth-two")
+    package_a = skill_package(factory, "a", dependencies=("org/b",))
+    package_b = skill_package(factory, "b")
+    lifecycle_world.services.publish("org/a", package_a, tag=None)
+    lifecycle_world.services.publish("org/b", package_b, tag=None)
+    scenario = _scenario(
+        lifecycle_world,
+        {"a": "org/a", "b": "org/b"},
+        kinds={"a": ("skill",), "b": ("skill",)},
+        requires={"a": ("b",)},
+    )
+
+    installed = scenario.run("install a")
+    assert_changes(
+        installed.changed,
+        (*INSTALL_WRITES, *_skills("a", "b")),
+        label="install depth-two graph",
+    )
+    rows = scenario.lock().get_package_dependencies()
+    assert {row.repo_url: row.depth for row in rows} == {"org/a": 1, "org/b": 2}, rows
+    scenario.pair()
+
+    use_policy(lifecycle_world, "max-depth-1")
+    scenario.source_moved()
+    refused = scenario.run("install", exit=1)
+    assert_changes(refused.changed, (), label="refuse dependency at depth two")
+    assert "dependencies.max_depth" in refused.output
+    assert "ask your policy admin to raise dependencies.max_depth" in refused.output
+
+    audit = scenario.run("audit --ci", read_only=True, exit=1)
+    assert "depth 2 exceeds limit 1" in audit.output
+    scenario.finish()
+
+
+def test_max_depth_does_not_reuse_a_different_origin_with_the_same_repo_name(
+    lifecycle_world,
+) -> None:
+    factory = LocalPackageFactory(lifecycle_world.root / "depth-origin")
+    package_a = skill_package(factory, "a", dependencies=("fork/b",))
+    package_b = skill_package(factory, "b")
+    package_fork_b = skill_package(factory, "fork-b")
+    lifecycle_world.services.publish("org/a", package_a, tag=None)
+    lifecycle_world.services.publish("org/b", package_b, tag=None)
+    lifecycle_world.services.publish("fork/b", package_fork_b, tag=None)
+    scenario = _scenario(
+        lifecycle_world,
+        {"a": "org/a", "b": "org/b#main", "fork-b": "fork/b"},
+        kinds={"a": ("skill",), "b": ("skill",), "fork-b": ("skill",)},
+        requires={"a": ("fork-b",)},
+    )
+
+    installed = scenario.run("install b a")
+    assert_changes(
+        installed.changed,
+        (*INSTALL_WRITES, *_skills("a", "b", "fork-b")),
+        label="install same-name dependencies from distinct origins",
+    )
+    rows = scenario.lock().get_package_dependencies()
+    assert {row.repo_url: row.depth for row in rows} == {
+        "org/a": 1,
+        "org/b": 1,
+        "fork/b": 2,
+    }, rows
+    scenario.pair()
+
+    use_policy(lifecycle_world, "max-depth-1")
+    scenario.source_moved()
+    refused = scenario.run("install", exit=1)
+    assert_changes(refused.changed, (), label="refuse dependency from a different origin")
+    assert "dependencies.max_depth" in refused.output
+    assert "ask your policy admin to raise dependencies.max_depth" in refused.output
+
+    audit = scenario.run("audit --ci", read_only=True, exit=1)
+    assert "depth 2 exceeds limit 1" in audit.output
+    scenario.finish()
+
+
 @pytest.fixture
 def tagged_repository(lifecycle_world):
     """``lifecycle/g-tags``: v1.0.0 lightweight, v2.0.0 annotated, on distinct commits."""
