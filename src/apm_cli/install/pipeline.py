@@ -851,6 +851,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
         transaction.journal_deploy_writes(ctx)
+        from apm_cli.utils import research_owalk
+
+        research_owalk.ACTIVE = True  # RESEARCH: package trees are complete from here on
         materialization_session = _run_integration_phase(ctx)
 
         # A direct dependency failing integration fails the install; transitive ones continue.
