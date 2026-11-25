@@ -341,6 +341,56 @@ def locked_skill_sources(ctx: Any) -> LockedSkillSources | None:
     return LockedSkillSources(fetch, locked_commit)
 
 
+def reclaimed_members(
+    integrator: Any,
+    source: Path,
+    destination: Path,
+    *,
+    ignore: Callable[[str, list[str]], list[str]],
+    owner: str | None,
+) -> dict[Path, str]:
+    """Members a restored older lock no longer claims, still as *owner* wrote them (#5399).
+
+    Only this installation's own receipt for the deploying owner counts
+    (:mod:`apm_cli.core.deployment_reclaim`), and only when the bytes also equal
+    what this install renders there. A hand-made file has no such receipt, so it
+    keeps the unmanaged handling; nothing is reclaimed when no receipt qualifies.
+    """
+    from apm_cli.core.deployment_reclaim import has_unclaimed_receipts, own_unclaimed_receipt
+
+    session = integrator._materialization_session
+    if owner is None or not has_unclaimed_receipts(session, owner):
+        return {}
+    found: dict[Path, str] = {}
+    expected = _rendered_members(
+        source, destination, walk_source=integrator.walk_source_tree, ignore=ignore
+    )
+    try:
+        for target, member in expected.items():
+            if target.is_symlink() or not target.is_file():
+                continue
+            receipted = own_unclaimed_receipt(session, target, owner)
+            if receipted is not None and target.read_bytes() == _expected_bytes(
+                integrator.resolve_links, member, target, source
+            ):
+                found[target] = receipted
+    except (OSError, UnicodeError):
+        return {}
+    return found
+
+
+def self_owned(prev_owner: str | None, parent_name: str, is_managed: bool, writer: Any) -> bool:
+    """Whether the package writing a skill directory also wrote what is there (#5399).
+
+    A dependency's skills are named in the lock's owner map. The project's own
+    skills (receipt owner ``.``) have no dependency row, so a managed directory
+    that no dependency owns is theirs, never "another package".
+    """
+    if prev_owner is not None:
+        return prev_owner == parent_name
+    return is_managed and getattr(writer, "_skill_current_owner", None) == "."
+
+
 def skill_tree_baselines(
     integrator: Any,
     source: Path,
@@ -379,7 +429,7 @@ def skill_tree_baselines(
         return session.baseline(path, targets)
 
     if all_files_receipted(destination, session.receipt_held):
-        return {}
+        return reclaimed_members(integrator, source, destination, ignore=ignore, owner=owner)
     compare = partial(
         adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned, trusted=trusted
     )

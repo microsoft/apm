@@ -23,6 +23,7 @@ from apm_cli.integration.skill_adoption import (
     is_skill_dir_identical_to_source,
     render_skill_markdown,
     report_stale_kept_copies,
+    self_owned,
     skill_tree_baselines,
     tree_equals_install_output,
 )
@@ -508,11 +509,12 @@ class SkillIntegrator(BaseIntegrator):
             )
 
         def managed(path: str) -> bool:
-            return path in self._skill_session_hashes or claimed(path)
+            return path in self._skill_session_hashes or claimed(path) or path in reclaimed
 
         adopted = skill_tree_baselines(
             self, source, destination, ignore=ignore, owned=lambda p: claimed(entry(p)), force=force
         )
+        reclaimed = {entry(path) for path in adopted}  # incl. own unclaimed writes (#5399)
         unchanged = unchanged and not adopted
         before = tree_file_hashes(destination, entry)
         copied = self.copy_directory_files(
@@ -975,7 +977,6 @@ class SkillIntegrator(BaseIntegrator):
             is_self_overwrite = False
             is_managed = False
             if target_existed:
-                # Check if this is a user-authored skill (not managed by APM)
                 is_managed = (
                     managed_files is not None and rel_path.replace("\\", "/") in managed_files
                 ) or (
@@ -983,7 +984,7 @@ class SkillIntegrator(BaseIntegrator):
                     and target.resolve() in rewriter._native_skill_session_owners
                 )
                 prev_owner = (owned_by or {}).get(sub_name)
-                is_self_overwrite = prev_owner is not None and prev_owner == parent_name
+                is_self_overwrite = self_owned(prev_owner, parent_name, is_managed, rewriter)
 
                 if (
                     managed_files is not None
