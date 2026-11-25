@@ -1003,3 +1003,33 @@ def test_unmanaged_files_deny_refuses_a_hook_file_the_install_skips(
     text = _assert_refused(world, _UNMANAGED, "--target", "copilot", bundle)
 
     assert ".github/hooks/p-exec-hooks.json" in text, text
+
+
+@pytest.mark.parametrize(
+    ("target", "link"),
+    [("copilot", ".github/hooks/p-exec-hooks.json"), ("claude", ".claude/settings.json")],
+)
+def test_bundle_dry_run_never_writes_through_a_linked_hook_destination(
+    lifecycle_world: World,  # noqa: F811
+    target: str,
+    link: str,
+) -> None:
+    """#4956: the preview seeds regular files only, so a link never reaches its writer."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, target)
+    outside = world.root / "outside-hook.json"
+    outside.write_text('{"hooks": {}}\n', encoding="utf-8")
+    destination = world.project / link
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks cannot be created here")
+
+    result = _apm(world, "install", "--force", "--dry-run", "--target", target, bundle)
+
+    assert "Traceback" not in _text(result), _evidence(result)
+    assert outside.read_bytes() == b'{"hooks": {}}\n'
+    assert destination.is_symlink()

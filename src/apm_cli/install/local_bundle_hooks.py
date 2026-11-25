@@ -11,6 +11,7 @@ It never writes hook configuration itself (#3700).
 from __future__ import annotations
 
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -300,19 +301,45 @@ def _seed_preview_destinations(project_root: Path, scratch: Path, hook_targets: 
     config_files = {*specs, *(sidecar for sidecar, _key in specs.values())}
     for target in hook_targets:
         root = project_root / target.root_dir
-        if not root.is_dir():
+        if not _is_regular_dir(root):
             continue
         (scratch / target.root_dir).mkdir(exist_ok=True)
-        if (root / "hooks").is_dir():
-            shutil.copytree(root / "hooks", scratch / target.root_dir / "hooks", symlinks=True)
+        hooks = root / "hooks"
+        if _is_regular_dir(hooks):
+            shutil.copytree(
+                hooks,
+                scratch / target.root_dir / "hooks",
+                ignore=lambda directory, names: [
+                    name for name in names if not _is_seedable(Path(directory) / name)
+                ],
+            )
     for rel in config_files:
         src = project_root / rel
-        if (scratch / rel).parent.is_dir() and src.is_file():
-            shutil.copy2(src, scratch / rel, follow_symlinks=False)
+        if (scratch / rel).parent.is_dir() and _is_regular_file(src):
+            shutil.copy2(src, scratch / rel)
     manifest = manifest_file(project_root)
-    if manifest.is_file() and not manifest.is_symlink():
+    if _is_regular_file(manifest):
         shutil.copy2(manifest, scratch / manifest.name)
     return config_files
+
+
+def _is_regular_file(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _is_regular_dir(path: Path) -> bool:
+    try:
+        return stat.S_ISDIR(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _is_seedable(path: Path) -> bool:
+    """Only regular files and real directories seed the scratch: a link never does."""
+    return _is_regular_file(path) or _is_regular_dir(path)
 
 
 def _verified_configs(scratch: Path, project_root: Path, configs: list[str]) -> list[str]:
