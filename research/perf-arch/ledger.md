@@ -267,3 +267,12 @@
 03:01 | VP approved stacked ceiling (L+W+M) + native-core gate measurement on stacked L profile -> SoL 04:30 | SoL; Bets re-H8 | none
 03:07 | #5382 9be8e258 fully green, QL re-H8 requested -> VP | QL; SoL 04:30 | none
 03:08 | doc skeleton v040-design-doc.md written; Bets -> sec3 security table + sec4 build plan 05:30 | SoL 04:30; QL re-H8 #5382 | none
+03:10 | Bets sec3 (security table, 7 gaps) + sec4 (5 cars; B dropped) at bets-notes 9a70a49e -> VP; W3d asked G1-G4 by 05:30 | SoL 04:30; QL re-H8 #5382 | none
+03:10 | VP owners: Car1 E2, Car2 E1, Car3 Bets (+E1), Car5 me + L5; G1-G4 before Cars 3/5 -> doc sec 7 | SoL 04:30; W3d 05:30 | none
+03:11 | W3d ruled G1-G4 OK w/ amendments (w3d:ruling:v040-gaps) -> doc sec 5; Cars 3/5 unblocked | SoL 04:30 | none
+03:11 | Bets sec3 G1-G4 resolved + sec4 owner table (bets-notes 97d78531); #5382 awaiting QL re-H8 | SoL 04:30; QL | none
+03:17 | STACKED: L 0.701 (~4.3 s, miss 0.8), M 0.663, W 0.719 suspect (ancestry) -> SoL re-run; native gate MET 45% -> VP + doc | SoL W 30 min | W stacked number
+03:18 | doc sec 6 per VP default (3.5 North Star, 4.3 s milestone, 48h native lane, alt b) | SoL W 30 min | none
+03:18 | regent ruling in doc sec 6 verbatim; Lane N added (SoL, end FRI 27 03:30) | SoL W re-run | none
+03:19 | W stacked 0.719 invalid: win32 resolve_path redefinition bypassed lexical stub; rebuilt 6d67f5aa rerun ~25 min; lesson in doc sec 8 | SoL W | W stacked
+03:19 | E2 _trusted_hash memo neutral (main + K) -> doc sec 2 | SoL W 03:55 | none
