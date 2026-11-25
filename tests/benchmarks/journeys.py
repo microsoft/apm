@@ -246,11 +246,47 @@ class _RealWorld:
         self.cache_dir.mkdir(parents=True)
 
 
+_SYSTEM_TLS_KEYS = ("http.sslBackend", "http.sslCAInfo")
+
+
+def _carry_system_tls(env: dict[str, str]) -> dict[str, str]:
+    """Copy Git for Windows' system TLS settings into the isolated global config.
+
+    Git for Windows keeps its TLS backend and CA bundle in the SYSTEM config,
+    which the isolated world hides (``GIT_CONFIG_NOSYSTEM``). Without them, APM
+    sees no CA file and refuses its in-process fetch, so a real-network cell
+    would measure the git fallback instead of what a Windows user gets.
+    Returns the copied values, so the record shows which backend was modeled.
+    """
+    carried: dict[str, str] = {}
+    if sys.platform != "win32" or not env.get("GIT_CONFIG_GLOBAL"):
+        return carried
+    for key in _SYSTEM_TLS_KEYS:
+        found = subprocess.run(
+            ["git", "config", "--system", "--get", key],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        value = found.stdout.strip()
+        if found.returncode == 0 and value:
+            subprocess.run(
+                ["git", "config", "--file", env["GIT_CONFIG_GLOBAL"], key, value],
+                capture_output=True,
+                check=True,
+            )
+            carried[key] = value
+    return carried
+
+
 @contextlib.contextmanager
 def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
     remove_tree(directory / "env")
     if fixture.real:
         isolated, env = isolated_environment(directory / "env")
+        system_tls = _carry_system_tls(env)
+        if system_tls:
+            fixture.stats["git_system_tls"] = system_tls
         with counting_tunnel() as tunnel:
             yield _RealWorld(isolated, env, tunnel)
         return
