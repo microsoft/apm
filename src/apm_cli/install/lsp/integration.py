@@ -232,20 +232,22 @@ def _locked_plugin_roots(
     A package's root is its materialized directory, from its lock row or, once
     the row is gone, from the recorded reference itself; the project's own
     declarations bind the project root. A root derived wrongly only makes the
-    render differ, which keeps the entry: never a guess that deletes.
+    render differ, which keeps the entry: never a guess that deletes. Roots
+    resolve like ``bind_plugin_roots``, keeping the stored spelling (#5437).
     """
     from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.utils.realpath import resolve_path
 
     roots: dict[str, str] = {}
     for name, owner in provenance.items():
         try:
             if owner == _PROJECT_LSP_OWNER:
-                roots[name] = str(Path(project_root).resolve())
+                roots[name] = str(resolve_path(Path(project_root)))
             elif owner.startswith(_PACKAGE_LSP_OWNER_PREFIX) and modules_dir is not None:
                 key = owner.removeprefix(_PACKAGE_LSP_OWNER_PREFIX)
                 row = lockfile.get_dependency(key) if lockfile is not None else None
                 ref = row.to_dependency_ref() if row is not None else DependencyReference.parse(key)
-                roots[name] = str(ref.get_install_path(Path(modules_dir)).resolve())
+                roots[name] = str(resolve_path(ref.get_install_path(Path(modules_dir))))
         except (OSError, ValueError, TypeError):
             continue
     return roots

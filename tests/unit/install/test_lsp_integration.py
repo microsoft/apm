@@ -8,6 +8,7 @@ and lockfile persistence.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -796,6 +797,36 @@ class TestPackageMoveWithPluginRoot:
         command = json.loads(config.read_text())["lspServers"]["srv"]["command"]
         assert command.endswith("apm_modules/acme/pkg-b/bin/srv")
         diagnostics.warn.assert_not_called()
+
+    def test_locked_root_keeps_the_spelling_install_bound(self, tmp_path, monkeypatch) -> None:
+        """A case-insensitive volume: resolve_path keeps the stored spelling (#5437 R1)."""
+        from apm_cli.deps.plugin_root_render import bind_plugin_roots
+        from apm_cli.utils import realpath
+
+        def stored_spelling(path):
+            return Path(str(Path(path).resolve()).replace("/pkg-a", "/PKG-A"))
+
+        monkeypatch.setattr(realpath, "resolve_path", stored_spelling)
+        # An upgrade: the entry is judged against the locked render, not skipped as equal.
+        dep = _make_dep(
+            "srv",
+            command="${CLAUDE_PLUGIN_ROOT}/bin/srv-v2",
+            extension_to_language=None,
+            resolved_by="acme/pkg-a",
+        )
+        bind_plugin_roots([dep], self._dep(tmp_path, "pkg-a").plugin_root)
+        config, lock = self._deploy_from_a(tmp_path, "copilot")
+        data = json.loads(config.read_text())
+        data["lspServers"]["srv"]["command"] = f"{dep.plugin_root}/bin/srv"
+        config.write_text(json.dumps(data), encoding="utf-8")
+
+        diagnostics = self._install(tmp_path, "copilot", lock, dep)
+
+        assert json.loads(config.read_text())["lspServers"]["srv"]["command"].endswith(
+            "/PKG-A/bin/srv-v2"
+        )
+        diagnostics.warn.assert_not_called()
+        diagnostics.error.assert_not_called()
 
     def test_user_edit_across_a_move_is_kept_not_overwritten(self, tmp_path) -> None:
         config, lock = self._deploy_from_a(tmp_path, "copilot")
