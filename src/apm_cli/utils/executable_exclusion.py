@@ -29,6 +29,7 @@ def same_directory(first: Path, second: Path) -> bool:
 
 _RESOLVED_HOME: dict[str, Path] = {}
 _HOME_CHAIN: dict[Path, frozenset[tuple[int, int]]] = {}
+_LEVEL_VERDICTS: dict[tuple[Path, Path], bool] = {}
 
 
 def resolved_home() -> Path | None:
@@ -73,13 +74,16 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
 
     The single HOME ceiling predicate: a marker there (a dotfiles repo, a stray
     manifest) is not a project. Identity-based, so a case-variant or symlinked
-    spelling matches; HOME's chain is stat'ed once, then one stat per query.
+    spelling matches; HOME's chain and each directory verdict are stat'ed once per process.
     A missing *home* (``resolved_home()`` returned None) disables the check.
     """
     if home is None:
         return False
     if directory == home or directory in home.parents:
         return True
+    known = _LEVEL_VERDICTS.get((home, directory))
+    if known is not None:
+        return known
     chain = _home_chain_identities(home)
     try:
         wanted = os.stat(directory)
@@ -89,7 +93,8 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
         return os.path.normcase(str(directory)) in levels
     if chain is None:
         return any(same_directory(directory, level) for level in (home, *home.parents))
-    return (wanted.st_dev, wanted.st_ino) in chain
+    verdict = _LEVEL_VERDICTS[(home, directory)] = (wanted.st_dev, wanted.st_ino) in chain
+    return verdict
 
 
 def executable_exclusion_root() -> Path | None:
