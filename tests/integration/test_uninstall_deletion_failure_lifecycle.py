@@ -411,3 +411,101 @@ def test_user_edited_target_refusal_retains_ownership_after_package_deletion(
     assert final.lockfile_bytes is None
     assert final.deployment_records == ()
     assert not target.exists()
+
+
+_HOLD_SHARE_READ = 0x1
+
+
+class _HeldFile:
+    """Hold a file open without delete sharing, as an editor or scanner does (Windows)."""
+
+    def __init__(self, path: Path) -> None:
+        import ctypes
+
+        self._kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel.CreateFileW.restype = ctypes.c_void_p
+        self._kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        self._handle = self._kernel.CreateFileW(
+            str(path), 0x80000000, _HOLD_SHARE_READ, None, 3, 0x80, None
+        )
+        assert self._handle not in (None, ctypes.c_void_p(-1).value), "could not hold the file"
+
+    def release(self) -> None:
+        if self._handle is not None:
+            self._kernel.CloseHandle(self._handle)
+            self._handle = None
+
+
+def _installed_skill_world(tmp_path: Path) -> tuple[ApmLifecycleRunner, dict, Path, Path]:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "held", base_env=os.environ)
+    env = _child_env(isolated)
+    factory = LocalPackageFactory(isolated.work_root)
+    package = factory.create("held-package")
+    factory.add_skill(package, "held-skill", _skill_text("held-skill", "Held skill"))
+    consumer = factory.create("consumer", targets=("copilot",))
+    factory.add_relative_dependency(consumer, package)
+    runner = ApmLifecycleRunner((sys.executable, "-c", _ENTRYPOINT))
+    installed = runner.run(
+        ("install", "--no-policy", "--parallel-downloads", "0"),
+        scenario_id="held-file-install",
+        cwd=consumer.root,
+        env=env,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    deployed = next((consumer.root / ".github" / "skills").rglob("SKILL.md"))
+    return runner, env, consumer.root, deployed
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing violations")
+def test_uninstall_waits_out_a_briefly_held_deployed_file(tmp_path: Path) -> None:
+    """A file released inside the retry window no longer fails the uninstall (#5441)."""
+    import threading
+
+    runner, env, root, deployed = _installed_skill_world(tmp_path)
+    held = _HeldFile(deployed)
+    timer = threading.Timer(1.0, held.release)
+    timer.start()
+    try:
+        result = runner.run(
+            ("uninstall", "_local/held-package"),
+            scenario_id="held-file-uninstall-released",
+            cwd=root,
+            env=env,
+        )
+    finally:
+        timer.cancel()
+        held.release()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not deployed.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing violations")
+def test_uninstall_of_a_still_held_file_fails_closed_then_recovers(tmp_path: Path) -> None:
+    """A handle held past the window keeps today's outcome; a rerun after release removes it."""
+    runner, env, root, deployed = _installed_skill_world(tmp_path)
+    before = LifecycleStateSnapshot.capture(root, targets=("copilot",))
+    held = _HeldFile(deployed)
+    try:
+        failed = runner.run(
+            ("uninstall", "_local/held-package"),
+            scenario_id="held-file-uninstall-blocked",
+            cwd=root,
+            env=env,
+        )
+    finally:
+        held.release()
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert "Uninstall complete" not in failed.stdout + failed.stderr
+    assert deployed.exists()
+    after = LifecycleStateSnapshot.capture(root, targets=("copilot",))
+    assert after.manifest_bytes == before.manifest_bytes
+    assert after.lockfile_bytes == before.lockfile_bytes
+
+    recovered = runner.run(
+        ("uninstall", "_local/held-package"),
+        scenario_id="held-file-uninstall-retry",
+        cwd=root,
+        env=env,
+    )
+    assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+    assert not deployed.exists()
