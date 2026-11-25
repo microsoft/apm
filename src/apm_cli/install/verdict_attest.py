@@ -116,22 +116,73 @@ def release_attested(held: Any) -> bool:
 
 
 def refuse_frozen_drift(project_root: Path) -> None:
-    """The frozen preflight owner itself (InstallService.enforce_frozen), live."""
+    """The frozen preflight owner itself (InstallService.enforce_frozen), live.
+
+    Its notices are taped, not printed: the render replays them at the full run's
+    print point (``replay_frozen_notices``), so one judgment serves both (#5491).
+    """
     from apm_cli.core.scope import InstallScope, manifest_file
     from apm_cli.install.diff_apply import Decline
     from apm_cli.install.errors import FrozenInstallError
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService
+    from apm_cli.integration import mcp_config_view
     from apm_cli.models.apm_package import APMPackage
 
+    _FROZEN_NOTICES.pop(str(project_root), None)
     manifest = APMPackage.from_apm_yml(manifest_file(project_root))
+    tape = _NoticeTape()
+    shown = mcp_config_view.trust_notices_shown()
     try:
         request = InstallRequest.frozen_preflight(
-            manifest, scope=InstallScope.PROJECT, speculative=True
+            manifest, scope=InstallScope.PROJECT, logger=tape, speculative=True
         )
         InstallService.enforce_frozen(request, allow_pending_mcp=True)  # a bare install
     except FrozenInstallError:
         raise Decline("frozen preflight") from None  # the full run renders the refusal
+    finally:
+        # Nothing was printed: a taped once-per-command notice is still unshown.
+        mcp_config_view.forget_trust_notices_since(shown)
+    _FROZEN_NOTICES[str(project_root)] = tape.calls
+
+
+class _NoticeTape:
+    """A logger that records each output call of the frozen preflight, in order."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+
+        def record(*args: Any, **kwargs: Any) -> None:
+            self.calls.append((name, args, kwargs))
+
+        return record
+
+
+_FROZEN_NOTICES: dict[str, list[tuple[str, tuple, dict]]] = {}
+
+
+def take_frozen_notices(project_root: Path) -> list[tuple[str, tuple, dict]] | None:
+    """This run's taped frozen preflight notices (consumed), or None."""
+    return _FROZEN_NOTICES.pop(str(project_root), None)
+
+
+def replay_frozen_notices(calls: list[tuple[str, tuple, dict]], logger: Any) -> None:
+    """Print taped frozen preflight notices on *logger*, in order.
+
+    The once-per-command trust notice goes through its owner's dedupe, as the
+    preflight's own print would (mcp_config_view._progress_trust_once).
+    """
+    from apm_cli.integration import mcp_config_view
+
+    for name, args, kwargs in calls:
+        if name == "progress":
+            mcp_config_view._progress_trust_once(logger, *args, **kwargs)
+        else:
+            getattr(logger, name)(*args, **kwargs)
 
 
 # Every frozen-only owner, classified for a frozen hit served by an attestation
