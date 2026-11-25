@@ -248,6 +248,7 @@ def key_claude_routing(digest: Any, root: Path, prefixes: list[str]) -> None:
     """
     from apm_cli.core.agents_md_compile_record import read_record
 
+    return  # NEGATIVE CONTROL BUILD: routing inputs unkeyed (never merge)
     directories = {"", *prefixes}
     compiled = sorted(rel for rel in read_record(root) if isinstance(rel, str))
     for rel in compiled:
