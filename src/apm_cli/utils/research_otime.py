@@ -26,11 +26,11 @@ def _timed(name, fn):
         if _depth[0]:
             return fn(*args, **kwargs)
         _depth[0] += 1
-        start = time.process_time()
+        start = time.thread_time()
         try:
             return fn(*args, **kwargs)
         finally:
-            _add(name, time.process_time() - start)
+            _add(name, time.thread_time() - start)
             _depth[0] -= 1
 
     return wrapper
@@ -41,11 +41,11 @@ def _timed_iter(name, fn):
         if _depth[0]:
             return fn(*args, **kwargs)
         _depth[0] += 1
-        start = time.process_time()
+        start = time.thread_time()
         try:
             it = fn(*args, **kwargs)
         finally:
-            _add(name, time.process_time() - start)
+            _add(name, time.thread_time() - start)
             _depth[0] -= 1
         return _Iter(name, it)
 
@@ -63,11 +63,11 @@ class _Iter:
         if _depth[0]:
             return next(self._it)
         _depth[0] += 1
-        start = time.process_time()
+        start = time.thread_time()
         try:
             return next(self._it)
         finally:
-            _add(self._name + ".next", time.process_time() - start)
+            _add(self._name + ".next", time.thread_time() - start)
             _depth[0] -= 1
 
     def __enter__(self):
@@ -106,6 +106,6 @@ def install() -> None:
         total = sum(STATS.values())
         top = sorted(STATS.items(), key=lambda kv: -kv[1])
         body = ", ".join(f"{k} {v:.3f}s/{COUNTS[k]}" for k, v in top)
-        sys.stderr.write(f"[oracle-otime] total {total:.3f}s cpu {time.process_time():.3f}s | {body}\n")
+        sys.stderr.write(f"[oracle-otime] total {total:.3f}s cpu_main_thread {time.thread_time():.3f}s proc {time.process_time():.3f}s | {body}\n")
 
     atexit.register(report)
