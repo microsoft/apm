@@ -312,10 +312,12 @@ def test_the_scope_guard_refuses_a_new_project_at_home_and_names_the_fix(
 
     home, work = _home_world(tmp_path, monkeypatch)
 
-    with pytest.raises(click.UsageError, match=r"your project directory.*apm update -g"):
-        ensure_project_root_is_not_user_scope(home, command="update")
+    with pytest.raises(click.UsageError, match=r"your project directory.*apm install -g"):
+        ensure_project_root_is_not_user_scope(home)
     with pytest.raises(click.UsageError, match=r"apm install -g.*apm install --root <dir>"):
         ensure_project_root_is_not_user_scope(home)
+    for command in ("update", "lock", "uninstall"):
+        ensure_project_root_is_not_user_scope(home, command=command)  # never creates a project
     ensure_project_root_is_not_user_scope(work)
     ensure_project_root_is_not_user_scope(home, user_scope=True)
 

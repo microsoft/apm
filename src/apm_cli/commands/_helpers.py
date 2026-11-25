@@ -599,8 +599,10 @@ def ensure_project_root_is_not_user_scope(
     """Guard a project-scope root that is ``$HOME`` (its deploy dirs are the user-scope ones, #4545).
 
     The one owner of the HOME scope guard: ``apm install``, ``update``, ``lock``
-    and ``uninstall`` each call it. A new project at ``$HOME`` (no ``apm.yml`` and
-    no lockfile there yet) is refused; an existing one keeps working with a warning.
+    and ``uninstall`` each call it. ``install`` refuses to create a new project at
+    ``$HOME`` (no ``apm.yml`` and no lockfile there yet); an existing one keeps
+    working with a warning. The other commands only warn, and only when a manifest
+    is found at ``$HOME``; they never create a project.
     """
     from ..core.remediation import HOME_ROOT_PICK_DIR, HOME_ROOT_USER_SCOPE
     from ..core.scope import manifest_file
@@ -611,19 +613,21 @@ def ensure_project_root_is_not_user_scope(
         return
     home = project_root.resolve()
     user_scope_advice = HOME_ROOT_USER_SCOPE.bind(command=command)
-    if manifest_file(home).exists() or (home / LOCKFILE_NAME).exists():
+    has_manifest = manifest_file(home).exists()
+    if has_manifest or (command == "install" and (home / LOCKFILE_NAME).exists()):
         _rich_warning(
             f"Project scope at {home} deploys into your user-scope directories "
             f"(~/.claude, ~/.agents, ...). {user_scope_advice.sentence()}",
             symbol="warning",
         )
         return
-    advice = f"Run it from your project directory, or {user_scope_advice.clause()}"
-    if command == "install":
-        advice += f", or '{HOME_ROOT_PICK_DIR.command}' to {HOME_ROOT_PICK_DIR.fixes_promise}"
+    if command != "install":
+        return
     raise click.UsageError(
         f"Refusing to create a project in your home directory {home}: project scope would "
-        f"deploy into the user-scope directories (~/.claude, ~/.agents, ...). {advice}."
+        "deploy into the user-scope directories (~/.claude, ~/.agents, ...). Run it from your "
+        f"project directory, or {user_scope_advice.clause()}, "
+        f"or '{HOME_ROOT_PICK_DIR.command}' to {HOME_ROOT_PICK_DIR.fixes_promise}."
     )
 
 

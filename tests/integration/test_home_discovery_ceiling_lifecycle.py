@@ -8,6 +8,7 @@ CELL: OP=install SCOPE=project START=under-home STRAY=~/apm.yml|~/.claude
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ pytestmark = [
     pytest.mark.promise("P-OWN-install-command-scope-selection"),
 ]
 
+V0_39_HOME_PROJECT = Path(__file__).resolve().parents[1] / "fixtures" / "home_project_v0_39_0"
 STRAY_HOME_MANIFEST = "name: home\nversion: 1.0.0\ntargets: [claude]\ndependencies:\n  apm: []\n"
 
 
@@ -45,24 +47,38 @@ def _run(engine: tuple[str, ...], args: tuple[str, ...], cwd: Path, env: dict[st
     return ApmLifecycleRunner(engine).run(args, scenario_id="home-ceiling", cwd=cwd, env=env)
 
 
+# APM's own per-user state (lifecycle lock files), not project data.
+_APM_STATE = (".apm/", ".apm-local/", ".cache/")
+
+
+def _home_tree(home: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(home).as_posix(): path.read_bytes()
+        for path in sorted(home.rglob("*"))
+        if path.is_file() and not path.relative_to(home).as_posix().startswith(_APM_STATE)
+    }
+
+
 def test_a_project_install_under_home_ignores_a_stray_home_manifest(
     tmp_path: Path, apm_engine_command: tuple[str, ...]
 ) -> None:
     isolated, environment, _ = _world(tmp_path)
     home_manifest = isolated.home / "apm.yml"
     home_manifest.write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
-    before = home_manifest.read_bytes()
     project = isolated.home / "work" / "newproj"
     (project / ".claude").mkdir(parents=True)
+    before = _home_tree(isolated.home)
 
     result = _run(apm_engine_command, ("install", "../../src/pkgs/a"), project, environment)
 
     assert result.returncode == 0, _describe(result)
     assert (project / "apm.yml").is_file(), _describe(result)
     assert (project / ".claude" / "skills" / "a-skill").is_dir(), _describe(result)
-    assert home_manifest.read_bytes() == before, _describe(result)
-    assert not (isolated.home / "apm.lock.yaml").exists(), _describe(result)
-    assert not (isolated.home / ".claude" / "skills").exists(), _describe(result)
+    after = _home_tree(isolated.home)
+    project_prefix = "work/newproj/"
+    assert {k: v for k, v in after.items() if not k.startswith(project_prefix)} == {
+        k: v for k, v in before.items() if not k.startswith(project_prefix)
+    }, _describe(result)
 
 
 def test_a_bare_install_in_an_empty_folder_under_home_reports_no_manifest(
@@ -72,16 +88,13 @@ def test_a_bare_install_in_an_empty_folder_under_home_reports_no_manifest(
     (isolated.home / "apm.yml").write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
     fresh = isolated.home / "work" / "fresh"
     fresh.mkdir(parents=True)
-    home_before = (isolated.home / "apm.yml").read_bytes()
+    before = _home_tree(isolated.home)
 
     result = _run(apm_engine_command, ("install",), fresh, environment)
 
     assert result.returncode == 1, _describe(result)
     assert "No apm.yml found" in result.stdout + result.stderr, _describe(result)
-    assert (isolated.home / "apm.yml").read_bytes() == home_before, _describe(result)
-    assert not (fresh / "apm.yml").exists(), _describe(result)
-    assert not (isolated.home / ".claude").exists(), _describe(result)
-    assert not (isolated.home / "apm.lock.yaml").exists(), _describe(result)
+    assert _home_tree(isolated.home) == before, _describe(result)
 
 
 def test_a_project_install_after_a_global_install_leaves_home_alone(
@@ -93,35 +106,27 @@ def test_a_project_install_after_a_global_install_leaves_home_alone(
     (isolated.home / ".claude").mkdir()
     home_manifest = isolated.home / "apm.yml"
     home_manifest.write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
-    home_before = home_manifest.read_bytes()
 
     global_result = _run(apm_engine_command, ("install", "-g", str(package)), work, environment)
     assert global_result.returncode == 0, _describe(global_result)
-    user_manifest = isolated.home / ".apm" / "apm.yml"
-    user_before = user_manifest.read_bytes() if user_manifest.exists() else None
-
     project = work / "newproj"
     (project / ".claude").mkdir(parents=True)
+    user_state = isolated.home / ".apm"
+    before = _home_tree(isolated.home)
+    user_before = {p: p.read_bytes() for p in user_state.rglob("*") if p.is_file()}
+
     result = _run(apm_engine_command, ("install", str(package)), project, environment)
 
     assert result.returncode == 0, _describe(result)
     assert (project / "apm.yml").is_file(), _describe(result)
-    assert not (isolated.home / "apm.lock.yaml").exists(), _describe(result)
-    assert home_manifest.read_bytes() == home_before, _describe(result)
-    after = user_manifest.read_bytes() if user_manifest.exists() else None
-    assert after == user_before, _describe(result)
-
-
-# APM's own per-user state (lifecycle lock files), not project data.
-_APM_STATE = (".apm/", ".apm-local/", ".cache/")
-
-
-def _home_tree(home: Path) -> dict[str, bytes]:
-    return {
-        path.relative_to(home).as_posix(): path.read_bytes()
-        for path in sorted(home.rglob("*"))
-        if path.is_file() and not path.relative_to(home).as_posix().startswith(_APM_STATE)
-    }
+    project_prefix = "work/newproj/"
+    after = _home_tree(isolated.home)
+    assert {k: v for k, v in after.items() if not k.startswith(project_prefix)} == {
+        k: v for k, v in before.items() if not k.startswith(project_prefix)
+    }, _describe(result)
+    assert {p: p.read_bytes() for p in user_state.rglob("*") if p.is_file()}.keys() >= (
+        user_before.keys()
+    ), _describe(result)
 
 
 def test_a_new_project_in_the_home_directory_is_refused_and_names_the_fix(
@@ -184,8 +189,22 @@ def test_uninstall_in_an_existing_home_project_warns_and_proceeds(
     assert "apm uninstall -g" in result.stdout + result.stderr, _describe(result)
 
 
-@pytest.mark.parametrize("command", ["update", "lock", "uninstall"])
-def test_a_new_project_command_in_the_home_directory_is_refused_and_writes_nothing(
+def test_update_from_a_home_without_a_manifest_still_forwards_to_self_update(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    isolated, environment, _ = _world(tmp_path)
+    before = _home_tree(isolated.home)
+
+    result = _run(apm_engine_command, ("update", "--check"), isolated.home, environment)
+
+    output = result.stdout + result.stderr
+    assert "apm self-update" in output, _describe(result)
+    assert "Refusing" not in output, _describe(result)
+    assert _home_tree(isolated.home) == before, _describe(result)
+
+
+@pytest.mark.parametrize("command", ["lock", "uninstall"])
+def test_lock_and_uninstall_in_a_home_without_a_manifest_never_create_a_project(
     tmp_path: Path, apm_engine_command: tuple[str, ...], command: str
 ) -> None:
     isolated, environment, package = _world(tmp_path)
@@ -194,9 +213,9 @@ def test_a_new_project_command_in_the_home_directory_is_refused_and_writes_nothi
 
     result = _run(apm_engine_command, args, isolated.home, environment)
 
-    output = " ".join((result.stdout + result.stderr).split())
-    assert result.returncode != 0, _describe(result)
-    assert f"apm {command} -g" in output, _describe(result)
+    output = result.stdout + result.stderr
+    assert "Refusing" not in output, _describe(result)
+    assert "user-scope directories" not in output, _describe(result)
     assert _home_tree(isolated.home) == before, _describe(result)
 
 
@@ -236,13 +255,11 @@ def test_a_home_project_never_reads_or_writes_a_manifest_above_home(
 def test_a_home_project_with_a_manifest_and_a_lockfile_reinstalls_with_one_warning(
     tmp_path: Path, apm_engine_command: tuple[str, ...]
 ) -> None:
-    isolated, environment, package = _world(tmp_path)
-    (isolated.home / "apm.yml").write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
-    seed = _run(apm_engine_command, ("install", str(package)), isolated.home, environment)
-    assert seed.returncode == 0, _describe(seed)
-    assert (isolated.home / "apm.lock.yaml").is_file(), _describe(seed)
+    isolated, environment, _ = _world(tmp_path)
+    shutil.copytree(V0_39_HOME_PROJECT, isolated.home, dirs_exist_ok=True)
     deployed = isolated.home / ".claude" / "skills" / "a-skill" / "SKILL.md"
-    before = deployed.read_bytes()
+    manifest, lock = isolated.home / "apm.yml", isolated.home / "apm.lock.yaml"
+    before = (deployed.read_bytes(), manifest.read_bytes())
 
     result = _run(apm_engine_command, ("install",), isolated.home, environment)
 
@@ -250,4 +267,5 @@ def test_a_home_project_with_a_manifest_and_a_lockfile_reinstalls_with_one_warni
     assert result.returncode == 0, _describe(result)
     assert output.count("user-scope directories") == 1, _describe(result)
     assert "apm install -g" in output, _describe(result)
-    assert deployed.read_bytes() == before, _describe(result)
+    assert (deployed.read_bytes(), manifest.read_bytes()) == before, _describe(result)
+    assert lock.is_file(), _describe(result)

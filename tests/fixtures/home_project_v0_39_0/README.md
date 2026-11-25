@@ -1,0 +1,1 @@
+A $HOME project (#4545) as apm 0.39.0 left it. Generated once with `uvx --from apm-cli==0.39.0 apm install ./src/pkgs/a --no-policy` in a scratch HOME holding `apm.yml` (`dependencies.apm: []`) and `src/pkgs/a`.

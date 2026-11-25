@@ -45,10 +45,20 @@ def is_home_or_above(directory: Path) -> bool:
     """Whether *directory* is HOME or one of its ancestors (``/``, ``/home``, ...).
 
     The single HOME ceiling predicate: a marker there (a dotfiles repo, a stray
-    manifest) is not a project.
+    manifest) is not a project. Identity-based: HOME's chain is stat'ed once and
+    *directory* once.
     """
     home = resolved_home()
-    return home is not None and any(_same_directory(directory, d) for d in (home, *home.parents))
+    if home is None:
+        return False
+    if directory == home or directory in home.parents:
+        return True
+    try:
+        wanted = os.stat(directory)
+        chain = {(info.st_dev, info.st_ino) for info in map(os.stat, (home, *home.parents))}
+    except OSError:
+        return False
+    return (wanted.st_dev, wanted.st_ino) in chain
 
 
 def executable_exclusion_root() -> Path | None:
