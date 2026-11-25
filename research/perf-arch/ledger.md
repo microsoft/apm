@@ -355,3 +355,4 @@
 07:56 | VP: doc lane CLOSED; relayed QL ledger format + rules to SoL/Bets; Bets +target L5 #5418 branch (../ lockfile replay) | checkpoints 08:30/09:00/09:20/10:15; QL interim 09:30 final 10:30 | none
 07:56 | QL single-writer correction relayed: finds -> QL inbox.db post (kind bug), no plan-file edits | checkpoints 08:30 | none
 08:02 | Bets clean combo VERIFIED (digest SAME vs plain main; combined 0.822 -> ~4.4 s at 9V74 on the 5.3 s no-c2 base); doc addendum
+08:07 | Bets audit table VERIFIED: all ceiling heads tree-50 672/672 identical (path+mode+bytes); monorepo-4 1-line mcp_omissions digest path-dependence (control pending); doc caveat upgraded
