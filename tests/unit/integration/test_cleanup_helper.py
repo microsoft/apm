@@ -988,3 +988,52 @@ def test_cowork_target_held_once_then_released_is_removed(tmp_path, diagnostics)
     assert len(calls) == 2
     assert not skill_md.exists()
     assert result.deleted == ["cowork://skills/my-skill/SKILL.md"]
+
+
+def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed(
+    tmp_path, diagnostics
+):
+    """A cowork skill dir relinked outside the cowork root while a file is held loses nothing."""
+    cowork_root = tmp_path / "cowork-skills"
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    victim = tmp_path / "outside-victim" / "SKILL.md"
+    victim.parent.mkdir()
+    victim.write_text("# My Skill\n", encoding="ascii")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    real_unlink = Path.unlink
+    calls = []
+
+    def held_then_relinked(path, *args, **kwargs):
+        if path.name != "SKILL.md":
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        skill_md.parent.rename(cowork_root / "moved-away")
+        skill_md.parent.symlink_to(victim.parent, target_is_directory=True)
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    with (
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ),
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_then_relinked),
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(cowork_root, deploy_root=project_root),
+        )
+
+    assert len(calls) == 1
+    assert victim.read_text(encoding="ascii") == "# My Skill\n"
+    assert result.deleted == []

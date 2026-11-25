@@ -1665,7 +1665,7 @@ def remove_stale_deployed_files(
 
                 # Never follow a final symlink to the file it points at.
                 stale_target = cowork_locator(stale_path, _cowork_root_cached)
-                cowork_path = True
+                stale_cowork_root = _cowork_root_cached
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -1695,7 +1695,7 @@ def remove_stale_deployed_files(
                 result.reject(stale_path, REJECTED_UNSAFE_PATH)
                 continue
             stale_target = project_root / stale_path
-            cowork_path = False
+            stale_cowork_root = None
 
         if _stale_target_absent(stale_target, allow_final_symlink=allow_final_symlink):
             # File already gone -- treat as cleaned (no-op success).
@@ -1779,8 +1779,8 @@ def remove_stale_deployed_files(
             dep_key=dep_key,
             evidence=evidence,
             recorded_hashes=recorded_hashes,
-            path_gate=None
-            if cowork_path
+            path_gate=partial(_cowork_gate_passes, stale_path, stale_cowork_root)
+            if stale_cowork_root is not None
             else partial(
                 _stale_gate_passes,
                 stale_path,
@@ -1914,6 +1914,17 @@ def remove_synced_files(
     )
     diagnostics.render_summary()
     return result
+
+
+def _cowork_gate_passes(stale_path: str, cowork_root: Path) -> bool:
+    """Whether a cowork entry still resolves inside its (originally resolved) cowork root."""
+    from .copilot_cowork_paths import cowork_locator
+
+    try:
+        cowork_locator(stale_path, cowork_root, reject_linked_ancestors=True)
+    except Exception:
+        return False
+    return True
 
 
 def _recheck_stale_gates(
