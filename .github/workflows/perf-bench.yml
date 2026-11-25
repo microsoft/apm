@@ -177,10 +177,13 @@ jobs:
       env:
         NEW_APM: ${{ github.workspace }}/new/${{ needs.request.outputs.venv_apm }}
         ORACLE_FIXTURE: ${{ matrix.fixture }}
+        VENV_APM_REL: ${{ needs.request.outputs.venv_apm }}
         ORACLE_MODE: ${{ matrix.mode }}
       run: |
         set +e
-        if [[ "$ORACLE_MODE" == census-* ]]; then
+        if [[ "$ORACLE_MODE" == lintprof ]]; then
+          LINT_ROOT="$GITHUB_WORKSPACE/new" "$GITHUB_WORKSPACE/new/$(dirname "$VENV_APM_REL")/python" .github/probe/lint_profile.py 2>&1 | tee oracle.log | tail -120
+        elif [[ "$ORACLE_MODE" == census-* ]]; then
           CENSUS_JOURNEY="${ORACLE_MODE#census-}" uv run --frozen python .github/probe/write_census.py 2>&1 | tee oracle.log | tail -60
         else
           uv run --frozen python .github/probe/mutation_oracle.py 2>&1 | tee oracle.log | grep -E "^ORACLE" | grep -v "^ORACLE same" | tail -300
