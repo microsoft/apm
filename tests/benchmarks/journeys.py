@@ -58,6 +58,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests.benchmarks import output_oracle  # noqa: E402
 from tests.fixtures.perf import (  # noqa: E402
     MONOREPO_RECIPES,
     REAL_PACKAGES,
@@ -798,6 +799,7 @@ class Sample:
     routes: dict = field(default_factory=dict)
     git_verbs: dict = field(default_factory=dict)
     fs: dict = field(default_factory=dict)
+    output: dict = field(default_factory=dict)
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
@@ -829,7 +831,30 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
     sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
+    if returncode == 0:
+        sample.output = _deployed_output(ctx, journey)
     return sample, output
+
+
+_USER_TARGETS = (".github", ".claude", ".cursor", ".windsurf", ".kiro", ".gemini", ".codex")
+_USER_TARGETS += (".opencode", ".copilot")
+
+
+def _deployed_output(ctx: Context, journey: Journey) -> dict:
+    """What the journey left behind (untimed): see ``output_oracle``."""
+    work = ctx.work.parents[1]
+    if journey.name in _GLOBAL:
+        home = Path(ctx.world.env["HOME"])
+        return output_oracle.capture(
+            [home / name for name in _USER_TARGETS], work, lock_dirs=[ctx.world.apm_home]
+        )
+    return output_oracle.capture(ctx.roots(), work)
+
+
+def _sample_record(sample: Sample) -> dict:
+    record = asdict(sample)
+    record["output"] = {k: v for k, v in sample.output.items() if k != "manifest"}
+    return record
 
 
 def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
@@ -972,7 +997,8 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "routes": ok[-1].routes if ok else {},
         "git_verbs": ok[-1].git_verbs if ok else {},
         "fs": ok[-1].fs if ok else {},
-        "samples": [asdict(s) for s in samples],
+        "output": ok[-1].output if ok else {},
+        "samples": [_sample_record(s) for s in samples],
         "error": error,
     }
     if args.profile and not error:
