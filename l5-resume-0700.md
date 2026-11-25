@@ -29,3 +29,8 @@
 - VP rulings: warm >1.010 with band crossing 1.0 -> disclose and ship; band fully >1.0 -> stop. H8 by 05:00 or next window.
 - Backlog row posted on #5384 (dev-tree identity cost).
 - W3d N1 on notice flag: done structurally in ddd81de1.
+
+## 02:32 CET
+- #5383 H8 SIGNED ddd81de1; train-ready rows posted (desk, OPS, VP). Warm +1.4-1.9% disclosed; writer shave row in #5384.
+- #5403 at f068b670: W3d ACCEPT, CI green, Copilot clean; asked QL for H8 (PR FROZEN: decline further threads unless security/data loss).
+- Follow-ups: W3d #5403 N1 (set-aside anchor depth, fail-safe); W3d #5383 N1-N3 (EMITTED growth, [x] prefix, subdir cwd lstat); dev-tree identity cache (#5384); delete wip/l5-bench-noattest after the train.
