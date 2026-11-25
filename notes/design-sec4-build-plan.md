@@ -89,6 +89,18 @@ Rules for every car:
 - **Differential:** everything from Cars 1-3, plus class(manifest paths) == today's classification on L/W/M (MD4), and the MD5 whole-package fallback cells.
 - **Owner suggestion:** PERF-ARCH Lead (architecture), with SoL (materialize) and PERF-BETS (integrate consumption).
 
+## Owners (VP-accepted 03:10; work starts after the doc lands WED 12:00 CET)
+
+| car | owner | reviewers / notes |
+|---|---|---|
+| Car 1 (A plan-once) | E2 | W3d implementation row |
+| Car 2 (M2 materialize-once) | E1 | W3d MS1-MS7 row |
+| Car 3 (C containment by construction) | PERF-BETS | E1 reviews W; W3d K/IR rows |
+| Car 4 (B bulk skills) | DROPPED (VP-accepted) | folded into Car 5 |
+| Car 5 (MD manifest-driven deploy) | PERF-ARCH Lead (architect) + L5 (builder, after #5418) | W3d MD1-MD5 |
+
+Precondition: W3d rules gaps G1-G4 (section 3.2) before Cars 3 and 5 start.
+
 ## Order and dependencies
 
 ```
