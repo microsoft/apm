@@ -11,6 +11,7 @@ import os
 _ORIG_SCANDIR = os.scandir
 _ORIG_LISTDIR = os.listdir
 _SCANS: dict[str, list] = {}
+STATS = {"scan_hit": 0, "scan_miss": 0, "list_hit": 0, "list_miss": 0, "walk_hit": 0, "walk_miss": 0, "glob_hit": 0, "glob_miss": 0}
 _LISTS: dict[str, list] = {}
 ACTIVE = False
 
@@ -52,6 +53,7 @@ def _scandir(path="."):
     if key is None:
         return _ORIG_SCANDIR(path)
     entries = _SCANS.get(key)
+    STATS["scan_hit" if entries is not None else "scan_miss"] += 1
     if entries is None:
         with _ORIG_SCANDIR(path) as it:
             entries = _SCANS[key] = list(it)
@@ -63,12 +65,17 @@ def _listdir(path="."):
     if key is None:
         return _ORIG_LISTDIR(path)
     names = _LISTS.get(key)
+    STATS["list_hit" if names is not None else "list_miss"] += 1
     if names is None:
         names = _LISTS[key] = _ORIG_LISTDIR(path)
     return list(names)
 
 
 def install() -> None:
+    import atexit
+    import sys
+
+    atexit.register(lambda: sys.stderr.write(f"[oracle-owalk2] {STATS}\n"))
     os.scandir = _scandir
     os.listdir = _listdir
     install_walk2()
@@ -91,6 +98,7 @@ def _walk(top, topdown=True, onerror=None, followlinks=False):
         return
     form = os.fspath(top)
     tree = _TREES.get(form)
+    STATS["walk_hit" if tree is not None else "walk_miss"] += 1
     if tree is None:
         tree = {root: (dirs, files) for root, dirs, files in _ORIG_WALK(form, True, onerror, False)}
         _TREES[form] = tree
@@ -113,6 +121,7 @@ def _glob_cached(orig, kind):
             return orig(self, pattern, *args, **kwargs)
         ck = (kind, str(self), pattern)
         found = _GLOBS.get(ck)
+        STATS["glob_hit" if found is not None else "glob_miss"] += 1
         if found is None:
             found = _GLOBS[ck] = list(orig(self, pattern))
         return iter(found)
