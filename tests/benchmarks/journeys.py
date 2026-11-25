@@ -778,6 +778,10 @@ def _setup_replay(ctx: Context) -> None:
     ctx.replay_supported = False
     for root in ctx.roots():
         first = _replay_outcome(ctx.checked(["install"], root).stderr)
+        if first and "no record (" in first and ctx.fixture.stats.get("root_agents_md"):
+            # The CLI declines the record for this project by design (#5434): every
+            # later no-op takes the full path, which is what the timed samples show.
+            continue
         # The first unchanged re-install must record (a CLI without the record prints nothing).
         if first and "recorded" not in first:
             raise RuntimeError(
