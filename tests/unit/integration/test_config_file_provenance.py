@@ -1399,6 +1399,34 @@ def test_a_retried_save_keeps_a_retirement_of_a_record_it_already_published(
     assert config_file_origin(second_dir) is Origin.CREATED
 
 
+@pytest.mark.parametrize("dirs", [("a",), ("a", "b")], ids=["index-write-fails", "next-file-fails"])
+def test_a_retried_save_lists_a_record_file_it_published_before_failing(
+    tmp_path, apm_home, dirs: tuple[str, ...]
+) -> None:
+    """#5444 review: a new record file lands, then the next record file or the index write
+    fails. The retry still lists it, so losing that file later fails closed and a
+    preexisting user file is kept instead of reading as unrecorded."""
+    from apm_cli.integration.config_file_provenance import _store_path
+
+    _apm_writes(tmp_path / "seed" / ".mcp.json", _WITH_ENTRY)  # the index exists
+    configs = sorted(
+        (_user_skeleton(tmp_path / name / ".mcp.json") for name in dirs), key=_shard_of
+    )
+    (writer,) = _writers()[:1]
+    for config in configs:
+        writer.files[config_file_key(config)] = {"origin": "preexisting", "hash": _sha(_SKELETON)}
+    with _killed_at_write(apm_home, after=1), pytest.raises(OSError, match="killed"):
+        writer.save()  # the first new record file landed; nothing after it did
+    writer.save()
+
+    listed = json.loads(_store_path().read_text(encoding="utf-8"))["shards"]
+    assert {_shard_of(config) for config in configs} <= set(listed), listed
+    users = configs[0]
+    _holding(apm_home, users).unlink()
+    assert _apm_empties(users, root=users.parent) is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
+
+
 def _shard_of(config: Path) -> str:
     from apm_cli.integration.config_file_provenance import _shard_id
 

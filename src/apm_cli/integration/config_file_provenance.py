@@ -184,6 +184,9 @@ class _Store:
     base: dict[str, tuple[dict[str, Any], Any]] = field(default_factory=dict)
     # Records both this store and another writer changed; the save kept the protective one.
     conflicts: list[str] = field(default_factory=list)
+    # Record files this store published that its index write has not listed yet. Kept
+    # apart from ``base``: a retry after a failed save re-merges and lists them (#5444).
+    unlisted: set[str] = field(default_factory=set)
     saving: bool = False
 
     def _shard_path(self, shard: str) -> Path:
@@ -476,7 +479,7 @@ class _Store:
             return
         # Only record files this writer changed are saved, each re-read and merged
         # first: one extra read per changed record file, under the lock (#5270).
-        changed = self._changed_shards()
+        changed = self._changed_shards() | self.unlisted
         if not self.indexed and changed:
             self._start_index()
         for shard in sorted(changed):
@@ -488,9 +491,11 @@ class _Store:
         # is removed, so a kill never leaves a listed file missing (#5037).
         for shard in sorted(written):
             self._save_shard(shard, sorted(grouped[shard]))
+            self.unlisted.add(shard)
             self._rebase_shard(shard)
         if self.indexed:
             self._save_listing(removed, written)
+        self.unlisted.clear()
         for shard in sorted(removed):
             self._save_shard(shard, [])
             self._rebase_shard(shard)
