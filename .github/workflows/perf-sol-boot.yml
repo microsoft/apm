@@ -16,9 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, product: bf1e3c8a4db5c3f92bde7d7b68c89a60d39a120d}
-          - {os: windows-2025, product: bf1e3c8a4db5c3f92bde7d7b68c89a60d39a120d}
-          - {os: macos-15, product: bf1e3c8a4db5c3f92bde7d7b68c89a60d39a120d}
+          - {os: ubuntu-24.04, product: ea4fe51cecd13ebf0817b72751288ab707f09cfd}
+          - {os: windows-2025, product: ea4fe51cecd13ebf0817b72751288ab707f09cfd}
+          - {os: macos-15, product: ea4fe51cecd13ebf0817b72751288ab707f09cfd}
     defaults:
       run:
         shell: bash
