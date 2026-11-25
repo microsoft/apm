@@ -257,7 +257,7 @@ _APM_HOME_OWNER = "src/apm_cli/core/scope.py"
 
 
 _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
-    "src/apm_cli/config.py": "CONFIG_DIR = os.fspath(get_apm_home())",
+    "src/apm_cli/config.py": "def get_config_dir() -> str:",
     "src/apm_cli/core/lifecycle_scripts.py": "return get_manifest_path(InstallScope.USER)",
     "src/apm_cli/core/script_trust.py": 'return get_apm_home() / "scripts-trust.json"',
     "src/apm_cli/core/script_executors.py": 'return get_apm_home() / "logs" / "scripts.log"',
@@ -1522,6 +1522,25 @@ def _check_apm_home_resolution(provider: FactsProvider) -> Iterable[Violation]:
                         column=getattr(node, "col_offset", 0) + 1,
                     )
                 )
+        for stmt in index.module_children():
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for node in ast.walk(stmt):
+                if isinstance(node, ast.Call):
+                    func = node.func
+                    is_call = (isinstance(func, ast.Name) and func.id == "get_apm_home") or (
+                        isinstance(func, ast.Attribute) and func.attr == "get_apm_home"
+                    )
+                    if is_call:
+                        findings.append(
+                            violation(
+                                rule_id,
+                                path,
+                                "get_apm_home must not be called at module level",
+                                line=getattr(node, "lineno", 1),
+                                column=getattr(node, "col_offset", 0) + 1,
+                            )
+                        )
     return findings
 
 

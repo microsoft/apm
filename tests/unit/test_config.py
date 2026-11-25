@@ -59,12 +59,11 @@ print(json.dumps({"dir": config.CONFIG_DIR, "file": config.CONFIG_FILE}))
 
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
-    """Point CONFIG_DIR / CONFIG_FILE to a temp directory and clear cache."""
+    """Point APM_HOME to a temp directory and clear cache."""
     config_dir = tmp_path / ".apm"
     config_file = config_dir / "config.json"
-    monkeypatch.setattr(config_mod, "CONFIG_DIR", str(config_dir))
-    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(config_mod, "_config_cache", None)
+    monkeypatch.setenv("APM_HOME", str(config_dir))
+    monkeypatch.setattr(config_mod, "_config_cache", {})
     return config_file
 
 
@@ -340,3 +339,82 @@ class TestMcpRegistryUrlConfig:
         with pytest.raises(ValueError) as raised:
             config_mod.set_mcp_registry_url(f"https://corp.mcp.example.com:{secret}")
         assert secret not in str(raised.value)
+
+
+def test_changing_apm_home_after_import_uses_new_location(tmp_path, monkeypatch):
+    """Reading and writing config after changing APM_HOME uses the new directory (#5420)."""
+    dir1 = tmp_path / "home1"
+    dir2 = tmp_path / "home2"
+    dir1.mkdir()
+    dir2.mkdir()
+
+    monkeypatch.setenv("APM_HOME", str(dir1))
+    config_mod._invalidate_config_cache()
+    config_mod.update_config({"test_key": "val1"})
+    assert (dir1 / "config.json").is_file()
+    assert not (dir2 / "config.json").exists()
+    assert config_mod.get_config()["test_key"] == "val1"
+    assert str(dir1) == config_mod.CONFIG_DIR
+    assert str(dir1 / "config.json") == config_mod.CONFIG_FILE
+
+    # Now change APM_HOME after import without monkeypatching CONFIG_DIR
+    monkeypatch.setenv("APM_HOME", str(dir2))
+    config_mod.update_config({"test_key": "val2"})
+    assert (dir2 / "config.json").is_file()
+    assert config_mod.get_config()["test_key"] == "val2"
+    assert str(dir2) == config_mod.CONFIG_DIR
+    assert str(dir2 / "config.json") == config_mod.CONFIG_FILE
+
+
+def test_cli_run_with_pre_set_apm_home_resolves_same_paths(tmp_path):
+    """CLI run with APM_HOME set before start resolves expected config.json and approvals paths (#5420)."""
+    apm_home = tmp_path / "cli_apm_home"
+    apm_home.mkdir()
+    script = """\
+import json
+import os
+from apm_cli import config
+from apm_cli.security.executables import _legacy_approvals_path
+
+config.ensure_config_exists()
+data = {
+    "config_dir": config.CONFIG_DIR,
+    "config_file": config.CONFIG_FILE,
+    "approvals_path": str(_legacy_approvals_path()),
+}
+print(json.dumps(data))
+"""
+    repo_root = Path(__file__).resolve().parents[2]
+    pythonpath = str(repo_root / "src")
+    if "PYTHONPATH" in os.environ:
+        pythonpath = f"{pythonpath}{os.pathsep}{os.environ['PYTHONPATH']}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        env={**os.environ, "APM_HOME": str(apm_home), "PYTHONPATH": pythonpath},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    data = json.loads(result.stdout)
+    assert data["config_dir"] == str(apm_home)
+    assert data["config_file"] == str(apm_home / "config.json")
+    assert data["approvals_path"] == str(apm_home / "approvals.yml")
+
+
+def test_config_cache_keyed_by_resolved_path(tmp_path, monkeypatch):
+    """Config cache does not return a value read under a previous APM home (#5420)."""
+    dir1 = tmp_path / "cache_home1"
+    dir2 = tmp_path / "cache_home2"
+    dir1.mkdir()
+    dir2.mkdir()
+    (dir1 / "config.json").write_text(json.dumps({"env_name": "first"}), encoding="utf-8")
+    (dir2 / "config.json").write_text(json.dumps({"env_name": "second"}), encoding="utf-8")
+
+    monkeypatch.setenv("APM_HOME", str(dir1))
+    config_mod._invalidate_config_cache()
+    assert config_mod.get_config()["env_name"] == "first"
+
+    # Switch to dir2 WITHOUT invalidating the cache explicitly
+    monkeypatch.setenv("APM_HOME", str(dir2))
+    assert config_mod.get_config()["env_name"] == "second"

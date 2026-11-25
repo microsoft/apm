@@ -14,14 +14,30 @@ _ENV_ALLOW_PROTOCOL_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
 _ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
 _ENV_GITHUB_AUTH_FIRST = "APM_GITHUB_AUTH_FIRST"
 
-CONFIG_DIR = os.fspath(get_apm_home())
-CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 _INSTALL_TARGET_KEY = "install_target"
 _SELF_UPDATE_CHANNEL_KEY = "self_update_channel"
 _SELF_UPDATE_INSTALL_DIR_KEY = "self_update_install_dir"
 _SELF_UPDATE_CHANNELS = {"stable", "prerelease"}
 
-_config_cache: dict | None = None
+_config_cache: dict[str, dict] = {}
+
+
+def get_config_dir() -> str:
+    """Return the resolved APM configuration directory path."""
+    return os.fspath(get_apm_home())
+
+
+def get_config_file() -> str:
+    """Return the resolved path to config.json."""
+    return os.path.join(get_config_dir(), "config.json")
+
+
+def __getattr__(name: str) -> str:
+    if name == "CONFIG_DIR":
+        return get_config_dir()
+    if name == "CONFIG_FILE":
+        return get_config_file()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def ensure_config_exists():
@@ -32,17 +48,19 @@ def ensure_config_exists():
     shared system from reading persisted tokens or transport preferences.
     Both restrictions are silently ignored on Windows.
     """
-    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
+    config_dir = get_config_dir()
+    config_file = get_config_file()
+    os.makedirs(config_dir, mode=0o700, exist_ok=True)
 
-    if not os.path.exists(CONFIG_FILE):
+    if not os.path.exists(config_file):
         try:
-            fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            fd = os.open(config_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"default_client": "copilot"}, f)
         except FileExistsError:
             pass
         with contextlib.suppress(NotImplementedError, OSError):
-            os.chmod(CONFIG_FILE, 0o600)
+            os.chmod(config_file, 0o600)
 
 
 _CONFIG_CREATION_SUPPRESSED = False
@@ -84,16 +102,24 @@ def get_config(*, create: bool | None = None):
     return get_config_if_exists()
 
 
+def _get_cache_dict() -> dict[str, dict]:
+    global _config_cache
+    if not isinstance(_config_cache, dict):
+        _config_cache = {}
+    return _config_cache
+
+
 def get_config_if_exists() -> dict:
     """Read the existing configuration without creating a user config file."""
-    global _config_cache
-    if _config_cache is not None:
-        return _config_cache
-    if not os.path.isfile(CONFIG_FILE):
+    config_file = get_config_file()
+    cache = _get_cache_dict()
+    if config_file in cache:
+        return cache[config_file]
+    if not os.path.isfile(config_file):
         return {}
-    with open(CONFIG_FILE, encoding="utf-8") as f:
-        _config_cache = json.load(f)
-    return _config_cache
+    with open(config_file, encoding="utf-8") as f:
+        cache[config_file] = json.load(f)
+    return cache[config_file]
 
 
 def _resolve_create_config(
@@ -112,7 +138,10 @@ def _resolve_create_config(
 def _invalidate_config_cache():
     """Invalidate the config cache (called after writes)."""
     global _config_cache
-    _config_cache = None
+    if isinstance(_config_cache, dict):
+        _config_cache.clear()
+    else:
+        _config_cache = {}
 
 
 def update_config(updates):
@@ -126,7 +155,8 @@ def update_config(updates):
     config = get_config()
     config.update(updates)
 
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+    config_file = get_config_file()
+    with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
     _invalidate_config_cache()
 
@@ -218,7 +248,8 @@ def _unset_config_key(key: str) -> None:
     config = get_config()
     if key in config:
         del config[key]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        config_file = get_config_file()
+        with open(config_file, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
     _invalidate_config_cache()
 
@@ -1007,7 +1038,9 @@ def get_mcp_registry_url(*, create_config: bool = False) -> str | None:
     say so. Passing ``create_config=True`` preserves the legacy bootstrapping
     behavior for callers that intentionally materialise user config.
     """
-    if _config_cache is None and not create_config and not os.path.exists(CONFIG_FILE):
+    config_file = get_config_file()
+    cache = _get_cache_dict()
+    if config_file not in cache and not create_config and not os.path.exists(config_file):
         return None
     return get_config(create=create_config).get(_MCP_REGISTRY_URL_KEY)
 
