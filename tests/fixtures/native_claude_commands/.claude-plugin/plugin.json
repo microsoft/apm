@@ -1,0 +1,7 @@
+{
+  "name": "apm-command-context",
+  "version": "1.0.0",
+  "description": "Owned fixture for native Claude command context",
+  "author": {"name": "APM"},
+  "commands": ["./selected/status.md"]
+}
