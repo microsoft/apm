@@ -40,10 +40,20 @@ pytestmark = [
 _APP = Path("apps") / "app"
 
 
-def _skill_package(root: Path, name: str, deps: tuple[str, ...] = ()) -> None:
+_MCP = (
+    "  mcp:\n    - name: echo-srv\n      registry: false\n"
+    "      transport: stdio\n      command: echo\n"
+)
+
+
+def _skill_package(root: Path, name: str, deps: tuple[str, ...] = (), *, mcp: bool = False) -> None:
     manifest = f"name: {name}\nversion: 1.0.0\n"
+    if deps or mcp:
+        manifest += "dependencies:\n"
     if deps:
-        manifest += "dependencies:\n  apm:\n" + "".join(f"    - {dep}\n" for dep in deps)
+        manifest += "  apm:\n" + "".join(f"    - {dep}\n" for dep in deps)
+    if mcp:
+        manifest += _MCP
     write(root / "apm.yml", manifest)
     write(
         root / f".apm/skills/{name}-skill/SKILL.md",
@@ -51,10 +61,15 @@ def _skill_package(root: Path, name: str, deps: tuple[str, ...] = ()) -> None:
     )
 
 
-def _monorepo(world: ReplayWorld, root: Path, *, outside: Path | None = None) -> Path:
-    """The issue's layout: app -> ../../packages/lib-a -> ../lib-b -> ../lib-c (+ outside)."""
+def _monorepo(
+    world: ReplayWorld, root: Path, *, outside: Path | None = None, mcp: bool = False
+) -> Path:
+    """The issue's layout: app -> ../../packages/lib-a -> ../lib-b -> ../lib-c (+ outside).
+
+    With *mcp*, lib-b (a transitive sibling) declares a self-defined MCP server.
+    """
     _skill_package(root / "packages" / "lib-c", "lib-c")
-    _skill_package(root / "packages" / "lib-b", "lib-b", ("../lib-c",))
+    _skill_package(root / "packages" / "lib-b", "lib-b", ("../lib-c",), mcp=mcp)
     lib_a_deps = ("../lib-b",) if outside is None else ("../lib-b", outside.as_posix())
     _skill_package(root / "packages" / "lib-a", "lib-a", lib_a_deps)
     app = root / _APP
@@ -93,7 +108,7 @@ def _slots(app: Path) -> set[str]:
 def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_path: Path) -> None:
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     repo_a = world.sources / "A"
-    app_a = _monorepo(world, repo_a)
+    app_a = _monorepo(world, repo_a, mcp=True)
     world.git(repo_a, "init", "-q", "--initial-branch=main")
     repo_b = world.sources / "elsewhere" / "deeper" / "B"
     shutil.copytree(repo_a, repo_b, symlinks=True)
@@ -101,9 +116,12 @@ def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_pa
 
     world.apm("install", cwd=app_a)
     world.apm("install", cwd=app_b)
+    for app in (app_a, app_b):
+        world.apm("install", "--only", "apm", cwd=app)
 
     text = (app_a / "apm.lock.yaml").read_text(encoding="utf-8")
     assert (app_b / "apm.lock.yaml").read_text(encoding="utf-8") == text
+    assert "mcp_omissions:\n  echo-srv:\n    declaration: sha256:" in text
     assert str(world.sources) not in text
     assert str(world.sources.resolve()) not in text
     rows = _transitive_rows(app_a)
@@ -113,9 +131,9 @@ def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_pa
     assert rows["lib-c"]["declaring_parent"] == "local:../../packages/lib-b"
 
     before = lock_bytes(app_a)
-    world.apm("install", cwd=app_a)
+    world.apm("install", "--only", "apm", cwd=app_a)
     assert lock_bytes(app_a) == before, "I2: a converged install rewrote the lockfile"
-    world.apm("install", "--frozen", cwd=app_a)
+    world.apm("install", "--frozen", "--only", "apm", cwd=app_a)
     world.audit_clean(cwd=app_a)
 
 
@@ -196,3 +214,58 @@ def test_absolute_lock_is_rekeyed_in_place_once(tmp_path: Path, apm_binary_path:
     assert _slots(app) == slots
     world.apm("install", "--frozen", cwd=app)
     world.audit_clean(cwd=app)
+
+
+def _legacy_mcp_lock(tmp_path: Path, apm_binary_path: Path) -> tuple[ReplayWorld, Path, dict]:
+    """A lock written before #5418 with a skills-only (--only apm) MCP omission."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    repo = world.sources / "R"
+    app = _monorepo(world, repo, mcp=True)
+    world.apm("install", "--only", "apm", cwd=app)
+    evidence = load_yaml(app / "apm.lock.yaml")["mcp_omissions"]["echo-srv"]
+    assert evidence["reason"] == "only-apm"
+    world.git(repo, "init", "-q", "--initial-branch=main")
+    return world, app, evidence
+
+
+@pytest.mark.parametrize("command", [("lock",), ("deps", "update")])
+def test_rekey_keeps_mcp_omission_bound(
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
+) -> None:
+    """C2: evidence that matches the legacy recompute moves to the new key."""
+    world, app, legacy = _legacy_mcp_lock(tmp_path, apm_binary_path)
+
+    world.apm(*command, cwd=app)
+
+    text = (app / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert "anchored_local_path: ../../packages/lib-b" in text
+    evidence = load_yaml(app / "apm.lock.yaml")["mcp_omissions"]["echo-srv"]
+    assert evidence["reason"] == "only-apm"
+    assert evidence["declaration"] != legacy["declaration"]
+    world.audit_clean(cwd=app)
+    # The rebound value is the one a fresh portable install records.
+    world.apm("install", "--only", "apm", cwd=app)
+    assert (app / "apm.lock.yaml").read_text(encoding="utf-8") == text
+
+
+def test_rekey_leaves_mismatched_mcp_omission_unbound(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """C2: a stored value that is not the legacy recompute is never rebound."""
+    world, app, legacy = _legacy_mcp_lock(tmp_path, apm_binary_path)
+    lock_path = app / "apm.lock.yaml"
+    forged = "sha256:" + "0" * 64
+    lock_path.write_text(
+        lock_path.read_text(encoding="utf-8").replace(legacy["declaration"], forged),
+        encoding="utf-8",
+    )
+
+    world.apm("lock", cwd=app)
+
+    text = lock_path.read_text(encoding="utf-8")
+    assert "anchored_local_path: ../../packages/lib-b" in text
+    assert f"declaration: {forged}" in text
+    audit = world.apm("audit", "--ci", "--no-policy", "--no-fail-fast", cwd=app, expect=1)
+    output = audit.stdout + audit.stderr
+    assert "omission evidence is missing, damaged or stale" in " ".join(output.split())
+    assert "--only apm" in output

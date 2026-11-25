@@ -60,7 +60,7 @@ def _expect_clean(report) -> None:
         ),
         pytest.param(
             RELEASE,
-            "src/apm_cli/commands/uninstall/local_reanchor.py",
+            "src/apm_cli/core/deployment_reanchor.py",
             "            release_held(parent)\n",
             "",
             id="journal-parent-rmdir",

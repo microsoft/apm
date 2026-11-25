@@ -4441,7 +4441,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="transport-platform-held-directory-release",
         rule_id="transport-platform-held-directory-release",
-        path="src/apm_cli/commands/uninstall/local_reanchor.py",
+        path="src/apm_cli/core/deployment_reanchor.py",
         old="            release_held(current)\n            current.rename(target)\n",
         new="            current.rename(target)\n",
         intent="A re-anchor move renames a package directory path resolution may still hold.",

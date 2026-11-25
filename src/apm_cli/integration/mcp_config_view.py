@@ -7,7 +7,7 @@ projection and the symmetric comparison with the stored lockfile baseline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -590,6 +590,39 @@ def _declaration_fingerprint(dependency: LockedDependency, declaration: MCPDepen
         "declaration": declaration.to_dict(),
     }
     return evidence_fingerprint(payload)
+
+
+def rebind_rekeyed_omissions(
+    lockfile: LockFile, rekeyed: Iterable[tuple[LockedDependency, LockedDependency, Path]]
+) -> None:
+    """Carry omission evidence across a local identity re-key (#5418), or leave it unbound.
+
+    Each item is (row under its legacy key, the same row re-keyed, its package
+    directory). A server's ``declaration`` moves to the fingerprint under the
+    new key only when the stored value equals, byte for byte, the fingerprint
+    recomputed under the legacy key from the package's current declaration.
+    Any other value stays as stored, so it no longer verifies and the
+    selection must be repeated: intent is never trusted silently.
+    """
+    from apm_cli.utils.yaml_io import load_yaml
+
+    omissions = lockfile.mcp_omissions
+    if not omissions:
+        return
+    for legacy, current, package_dir in rekeyed:
+        try:
+            manifest = load_yaml(manifest_file(package_dir))
+            declarations = (
+                _authored_mcp_declarations(manifest) if isinstance(manifest, dict) else {}
+            )
+        except (OSError, ValueError, UnicodeError, yaml.YAMLError):
+            continue
+        for name, declaration in declarations.items():
+            evidence = omissions.get(name)
+            if not isinstance(evidence, dict):
+                continue
+            if evidence.get("declaration") == _declaration_fingerprint(legacy, declaration):
+                evidence["declaration"] = _declaration_fingerprint(current, declaration)
 
 
 def _authored_mcp_declarations(manifest: dict[str, Any]) -> dict[str, MCPDependency]:

@@ -16,6 +16,7 @@ Exposes:
 from __future__ import annotations
 
 import copy
+import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -104,6 +105,8 @@ def rekey_legacy_local_identities(
     from apm_cli.core.remediation import LOCAL_IDENTITY_DUPLICATE
     from apm_cli.deps.local_identity import legacy_local_renames
     from apm_cli.integration.base_integrator import BaseIntegrator
+    from apm_cli.integration.mcp_config_view import rebind_rekeyed_omissions
+    from apm_cli.utils.realpath import resolve_path
 
     anchors = legacy_local_renames(lockfile.dependencies, project_root)
     if not anchors:
@@ -118,10 +121,13 @@ def rekey_legacy_local_identities(
             )
         owners[new] = old
     moves = []
+    rekeyed = []
     for old, anchor in anchors.items():
         row = lockfile.dependencies[old]
         current = row.to_dependency_ref().get_install_path(modules_dir) if modules_dir else None
+        legacy = dataclasses.replace(row)
         row.anchored_local_path = anchor
+        rekeyed.append((legacy, row, resolve_path(Path(legacy.anchored_local_path))))
         if current is not None and current.is_dir():
             target = row.to_dependency_ref().get_install_path(modules_dir)
             if not target.exists():
@@ -133,6 +139,7 @@ def rekey_legacy_local_identities(
             [current for current, _ in moves], stop_at=modules_dir / "_local"
         )
     rename_ledger_owners(lockfile, renames)
+    rebind_rekeyed_omissions(lockfile, rekeyed)
     rows = list(lockfile.dependencies.items())
     lockfile.dependencies.clear()
     for key, row in rows:
