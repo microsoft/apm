@@ -444,7 +444,7 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
 # fast run's output runs the install's MCP phase itself
 # (fast_output.run_services), which reconciles, parks and reports exactly as
 # the full run does.
-_RENDERED_BY_THE_INSTALL_OWNER = frozenset({"config-consistency"})
+_RENDERED_BY_THE_INSTALL_OWNER = frozenset({"config-consistency", "kept-mcp-entries"})  # RESEARCH: kept-mcp decline deleted
 
 
 # Baseline checks that fail before APPLY only because of what APPLY is about to write.
