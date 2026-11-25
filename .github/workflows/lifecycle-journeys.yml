@@ -278,6 +278,18 @@ jobs:
           APM_ARCH_CACHE_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
         run: |
           set -o pipefail
+          # A dispatched ref that predates sharding (#5475) ignores the shard
+          # spec, so only shard 0 replays its full matrix there.
+          if ! grep -q APM_ARCH_CACHE_SHARD tests/integration/test_architecture_linter_session_cache.py; then
+            case "$APM_ARCH_CACHE_SHARD" in
+              0/*) echo "[i] Revision predates sharding; shard 0 replays the full matrix" ;;
+              *)
+                echo "- Architecture cache shard \`$APM_ARCH_CACHE_SHARD\`: skipped, revision predates sharding" \
+                  >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+            esac
+          fi
           # Each shard records its wall time in the job summary, so growth
           # shows up well before a shard reaches its cap.
           start=$SECONDS
