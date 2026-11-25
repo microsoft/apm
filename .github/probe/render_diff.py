@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, os.getcwd())
 from tests.benchmarks.journeys import Context, open_world, prepare_fixture  # noqa: E402
 
-FIXTURES = os.environ.get("DIFF_FIXTURES", "tree-50,tree-10-mcp,tree-10-multi,monorepo-4,tree-10-multi-policy,tree-50-policy").split(",")
+FIXTURES = os.environ.get("DIFF_FIXTURES", "tree-50-policy,tree-10-multi-policy").split(",")
 SKIP = {"apm_modules", ".git"}
 SKIP_FILES = {".apm-local/installation"}  # per-install id, random by design
 import difflib
@@ -32,6 +32,7 @@ def snapshot(project: Path) -> dict[str, str]:
 
 
 failures = 0
+summary: list[str] = []
 work = Path(tempfile.mkdtemp())
 for name in FIXTURES:
     fixture = prepare_fixture(name, work)
@@ -48,7 +49,9 @@ for name in FIXTURES:
     base, new = shots["base"], shots["new"]
     broot, nroot = shots["base_root"], shots["new_root"]
     diffs = sorted(k for k in base.keys() | new.keys() if base.get(k) != new.get(k))
-    print(f"DIFF {name}: files base={len(base)} new={len(new)} differing={len(diffs)}", flush=True)
+    line = f"DIFF {name}: files base={len(base)} new={len(new)} differing={len(diffs)}"
+    summary.append(line)
+    print(line, flush=True)
     for rel in diffs[:40]:
         print(f"   {rel}: base={base.get(rel, '-')[:12]} new={new.get(rel, '-')[:12]}")
     for rel in diffs[:3]:
@@ -57,5 +60,7 @@ for name in FIXTURES:
         for line in list(difflib.unified_diff(a, b, "base/" + rel, "new/" + rel, n=2, lineterm=""))[:60]:
             print("      " + line[:220])
     failures += bool(diffs)
+for line in summary:
+    print(line)
 print("DIFF RESULT:", "IDENTICAL" if not failures else f"{failures} fixture(s) differ")
 sys.exit(1 if failures else 0)
