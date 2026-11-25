@@ -122,7 +122,7 @@ def test_modern_windows_missing_lookup_scales_linearly(
             ),
         )
         with patch("shutil._access_check", return_value=False) as access:
-            with pytest.raises(FileNotFoundError, match="is inside the project"):
+            with pytest.raises(FileNotFoundError, match="trusted PATH"):
                 _resolve_trusted_executable(name)
             counts.append(access.call_count)
 
@@ -396,6 +396,23 @@ class TestTrustedExecutableUnderHome:
             _assert_resolves_to(_resolve_trusted_executable("git"), git)
 
     @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
+    def test_monorepo_git_root_still_excludes_its_bin_from_nested_manifest_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        repo = home / "code" / "repo"
+        (repo / ".git").mkdir(parents=True)
+        cwd = repo / "packages" / "p"
+        cwd.mkdir(parents=True)
+        (cwd / "apm.yml").write_text("name: p\n", encoding="utf-8")
+        _tool(repo / "bin", "git")
+        outside = _tool(home / tool_dir, "git")
+        monkeypatch.chdir(cwd)
+
+        with patch("os.get_exec_path", return_value=[str(repo / "bin"), str(home / tool_dir)]):
+            _assert_resolves_to(_resolve_trusted_executable("git"), outside)
+
+    @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
     def test_nearest_marker_wins_over_dotfiles_git(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
     ) -> None:
@@ -440,7 +457,8 @@ class TestTrustedExecutableUnderHome:
             _resolve_trusted_executable(name)
 
         message = str(excinfo.value)
-        assert f"{name} at {shadow.resolve()} is inside the project {project.resolve()}" in message
+        expected = f"{name} at {shadow.resolve()} is inside the project {project.resolve()}"
+        assert os.path.normcase(expected) in os.path.normcase(message)
         assert "Install" in message
         assert message.isascii()
 

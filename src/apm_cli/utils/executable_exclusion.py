@@ -17,22 +17,20 @@ class ProjectShadowedExecutableError(FileNotFoundError):
 
 
 def executable_exclusion_root() -> Path | None:
-    """Return the nearest project root containing the cwd, or None to exclude nothing.
+    """Return the project root containing the cwd, or None to exclude nothing.
 
-    The nearest directory holding ``.git`` or the APM manifest wins; with no
-    marker the cwd is the root. A marker at HOME or above (a dotfiles repo, a
-    stray manifest, ``/``) is not a project: the cwd is the root instead, and
-    when the cwd is HOME or above nothing is excluded.
+    The nearest ``.git`` root wins, else the nearest APM manifest root, else
+    the cwd. A marker at HOME or above (a dotfiles repo, a stray manifest,
+    ``/``) is not a project and is skipped; when the cwd itself is HOME or
+    above nothing is excluded.
     """
     from apm_cli.core.scope import manifest_file
 
     cwd = Path.cwd().resolve()
-    root = cwd
-    for directory in (cwd, *cwd.parents):
-        if (directory / ".git").exists() or manifest_file(directory).is_file():
-            root = directory
-            break
     home = Path.home().resolve()
-    if root == home or root in home.parents:
-        root = cwd  # a dotfiles repo at HOME is not a project: keep the cwd guard
-    return None if root == home or root in home.parents else root
+    ancestors = (cwd, *cwd.parents)
+    for has_marker in (lambda d: (d / ".git").exists(), lambda d: manifest_file(d).is_file()):
+        for directory in ancestors:
+            if directory != home and directory not in home.parents and has_marker(directory):
+                return directory
+    return None if cwd == home or cwd in home.parents else cwd
