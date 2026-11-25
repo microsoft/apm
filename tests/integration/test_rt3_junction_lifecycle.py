@@ -321,3 +321,41 @@ def test_rt3_subst_and_unc_cwd_then_long_cwd_agree(
     finally:
         if drive:
             subprocess.run(["subst", drive, "/D"], capture_output=True)
+
+
+@pytest.mark.parametrize("command", ["uninstall", "prune", "install"])
+def test_rt3_deployed_dir_linked_back_to_its_source_never_loses_the_source(
+    tmp_path: Path, apm_binary_path: Path, command: str
+) -> None:
+    """The live-edit trick: the deployed skill dir links to the package's own source."""
+    world, _outside = _world(tmp_path, apm_binary_path)
+    world.apm("install")
+    deployed = world.project / ".claude" / "skills" / "a-skill"
+    source = world.project / "vendor" / "a" / ".apm" / "skills" / "a-skill"
+    (source / "notes.md").write_text("user notes\n", encoding="utf-8")
+    shutil.rmtree(deployed)
+    _link_dir(deployed, source)
+    before = _snapshot(source)
+
+    if command == "uninstall":
+        result = world.apm("uninstall", "./vendor/a", expect=None)
+    elif command == "prune":
+        dump_yaml(
+            {
+                "name": "proj",
+                "version": "1.0.0",
+                "targets": ["claude"],
+                "dependencies": {"apm": []},
+            },
+            world.project / "apm.yml",
+        )
+        result = world.apm("prune", expect=None)
+    else:
+        (source / "SKILL.md").write_text(_SKILL + "v2\n", encoding="utf-8")
+        before = _snapshot(source)
+        result = world.apm("install", expect=None)
+
+    assert _snapshot(source) == before, (
+        f"apm {command} changed the package SOURCE through the link (exit {result.returncode}):\n"
+        f"{result.stdout[-1500:]}\n{result.stderr[-1500:]}"
+    )

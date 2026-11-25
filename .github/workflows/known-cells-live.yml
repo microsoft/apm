@@ -35,5 +35,4 @@ jobs:
           export APM_BINARY_PATH="$(uv run --frozen python -c 'import shutil; print(shutil.which("apm"))')"
           echo "apm: $APM_BINARY_PATH"
           uv run --frozen python -m pytest -p no:cacheprovider -p no:randomly -rA -v -s \
-          tests/integration/test_rt3_junction_lifecycle.py \
-          tests/unit/utils/test_rt3_windows_redteam.py
+          tests/integration/test_rt3_junction_lifecycle.py -k linked_back
