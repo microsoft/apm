@@ -230,3 +230,62 @@ def policy_cache_shape() -> str | None:
         return "\n".join(rows)
     except (OSError, ValueError):
         return None
+
+
+# The two files of a directory that decide whether Claude loads its AGENTS.md.
+_CARRIERS = ("AGENTS.md", "CLAUDE.md")
+
+
+def key_claude_routing(digest: Any, root: Path, prefixes: list[str]) -> None:
+    """Every input of the Claude rule-routing decision (#5451, compilation/claude_agents_md).
+
+    The root and each routed directory prefix the recorded run noted, plus each
+    compiled file the compile record names (its directory too): the directory as
+    routing sees it (kind, followed type, resolved path), its ``AGENTS.md`` and
+    ``CLAUDE.md`` (kind, link target, followed bytes, and whether they are one
+    file), every ``.git`` between it and the root, and the compiled file's bytes.
+    The compile record itself is keyed with APM home.
+    """
+    from apm_cli.core.agents_md_compile_record import read_record
+
+    directories = {"", *prefixes}
+    compiled = sorted(rel for rel in read_record(root) if isinstance(rel, str))
+    for rel in compiled:
+        directories.add(os.path.dirname(rel))
+        _key_followed(digest, f"route-compiled:{rel}", root / rel)
+    for rel in sorted(directories):
+        directory = root / rel if rel else root
+        digest.put(
+            f"route-dir:{rel}",
+            b"%s|%d|%s"
+            % (
+                _kind(str(directory)),
+                directory.is_dir(),
+                os.path.realpath(directory).encode("utf-8", "surrogateescape"),
+            ),
+        )
+        for name in _CARRIERS:
+            _key_followed(digest, f"route:{rel}/{name}", directory / name)
+        try:
+            same = (directory / "CLAUDE.md").samefile(directory / "AGENTS.md")
+        except OSError:
+            same = False
+        digest.put(f"route-same:{rel}", b"%d" % same)
+        current = directory
+        while current != root and root in current.parents:
+            git = current / ".git"
+            digest.put(f"route-git:{git}", b"%s|%d" % (_kind(str(git)), git.exists()))
+            current = current.parent
+
+
+def _key_followed(digest: Any, tag: str, path: Path) -> None:
+    """A path as routing reads it: its own kind, a link's target, and the bytes it opens to."""
+    kind = _kind(str(path))
+    target = os.readlink(path).encode("utf-8", "surrogateescape") if kind == b"link" else b""
+    try:
+        with open(path, "rb") as handle:
+            data = b"\x01" + handle.read()
+    except OSError:
+        data = b"\x00unreadable"
+    resolved = os.path.realpath(path).encode("utf-8", "surrogateescape")
+    digest.put(tag, kind + b"|" + target + b"|" + resolved + b"|" + data)

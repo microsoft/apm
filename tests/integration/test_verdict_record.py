@@ -1730,12 +1730,58 @@ def test_a_compile_record_appearing_after_the_record_misses(project: Path, capsy
 
 
 def test_a_root_carrier_removed_after_the_record_misses(project: Path, capsys) -> None:
-    """A run with a root carrier writes no replayable record, so removing it cannot hit."""
+    """#5451: a run with root carriers records them; removing one misses."""
     (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
     (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
     _record()
-    assert not verdict_record._record_path(project).exists()
+    capsys.readouterr()
+    _assert_replays(True)  # control: unchanged carriers replay
     (project / "AGENTS.md").unlink()
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+@pytest.mark.parametrize("name", ["AGENTS.md", "CLAUDE.md"])
+def test_a_root_carrier_content_edit_misses(project: Path, capsys, name: str) -> None:
+    """#5451: the bytes of each root carrier are keyed, not only its presence."""
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    _record()
+    with (project / name).open("a", encoding="utf-8") as handle:
+        handle.write("Edited.\n")
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+def test_a_claude_md_hard_link_replaced_by_a_copy_misses(project: Path, capsys) -> None:
+    """#5451: routing asks whether CLAUDE.md and AGENTS.md are one file; same bytes in a
+    copy are another answer."""
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    try:
+        os.link(project / "AGENTS.md", project / "CLAUDE.md")
+    except OSError:
+        pytest.skip("hard links unsupported here")
+    _record()
+    (project / "CLAUDE.md").unlink()
+    (project / "CLAUDE.md").write_text(_CARRIER, encoding="utf-8")
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+def test_a_compiled_file_the_compile_record_names_is_keyed(project: Path, capsys) -> None:
+    """#5451: an edit to a compiled AGENTS.md the compile record names misses."""
+    from apm_cli.core.agents_md_compile_record import write_record
+
+    (project / "docs").mkdir()
+    (project / "docs" / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    write_record(project, {"docs/AGENTS.md": {"sha256": "sha256:0", "instructions": []}})
+    _record()
+    capsys.readouterr()
+    _assert_replays(True)
+    (project / "docs" / "AGENTS.md").write_text(_CARRIER + "Edited.\n", encoding="utf-8")
     capsys.readouterr()
 
     _assert_replays(False)
@@ -1772,15 +1818,16 @@ def _decide_claude_routing(project: Path, apply_to: str) -> None:
 
 @pytest.mark.parametrize(
     ("apply_to", "replays"),
-    [("**", False), ("src/test/**", False), ("**/*.py", True)],
+    [("**", True), ("src/test/**", False), ("**/*.py", True)],
 )
-def test_a_run_that_decided_claude_routing_records_nothing(
+def test_a_run_that_decided_claude_routing_keys_its_carriers(
     project: Path, capsys, apply_to: str, replays: bool
 ) -> None:
-    """A routable instruction (always-on or one literal directory, even while that
-    directory is absent) means the run decided routing: nothing is recorded, so a
-    carrier created later (src/test/AGENTS.md importing CLAUDE.md) cannot be skipped.
-    A path-scoped instruction never routes: its no-op still records and replays."""
+    """#5451: a run that decided routing records the prefixes it routed, and the record
+    keys their carriers. A carrier created later at the routed directory (src/test,
+    even while absent at record time) misses. An always-on instruction routes on the
+    root alone, so that nested carrier is not its input. A path-scoped instruction
+    never routes."""
     with verdict_record.recording(["install"]):
         sys.stdout.write(_OUTPUT)
         _decide_claude_routing(project, apply_to)
@@ -1836,8 +1883,9 @@ def test_the_engine_fast_path_declines_for_a_routable_instruction(
     diff_apply._refuse_claude_carried_rules(project, [SimpleNamespace(compile_family="x")], lock)
 
 
-def test_the_replay_and_the_engine_share_one_carrier_owner(project: Path, capsys) -> None:
-    """Every root carrier the engine's predicate names also stops the record and the replay."""
+def test_each_root_carrier_the_engine_names_is_keyed_by_the_replay(project: Path, capsys) -> None:
+    """#5451: every root carrier the engine's predicate names is a keyed replay input:
+    recorded with it present, the replay serves; edited, it misses."""
     from apm_cli.compilation.claude_agents_md import compiled_agents_md_may_carry
     from apm_cli.core.agents_md_compile_record import ROOT_CARRIERS
 
@@ -1846,12 +1894,27 @@ def test_the_replay_and_the_engine_share_one_carrier_owner(project: Path, capsys
         assert compiled_agents_md_may_carry(project)
         _record()
         capsys.readouterr()
+        _assert_replays(True)
+        (project / name).write_text(_CARRIER + "Edited.\n", encoding="utf-8")
+        capsys.readouterr()
         _assert_replays(False)
         (project / name).unlink()
-    assert not compiled_agents_md_may_carry(project)
-    _record()
+
+
+def test_a_nested_repository_above_a_routed_directory_misses(project: Path, capsys) -> None:
+    """#5451: routing skips a directory inside a nested Git repository; a .git that
+    appears between the root and a routed prefix misses."""
+    (project / "src" / "test").mkdir(parents=True)
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        _decide_claude_routing(project, "src/test/**")
+        verdict_record.note_verified_noop()
     capsys.readouterr()
     _assert_replays(True)
+    (project / "src" / ".git").mkdir()
+    capsys.readouterr()
+
+    _assert_replays(False)
 
 
 def _link_dir(path: Path, target: Path) -> None:

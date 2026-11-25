@@ -738,12 +738,14 @@ class InstructionIntegrator(BaseIntegrator):
             source: self._parse_frontmatter(prepared_instructions[source].content)[0].get("applyTo")
             for source in instruction_files
         }
-        if any(routes_to_agents_md(apply_to) for apply_to in apply_tos.values()):
-            # Routing reads carriers anywhere (a directory routes once it and its
-            # carrier exist); a no-op replay never re-decides it, so record none (#5434).
+        routable = [a for a in apply_tos.values() if routes_to_agents_md(a)]
+        if routable:
+            # Routing reads the carriers of the root and of each directory prefix; a
+            # record keys exactly those inputs, so a replay never re-decides it (#5434, #5451).
+            from apm_cli.compilation.claude_agents_md import directory_scope
             from apm_cli.install import verdict_record
 
-            verdict_record.unknown("claude routing")
+            verdict_record.note_claude_routing(directory_scope(a) or "" for a in routable)
         routed = {
             source
             for source in instruction_files

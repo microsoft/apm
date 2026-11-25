@@ -86,11 +86,6 @@ def _record_after(
     if attested:
         _write_at_entry(entry, argv, "", "", deployed, kind=ATTESTED, provenance=ATTESTED)
         return
-    from apm_cli.core.agents_md_compile_record import may_carry
-
-    if may_carry(Path.cwd()):
-        vr._trace("no record (a compiled AGENTS.md may carry a Claude rule)")  # #5434
-        return
     provenance = ATTESTED if ATTESTED in vr._VERIFIED_NOOP else PROVEN
     out_text, err_text = "".join(out.parts), "".join(err.parts)
     _write_at_entry(entry, argv, out_text, err_text, deployed, provenance=provenance)
@@ -260,7 +255,10 @@ def _write(
 
         git_system = verdict_git._git_system()
         digest = vr._Digest(key)
-        vr._inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, deployed, notice)
+        routing = sorted(vr._CLAUDE_ROUTING)
+        vr._inputs(
+            digest, root, argv, lock_text, run_env, surfaces, git_system, deployed, notice, routing
+        )
         if kind == ATTESTED:
             if not vr._RUN_FROZEN:
                 vr._trace("no record (frozen disposition unknown)")
@@ -283,6 +281,7 @@ def _write(
             "surfaces": surfaces,
             "git_system": git_system,
             "notice": notice,
+            "claude_routing": routing,  # MAC-bound: the "route-prefixes" input above
             "kind": kind,
             "provenance": provenance,
         }

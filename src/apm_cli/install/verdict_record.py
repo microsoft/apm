@@ -504,6 +504,7 @@ def _inputs(
     git_system: str,
     deployed: frozenset[str],
     notice: str,
+    routing: list[str] = (),  # type: ignore[assignment]
 ) -> None:
     """Every verdict input, read live (QL D3-D6, O3); a writer reads the run's entry state."""
     if os.path.lexists(os.path.join(root, ".apm")):
@@ -559,6 +560,9 @@ def _inputs(
     from apm_cli.install import verdict_inputs
 
     verdict_inputs.key_startup(digest, root, notice, surfaces)
+    # The Claude rule-routing inputs, at the prefixes the recorded run routed (#5451).
+    digest.put("route-prefixes", "\x00".join(routing).encode("utf-8", "surrogateescape"))
+    verdict_inputs.key_claude_routing(digest, root, list(routing))
     for name in _GOVERNED_DIRS:
         base = os.path.join(root, name)
         digest.put(f"target:{name}", verdict_inputs._kind(base))
@@ -755,11 +759,6 @@ def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> 
     raw = _read_nofollow(_record_path(root))
     if raw is None or not _location_trusted(root):
         raise _Miss("")
-    from apm_cli.core.agents_md_compile_record import may_carry
-
-    if not attested and may_carry(root):
-        # The full run decides Claude rules from it; a replay never does (#5434).
-        raise _Miss("a compiled AGENTS.md may carry a Claude rule")
     key = _key(create=False)
     if key is None:
         raise _Miss("no key")
@@ -774,6 +773,7 @@ def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> 
         or record.get("v") != RECORD_VERSION
         or int(record.get("exit", 1)) != 0
         or not (_names(run_env) and _names(surfaces) and _names([git_system, notice]))
+        or not _names(record.get("claude_routing"))
     ):
         raise _Miss("")
     lock_tag = hmac.new(key, lock_text, hashlib.sha256).hexdigest()[:16]
@@ -787,7 +787,8 @@ def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> 
     digest = _Digest(key)
     rels = _deployed_rels(lock)
     keyed = _keyed_argv(record, argv) if attested else argv
-    _inputs(digest, root, keyed, lock_text, run_env, surfaces, git_system, rels, notice)
+    routing = record["claude_routing"]
+    _inputs(digest, root, keyed, lock_text, run_env, surfaces, git_system, rels, notice, routing)
     if attested:
         digest.put("disposition", str(record.get("disposition")).encode())
     _body(digest, record)
@@ -903,6 +904,15 @@ class _Tee:
 
 _ACTIVE: list[_Tee] = []
 _UNKNOWN: list[str] = []
+# The directory prefixes ("" for the root) whose carriers decided Claude rule
+# routing this run (instruction_integrator); a record keys their inputs (#5451).
+_CLAUDE_ROUTING: set[str] = set()
+
+
+def note_claude_routing(prefixes: Any) -> None:
+    """Note the prefixes whose AGENTS.md / CLAUDE.md decided Claude routing this run."""
+    if _ACTIVE:
+        _CLAUDE_ROUTING.update(prefixes)
 
 
 def unknown(reason: str) -> None:
@@ -924,6 +934,7 @@ def recording(argv: list[str]) -> Iterator[None]:
     for state in (
         _VERIFIED_NOOP,
         _UNKNOWN,
+        _CLAUDE_ROUTING,
         _PROVEN_LOCK,
         _ATTESTED_INSTALL,
         _RUN_ENTRY,
