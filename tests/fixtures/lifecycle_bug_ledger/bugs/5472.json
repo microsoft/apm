@@ -1,0 +1,15 @@
+{
+  "issue": 5472,
+  "fixed_in": "Unreleased",
+  "summary": "unmanaged_files.action: deny refused an install because of .claude/settings.local.json, the per-user file Claude Code writes itself; that file is no longer governed, while a user-authored file elsewhere under .claude/ is still refused.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_policy_promises.py::test_unmanaged_files_deny_skips_harness_owned_local_files",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_skips_harness_local_settings_only_at_their_exact_path"
+  ]
+}

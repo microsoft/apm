@@ -239,6 +239,11 @@ keys in the config are covered at file granularity. A special file (such as a
 FIFO) in a governed directory is always reported.
 With no executables block, bundle hook files count as unmanaged; approve them to attest.
 
+Claude Code's per-user local settings file, `.claude/settings.local.json`, is
+never governed, whatever `directories` lists: Claude Code writes it and it is
+not committed. Only that exact path is skipped; a file with the same name
+elsewhere is still reported.
+
 ## security
 
 Rules over APM's security checks. The `audit.on_install`, `audit.external`

@@ -233,6 +233,21 @@ class TestUnmanagedFiles:
         assert result.passed
         assert len(result.details) > 0
 
+    @pytest.mark.parametrize("directories", [None, [".claude"]])
+    def test_deny_skips_harness_local_settings_only_at_their_exact_path(
+        self, tmp_path, directories
+    ):
+        """#5472: Claude Code's per-user local settings file is never governed, under the
+        default or a custom directory list; the same name elsewhere still is."""
+        for rel in (".claude/settings.local.json", ".claude/commands/settings.local.json"):
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text("{}", encoding="utf-8")
+        policy = UnmanagedFilesPolicy(action="deny", directories=directories)
+        result = _check_unmanaged_files(tmp_path, None, policy)
+        assert not result.passed
+        flagged = [d.split(" ", 1)[0] for d in result.details[:-1]]
+        assert flagged == [".claude/commands/settings.local.json"], result.details
+
     def test_pass_empty_directory(self, tmp_path):
         policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
         result = _check_unmanaged_files(tmp_path, None, policy)

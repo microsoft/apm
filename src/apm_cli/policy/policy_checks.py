@@ -1121,7 +1121,7 @@ _DEFAULT_GOVERNANCE_DIRS = [
     ".opencode",
     ".kiro",
 ]
-
+HARNESS_LOCAL_FILES = frozenset({".claude/settings.local.json"})  # Claude Code, per-user (#5472)
 
 _MAX_UNMANAGED_SCAN_FILES = 10_000
 
@@ -1290,7 +1290,7 @@ def _check_unmanaged_files(
                 rel = file_path.relative_to(project_root).as_posix()
                 if (rel in deployed or rel.startswith(dir_prefix_tuple)) and file_path.is_file():
                     continue
-                if first_matching_pattern(rel, exclude) is not None:
+                if rel in HARNESS_LOCAL_FILES or first_matching_pattern(rel, exclude) is not None:
                     continue
                 primitive_type = _classify_primitive_type(rel)
                 deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
