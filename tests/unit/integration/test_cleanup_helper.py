@@ -994,6 +994,8 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
     tmp_path, diagnostics
 ):
     """A cowork skill dir relinked outside the cowork root while a file is held loses nothing."""
+    from apm_cli.integration.cleanup import AUTHORIZED, REJECTED_UNSAFE_PATH, DeploymentEvidence
+
     cowork_root = tmp_path / "cowork-skills"
     skill_md = cowork_root / "my-skill" / "SKILL.md"
     skill_md.parent.mkdir(parents=True)
@@ -1006,10 +1008,12 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
     real_unlink = Path.unlink
     calls = []
 
-    def held_then_relinked(path, *args, **kwargs):
+    def held_once_then_real(path, *args, **kwargs):
         if path.name != "SKILL.md":
             return real_unlink(path, *args, **kwargs)
         calls.append(path)
+        if len(calls) > 1:
+            return real_unlink(path, *args, **kwargs)
         skill_md.parent.rename(cowork_root / "moved-away")
         skill_md.parent.symlink_to(victim.parent, target_is_directory=True)
         exc = OSError(13, "in use", str(path))
@@ -1021,9 +1025,10 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
             "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
             return_value=cowork_root,
         ),
+        patch.object(DeploymentEvidence, "verdict", return_value=AUTHORIZED),
         patch("sys.platform", "win32"),
         patch("time.sleep"),
-        patch.object(Path, "unlink", autospec=True, side_effect=held_then_relinked),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_once_then_real),
     ):
         result = remove_stale_deployed_files(
             ["cowork://skills/my-skill/SKILL.md"],
@@ -1037,3 +1042,4 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
     assert len(calls) == 1
     assert victim.read_text(encoding="ascii") == "# My Skill\n"
     assert result.deleted == []
+    assert result.rejected == {"cowork://skills/my-skill/SKILL.md": REJECTED_UNSAFE_PATH}
