@@ -126,13 +126,11 @@ def refuse_frozen_drift(project_root: Path) -> None:
     from apm_cli.install.errors import FrozenInstallError
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService
-    from apm_cli.integration import mcp_config_view
     from apm_cli.models.apm_package import APMPackage
 
     _FROZEN_NOTICES.pop(str(project_root), None)
     manifest = APMPackage.from_apm_yml(manifest_file(project_root))
     tape = _NoticeTape()
-    shown = mcp_config_view.trust_notices_shown()
     try:
         request = InstallRequest.frozen_preflight(
             manifest, scope=InstallScope.PROJECT, logger=tape, speculative=True
@@ -140,49 +138,54 @@ def refuse_frozen_drift(project_root: Path) -> None:
         InstallService.enforce_frozen(request, allow_pending_mcp=True)  # a bare install
     except FrozenInstallError:
         raise Decline("frozen preflight") from None  # the full run renders the refusal
-    finally:
-        # Nothing was printed: a taped once-per-command notice is still unshown.
-        mcp_config_view.forget_trust_notices_since(shown)
     _FROZEN_NOTICES[str(project_root)] = tape.calls
 
 
 class _NoticeTape:
-    """A logger that records each output call of the frozen preflight, in order."""
+    """Records each output call of the frozen preflight, in order.
+
+    Only the MCP view's output methods exist (mcp_config_view._McpViewLogger), so
+    any other use raises and the fast path declines (W3d N2). A once-per-command
+    trust notice is taped as such and never touches its owner's dedupe (N1).
+    """
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple, dict]] = []
+        self.calls: list[tuple[str, str]] = []
 
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("__"):
-            raise AttributeError(name)
+    def progress(self, message: str) -> None:
+        self.calls.append(("progress", message))
 
-        def record(*args: Any, **kwargs: Any) -> None:
-            self.calls.append((name, args, kwargs))
+    def warning(self, message: str) -> None:
+        self.calls.append(("warning", message))
 
-        return record
+    def verbose_detail(self, message: str) -> None:
+        self.calls.append(("verbose_detail", message))
+
+    def tape_trust_once(self, message: str) -> None:
+        self.calls.append(("trust_once", message))
 
 
-_FROZEN_NOTICES: dict[str, list[tuple[str, tuple, dict]]] = {}
+_FROZEN_NOTICES: dict[str, list[tuple[str, str]]] = {}
 
 
-def take_frozen_notices(project_root: Path) -> list[tuple[str, tuple, dict]] | None:
+def take_frozen_notices(project_root: Path) -> list[tuple[str, str]] | None:
     """This run's taped frozen preflight notices (consumed), or None."""
     return _FROZEN_NOTICES.pop(str(project_root), None)
 
 
-def replay_frozen_notices(calls: list[tuple[str, tuple, dict]], logger: Any) -> None:
+def replay_frozen_notices(calls: list[tuple[str, str]], logger: Any) -> None:
     """Print taped frozen preflight notices on *logger*, in order.
 
-    The once-per-command trust notice goes through its owner's dedupe, as the
-    preflight's own print would (mcp_config_view._progress_trust_once).
+    A taped trust notice goes through its owner's dedupe now, as the preflight's
+    own print would have (mcp_config_view._progress_trust_once).
     """
     from apm_cli.integration import mcp_config_view
 
-    for name, args, kwargs in calls:
-        if name == "progress":
-            mcp_config_view._progress_trust_once(logger, *args, **kwargs)
+    for name, message in calls:
+        if name == "trust_once":
+            mcp_config_view._progress_trust_once(logger, message)
         else:
-            getattr(logger, name)(*args, **kwargs)
+            getattr(logger, name)(message)
 
 
 # Every frozen-only owner, classified for a frozen hit served by an attestation

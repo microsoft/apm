@@ -518,6 +518,9 @@ def forget_trust_notices_since(shown: frozenset[str]) -> None:
 
 
 def _progress_trust_once(logger: Any, message: str) -> None:
+    if (tape := getattr(logger, "tape_trust_once", None)) is not None:
+        tape(message)  # a taped preflight: its replay applies the dedupe (#5491)
+        return
     if message in _TRUST_NOTICES_SHOWN:
         return
     _TRUST_NOTICES_SHOWN.add(message)
