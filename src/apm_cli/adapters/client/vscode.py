@@ -79,18 +79,18 @@ class VSCodeClientAdapter(MCPClientAdapter):
         """VS Code keys every entry by its full declared reference, never a short name."""
         return server_name or server_url
 
+    def peek_config_path(self):
+        """The ``.vscode/mcp.json`` path, without creating ``.vscode``."""
+        return str(self.project_root / ".vscode" / "mcp.json")
+
     def get_config_path(self, logger=None):
         """Get the path to the VSCode MCP configuration file in the repository.
 
         Returns:
             str: Path to the .vscode/mcp.json file.
         """
-        # Use the resolved project root, which may be explicitly provided
-        repo_root = self.project_root
-
-        # Path to .vscode/mcp.json in the repository
-        vscode_dir = repo_root / ".vscode"
-        mcp_config_path = vscode_dir / "mcp.json"
+        mcp_config_path = Path(self.peek_config_path())
+        vscode_dir = mcp_config_path.parent
 
         # Create the .vscode directory if it doesn't exist
         try:

@@ -30,6 +30,11 @@ from .models import (
     PolicyRemedy,
     PolicySubject,
 )
+from .unmanaged_projection import (
+    _format_unmanaged_detail,
+    _unclaimed_projected_writes,
+    _unmanaged_deny_conflict,
+)
 
 if TYPE_CHECKING:
     from ..integration.mcp_config_view import CurrentMcpConfigView
@@ -779,15 +784,12 @@ _TRUST_TRANSITIVE_REASON = "transitive server not in mcp.allow (mcp.trust_transi
 
 def _trust_transitive_result(names: Sequence[str]) -> CheckResult:
     if not names:
-        return CheckResult(
-            name=_TRUST_TRANSITIVE,
-            passed=True,
-            message="No transitive MCP server outside mcp.allow",
-        )
+        return CheckResult(_TRUST_TRANSITIVE, True, "No transitive MCP server outside mcp.allow")
+    from ..security.trust import trust_transitive_summary
+
     return _subjects_result(
         _TRUST_TRANSITIVE,
-        f"{len(names)} transitive MCP server(s) not in mcp.allow while "
-        "mcp.trust_transitive is false",
+        trust_transitive_summary(len(names)),
         [PolicySubject(name, _TRUST_TRANSITIVE_REASON) for name in names],
     )
 
@@ -1153,46 +1155,6 @@ def _classify_primitive_type(rel_path: str) -> str | None:
     return None
 
 
-def _unmanaged_deny_conflict(
-    rel_path: str,
-    dependency_deny: tuple[str, ...] | None,
-    mcp_deny: tuple[str, ...] | None,
-) -> str | None:
-    """Return the deny pattern an unmanaged file conflicts with, or ``None``.
-
-    Surfaces APM's OWN deny policy as a human-resolve conflict: the dependency
-    side is defaults-inclusive (``dependencies.effective_deny``) and the MCP
-    side is the raw ``mcp.deny`` -- mirroring the deny-list checks exactly.
-    Routes through the same ``first_matching_pattern`` matcher the deny-list
-    checks use -- never a second matcher.
-    """
-    from .matcher import first_matching_pattern
-
-    name = rel_path.rsplit("/", 1)[-1]
-    for patterns in (dependency_deny, mcp_deny):
-        hit = first_matching_pattern(rel_path, patterns)
-        if hit is None:
-            # Fall back to the basename so a deny glob written against a bare
-            # filename (e.g. 'mcp.json') still surfaces the conflict.
-            hit = first_matching_pattern(name, patterns)
-        if hit is not None:
-            return hit
-    return None
-
-
-def _format_unmanaged_detail(
-    rel_path: str,
-    primitive_type: str | None,
-    deny_hit: str | None,
-) -> str:
-    """Render one enriched, ASCII-only finding line for an unmanaged file."""
-    label = f"{rel_path} [type: {primitive_type}]" if primitive_type else rel_path
-    reasons = ["not tracked in apm.lock.yaml"]
-    if deny_hit:
-        reasons.append(f"matches deny rule ({deny_hit})")
-    return f"{label} -- {'; '.join(reasons)}"
-
-
 def _check_unmanaged_files(
     project_root: Path,
     lock: LockFile | None,
@@ -1200,6 +1162,7 @@ def _check_unmanaged_files(
     *,
     dependency_deny: tuple[str, ...] | None = None,
     mcp_deny: tuple[str, ...] | None = None,
+    projected_writes: Iterable[str] = (),
 ) -> CheckResult:
     """Check 16: surface files in governance dirs not tracked in apm.lock.yaml.
 
@@ -1209,6 +1172,11 @@ def _check_unmanaged_files(
     ``dependencies.deny`` / ``mcp.deny`` -- a deny-conflict note for a human to
     resolve. Paths matching ``policy.exclude`` are suppressed. This is drift /
     divergence visibility, not supply-chain-attack prevention.
+
+    *projected_writes* are project-relative files an install is about to
+    create or edit through server ownership (MCP, LSP and hook configs, #4956):
+    they carry no ``deployed_files`` claim, so each is judged here with the
+    files already on disk, whether or not it exists yet.
     """
     from ..integration.hook_ownership import verified_apm_hook_files
     from .matcher import first_matching_pattern
@@ -1250,14 +1218,21 @@ def _check_unmanaged_files(
         )
 
     details: list[str] = []
+    flagged: set[str] = set(scan.exempt)
     for rel, file_path in scan.files:
         if (rel in deployed or rel.startswith(dir_prefix_tuple)) and file_path.is_file():
             continue
         if first_matching_pattern(rel, exclude) is not None:
             continue
+        flagged.add(rel)
         primitive_type = _classify_primitive_type(rel)
         deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
         details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
+    for rel in _unclaimed_projected_writes(
+        projected_writes, scan.roots, exclude, deployed, dir_prefix_tuple, flagged
+    ):
+        deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
+        details.append(_format_unmanaged_detail(rel, _classify_primitive_type(rel), deny_hit))
     unmanaged_count = len(details)
     notes = tuple(scan.notes)
 

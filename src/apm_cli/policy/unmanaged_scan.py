@@ -42,6 +42,10 @@ class GovernedScan:
     files: list[tuple[str, Path]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
+    # The governed entries walked (project-relative), and the harness local
+    # files skipped by default, for judging projected writes the same way.
+    roots: list[str] = field(default_factory=list)
+    exempt: set[str] = field(default_factory=set)
     capped: bool = False
 
 
@@ -191,6 +195,8 @@ def scan_governed_files(project_root: Path, directories: Sequence[str] | None) -
             else:
                 entries.append(gov_dir)
     named = {_walked_label(project_root, project_root / entry) for entry in entries}
+    scan.roots = [_lexical_posix(entry) for entry in entries]
+    scan.exempt = {rel for rel in HARNESS_LOCAL_FILES if rel not in named}
     seen: set[str] = set()
     scanned = 0
     for file_path in _candidate_files(project_root, entries):

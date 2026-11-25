@@ -458,7 +458,7 @@ class TestTrustedExecutableUnderHome:
 
         message = str(excinfo.value)
         expected = f"{name} at {shadow.resolve()} is inside the project {project.resolve()}"
-        assert os.path.normcase(expected) in os.path.normcase(message)
+        assert expected in message
         assert "Install" in message
         assert message.isascii()
 

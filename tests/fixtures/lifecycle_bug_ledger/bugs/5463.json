@@ -1,0 +1,16 @@
+{
+  "issue": 5463,
+  "fixed_in": "Unreleased",
+  "summary": "apm update reported all dependencies current and kept the old deployment after a local dependency's content changed, and exited 0 when a declared local path was deleted, while apm install re-snapshotted the change.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_update_local_refresh.py::test_local_version_bump_through_outdated_and_update",
+    "tests/lifecycle/scenarios/test_update_local_refresh.py::test_update_with_deleted_local_source_names_the_fix",
+    "tests/lifecycle/scenarios/test_update_local_refresh.py::test_update_keeps_an_unchanged_legacy_plugin_and_refreshes_a_transitive_local"
+  ]
+}
