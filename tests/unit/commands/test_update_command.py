@@ -1837,3 +1837,28 @@ class TestResolveRequestedPackages:
 
         deps = [self._dep("org/compliance-rules", alias="my-rules")]
         assert resolve_requested_packages(("my-rules",), deps) == ["org/compliance-rules"]
+
+
+@pytest.mark.parametrize("changed", [0, 1], ids=["revision-pin-only", "with-dependency-change"])
+def test_a_revision_pin_summary_still_reports_an_unsaved_pin_repair(changed: int, capsys) -> None:
+    """Every outcome line reports what the pin repairs did (#5243)."""
+    from apm_cli.commands.update import _render_update_completion_summary, _UpdateRunState
+    from apm_cli.marketplace.version_pins import StagedPinRepair, open_ref_pin_stage
+
+    open_ref_pin_stage().discard()  # no commit saved anything
+    repair = StagedPinRepair("mkt", "plug", "", "v1")
+    logger = MagicMock()
+
+    _render_update_completion_summary(
+        installed=changed,
+        changed=changed,
+        revision_pin_updates=[object()],
+        plan_state=_UpdateRunState(pin_repairs=(repair,)),
+        exec_reconcile_required=False,
+        restored_provenance=False,
+        logger=logger,
+    )
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "revision pin" in output, output
+    assert "Could not save 1 marketplace ref pin repair" in output, output
