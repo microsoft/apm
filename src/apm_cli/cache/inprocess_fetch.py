@@ -1068,8 +1068,14 @@ def fetch_worktree(
     staged: Path,
     env: Mapping[str, str] | None,
     pins: tuple[tuple[str, str], ...],
+    *,
+    blobs_out: dict[str, bytes] | None = None,
 ) -> dict[str, tuple[str, bool]] | None:
-    """Write commit *sha* of *url* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``."""
+    """Write commit *sha* of *url* into empty *staged*; ``{path: (blob id, exec)}`` or ``None``.
+
+    *blobs_out*, when given, receives each written blob by id (each id is the
+    hash of its bytes, computed as the pack was parsed).
+    """
     if len(sha) != 40:
         return None
     if _rate_limited():
@@ -1101,6 +1107,8 @@ def fetch_worktree(
             if not stat.S_ISDIR(info.st_mode):
                 raise _Refuse("staged root changed")
         _note(url, "hit")
+        if blobs_out is not None:
+            blobs_out.update((oid, objects[oid][1]) for oid, _executable in manifest.values())
         return manifest
     except _Refuse as reason:
         _note(url, f"fallback: {reason}")

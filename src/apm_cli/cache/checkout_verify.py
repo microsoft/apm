@@ -696,6 +696,8 @@ def materialize_verified_copy(
 
     prefix = subdir.strip("/")
     full = _full_sha(repo, sha)
+    if len(full) == 40 and _materialize_fresh(dest, repo, full, prefix):
+        return
     if len(full) == 40:
         written = materialize_into(
             repo, full, dest, dict(env if env is not None else os.environ), subdir=prefix
@@ -710,6 +712,32 @@ def materialize_verified_copy(
             continue
         robust_copy_entry(source / item.name, dest / item.name)
     require_verified_copy(dest, repo, sha, subdir, env)
+
+
+def _materialize_fresh(dest: Path, repo: Path, sha: str, prefix: str) -> bool:
+    """Write *dest* from the blobs the in-process fetch of *repo* just wrote (one use).
+
+    Each blob's id was computed from its bytes as the pack was parsed, and the
+    record holds only while *repo* is the directory that fetch landed (MS1:
+    re-hash-as-written, one use, same command, dev/ino).
+    """
+    key = _key(repo, sha)
+    with _MANIFEST_LOCK:
+        blobs = _FRESH_BLOBS.pop(key, None)
+        manifest = _MANIFESTS.get(key)
+    if blobs is None or manifest is None or not inprocess_verified(repo, sha, use="materialize"):
+        return False
+    under = f"{prefix}/" if prefix else ""
+    files = [
+        (rel[len(under) :], oid, executable)
+        for rel, (oid, executable) in manifest.files.items()
+        if rel.startswith(under)
+    ]
+    if not files or any(oid not in blobs for _rel, oid, _exec in files):
+        return False
+    from .pack_objects import write_tree
+
+    return write_tree(dest, files, blobs)
 
 
 def read_verified_file(
@@ -733,11 +761,19 @@ def require_verified_bytes(
 
 
 # Guarantees the fresh landing proved while writing, each usable by ONE read.
-_FRESH_USES = frozenset({"verify", "links"})
+_FRESH_USES = frozenset({"verify", "links", "materialize"})
+# The blobs an in-process fetch wrote, by id, held for the one materialize use.
+_FRESH_BLOBS: dict[tuple[str, str], dict[str, bytes]] = {}
 _INPROCESS: dict[tuple[str, str], tuple[int, int, set[str]]] = {}
 
 
-def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str, bool]]) -> None:
+def register_inprocess_manifest(
+    repo: Path,
+    sha: str,
+    files: dict[str, tuple[str, bool]],
+    *,
+    blobs: dict[str, bytes] | None = None,
+) -> None:
     """Record the verdict an in-process fetch reached while writing *repo*.
 
     The manifest stays for copy verification. The skip of the commit verify and
@@ -750,6 +786,10 @@ def register_inprocess_manifest(repo: Path, sha: str, files: dict[str, tuple[str
     with _MANIFEST_LOCK:
         _MANIFESTS[key] = _Manifest(object_format(sha), dict(files))
         _INPROCESS[key] = (info.st_dev, info.st_ino, set(_FRESH_USES))
+        if blobs:
+            _FRESH_BLOBS[key] = blobs
+        else:
+            _FRESH_BLOBS.pop(key, None)
 
 
 def inprocess_verified(repo: Path, sha: str | None = None, *, use: str) -> bool:
@@ -774,4 +814,5 @@ def forget_verdicts() -> None:
     """Drop every record (an evicted or rebuilt checkout, or a new run)."""
     with _MANIFEST_LOCK:
         _MANIFESTS.clear()
+        _FRESH_BLOBS.clear()
         _INPROCESS.clear()

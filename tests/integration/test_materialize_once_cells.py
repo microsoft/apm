@@ -113,13 +113,19 @@ def test_each_written_file_is_its_pinned_blob_and_nothing_is_copied(world) -> No
     _assert_pinned_tree(dest, checkout, sha)
 
 
-def _assert_pinned_tree(dest: Path, checkout: Path, sha: str) -> None:
+def _assert_pinned_tree(dest: Path, checkout: Path, sha: str, *, check_objects=True) -> None:
     """MS1/MS7: bytes equal to the commit and each file's hash is the pinned blob id."""
-    pinned = {}
-    for line in _git(checkout, "ls-tree", "-r", sha).splitlines():
-        meta, _, path = line.partition("\t")
-        mode, _kind, oid = meta.split()
-        pinned[path] = (mode, oid)
+    pinned = {
+        path: ("100755" if path.endswith(".sh") else "100644", _blob_id(data))
+        for path, data in _FILES.items()
+    }
+    if check_objects:
+        listed = {}
+        for line in _git(checkout, "ls-tree", "-r", sha).splitlines():
+            meta, _, path = line.partition("\t")
+            mode, _kind, oid = meta.split()
+            listed[path] = (mode, oid)
+        assert listed == pinned
     written = _tree(dest)
     assert written == _FILES
     assert {path: _blob_id(data) for path, data in written.items()} == {
@@ -160,7 +166,7 @@ def test_an_attributes_file_takes_the_copy_and_verify_path(world) -> None:
     checkout_verify.forget_verdicts()
     (checkout / "a.txt").unlink()
     with pytest.raises(
-        CheckoutVerificationError, match="does not match its commit|missing from the copy"
+        CheckoutVerificationError, match=r"does not match its commit|missing from the copy"
     ):
         _materialize(checkout, sha, world / "missing")
 
@@ -199,3 +205,49 @@ def test_a_non_empty_target_is_never_merged_into(world) -> None:
     with pytest.raises(CheckoutVerificationError):
         materialize_verified_copy(dest, checkout, sha)
     assert (dest / "stray.txt").read_bytes() == b"left over\n"
+
+
+def _fresh_record(checkout: Path, sha: str) -> dict[str, bytes]:
+    """Record *checkout* as an in-process landing, with the blobs that fetch wrote."""
+    files, blobs = {}, {}
+    for line in _git(checkout, "ls-tree", "-r", sha).splitlines():
+        meta, _, path = line.partition("\t")
+        mode, _kind, oid = meta.split()
+        files[path] = (oid, mode == "100755")
+        blobs[oid] = _FILES[path]
+    checkout_verify.register_inprocess_manifest(checkout, sha, files, blobs=blobs)
+    return blobs
+
+
+def test_a_fresh_landing_is_written_from_the_fetched_blobs_once(world) -> None:
+    """Cold M2: the blobs the fetch hashed and wrote are written once more, into the target.
+
+    With the cache worktree file and every cache object gone, only the handoff
+    can produce the tree; the record is one use, so a second target needs objects.
+    """
+    checkout, sha = _checkout(world)
+    _fresh_record(checkout, sha)
+    (checkout / "a.txt").unlink()
+    objects = checkout / ".git" / "objects"
+    for pack in (objects / "pack").glob("*"):
+        os.chmod(pack, 0o644)
+        pack.unlink()
+    dest = world / "apm_modules" / "o" / "r"
+    _materialize(checkout, sha, dest)
+    _assert_pinned_tree(dest, checkout, sha, check_objects=False)
+    with pytest.raises(CheckoutVerificationError):
+        _materialize(checkout, sha, world / "second")
+
+
+def test_a_fresh_record_is_not_used_for_a_replaced_directory(world) -> None:
+    """The handoff holds only while the cache checkout is the directory the fetch landed."""
+    checkout, sha = _checkout(world)
+    _fresh_record(checkout, sha)
+    moved = checkout.with_name(checkout.name + "-old")
+    checkout.rename(moved)
+    _git(moved.parent, "clone", "-q", "--no-local", str(moved), str(checkout))
+    _git(checkout, "checkout", "-q", "--detach", sha)
+    (checkout / "a.txt").write_bytes(b"not the commit\n")
+    dest = world / "apm_modules" / "o" / "r"
+    _materialize(checkout, sha, dest)
+    _assert_pinned_tree(dest, moved, sha)

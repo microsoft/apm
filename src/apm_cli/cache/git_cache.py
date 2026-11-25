@@ -592,11 +592,13 @@ class GitCache:
             ensure_path_within(staged, self._checkouts_root)
             staged.mkdir(parents=True, exist_ok=True)
             os.chmod(str(staged), 0o700)
-            files = fetch_worktree(url, sha, staged, env, _checkout_materialization_pins())
+            blobs: dict[str, bytes] = {}
+            pins = _checkout_materialization_pins()
+            files = fetch_worktree(url, sha, staged, env, pins, blobs_out=blobs)
             if files is None or not atomic_land(staged, final_dir, lock):
                 robust_rmtree(staged, ignore_errors=True)
                 return None
-        register_inprocess_manifest(final_dir, sha, files)
+        register_inprocess_manifest(final_dir, sha, files, blobs=blobs)
         _log.debug("In-process fetch: %s @ %s", _sanitize_url(url), sha[:12])
         return self._record_checkout_access(final_dir)
 

@@ -387,6 +387,34 @@ def materialize_into(
     return {path: (oid, executable) for path, oid, executable in files}
 
 
+def write_tree(dest: Path, files: list[tuple[str, str, bool]], blobs: dict[str, bytes]) -> bool:
+    """Write proven *files* (``(path, blob id, executable)``) into the empty *dest*, sealed.
+
+    ``False`` leaves *dest* empty. The caller vouches that each blob is the
+    bytes of its id; paths are re-checked here as the fetch checked them.
+    """
+    from .inprocess_fetch import _safe_name
+
+    try:
+        if os.listdir(dest):
+            return False
+        dirs: set[str] = set()
+        for path, _oid, _executable in files:
+            parts = path.split("/")
+            if any(_safe_name(part.encode("utf-8")) != part for part in parts):
+                return False
+            dirs.update("/".join(parts[:depth]) for depth in range(1, len(parts)))
+    except (OSError, ValueError, _Refuse):
+        return False
+    root = str(dest)
+    try:
+        _write_sealed(root, sorted(dirs), files, blobs)
+    except Exception:
+        _discard_worktree(root)
+        return False
+    return True
+
+
 _Plan = tuple[list[str], list[tuple[str, str, bool]], dict[str, bytes]]
 
 
