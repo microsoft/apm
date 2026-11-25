@@ -306,3 +306,6 @@
 04:51 | VP memo default: no resident lane v0.40; filed FS0 #5420 (config.py:17-18); W3d fork Linux-only (macOS rejected) + F1-F6 pre-fork checks; Bets probe +cold-case +F1-F6 | combined ~05:30 | none
 04:56 | COMBINED B+fork L 0.792 med [45542197103] -> ~3.41-3.67 s at 9V74: MISSES 3.3 bar; no memo; Bets stops spawn-ahead -> standby/Car 3; W3d design banked; next: deletion map of remaining 4.3 s | VP ack; O-TIME kill | none
 04:56 | VP approved defaults; B fold-only-if-free else dead; deletion map (SoL, 60 min, kill if no owner >=0.5 s); doc section 7 combined verdict added | O-TIME; Bets B para ~05:30 | none
+04:57 | tick: main 1e4a208e; inbox silent; tick prompt refreshed (doc v3.6, combined miss, O-TIME + deletion map) | O-TIME kill; Bets B para | none
+04:58 | Bets B triage: free subset (format detect/plugin.json/nested skill dirs) folds into Car 1; 5 memos dead; doc section 7 updated | O-TIME | none
+05:03 | W B-alone 0.968 med [45542228941] (verified), doc updated | O-TIME | none

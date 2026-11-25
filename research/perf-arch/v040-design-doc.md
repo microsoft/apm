@@ -615,7 +615,9 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
   - COMBINED B+fork: 0.792 / 0.798 / 0.776, median 0.792 -> ~3.41 s ratio-scaled, 3.55-3.67 s absolute at 9V74 (a bound on a bound).
   - B alone: 0.964 / 0.960 / 0.983 (wrapper 0.984) -> ~4.2 s.
   - M B alone 0.911 median, but the wrapper reads 1.011 [45542213046]: noise-grade.
+  - W B alone 0.968 median (0.968 / 0.907 / 1.001; wrapper 0.985) [45542228941]: bound <= 4%, same as L.
 - VERDICT (VP 04:57, regent informed): MISSES the 3.3 s memo bar. No CEO memo, no resident-process lane, and fork is not a v0.41 ask. B at 2-4% fails the bar: it folds into Car 1 only if it is free (same code paths, no new invariants); otherwise it is dead.
+  - B triage (Bets, perf-research/bets-notes @ 64beda00, design-car1-ext-passmemo.md): FREE, so folded into Car 1 by construction: PackageFormatDetector.detect (default detectors) + find_plugin_json + _collect_nested_skill_dirs, read from the per-package plan (~2,550 stats on L; covered by Car 1's own paired read). DEAD (each needs a new invariant): cross-caller hash-pass reuse, _package_files per root (tree-unchanged), compute_file_hash per path (file-unchanged + source/deployed split), _skill_names_in_directory (also used on deploy targets), carried_license._skill_dirs (no in-owner redundancy: 517/517).
 - Banked reference: W3d resident-server design (rows w3d:design:resident-server, :fork): spawn-ahead single-use workers on all OS (a LATENCY win; CPU-neutral on our CPU-p50 yardstick, since imports are still paid per command); fork is a Linux-only CPU win (macOS rejected), with F1-F6 pre-fork re-checks; multi-request-in-one-interpreter rejected. Precondition FS0 (import initializes nothing) is filed as #5420 for v0.40 regardless.
 - HONEST FINDING: there is no measured Python path to L <= 3.5 s at 9V74. 3.5 s stays the North Star, labelled "no measured path; v0.41+ research". One time-boxed deletion map of the remaining cost (stacked + B head, 60 min) looks for a single owner >= 0.5 s L; if none exists, this is the honest end of the v0.40 research.
 
@@ -632,7 +634,13 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
 - Lane N zero-cost oracles (stacked heads, cold t50, 6 pairs, 18/18 valid; engagement proven per OS by served counts, trace 45540082415; on W resolve_path = realpath.py:235, the override after the win32 block, and the native _resolve_windows was called 0 times):
   - O-resolve (every Path.resolve / os.path.realpath lexical): L 0.956 [45534288568] / W 0.954 [45534253181] / M 0.916 [45534321911]; ~0.19 s L at 9V74.
   - O-walk2 (os.walk / scandir / listdir / glob / rglob served at zero cost in integrate): L 0.992 [45538269139] / W 0.987 [45538289388] / M 1.026 [45538306906]; ~0.03 s L at 9V74.
-  - Both are below the 0.5 s L bar. KILL decision pending the O-TIME whole-run absolute bound (CPU inside every walk/stat/exists/is_* primitive).
+  - Both are below the 0.5 s L bar.
+  - O-TIME whole-run absolute bound [45543605433] (per-thread CPU INSIDE every walk/scandir/listdir/glob/rglob/iterdir/stat/lstat/exists/is_* primitive, 3 runs per OS, stacked head):
+    - L 0.48-0.50 s of a 2.7-3.7 s process (13-18%); ~80k calls from ~100 call sites; the largest single family is lstat (realpath chains) at 0.09 s / 27.9k calls.
+    - M 1.02-1.27 s (16-19%); W 1.53-1.72 s (19-27%).
+    - A native layer still pays the syscalls (~0.15 s on L). So even moving ALL ~80k calls frees at most ~0.4-0.55 s L at 9V74, and that is a ~100-call-site rewrite, not one hot loop. Any SINGLE loop is <= ~0.25 s at 9V74.
+  - **Lane N KILLED, WED 25 Nov 05:12 CET, inside its window:** one native fs loop cannot reach >= 0.5 s on L.
+  - Kept as a candidate, not a lane: on W the whole fs-primitive layer is ~1.2-1.6 s at 9V74 (Windows stat/exists cost 2-3x more). That is a possible future W-only many-call-site redesign. W is already at target, so it is not a v0.40 item.
 - **Lessons:**
   - attribution ranks, deletion sizes; 45% fs leaf-kind -> ~5% deletable. The 45% native-core gate counted fs-NAMED Python frames, not syscall CPU:
     - kinds are mapped by frame-name substring (":resolve", ":read", ":stat", ":walk"...), which catches abspath (the ceiling's own lexical replacement), click's resolve, read_manifest_text, etc.;
