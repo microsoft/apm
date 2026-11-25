@@ -16,6 +16,9 @@
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file",
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_never_relabels_a_path_through_a_symlinked_dir_as_exempt",
     "tests/unit/policy/test_unmanaged_special_files.py::test_a_fifo_the_policy_names_is_unmanaged",
-    "tests/lifecycle/scenarios/test_policy_promises.py::test_unmanaged_files_warn_enforcement_audit_keeps_the_harness_local_skip_line"
+    "tests/lifecycle/scenarios/test_policy_promises.py::test_unmanaged_files_warn_enforcement_audit_keeps_the_harness_local_skip_line",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_absolute_entry_inside_the_project_is_governed_as_relative",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_naming_a_path_through_a_symlinked_dir_never_governs_the_root_local_file",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_entry_outside_the_project_is_refused_by_name"
   ]
 }

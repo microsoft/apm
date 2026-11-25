@@ -1234,7 +1234,15 @@ def _check_unmanaged_files(
 
     dir_prefix_tuple = tuple(deployed_dir_prefixes)
 
-    scan = unmanaged_scan.scan_governed_files(project_root, policy.directories)
+    try:
+        scan = unmanaged_scan.scan_governed_files(project_root, policy.directories)
+    except unmanaged_scan.EntryOutsideProject as exc:
+        return CheckResult(
+            name="unmanaged-files",
+            passed=policy.effective_action != "deny",
+            message=str(exc),
+            details=[str(exc)],
+        )
     if scan.capped:
         return CheckResult(
             name="unmanaged-files",

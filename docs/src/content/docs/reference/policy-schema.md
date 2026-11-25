@@ -210,7 +210,7 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 | Field         | Type           | Default  | Notes                                                                            |
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift: under `enforcement: block`, `apm install` refuses when a governed directory would hold a file no lockfile row claims. `--mcp` and a local bundle refuse before writing anything; an install that deploys packages or local `.apm/` content restores every file it deployed and its lockfile; `--dry-run` previews it; `apm audit --ci` fails the same state. Known limit: this verdict needs the deployed files, so an install killed between deploy and restore leaves them unrecorded. |
-| `directories` | list of paths  | `[]`     | Subset of target directories (or single files) to check. Empty = all known target directories.     |
+| `directories` | list of paths  | `[]`     | Subset of target directories (or single files) to check, relative to the project root. An entry outside the project is refused. Empty = all known target directories.     |
 | `exclude`     | list of globs  | `null`   | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. `null` = no opinion (transparent in the `extends:` merge); merges as a union down the chain. |
 
 Each reported file is a divergence-visibility finding, not a security verdict

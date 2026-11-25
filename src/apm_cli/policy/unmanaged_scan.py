@@ -82,6 +82,38 @@ def _walked_label(project_root: Path, file_path: Path) -> str:
     return walked
 
 
+class EntryOutsideProject(ValueError):
+    """An ``unmanaged_files.directories`` entry that names a path outside the project."""
+
+
+def _workspace_entry(project_root: Path, entry: str) -> str:
+    """*entry* as a project-relative POSIX path; refuse one outside the project.
+
+    A relative entry is kept as written (the walk labels what it finds). An
+    absolute entry inside the project becomes project-relative. An entry whose
+    path, lexically or once links are resolved, is outside is refused.
+    """
+    raw = entry.replace("\\", "/")
+    target = Path(raw) if os.path.isabs(raw) else project_root / raw
+    for resolve in (os.path.normpath, os.path.realpath):
+        try:
+            rel = os.path.relpath(resolve(target), resolve(project_root))
+        except ValueError:  # another drive on Windows
+            continue
+        if rel != os.pardir and not rel.startswith(os.pardir + os.sep):
+            return Path(rel).as_posix() if os.path.isabs(raw) else raw
+    raise EntryOutsideProject(
+        f"unmanaged_files.directories entry '{entry}' is outside the project; "
+        "use a path relative to the project root"
+    )
+
+
+def _real_label(project_root: Path, file_path: Path) -> str:
+    """The project-relative path of *file_path* with its parent's links resolved."""
+    parent = os.path.relpath(os.path.realpath(file_path.parent), os.path.realpath(project_root))
+    return posixpath.join(Path(parent).as_posix(), file_path.name).removeprefix("./")
+
+
 def _candidate_files(project_root: Path, dirs: Sequence[str]) -> Iterator[Path]:
     """Yield every non-directory file under each governance entry.
 
@@ -118,16 +150,23 @@ def scan_governed_files(project_root: Path, directories: Sequence[str] | None) -
 
     Stops with ``capped`` set past ``MAX_UNMANAGED_SCAN_FILES`` files. A
     harness local file the policy does not name is skipped with one note.
+    Raises :class:`EntryOutsideProject` for an entry outside the project.
     """
-    named = {_lexical_posix(entry.replace("\\", "/")) for entry in directories or ()}
+    entries = [_workspace_entry(project_root, entry) for entry in directories or ()]
+    named = {_walked_label(project_root, project_root / entry) for entry in entries}
     scan = GovernedScan()
     seen: set[str] = set()
-    for file_path in _candidate_files(project_root, directories or _DEFAULT_GOVERNANCE_DIRS):
+    scanned = 0
+    for file_path in _candidate_files(project_root, entries or _DEFAULT_GOVERNANCE_DIRS):
         rel = _walked_label(project_root, file_path)
-        if rel in seen:
+        # A label the walk kept unnormalized also claims its real path, so one
+        # file reached under two labels is judged once.
+        real = _real_label(project_root, file_path) if rel != _lexical_posix(rel) else rel
+        if rel in seen or real in seen:
             continue
-        seen.add(rel)
-        if len(seen) > MAX_UNMANAGED_SCAN_FILES:
+        seen.update((rel, real))
+        scanned += 1
+        if scanned > MAX_UNMANAGED_SCAN_FILES:
             scan.capped = True
             break
         owner = HARNESS_LOCAL_FILES.get(rel)
