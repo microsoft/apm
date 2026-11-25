@@ -611,7 +611,13 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
   - Faithfulness: identical lockfile digest (af1dced3c0ad) and deployed-file digest (9680bf021f7c, path + mode + bytes) fork vs subprocess, with one identical env dict.
 - At 9V74, "~3.47 s" L = 4.3 s (stacked UNSAFE upper bound) x 0.807 (another upper bound): a bound on a bound, not a projection. Shard bases differ (2.9-4.6 s CPU), so the median ratio and per-shard absolutes are quoted.
 - Lazy imports were 1.00x (#4812); reaching this needs a process-model change (warm resident process / fork server).
-- Next: combined head (result-level pass dedup B + fork), L t50 paired. A proposal goes to the VP + regent only if L at 9V74 <= ~3.3 s. It must carry: W3d's trust-boundary design before any code; a W number (paired deletion, or an explicit no-fork-on-Windows plan); the ship/distribution impact (a resident process is a product change, CEO gate likely); and a kill date.
+- COMBINED head (result-level pass memos B + fork) [45542197103], L, 3 shards x 6 pairs, 3-way interleave per pair in one VM, identical lock/deployed digests on all sides (`| ORACLE |` rows, harness perf-research/arch-lanen-probe4):
+  - COMBINED B+fork: 0.792 / 0.798 / 0.776, median 0.792 -> ~3.41 s ratio-scaled, 3.55-3.67 s absolute at 9V74 (a bound on a bound).
+  - B alone: 0.964 / 0.960 / 0.983 (wrapper 0.984) -> ~4.2 s.
+  - M B alone 0.911 median, but the wrapper reads 1.011 [45542213046]: noise-grade.
+- VERDICT (VP 04:57, regent informed): MISSES the 3.3 s memo bar. No CEO memo, no resident-process lane, and fork is not a v0.41 ask. B at 2-4% fails the bar: it folds into Car 1 only if it is free (same code paths, no new invariants); otherwise it is dead.
+- Banked reference: W3d resident-server design (rows w3d:design:resident-server, :fork): spawn-ahead single-use workers on all OS (a LATENCY win; CPU-neutral on our CPU-p50 yardstick, since imports are still paid per command); fork is a Linux-only CPU win (macOS rejected), with F1-F6 pre-fork re-checks; multi-request-in-one-interpreter rejected. Precondition FS0 (import initializes nothing) is filed as #5420 for v0.40 regardless.
+- HONEST FINDING: there is no measured Python path to L <= 3.5 s at 9V74. 3.5 s stays the North Star, labelled "no measured path; v0.41+ research". One time-boxed deletion map of the remaining cost (stacked + B head, 60 min) looks for a single owner >= 0.5 s L; if none exists, this is the honest end of the v0.40 research.
 
 ## 8. What did not work (kills, with numbers)
 - lazy imports (L 0.988 / W 0.995);

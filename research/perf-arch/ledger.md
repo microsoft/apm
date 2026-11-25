@@ -301,3 +301,8 @@
 04:47 | SoL O-walk2 L 0.992/W 0.987/M 1.026 (verified); engagement proven per OS; O-TIME absolute bound ~15 min then kill line | kill ~05:05 | none
 04:48 | Bets A3x3 verified: fork-server L 0.807 med (0.806-0.826) [45541271380], M 0.883 [45541286025]; L ~3.47 s at 9V74 = AT line; combined B+fork ~05:30 | O-TIME kill ~05:05; combined ~05:30 | none
 04:48 | doc v3.4: section 8 Lane N oracles + VP-verbatim lesson; section 6 gate superseded note; push a58668ec02a580c2e06523339fc2fa25314ce0bb | O-TIME kill line | none
+04:49 | regent: Lane N kill at O-TIME miss; warm-process = CEO gate, memo if combined <=3.3 s; doc v3.5 A3 finding ff56b73a9686d2c7b256c7dd2718c5e45815a90b; W3d pre-asked trust-boundary sketch (conditional); Bets asked for W in-process server oracle | combined ~05:30 | none
+04:51 | W3d resident-server design: spawn-ahead single-use (+opt Linux fork); FS0 precondition (config.py:17-18). Physics: spawn-ahead CPU-neutral (latency win only); fork = CPU win. Bets W oracle switched to spawn-ahead (total vs post-request CPU + wall) | combined ~05:30 | none
+04:51 | VP memo default: no resident lane v0.40; filed FS0 #5420 (config.py:17-18); W3d fork Linux-only (macOS rejected) + F1-F6 pre-fork checks; Bets probe +cold-case +F1-F6 | combined ~05:30 | none
+04:56 | COMBINED B+fork L 0.792 med [45542197103] -> ~3.41-3.67 s at 9V74: MISSES 3.3 bar; no memo; Bets stops spawn-ahead -> standby/Car 3; W3d design banked; next: deletion map of remaining 4.3 s | VP ack; O-TIME kill | none
+04:56 | VP approved defaults; B fold-only-if-free else dead; deletion map (SoL, 60 min, kill if no owner >=0.5 s); doc section 7 combined verdict added | O-TIME; Bets B para ~05:30 | none
