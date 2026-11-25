@@ -1940,7 +1940,7 @@ class GitHubPackageDownloader:
                 # RESEARCH: verified-copy re-read deleted (same inodes as the verified checkout)
 
                 # Validate, then return without cloning.
-                route_agent_plugin_package(target_path)
+                pass  # RESEARCH: route_agent_plugin_package deleted
                 validation_result = validate_apm_package(target_path)
                 if validation_result.is_valid and validation_result.package:
                     package = validation_result.package
@@ -1964,7 +1964,7 @@ class GitHubPackageDownloader:
                         installed_at=datetime.now().isoformat(),
                         dependency_ref=dep_ref,
                         package_type=validation_result.package_type,
-                        carried_licenses=carry_licenses(target_path),
+                        carried_licenses=(),  # RESEARCH: carry_licenses deleted
                     )
                 # Validation failed against cached copy: fall through to a
                 # fresh clone (cache may be stale or repo structure changed).
