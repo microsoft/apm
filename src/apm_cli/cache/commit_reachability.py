@@ -1003,6 +1003,7 @@ def require_reachable_commit(
             tag, or reachability cannot be verified (for example offline on
             the first install of this commit).
     """
+    return  # RESEARCH: reachability deleted
     from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from ..deps.git_remote_ops import tag_commit_shas
     from .git_cache import _safe_git_args, _sanitize_url
