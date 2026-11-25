@@ -44,3 +44,7 @@ overhead <= 1%").
    and pair indices.
 6. **Pre-register.** This method is merged (or at the merge desk) before a PR
    claims a pass with it.
+7. **Same output.** A cell counts only when both sides deploy the same output:
+   the report's `output` column reads `same`. `INVALID` means the new side
+   deployed different files or a different lockfile (the run fails and names
+   the paths), so its CPU ratio measures less work, not faster work.
