@@ -141,6 +141,8 @@ def load():
 
 ROWS, META = load()
 NEW_SHA = (META.get("new") or "9ba3589d")[:8]
+# CLAIM HOLD (PERF VP 02:15): set to None once the real-github.com Windows probe clears #5376 engagement.
+WIN_CAVEAT = "offline mirror; real-network engagement under verification"
 OLD_NEW = "9ba3589d"
 NEW_LABEL = META.get("new_label") or ""
 FAT = os.environ.get("PERF_REPORT_FORCE_FAT") == "1" or NEW_SHA != OLD_NEW
@@ -234,7 +236,8 @@ def chart(name, journeys, pop, tr, src, track=True, height=2.3, openssl=False):
         if os_ == "windows-openssl":
             ax.set_title("Windows\n(OpenSSL)", fontsize=7.5)
         elif os_ == "windows":
-            ax.set_title(("Windows\n(default config)" if IN(5376) else "Windows\n(default: schannel)") if src == "final" else "Windows\n(OpenSSL backend)", fontsize=7.5)
+            ax.set_title((("Windows\n(default config)" if IN(5376) else "Windows\n(default: schannel)")
+                          + ("\n[offline mirror, see note]" if WIN_CAVEAT and name in ("1-install.png", "2-auth.png") else "")) if src == "final" else "Windows\n(OpenSSL backend)", fontsize=7.5)
         else:
             ax.set_title(OSN[os_], fontsize=8)
         ax.tick_params(axis="y", labelsize=6.5)
@@ -243,7 +246,8 @@ def chart(name, journeys, pop, tr, src, track=True, height=2.3, openssl=False):
     axes[0].set_ylabel("CPU seconds (p50)", fontsize=7)
     from matplotlib.patches import Patch
     base_lbl = f"Before the epic (e37400fa)" if src == "final" else "Before (703acd6f, Nov 23 eve)"
-    now_lbl = f"Now (main {NEW_SHA})" if src == "final" else "Now (main c0296fab)"
+    now_lbl = (f"Now ({'fat train #5406' if '5406' in NEW_LABEL else 'main'} {NEW_SHA})" if src == "final"
+               else "Now (main c0296fab)")
     h = [Patch(color=C_BEFORE, label=base_lbl), Patch(color=C_NOW, label=now_lbl + "; label = speedup"
                                                        + ("; * = provisional" if any_prov else ""))]
     if any_track:
@@ -271,7 +275,8 @@ def table():
              ("compile", ANON), ("audit", ANON), ("audit-ci", ANON), ("pack", ANON), ("install-bundle", ANON),
              ("boot-version", ANON), ("boot-help", ANON)]
     popshort = {ANON: "anonymous", AUTH: "authenticated", ENTA: "GHE anonymous", ENTU: "GHE authenticated"}
-    out = ["| command | population | Linux t50 / t10 | macOS t50 / t10 | Windows t50 / t10 |",
+    out = ["| command | population | Linux t50 / t10 | macOS t50 / t10 | Windows t50 / t10"
+           + (" (install rows: " + WIN_CAVEAT + ")" if WIN_CAVEAT else "") + " |",
            "|---|---|---|---|---|"]
     for j, pop in order:
         cs = []

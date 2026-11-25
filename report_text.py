@@ -19,6 +19,8 @@ def render(g, srcs):
 
     ROWS = g["ROWS"]
     IN, FAT = g["IN"], g["FAT"]
+    WC = g["WIN_CAVEAT"]
+    wc = f" [{WC}]" if WC else ""
 
     def waiting(items):
         """items: (n, text); keep only PRs not yet in the measured head."""
@@ -70,11 +72,11 @@ def render(g, srcs):
       "for Windows (schannel TLS) unless labelled OpenSSL.")
     a("")
     if IN(5376):
-        W = lambda j, fx="tree-50": fin(j, "windows", fx)
-        WD = ""
+        W = lambda j, fx="tree-50": fin(j, "windows", fx) + wc
+        WD = wc
     else:
-        W = lambda j, fx="tree-50": fin(j, "windows", fx) + " default schannel / " + fin(j, "windows", fx + "-openssl") + " OpenSSL backend"
-        WD = " default schannel"
+        W = lambda j, fx="tree-50": fin(j, "windows", fx) + " default schannel" + wc + " / " + fin(j, "windows", fx + "-openssl") + " OpenSSL backend"
+        WD = " default schannel" + wc
     a("**Headline (tree-50, vs e37400fa).** First install (cold, anonymous): Linux " + fin("install-cold", "linux", "tree-50")
       + ", macOS " + fin("install-cold", "macos", "tree-50") + ", Windows " + W("install-cold")
       + ". CI install (frozen): Linux " + fin("install-frozen", "linux", "tree-50") + ", macOS " + fin("install-frozen", "macos", "tree-50")
@@ -84,7 +86,7 @@ def render(g, srcs):
       + ". First unchanged re-install (#2): " + ", ".join(f"{OSN[o]} {fin('install-noop', o, 'tree-50')}" for o in OSES)
       + "; repeat no-op (#3+, footnote 1): " + ", ".join(f"{OSN[o]} {fin('install-noop-replay', o, 'tree-50')}" for o in OSES)
       + (". **Windows default config now engages the in-process fetch** (#5376, merged: default cold 0.449 / 0.447, "
-         "warm 0.868 of the main before it), so Windows numbers above are the default setup. " if IN(5376) else
+         "warm 0.868 of the main before it" + (f"; {WC}" if WC else "") + "), so Windows numbers above are the default setup. " if IN(5376) else
          ". **Windows in its default config is the gap:** the in-process fetch does not engage under schannel until "
          "#5376 (on track) lands, which takes default-config cold to 0.474 of today (run 45458601150); Windows warm "
          "is slower than before the epic and Windows update too (section 3). ") + "Other commands, ranges across OS and tree "
@@ -104,7 +106,7 @@ def render(g, srcs):
     a(f"- **Fetch in process (B1).** {pr(5330)} (Linux/macOS) and {pr(5351)} (Windows) fetch the pinned commit over "
       "smart HTTP inside apm instead of a git CLI chain per package: cold t50 spawns ~670 -> ~18, requests 201 -> 101. "
       + (f"{pr(5376)} makes it engage under default Windows TLS (schannel -> OS trust store): Windows default cold "
-         "0.449 / 0.447, warm 0.868." if IN(5376) else
+         "0.449 / 0.447, warm 0.868" + (f" ({WC})" if WC else "") + "." if IN(5376) else
          f"Under default Windows TLS (schannel) it engages only with {pr(5376)} (OS trust store): Windows cold t50 "
          "0.474 (34.5 -> 15.9 s, spawns 366 -> 18; run 45458601150; "
          + ("on-track bar" if srcs["install"] == "final" else "not in the OpenSSL-backend chart") + ")."))
@@ -209,7 +211,7 @@ def render(g, srcs):
     wo = cell("install-cold", "windows-openssl", ANON, "tree-50")
     gap = ""
     if lr and wd and (IN(5376) or not wo):
-        gap = (f"Cold install t50 is now {lr['new_cpu']:.1f} s on Linux and {wd['new_cpu']:.1f} s on Windows default config "
+        gap = (f"Cold install t50 is now {lr['new_cpu']:.1f} s on Linux and {wd['new_cpu']:.1f} s on Windows default config" + (f" ({WC})" if WC else "") + " "
                f"(seconds depend on runner class), about {lr['new_cpu'] / 0.7:.0f}x and {wd['new_cpu'] / 1.5:.0f}x the "
                "physics floor (~0.7 s Linux, ~1.5 s Windows: 0 git children, 2 requests per package).")
     elif lr and wd and wo:
