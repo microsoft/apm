@@ -204,6 +204,78 @@ def _assert_names(name: str, *outputs: str) -> None:
         assert name in output, output
 
 
+def test_the_first_frozen_install_after_an_install_is_an_attested_hit(world_install) -> None:
+    """#4770 (CI's path): a plain install's attestation serves the first --frozen; the
+    frozen hit records nothing (W3d AF5), so the next --frozen is served again."""
+    install, _project, _world = world_install
+    _assert_attested(install())
+
+    first, second = install("--frozen"), install("--frozen")
+
+    for run in (first, second):
+        _assert_attested_hit(run)
+        assert "recorded" not in _traces(run[2]), run[2]
+
+
+@pytest.mark.parametrize(
+    "scenario", ["converged", "manifest drift", "lock-only edge", "local dependency"]
+)
+def test_a_frozen_install_answers_as_the_full_frozen_pipeline(world_install, scenario) -> None:
+    """W3d AF4: whatever the fast path decides, --frozen prints, exits and leaves the
+    lock exactly as the full frozen pipeline (every fast path off) does."""
+    install, project, _world = world_install
+    if scenario == "local dependency":
+        _add_local_dependency(project)
+        first = install()
+        assert first[0] == 0 and "attested" not in _traces(first[2]), first[2]  # unprovable
+    else:
+        _assert_attested(install())
+    if scenario == "manifest drift":
+        _declare(project, "perf-org/not-locked#v1.0.0")
+    elif scenario == "lock-only edge":
+        _drop_a_dependency(project)
+    lock = project / "apm.lock.yaml"
+    before = (lock.read_bytes(), lock.stat().st_mtime_ns)
+
+    fast, full = install("--frozen"), install("--frozen", fast="0")
+
+    _assert_same_frozen_answer(fast, full)
+    assert (lock.read_bytes(), lock.stat().st_mtime_ns) == before, "--frozen rewrote the lock"
+
+
+def _add_local_dependency(project: Path) -> None:
+    package = project / "local-pkg"
+    (package / ".apm" / "instructions").mkdir(parents=True)
+    (package / "apm.yml").write_text("name: local-pkg\nversion: 1.0.0\n", encoding="utf-8")
+    (package / ".apm" / "instructions" / "local.instructions.md").write_text(
+        "---\napplyTo: '**'\n---\nLocal rule.\n", encoding="utf-8"
+    )
+    _declare(project, "./local-pkg")
+
+
+def _declare(project: Path, entry: str) -> None:
+    import yaml
+
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"].append(entry)
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+
+def _assert_same_frozen_answer(fast, full) -> None:
+    assert fast[0] == full[0], fast[1] + fast[2] + "\n---\n" + full[1] + full[2]
+    assert _normalized(fast[1]) == _normalized(full[1])
+    assert _untraced(fast[2]) == _untraced(full[2])
+
+
+def _untraced(stderr: str) -> str:
+    kept = (
+        line
+        for line in stderr.splitlines()
+        if not line.startswith((_TRACE, "[i] install fast path:"))
+    )
+    return _normalized("\n".join(kept))
+
+
 def _tree_bytes(project: Path) -> dict[str, bytes]:
     return {
         path.relative_to(project).as_posix(): path.read_bytes()

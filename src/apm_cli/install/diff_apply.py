@@ -791,7 +791,9 @@ def try_apply(
         deploy = DeployStore.open_default()
         if deploy is None:
             raise Decline("no deploy store")
-        if attested and verdict_attest.attested_gates(project_root, lock, fetch):
+        if attested and verdict_attest.attested_gates(
+            project_root, lock, fetch, frozen_disposition
+        ):
             if decide_only:
                 _trace("no-op (attested record)")
                 return True
