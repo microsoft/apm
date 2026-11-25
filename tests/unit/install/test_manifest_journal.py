@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,6 +14,7 @@ from apm_cli.install.errors import InstallFailureAlreadyRendered
 from apm_cli.install.manifest_journal import (
     ManifestJournal,
     replay_abandoned_manifest,
+    shell_words,
 )
 
 pytestmark = [
@@ -190,8 +192,10 @@ def test_a_record_from_another_source_refuses_and_names_that_source(
 
     assert journal.path.exists()
     message = logger.error.call_args.args[0]
-    assert f"'apm install --root {deploy} ./x' from {source} is still pending" in message
-    assert f"Change to {source}, then run 'apm install --root {deploy}'" in message
+    # The command is quoted for this platform's shell (a Windows path keeps its backslashes).
+    root = shell_words(["--root", str(deploy)])
+    assert f"'apm install {root} ./x' from {source} is still pending" in message
+    assert f"Change to {source}, then run 'apm install {root}'" in message
 
 
 def _other_source_record(tmp_path: Path) -> tuple[ManifestJournal, Path, Path]:
@@ -238,3 +242,41 @@ def test_a_record_whose_source_is_gone_is_dropped_and_named(
     assert f"from {source} can no longer be restored" in message
     assert str(journal.path) in message
     assert message.endswith("Run 'apm install' to continue.")
+
+
+def test_a_symlinked_apm_yml_is_restored_through_its_link(workspace: Path) -> None:
+    """Replay restores the link's file and keeps the link; a moved link is refused."""
+    shared = workspace / "shared.yml"
+    shared.write_bytes(_PRIOR)
+    (workspace / "apm.yml").unlink()
+    try:
+        (workspace / "apm.yml").symlink_to("shared.yml")
+    except OSError:
+        pytest.skip("this platform cannot create a symbolic link here")
+    added = _PRIOR.decode() + "dependencies:\n  apm: [./x]\n"
+    journal = ManifestJournal(workspace / "apm.yml", workspace, _PRIOR, ["./x"])
+    journal.publish(added)
+    assert (workspace / "apm.yml").is_symlink(), "publishing replaced the link"
+
+    replay_abandoned_manifest(workspace, MagicMock(), workspace / "apm.yml")
+
+    assert (workspace / "apm.yml").is_symlink()
+    assert os.readlink(workspace / "apm.yml") == "shared.yml"
+    assert shared.read_bytes() == _PRIOR
+    assert not journal.path.exists()
+
+    journal = ManifestJournal(workspace / "apm.yml", workspace, _PRIOR, ["./x"])
+    journal.publish(added)
+    other = workspace / "other.yml"
+    other.write_bytes(added.encode())
+    (workspace / "apm.yml").unlink()
+    (workspace / "apm.yml").symlink_to("other.yml")
+    logger = MagicMock()
+
+    with pytest.raises(InstallFailureAlreadyRendered):
+        replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
+
+    assert os.readlink(workspace / "apm.yml") == "other.yml"
+    assert other.read_bytes() == added.encode()
+    assert journal.path.exists()
+    assert f"delete {journal.path}" in logger.error.call_args.args[0]

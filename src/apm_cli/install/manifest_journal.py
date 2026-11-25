@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -84,11 +85,17 @@ def _lock_identity(workspace: Path) -> str | None:
         return None
 
 
-def _quoted(words: list[str]) -> str:
+def shell_words(words: list[str]) -> str:
+    """*words* as one command line the user can paste into this platform's shell."""
     from apm_cli.utils.diagnostics import printable_ascii_text
 
     # The record is data on disk: never echo control or ANSI bytes to the terminal.
-    return " ".join(shlex.quote(printable_ascii_text(w)) for w in words)
+    safe = [printable_ascii_text(w) for w in words]
+    if os.name == "nt":
+        return subprocess.list2cmdline(
+            safe
+        )  # cmd/PowerShell quoting; backslash paths stay as typed
+    return " ".join(shlex.quote(w) for w in safe)
 
 
 def retry_options(
@@ -167,6 +174,9 @@ class ManifestJournal:
             "packages": list(packages),
             "options": list(options[0]),
             "bootstrap_options": list(options[1]),
+            # A symlinked apm.yml: the link text and the file it names (#5454).
+            "link": _link_text(self.manifest_path),
+            "resolved": str(_resolved(self.manifest_path)),
         }
         _write(self.path, self._record)
         _ACTIVE = self
@@ -185,16 +195,12 @@ class ManifestJournal:
         )
 
     def publish(self, text: str) -> None:
-        """Name *text*, then replace the manifest with it in one rename."""
-        from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode, write_text_lf
+        """Name *text*, then replace the manifest (a link's referent) with it in one rename."""
+        from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
 
         self.expect(text)
-        if self.manifest_path.is_symlink():
-            write_text_lf(self.manifest_path, text)  # a rename would replace the link
-            return
-        atomic_write_text(
-            self.manifest_path, text, new_file_mode=umask_file_mode(self.manifest_path)
-        )
+        target = _resolved(self.manifest_path)  # renaming onto a link would replace the link
+        atomic_write_text(target, text, new_file_mode=umask_file_mode(target))
 
     def seal(self) -> None:
         """Record the manifest this attempt wrote, so replay may undo exactly it."""
@@ -211,6 +217,14 @@ class ManifestJournal:
 
     def discard(self) -> None:
         _remove(self.path)
+
+
+def _link_text(path: Path) -> str | None:
+    return os.readlink(path) if path.is_symlink() else None
+
+
+def _resolved(path: Path) -> Path:
+    return Path(os.path.realpath(path)) if path.is_symlink() else path
 
 
 def _strings(value: Any) -> bool:
@@ -233,6 +247,8 @@ def _load(path: Path, workspace: Path) -> dict[str, Any]:
         raise ValueError("the record names a file other than an apm.yml")
     if not all(_strings(record.get(k)) for k in _LISTS):
         raise ValueError("the record is malformed")
+    if not all(isinstance(record.get(k), str | None) for k in ("link", "resolved")):
+        raise ValueError("the record is malformed")
     prior = record.get("prior")
     record["prior"] = base64.b64decode(prior, validate=True) if prior is not None else None
     return record
@@ -244,7 +260,28 @@ _LISTS = ("written", "packages", "options", "bootstrap_options")
 def _retry(record: dict[str, Any]) -> str:
     """The exact ``apm install`` that repeats the interrupted add."""
     bootstrap = record["bootstrap_options"] if record["prior"] is None else []
-    return _quoted([*record["options"], *bootstrap, *record["packages"]])
+    return shell_words([*record["options"], *bootstrap, *record["packages"]])
+
+
+def _same_link(record: dict[str, Any], target: Path, path: Path, logger: Any) -> Path:
+    """The file replay restores: *target*, or the referent of the same link it found.
+
+    A link that changed since the interrupted install is never replaced or
+    followed: replay refuses and names the fix.
+    """
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+
+    link, resolved = record.get("link"), record.get("resolved")
+    if _link_text(target) == link and (link is None or str(_resolved(target)) == resolved):
+        return _resolved(target)
+    if logger is not None:
+        logger.error(
+            f"{target} is not the link an interrupted install found "
+            f"(it pointed to {link or 'no other file'}), so it was not restored. "
+            f"Check that {target.name} declares what you want, delete {path}, "
+            "then run the command again."
+        )
+    raise InstallFailureAlreadyRendered(f"manifest link changed since {path}")
 
 
 def _settle_other_source(record: dict[str, Any], target: Path, path: Path, logger: Any) -> None:
@@ -266,7 +303,7 @@ def _settle_other_source(record: dict[str, Any], target: Path, path: Path, logge
         return
     pending = INTERRUPTED_ADD_PENDING.bind(source=source)
     if scope := _scope_prefix(record["options"]):
-        pending = pending.with_command(f"apm install {_quoted(scope)}")
+        pending = pending.with_command(f"apm install {shell_words(scope)}")
     if logger is not None:
         logger.error(
             f"An interrupted 'apm install {_retry(record)}' from {source} is still pending "
@@ -315,6 +352,7 @@ def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> N
         # install overwrite a live record: refuse until that source replays it.
         _settle_other_source(record, target, path, logger)
         return
+    restore_to = _same_link(record, target, path, logger)
     prior = record["prior"]
     current = target.read_bytes() if target.is_file() else None
     retry = _retry(record)
@@ -326,7 +364,7 @@ def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> N
         _remove(path)
         kept = INTERRUPTED_ADD_KEPT
         if scope := _scope_prefix(record["options"]):
-            kept = kept.with_command(f"apm install {_quoted(scope)}")
+            kept = kept.with_command(f"apm install {shell_words(scope)}")
         if logger is not None:
             logger.warning(
                 f"An interrupted '{fix}' never locked what it added to {target.name}, which "
@@ -336,7 +374,7 @@ def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> N
     if prior is None:
         target.unlink()
     else:
-        _restore_manifest_from_snapshot(target, prior)
+        _restore_manifest_from_snapshot(restore_to, prior)  # a link stays a link
     _remove(path)
     if logger is not None:
         logger.warning(
