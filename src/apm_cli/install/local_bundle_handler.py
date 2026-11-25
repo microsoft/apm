@@ -77,9 +77,8 @@ def install_local_bundle(
     )
     from ..integration.targets import resolve_targets
 
-    # Reject incompatible flags with a single consolidated error.  Preserve
-    # dict insertion order (matches the order options are declared on the
-    # CLI command) rather than alphabetising -- M-cli-3.
+    # Reject incompatible flags in one consolidated error, in dict insertion
+    # order (the CLI declaration order), not alphabetised -- M-cli-3.
     bad = [name for name, value in rejected_flags.items() if value]
     if bad:
         raise click.UsageError(
@@ -90,9 +89,8 @@ def install_local_bundle(
             "bundle .mcp.json metadata is handled separately."
         )
 
-    # ``verbose`` is consumed by the InstallLogger on construction (the
-    # CLI seam wires it in) -- the handler doesn't need to gate calls on
-    # it because logger.verbose_detail self-gates.
+    # ``verbose`` reaches the InstallLogger at construction (the CLI seam wires
+    # it in); logger.verbose_detail self-gates, so the handler never checks it.
     del verbose
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
@@ -104,10 +102,10 @@ def install_local_bundle(
     try:
         enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
-        # Resolve targets before policy preflight so target restrictions apply
-        # to the actual deployment set, including auto-detected targets. The
-        # bundle never edits apm.yml, but its declared targets still restrict
-        # where files land (--target > apm.yml > apm config > auto-detect).
+        # Resolve targets before policy preflight so target restrictions apply to
+        # the actual deployment set, auto-detected targets included. The bundle never
+        # edits apm.yml; its targets still restrict where files land (--target >
+        # apm.yml > apm config > auto-detect).
         explicit = resolve_manifest_target_decision(
             project_root,
             manifest_path=get_manifest_path(scope),
@@ -146,8 +144,7 @@ def install_local_bundle(
             )
             return
 
-        # Apply --legacy-skill-paths before policy evaluation. The target names
-        # remain canonical; only their deployment paths change.
+        # Apply --legacy-skill-paths before policy: target names stay canonical, paths change.
         if legacy_skill_paths:
             from ..integration.skill_layout import resolve_skill_layout
 
@@ -171,9 +168,9 @@ def install_local_bundle(
                 integrity_verified = bundle_info.lockfile is not None
 
         if bundle_info.lockfile is not None:
-            # A bundle with a manifest is verified whatever the policy says, so
-            # refuse a tampered one before the executables gate offers to
-            # approve its content (RA-035). admit_bundle reuses this verdict.
+            # A bundle with a manifest is verified whatever the policy says: refuse a
+            # tampered one before the executables gate offers to approve it (RA-035).
+            # admit_bundle reuses this verdict.
             integrity_check(False)
 
         from ..bundle.local_bundle import bundle_declares_mcp
@@ -284,16 +281,15 @@ def install_local_bundle(
             )
         skipped = result.get("skipped", 0)
 
-        # Issue #1207 D2.b: instructions staged into
-        # ``apm_modules/<slug>/.apm/instructions/`` for targets without a
-        # native ``instructions`` primitive (opencode, codex, gemini) are
-        # compile input, never deployment claims (#3705). Surface a compile
-        # hint so users know why they are not visible to AGENTS.md / GEMINI.md.
+        # Issue #1207 D2.b: instructions staged into ``apm_modules/<slug>/.apm/instructions/``
+        # for targets without native instructions (opencode, codex, gemini) are compile
+        # input, never deployment claims (#3705); a compile hint says why AGENTS.md /
+        # GEMINI.md do not show them.
         staged_instructions = result.get("staged_files", [])
-        # Issue #1207 D2.c: legacy Claude bundle MCP metadata is routed through
-        # MCPIntegrator.install. Native Agent Plugins fail at the deployment boundary.
-        # A Claude bundle always reconciles its owner, so a reinstall that ships
-        # no approved MCP retires the servers it wired earlier (#3956).
+        # Issue #1207 D2.c: legacy Claude bundle MCP metadata goes through
+        # MCPIntegrator.install; native Agent Plugins fail at the deployment boundary.
+        # A Claude bundle always reconciles its owner, so a reinstall shipping no
+        # approved MCP retires the servers it wired earlier (#3956).
         bundle_mcp_present = (
             bool(bundle_mcp_deps) or bundle_info.format == BundleFormat.CLAUDE_PLUGIN.value
         )
@@ -302,8 +298,7 @@ def install_local_bundle(
             logger.dry_run_notice(
                 f"Would deploy {len(deployed) + len(staged_instructions)} file(s) from local bundle"
             )
-            # IM5: surface the file list in default mode (not just verbose)
-            # so users see WHICH files would deploy.
+            # IM5: list the files in default mode too, so users see WHICH would deploy.
             for f in (*deployed, *staged_instructions):
                 logger.tree_item(f)
             return
@@ -323,8 +318,7 @@ def install_local_bundle(
                     deps=bundle_mcp_deps,
                     owner=_bundle_owner_key(bundle_info),
                 )
-        # A kept user LSP entry fails the install only after the bundle's
-        # deployed files and receipts are recorded (#4628).
+        # A kept user LSP entry fails install only after files and receipts are recorded (#4628).
         lsp_conflict = (
             _wire_bundle_lsp_servers(
                 bundle_dir=bundle_info.source_dir,
@@ -436,12 +430,9 @@ def install_local_bundle(
             )
 
         # Issue #1207 D2.c: route bundle ``mcp.json`` / ``.mcp.json`` (Anthropic plugin
-        # format) through the MCP integrator so each resolved target's
-        # native MCP config gets the servers in its own format and
-        # location.  ``.mcp.json`` is Claude-Code-native; Copilot,
-        # Cursor, OpenCode, Gemini, etc. each have their own MCP config
-        # conventions, and ``MCPIntegrator.install`` handles per-target
-        # dispatch (same code path used for ``apm.yml mcp_dependencies``).
+        # format) through the MCP integrator, so each resolved target's native MCP config
+        # gets the servers in its own format and location. ``MCPIntegrator.install`` does
+        # the per-target dispatch (the same path as ``apm.yml mcp_dependencies``).
     finally:
         # Tarball cleanup (caller-owned per LocalBundleInfo contract).
         if bundle_info.temp_dir is not None and bundle_info.temp_dir.exists():
@@ -551,8 +542,7 @@ def _parse_legacy_bundle_mcp_servers(
 
     from apm_cli.models.dependency.mcp import MCPDependency
 
-    # Case-insensitive lookup mirrors the rest of the bundle metadata
-    # filtering (HFS+/NTFS case folding).
+    # Case-insensitive lookup, like the rest of bundle metadata filtering (HFS+/NTFS folding).
     mcp_path: Path | None = None
     for entry in bundle_dir.iterdir() if bundle_dir.is_dir() else []:
         if (
@@ -568,9 +558,8 @@ def _parse_legacy_bundle_mcp_servers(
     try:
         data = json.loads(mcp_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
-        # json.JSONDecodeError is a ValueError subclass; the wider set also
-        # fails closed on deeply-nested JSON (RecursionError) or an oversized-
-        # integer literal (bare ValueError) in an untrusted bundle's .mcp.json.
+        # json.JSONDecodeError is a ValueError; the wider set also fails closed on deeply
+        # nested JSON (RecursionError) or an oversized-integer literal (ValueError).
         return []
     if not isinstance(data, dict):
         return []
@@ -904,9 +893,8 @@ def _wire_legacy_bundle_mcp_servers(
         joined = ", ".join(target_names)
         logger.success(f"Wired {count} MCP server(s) from bundle .mcp.json (target(s): {joined})")
     elif deps:
-        # Bundle declared servers but none applied (e.g. resolved targets
-        # all gated out, or all servers already configured).  Emit an info
-        # line so users have a paper-trail.
+        # Bundle declared servers but none applied (targets all gated out, or all
+        # servers already configured): emit an info line as a paper trail.
         joined = ", ".join(target_names)
         logger.info(
             f"Bundle .mcp.json declared {len(deps)} server(s); "
