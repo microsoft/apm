@@ -91,10 +91,25 @@ def _med(xs):
     return statistics.median(xs) if xs else None
 
 
+def all_hit(trace):
+    """True when every step of a replay trace is a hit (strict rule from #5381 @ 1ec46b85)."""
+    steps = [s.strip() for s in (trace or "").split(";") if s.strip()]
+    return bool(steps) and all(s.split()[0].rstrip(",") == "hit" for s in steps)
+
+
 def row_from_pairs(fx, j, pairs, os_, rid):
     full = [p for p in pairs.values() if "base" in p and "new" in p]
     if not full:
         return None
+    hit_note = None
+    if j == "install-noop-replay":
+        n_all = len(full)
+        full = [p for p in full if all_hit(p["new"].get("replay"))]
+        hit_note = f"{len(full)}/{n_all}"
+        if not full:
+            return {"command": j, "journey": j, "os": os_, "fixture": fx, "run": str(rid), "pairs": 0,
+                    "speedup": None, "replay_hit": hit_note, "source": "artifacts",
+                    "quality": f"invalid (replay hit {hit_note}: no all-hit samples)"}
     ratios = [p["new"]["cpu"] / p["base"]["cpu"] for p in full]
     by = {}
     for p in full:
@@ -118,7 +133,9 @@ def row_from_pairs(fx, j, pairs, os_, rid):
         "replay_new": sorted({p["new"]["replay"] for p in full if p["new"].get("replay")}),
         "tls": {"mode": "openssl" if fx.endswith("-openssl") else "system"} if os_ == "windows" else {},
         "harness_rev": "v2", "source": "artifacts",
-        "quality": "final" if len(full) >= 6 else f"provisional ({len(full)} pairs)",
+        "quality": ("final" if len(full) >= 6 else f"provisional ({len(full)} pairs)")
+                   + (f"; replay hit {hit_note}" if hit_note else ""),
+        "replay_hit": hit_note,
     }
 
 
