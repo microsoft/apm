@@ -40,7 +40,7 @@ def _capture(work: Path, **kwargs) -> dict:
     return output_oracle.capture([_install(work, **kwargs)], work)
 
 
-def _shard(root: Path, side: str, output: dict) -> None:
+def _shard(root: Path, side: str, output: dict, pair: str = "00") -> None:
     record = {
         "fixture": "tree-50",
         "journey": "install-cold",
@@ -52,7 +52,7 @@ def _shard(root: Path, side: str, output: dict) -> None:
         "output": output,
         "error": "",
     }
-    run = root / "shard-1" / "runs" / f"{side}-00"
+    run = root / "shard-1" / "runs" / f"{side}-{pair}"
     run.mkdir(parents=True)
     (run / "journeys-x.json").write_text(json.dumps({"results": [record]}))
 
@@ -130,3 +130,32 @@ def test_pack_archives_compare_members_not_timestamps(tmp_path):
         outputs.append(output_oracle.capture([dist], tmp_path / side, lock_dirs=[]))
 
     assert output_oracle.key(outputs[0]) == output_oracle.key(outputs[1])
+
+
+def test_pooled_runs_keep_each_pairs_evidence(tmp_path):
+    full = _capture(tmp_path / "base")
+    partial = _capture(tmp_path / "new", deploy=False)
+    pooled = tmp_path / "pooled"
+    _shard(pooled / "run-a", "base", full)
+    _shard(pooled / "run-a", "new", partial)
+    _shard(pooled / "run-b", "base", full)
+    _shard(pooled / "run-b", "new", full)
+
+    (row,) = ci_bench.summarize(pooled)
+
+    assert row["output"]["verdict"] == "INVALID"
+    assert row["output"]["mismatched_pairs"] == 1
+
+
+def test_a_pair_without_output_on_one_side_is_incomplete(tmp_path, capsys):
+    full = _capture(tmp_path / "base")
+    shards = tmp_path / "shards"
+    _shard(shards, "base", full)
+    _shard(shards, "new", full)
+    _shard(shards, "base", full, pair="01")
+    _shard(shards, "new", {}, pair="01")
+
+    status = ci_bench.main(["report", str(shards), "--shards", "1", "--pairs", "2"])
+
+    assert status == 1
+    assert "INCOMPLETE (1/2 pairs uncaptured)" in capsys.readouterr().out

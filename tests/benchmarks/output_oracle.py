@@ -149,13 +149,24 @@ def compare(base: list[tuple[str, dict]], new: list[tuple[str, dict]]) -> dict:
 
     ``same`` needs every pair's base and new output to match and every pair to
     share one output: a side whose output varies across pairs is not a stable
-    measurement either. ``-`` when no pair captured an output.
+    measurement either. ``INCOMPLETE`` when some pair lacks an output on
+    either side (parity unproven); ``-`` only when no pair captured one (a
+    harness without the oracle).
     """
     base_by_pair = {pair: key(o) for pair, o in base if key(o) is not None}
     new_by_pair = {pair: key(o) for pair, o in new if key(o) is not None}
-    paired = sorted(set(base_by_pair) & set(new_by_pair))
-    if not paired:
+    if not base_by_pair and not new_by_pair:
         return {"verdict": "-"}
+    pairs = {pair for pair, _ in base} | {pair for pair, _ in new}
+    uncovered = sorted(p for p in pairs if p not in base_by_pair or p not in new_by_pair)
+    if uncovered:
+        return {
+            "verdict": "INCOMPLETE",
+            "uncovered_pairs": len(uncovered),
+            "pairs": len(pairs),
+            "first": uncovered[0],
+        }
+    paired = sorted(pairs)
     variants = {base_by_pair[p] for p in paired} | {new_by_pair[p] for p in paired}
     if len(variants) == 1:
         return {"verdict": "same", "files": next(iter(variants))[0]}

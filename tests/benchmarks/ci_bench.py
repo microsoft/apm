@@ -124,11 +124,13 @@ def _load(root: Path) -> dict:
         side, _, pair = run_dir.partition("-")
         if side not in SIDES:
             continue
-        shard = _shard_of(path, root)
+        # The pair id keeps every directory above the side's run dir: pooled
+        # workflow runs (downloaded side by side) reuse shard names and indices.
+        where = "/".join(path.relative_to(root).parts[:-2]) or _shard_of(path, root)
         report = json.loads(path.read_text(encoding="utf-8"))
         for record in report["results"]:
             key = (record["fixture"], record["journey"], record["rtt_ms"])
-            cells.setdefault(key, {}).setdefault(side, []).append((f"{shard}/{pair}", record))
+            cells.setdefault(key, {}).setdefault(side, []).append((f"{where}/{pair}", record))
     return cells
 
 
@@ -237,9 +239,11 @@ def render(rows: list[dict], meta: dict) -> str:
 
 
 def _output_cell(output: dict | None) -> str:
-    """``same (N files)``, ``INVALID (base->new files)`` or ``-``."""
+    """``same (N files)``, ``INVALID (base->new files)``, ``INCOMPLETE`` or ``-``."""
     if not output or output["verdict"] == "-":
         return "-"
+    if output["verdict"] == "INCOMPLETE":
+        return f"INCOMPLETE ({output['uncovered_pairs']}/{output['pairs']} pairs uncaptured)"
     return f"{output['verdict']} ({output.get('files')} files)"
 
 
@@ -248,6 +252,13 @@ def _invalid_lines(rows: list[dict]) -> list[str]:
     lines = []
     for row in rows:
         output = row.get("output") or {}
+        if output.get("verdict") == "INCOMPLETE":
+            lines.append(
+                f"\n[x] INCOMPLETE {row['fixture']} {row['journey']} rtt={row['rtt_ms']:g}: "
+                f"{output['uncovered_pairs']} of {output['pairs']} pairs carry no output on "
+                f"one side (first: {output['first']}), so parity is unproven."
+            )
+            continue
         if output.get("verdict") != "INVALID":
             continue
         detail = ", ".join(
@@ -273,7 +284,7 @@ def report(args: argparse.Namespace) -> int:
         Path(args.json).write_text(
             json.dumps({"meta": meta, "rows": rows}, indent=2) + "\n", encoding="utf-8"
         )
-    invalid = any((r.get("output") or {}).get("verdict") == "INVALID" for r in rows)
+    invalid = any((r.get("output") or {}).get("verdict") in ("INVALID", "INCOMPLETE") for r in rows)
     return 1 if not rows or invalid or any(_incomplete(r, args) for r in rows) else 0
 
 
