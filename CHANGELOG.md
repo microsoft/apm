@@ -13,7 +13,7 @@ The first published 0.39 release. It includes everything in 0.39.0 below, plus t
 
 ### Fixed
 
-- Helper tools such as git under your home directory are found again when apm runs outside a project. (#5470)
+- Helper tools such as git installed under your home directory are now found when apm runs outside a project. (#5470)
 
 ## [0.39.0] - 2026-11-25
 
