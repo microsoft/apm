@@ -211,6 +211,12 @@ RESTORE_EDITED = _entry(
 )
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
+LOCAL_IDENTITY_DUPLICATE = _entry(
+    "local-identity-duplicate",
+    "apm install",
+    "record the package once",
+    before="remove the duplicate entry from apm.yml",
+)
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
 # A managed config entry (an LSP server) install kept the same way (#4626).
 KEPT_ENTRY_RESTORE = _entry(

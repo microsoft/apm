@@ -85,6 +85,63 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     return out
 
 
+def rekey_legacy_local_identities(
+    lockfile: LockFile | None, project_root: Path, modules_dir: Path | None = None
+) -> dict[str, str]:
+    """Re-key pre-#5418 absolute local identities in place; return old -> new keys.
+
+    The write path of the migration (plain ``apm install`` / ``apm update``):
+    each row :func:`apm_cli.deps.local_identity.legacy_local_renames` names
+    takes its portable key and ``anchored_local_path``, children's
+    ``declaring_parent`` and the ledger owners follow the rename map, and,
+    with *modules_dir*, its ``apm_modules/_local/<slot>`` copy moves to the
+    new slot. The owner stays the same row; nothing is deleted. A new key
+    another row already holds refuses before any change.
+    """
+    if lockfile is None or not lockfile.dependencies:
+        return {}
+    from apm_cli.core.deployment_reanchor import move_materializations, rename_ledger_owners
+    from apm_cli.core.remediation import LOCAL_IDENTITY_DUPLICATE
+    from apm_cli.deps.local_identity import legacy_local_renames
+    from apm_cli.integration.base_integrator import BaseIntegrator
+
+    anchors = legacy_local_renames(lockfile.dependencies, project_root)
+    if not anchors:
+        return {}
+    renames = {old: f"local:{anchor}" for old, anchor in anchors.items()}
+    owners: dict[str, str] = {}
+    for old, new in renames.items():
+        if new in lockfile.dependencies or new in owners:
+            raise RuntimeError(
+                f"apm.lock.yaml records local package {new} twice: as {old} and as {new}. "
+                + LOCAL_IDENTITY_DUPLICATE.sentence()
+            )
+        owners[new] = old
+    moves = []
+    for old, anchor in anchors.items():
+        row = lockfile.dependencies[old]
+        current = row.to_dependency_ref().get_install_path(modules_dir) if modules_dir else None
+        row.anchored_local_path = anchor
+        if current is not None and current.is_dir():
+            target = row.to_dependency_ref().get_install_path(modules_dir)
+            if not target.exists():
+                moves.append((current, target))
+    if moves:
+        move_materializations(tuple(moves), modules_dir)
+        # The slot is _local/<hash>/<name>: the move leaves <hash> empty.
+        BaseIntegrator.cleanup_empty_parents(
+            [current for current, _ in moves], stop_at=modules_dir / "_local"
+        )
+    rename_ledger_owners(lockfile, renames)
+    rows = list(lockfile.dependencies.items())
+    lockfile.dependencies.clear()
+    for key, row in rows:
+        if row.declaring_parent in renames:
+            row.declaring_parent = renames[row.declaring_parent]
+        lockfile.dependencies[renames.get(key, key)] = row
+    return renames
+
+
 class LockfileBuilder:
     """Assembles a ``LockFile`` from :class:`InstallContext` state.
 
@@ -791,6 +848,7 @@ class LockfileBuilder:
         if self.ctx.only_packages:
             existing = _LF.read(lockfile_path)
             if existing:
+                rekey_legacy_local_identities(existing, self.ctx.source_root)
                 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
                 self._reconcile_partial_subtree(existing)

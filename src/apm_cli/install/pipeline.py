@@ -476,6 +476,14 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # local content exists (e.g. .apm/ was deleted but old files remain).
     _old_local_deployed: builtins.list = []
     _early_lockfile = LockFile.read(get_lockfile_path(apm_dir)) if apm_dir else None
+    if _early_lockfile and not frozen and not dry_run:
+        from ..core.scope import get_modules_dir
+        from .phases.lockfile import rekey_legacy_local_identities
+
+        # A writable install re-keys pre-#5418 absolute local identities once.
+        rekey_legacy_local_identities(
+            _early_lockfile, source_root, None if lockfile_only else get_modules_dir(scope)
+        )
     if _early_lockfile:
         _old_local_deployed = builtins.list(_early_lockfile.local_deployed_files)
 

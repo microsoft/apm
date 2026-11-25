@@ -718,6 +718,134 @@ def test_production_reaches_a_shared_leaf_in_either_dev_order(
     assert dev_flags["./packages/a"] is True, dev_flags
 
 
+class TestLegacyAbsoluteLocalIdentity:
+    """#5418: a lock row keyed by a monorepo sibling's absolute path is the same
+    owner as its portable ``../`` identity: read-only on the read path, re-keyed
+    in place on the write path.
+    """
+
+    @staticmethod
+    def _layout(root: Path) -> tuple[Path, Path, Path]:
+        app = root / "R" / "apps" / "app"
+        lib = root / "R" / "packages" / "lib-b"
+        outside = root / "outside" / "lib-x"
+        for path in (app, lib, outside):
+            path.mkdir(parents=True)
+        (root / "R" / ".git").mkdir()
+        return app, lib, outside
+
+    @staticmethod
+    def _row(anchor: str, parent: str = "../../packages/lib-a") -> LockedDependency:
+        return LockedDependency(
+            repo_url=f"_local/{Path(anchor).name}",
+            source="local",
+            local_path=f"../{Path(anchor).name}",
+            declaring_parent=parent,
+            anchored_local_path=anchor,
+        )
+
+    @staticmethod
+    def _ref(anchor: str) -> DependencyReference:
+        from dataclasses import replace
+
+        return replace(
+            DependencyReference.parse("../lib-b"),
+            declaring_parent="../../packages/lib-a",
+            anchored_local_path=anchor,
+        )
+
+    def test_read_path_finds_the_absolute_row_by_directory(self, tmp_path: Path) -> None:
+        from apm_cli.deps.local_identity import locked_spelling
+
+        app, lib, outside = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        locked = {f"local:{legacy}": self._row(legacy)}
+        ref = self._ref("../../packages/lib-b")
+
+        assert locked_spelling(ref, locked, app, directory=lib).anchored_local_path == legacy
+        assert locked_spelling(ref, locked, app, directory=outside) is ref
+        assert locked_spelling(ref, locked, app) is ref
+
+    def test_read_path_never_opens_a_dotdot_identity(self, tmp_path: Path, monkeypatch) -> None:
+        from apm_cli.deps import local_identity
+
+        app, lib, _ = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        locked = {
+            f"local:{legacy}": self._row(legacy),
+            "local:../../packages/other": self._row("../../packages/other"),
+        }
+        opened: list[str] = []
+        real = os.path.samefile
+
+        def spy(first, second):
+            opened.extend((os.fspath(first), os.fspath(second)))
+            return real(first, second)
+
+        monkeypatch.setattr(local_identity.os.path, "samefile", spy)
+        local_identity.locked_spelling(
+            self._ref("../../packages/lib-b"), locked, app, directory=lib
+        )
+
+        assert opened
+        assert not [path for path in opened if ".." in Path(path).parts], opened
+
+    def test_write_path_renames_only_in_repository_rows_that_exist(self, tmp_path: Path) -> None:
+        from apm_cli.deps.local_identity import legacy_local_renames
+
+        app, lib, outside = self._layout(tmp_path)
+        inside, out = lib.resolve().as_posix(), outside.resolve().as_posix()
+        gone = (tmp_path / "R" / "packages" / "gone").as_posix()
+        locked = {f"local:{path}": self._row(path) for path in (inside, out, gone)}
+
+        assert legacy_local_renames(locked, app) == {f"local:{inside}": "../../packages/lib-b"}
+
+    def test_rekey_moves_rows_parents_owners_and_slot(self, tmp_path: Path) -> None:
+        from apm_cli.install.phases.lockfile import rekey_legacy_local_identities
+
+        app, lib, _ = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        lockfile = LockFile()
+        lockfile.dependencies[f"local:{legacy}"] = self._row(legacy)
+        child = self._row((lib.parent / "lib-c").as_posix(), parent=f"local:{legacy}")
+        lockfile.dependencies["local:outside-child"] = child
+        modules = app / "apm_modules"
+        slot = self._row(legacy).to_dependency_ref().get_install_path(modules)
+        slot.mkdir(parents=True)
+        (slot / "apm.yml").write_text("name: lib-b\n", encoding="ascii")
+
+        renames = rekey_legacy_local_identities(lockfile, app, modules)
+
+        new = "local:../../packages/lib-b"
+        assert renames == {f"local:{legacy}": new}
+        assert list(lockfile.dependencies) == [new, "local:outside-child"]
+        assert lockfile.dependencies[new].anchored_local_path == "../../packages/lib-b"
+        assert child.declaring_parent == new
+        moved = lockfile.dependencies[new].to_dependency_ref().get_install_path(modules)
+        assert (moved / "apm.yml").read_text(encoding="ascii") == "name: lib-b\n"
+        assert not slot.parent.exists()
+        assert rekey_legacy_local_identities(lockfile, app, modules) == {}
+
+    def test_rekey_onto_a_key_another_row_holds_refuses_with_the_fix(self, tmp_path: Path) -> None:
+        from apm_cli.install.phases.lockfile import rekey_legacy_local_identities
+
+        app, lib, _ = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        lockfile = LockFile()
+        lockfile.dependencies[f"local:{legacy}"] = self._row(legacy)
+        lockfile.dependencies["local:../../packages/lib-b"] = self._row("../../packages/lib-b")
+        before = list(lockfile.dependencies)
+
+        with pytest.raises(RuntimeError) as refused:
+            rekey_legacy_local_identities(lockfile, app)
+
+        assert "Remove the duplicate entry from apm.yml, then run 'apm install'" in str(
+            refused.value
+        )
+        assert list(lockfile.dependencies) == before
+        assert lockfile.dependencies[f"local:{legacy}"].anchored_local_path == legacy
+
+
 class TestRepositoryRelativeAnchorIdentity:
     """#5418: a monorepo sibling (outside the project root, inside its
     repository) is recorded relative to the project root with ``../``, so two

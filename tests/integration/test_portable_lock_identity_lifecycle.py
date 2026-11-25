@@ -6,8 +6,13 @@ inside the repository but outside the project root (a monorepo sibling) is
 recorded relative to the project root with ``../``, in ``anchored_local_path``,
 ``declaring_parent: local:`` and the ledger owners (source: #5418 scope
 record). A package outside the repository keeps its absolute identity.
-CELL: OP=install SRC=local PRIM=skill SCOPE=project LOCK=absent
-GRAPH=transitive-sibling REPO=git|none
+CELL: OP=install SRC=local PRIM=skill SCOPE=project LOCK=absent|legacy-absolute
+GRAPH=transitive-sibling REPO=git|none FROZEN=on|off
+
+A lock written with the absolute form is accepted read-only by ``install
+--frozen`` and ``audit --ci``; one plain install re-keys it in place (same
+owners, no file deleted, the apm_modules slot moved) and the next install
+is a byte no-op.
 """
 
 from __future__ import annotations
@@ -18,7 +23,12 @@ from pathlib import Path
 import pytest
 
 from apm_cli.utils.yaml_io import load_yaml
-from tests.integration._install_audit_replay_kit import ReplayWorld, lock_bytes, write
+from tests.integration._install_audit_replay_kit import (
+    ReplayWorld,
+    lock_bytes,
+    tree_digest,
+    write,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -42,8 +52,9 @@ def _skill_package(root: Path, name: str, deps: tuple[str, ...] = ()) -> None:
 
 
 def _monorepo(world: ReplayWorld, root: Path, *, outside: Path | None = None) -> Path:
-    """The issue's layout: app -> ../../packages/lib-a -> ../lib-b (and an outside dep)."""
-    _skill_package(root / "packages" / "lib-b", "lib-b")
+    """The issue's layout: app -> ../../packages/lib-a -> ../lib-b -> ../lib-c (+ outside)."""
+    _skill_package(root / "packages" / "lib-c", "lib-c")
+    _skill_package(root / "packages" / "lib-b", "lib-b", ("../lib-c",))
     lib_a_deps = ("../lib-b",) if outside is None else ("../lib-b", outside.as_posix())
     _skill_package(root / "packages" / "lib-a", "lib-a", lib_a_deps)
     app = root / _APP
@@ -56,9 +67,27 @@ def _monorepo(world: ReplayWorld, root: Path, *, outside: Path | None = None) ->
     return app
 
 
-def _transitive_rows(app: Path) -> list[dict]:
+def _transitive_rows(app: Path) -> dict[str, dict]:
     lock = load_yaml(app / "apm.lock.yaml")
-    return [row for row in lock["dependencies"] if row.get("anchored_local_path")]
+    return {row["name"]: row for row in lock["dependencies"] if row.get("anchored_local_path")}
+
+
+def _owners(app: Path) -> list[tuple[str, tuple[str, ...], str]]:
+    lock = load_yaml(app / "apm.lock.yaml")
+    return [
+        (row["value"], tuple(row["owners"]), row["active_owner"]) for row in lock["deployments"]
+    ]
+
+
+def _deployed(app: Path) -> dict[str, bytes]:
+    """Every file outside apm_modules, .git and the lockfile, with its bytes."""
+    files = tree_digest(app)
+    files.pop("apm.lock.yaml")
+    return files
+
+
+def _slots(app: Path) -> set[str]:
+    return {path.name for path in (app / "apm_modules" / "_local").iterdir() if path.is_dir()}
 
 
 def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_path: Path) -> None:
@@ -77,9 +106,11 @@ def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_pa
     assert (app_b / "apm.lock.yaml").read_text(encoding="utf-8") == text
     assert str(world.sources) not in text
     assert str(world.sources.resolve()) not in text
-    (row,) = _transitive_rows(app_a)
-    assert row["anchored_local_path"] == "../../packages/lib-b"
-    assert row["declaring_parent"] == "../../packages/lib-a"
+    rows = _transitive_rows(app_a)
+    assert rows["lib-b"]["anchored_local_path"] == "../../packages/lib-b"
+    assert rows["lib-b"]["declaring_parent"] == "../../packages/lib-a"
+    assert rows["lib-c"]["anchored_local_path"] == "../../packages/lib-c"
+    assert rows["lib-c"]["declaring_parent"] == "local:../../packages/lib-b"
 
     before = lock_bytes(app_a)
     world.apm("install", cwd=app_a)
@@ -100,14 +131,68 @@ def test_outside_repository_and_no_repository_keep_absolute(
     world.apm("install", cwd=app)
     text = (app / "apm.lock.yaml").read_text(encoding="utf-8")
     assert f"anchored_local_path: {outside.resolve().as_posix()}" in text
-    assert "anchored_local_path: ../../packages/lib-b" in text
-    anchors = {row["anchored_local_path"] for row in _transitive_rows(app)}
-    assert anchors == {"../../packages/lib-b", outside.resolve().as_posix()}
+    assert "anchored_local_path: ../../packages/lib-c" in text
+    anchors = {row["anchored_local_path"] for row in _transitive_rows(app).values()}
+    assert anchors == {
+        "../../packages/lib-b",
+        "../../packages/lib-c",
+        outside.resolve().as_posix(),
+    }
 
     plain = world.sources / "plain"
     plain_app = _monorepo(world, plain)
     world.apm("install", cwd=plain_app)
     plain_text = (plain_app / "apm.lock.yaml").read_text(encoding="utf-8")
     assert "anchored_local_path: ../" not in plain_text
-    (row,) = _transitive_rows(plain_app)
-    assert row["anchored_local_path"] == (plain / "packages" / "lib-b").resolve().as_posix()
+    rows = _transitive_rows(plain_app)
+    assert rows["lib-b"]["anchored_local_path"] == (
+        (plain / "packages" / "lib-b").resolve().as_posix()
+    )
+
+
+def test_absolute_lock_is_rekeyed_in_place_once(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    repo = world.sources / "R"
+    app = _monorepo(world, repo)
+    # Written before the repository exists: the pre-#5418 absolute form.
+    world.apm("install", cwd=app)
+    legacy, legacy_owners, legacy_slots = lock_bytes(app), _owners(app), _slots(app)
+    absolute = {name: row["anchored_local_path"] for name, row in _transitive_rows(app).items()}
+    assert all(Path(anchor).is_absolute() for anchor in absolute.values()), absolute
+    deployed = _deployed(app)
+    world.git(repo, "init", "-q", "--initial-branch=main")
+
+    # Read path, on a second app in the same repository holding the same lock:
+    # accepted as locked, nothing written.
+    reader = repo / "apps" / "reader"
+    shutil.copytree(app, reader, symlinks=True)
+    world.apm("install", "--frozen", cwd=reader)
+    world.audit_clean(cwd=reader)
+    assert lock_bytes(reader) == legacy
+    assert _deployed(reader) == deployed
+    assert _slots(app) == legacy_slots
+
+    # Write path: one install re-keys the rows in place.
+    world.apm("install", cwd=app)
+    rows = _transitive_rows(app)
+    assert rows["lib-b"]["anchored_local_path"] == "../../packages/lib-b"
+    assert rows["lib-c"]["anchored_local_path"] == "../../packages/lib-c"
+    assert rows["lib-c"]["declaring_parent"] == "local:../../packages/lib-b"
+    renames = {
+        f"local:{absolute[name]}": f"local:{rows[name]['anchored_local_path']}" for name in rows
+    }
+    assert _owners(app) == [
+        (value, tuple(renames.get(owner, owner) for owner in owners), renames.get(active, active))
+        for value, owners, active in legacy_owners
+    ]
+    assert _deployed(app) == deployed, "a re-key must not redeploy or delete a file"
+    slots = _slots(app)
+    assert len(slots) == len(legacy_slots)
+    assert not (legacy_slots - {"lib-a"}) & slots, "the legacy slot must move, not stay"
+
+    rekeyed = (app / "apm.lock.yaml").read_bytes()
+    world.apm("install", cwd=app)
+    assert (app / "apm.lock.yaml").read_bytes() == rekeyed, "I2: the re-key must happen once"
+    assert _slots(app) == slots
+    world.apm("install", "--frozen", cwd=app)
+    world.audit_clean(cwd=app)

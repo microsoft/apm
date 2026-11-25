@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, TypeVar
 
 from ..models.dependency.reference import DependencyReference
@@ -110,35 +110,79 @@ def _below_root(anchor: str) -> bool:
     )
 
 
-def locked_spelling(
-    ref: DependencyReference, locked: Mapping[str, Any], root: Path | None
-) -> DependencyReference:
-    """*ref* keyed as a pre-#5424 lock row that names its directory another way.
+def _absolute_identity(anchor: str) -> bool:
+    """Whether an ``anchored_local_path`` is an absolute (pre-#5418 or out-of-repo) path."""
+    return PurePosixPath(anchor).is_absolute() or PureWindowsPath(anchor).is_absolute()
 
-    Before :func:`stored_directory`, a transitive row kept the declared
-    spelling (``vendor/f-pkg`` for a stored ``F-Pkg``). When *ref*'s key is not
-    locked, a row whose ``anchored_local_path`` has the same caseless key and
-    is the same directory below *root* (``samefile``) names it, so ``install
-    --frozen`` accepts such a lock, read-only, until a plain install re-keys
-    it. A case-sensitive volume never confirms two spellings. Scans the rows
-    only on a miss.
+
+def _same_entry(first: Path, second: Path) -> bool:
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def locked_spelling(
+    ref: DependencyReference,
+    locked: Mapping[str, Any],
+    root: Path | None,
+    directory: Path | None = None,
+) -> DependencyReference:
+    """*ref* keyed as a legacy lock row that names its directory another way.
+
+    The one read-only legacy lookup (``install --frozen``, ``audit --ci``),
+    used only when *ref*'s key is not locked, until a plain install re-keys
+    the lock. Scans the rows only on a miss. Two legacy forms name the
+    directory:
+
+    * pre-#5424: a row whose ``anchored_local_path`` has the same caseless
+      key and is the same directory below *root* (``samefile``); a
+      case-sensitive volume never confirms two spellings;
+    * pre-#5418: a row whose ``anchored_local_path`` is absolute and is the
+      same directory as *directory*, the resolved directory *ref* was
+      anchored from. A ``../`` identity is never opened as a path.
     """
     anchor = ref.anchored_local_path
-    if not anchor or root is None or ref.get_unique_key() in locked or not _below_root(anchor):
+    if not anchor or root is None or ref.get_unique_key() in locked:
         return ref
-    want = spelling_key(anchor)
+    want = spelling_key(anchor) if _below_root(anchor) else None
     for row in locked.values():
         legacy = getattr(row, "anchored_local_path", None)
-        if not legacy or legacy == anchor or spelling_key(legacy) != want:
+        if not legacy or legacy == anchor:
             continue
-        if not _below_root(legacy):
+        if want is not None and spelling_key(legacy) == want and _below_root(legacy):
+            if _same_entry(root / legacy, root / anchor):
+                return replace(ref, anchored_local_path=legacy)
+        elif directory is not None and _absolute_identity(legacy):
+            if _same_entry(Path(legacy), directory):
+                return replace(ref, anchored_local_path=legacy)
+    return ref
+
+
+def legacy_local_renames(locked: Mapping[str, Any], root: Path) -> dict[str, str]:
+    """Old lock key -> current identity of each row an absolute identity names (#5418).
+
+    A row recorded before #5418 keys a monorepo sibling by its absolute
+    path. Its current identity is :func:`portable_anchor_identity` of that
+    directory, so the write path re-keys the row in place, never as a new
+    owner. Rows whose directory is gone or whose identity is unchanged (a
+    package outside the repository) are not renamed.
+    """
+    renames: dict[str, str] = {}
+    for key, row in locked.items():
+        legacy = getattr(row, "anchored_local_path", None)
+        if not legacy or key != f"local:{legacy}" or not _absolute_identity(legacy):
             continue
         try:
-            if os.path.samefile(root / legacy, root / anchor):
-                return replace(ref, anchored_local_path=legacy)
-        except OSError:
+            anchored = resolve_path(Path(legacy))
+        except (OSError, RuntimeError):
             continue
-    return ref
+        if not anchored.is_dir():
+            continue
+        current = portable_anchor_identity(stored_directory(anchored, root), root)
+        if current != legacy:
+            renames[key] = current
+    return renames
 
 
 def root_local_dirs(
