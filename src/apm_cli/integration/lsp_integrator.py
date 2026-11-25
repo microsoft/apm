@@ -200,10 +200,13 @@ class LspInstallRecord:
     ``"unproven"``; the caller keeps its locked config (#4626). *held_claims*
     (out) maps runtime -> managed server names held at their locked render on
     a target the new config cannot reach; the caller keeps that target claim
-    so stale cleanup leaves the entry (#4871).
+    so stale cleanup leaves the entry (#4871). *locked_roots* (in) maps a
+    locked server to its locked declaring package's root: the locked render
+    uses it, so a package move is APM's update, not an edit (#4872).
     """
 
     locked_configs: dict[str, dict] | None = None
+    locked_roots: dict[str, str] = field(default_factory=dict)
     kept_unowned: dict[str, builtins.set] = field(default_factory=dict)
     kept_edits: dict[str, str] = field(default_factory=dict)
     held_claims: dict[str, builtins.set] = field(default_factory=dict)
@@ -974,20 +977,27 @@ class LSPIntegrator:
         *,
         project_root: Path,
         user_scope: bool,
+        locked_roots: Mapping[str, str] | None = None,
     ) -> dict[str, dict] | None:
         """The entries APM renders for *spec* from the locked server configs (#4626).
 
         Only servers this install renders are judged; each locked config goes
-        through the same rendering as a fresh declaration, with the declaring
-        package's current root. ``None`` without locked configs.
+        through the same rendering as a fresh declaration, with the locked
+        declaring package's root from *locked_roots* (#4872), else the current
+        declaration's. ``None`` without locked configs.
         """
         if locked_configs is None:
             return None
         names = {dep.name for dep in runtime_deps if hasattr(dep, "name")}
+        roots = [
+            SimpleNamespace(name=name, plugin_root=root)
+            for name, root in (locked_roots or {}).items()
+            if name in names
+        ]
         return LSPIntegrator._locked_entries(
             locked_configs,
             names,
-            runtime_deps,
+            [*roots, *runtime_deps],
             spec,
             project_root=project_root,
             user_scope=user_scope,
@@ -1514,6 +1524,7 @@ class LSPIntegrator:
                         spec,
                         project_root=project_root_path,
                         user_scope=user_scope,
+                        locked_roots=record.locked_roots if record is not None else None,
                     ),
                 }
                 if servers:

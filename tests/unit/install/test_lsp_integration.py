@@ -681,6 +681,136 @@ def test_uninstall_transfers_first_wins_lsp_to_surviving_package(tmp_path) -> No
     assert json.loads(plugin_path.read_text())["lspServers"]["shared"]["command"] == "survivor"
 
 
+class TestPackageMoveWithPluginRoot:
+    """A ${CLAUDE_PLUGIN_ROOT} server judged at its locked package's root (#4872)."""
+
+    _PATHS = {  # noqa: RUF012
+        "copilot": (".github", "lsp.json"),
+        "claude": (".claude", "skills", "apm-lsp", ".claude-plugin", "plugin.json"),
+    }
+
+    @staticmethod
+    def _dep(tmp_path, package: str, command: str = "${CLAUDE_PLUGIN_ROOT}/bin/srv"):
+        root = tmp_path / "apm_modules" / "acme" / package
+        root.mkdir(parents=True, exist_ok=True)
+        return _make_dep(
+            "srv",
+            command=command,
+            extension_to_language=None,
+            resolved_by=f"acme/{package}",
+            # Install binds a root only to a declaration that references it.
+            plugin_root=str(root.resolve()) if "${" in command else None,
+        )
+
+    def _deploy_from_a(self, tmp_path, runtime: str):
+        """Install srv from package A as a previous ``apm install`` would."""
+        from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+        dep_a = self._dep(tmp_path, "pkg-a")
+        LSPIntegrator.install([dep_a], project_root=tmp_path, target_runtimes=[runtime])
+        lock = LockFile(
+            lsp_servers=["srv"],
+            lsp_configs=LSPIntegrator.get_server_configs([dep_a]),
+            lsp_config_provenance={"srv": "package:acme/pkg-a"},
+        )
+        DeploymentLedgerCodec.replace_lsp_target_servers(lock, {runtime: ["srv"]})
+        lock._lsp_target_servers_present = True
+        return tmp_path.joinpath(*self._PATHS[runtime]), lock
+
+    def _install(self, tmp_path, runtime: str, lock: LockFile, dep: LSPDependency):
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [dep]
+        diagnostics = MagicMock()
+        run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=lock,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            diagnostics=diagnostics,
+            explicit_target=[runtime],
+        )
+        return diagnostics
+
+    @pytest.mark.parametrize("runtime", ["copilot", "claude"])
+    def test_package_move_updates_the_untouched_entry(self, tmp_path, runtime) -> None:
+        config, lock = self._deploy_from_a(tmp_path, runtime)
+        dep_b = self._dep(tmp_path, "pkg-b")
+
+        diagnostics = self._install(tmp_path, runtime, lock, dep_b)
+
+        command = json.loads(config.read_text())["lspServers"]["srv"]["command"]
+        assert command.endswith("apm_modules/acme/pkg-b/bin/srv")
+        diagnostics.warn.assert_not_called()
+        diagnostics.error.assert_not_called()
+        written = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert written.lsp_config_provenance == {"srv": "package:acme/pkg-b"}
+
+    def test_user_edit_without_a_move_is_still_kept_as_drift(self, tmp_path) -> None:
+        config, lock = self._deploy_from_a(tmp_path, "copilot")
+        data = json.loads(config.read_text())
+        data["lspServers"]["srv"]["command"] = "my-srv"
+        config.write_text(json.dumps(data), encoding="utf-8")
+
+        diagnostics = self._install(tmp_path, "copilot", lock, self._dep(tmp_path, "pkg-a"))
+
+        assert json.loads(config.read_text())["lspServers"]["srv"]["command"] == "my-srv"
+        (message,) = diagnostics.warn.call_args.args
+        assert message.startswith("Kept LSP server 'srv' in .github/lsp.json: it was modified")
+        diagnostics.error.assert_not_called()
+
+    def test_upgrade_that_drops_the_placeholder_updates_the_entry(self, tmp_path) -> None:
+        """The incoming declaration binds no root: the locked one still renders."""
+        config, lock = self._deploy_from_a(tmp_path, "copilot")
+
+        dep = self._dep(tmp_path, "pkg-a", command="srv-v2")
+        diagnostics = self._install(tmp_path, "copilot", lock, dep)
+
+        assert json.loads(config.read_text())["lspServers"]["srv"]["command"] == "srv-v2"
+        diagnostics.error.assert_not_called()
+
+    def test_project_server_moved_into_a_package_updates_the_entry(self, tmp_path) -> None:
+        from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+        project = _make_dep(
+            "srv",
+            command="${CLAUDE_PLUGIN_ROOT}/bin/srv",
+            extension_to_language=None,
+            plugin_root=str(tmp_path.resolve()),
+        )
+        LSPIntegrator.install([project], project_root=tmp_path, target_runtimes=["copilot"])
+        lock = LockFile(
+            lsp_servers=["srv"],
+            lsp_configs=LSPIntegrator.get_server_configs([project]),
+            lsp_config_provenance={"srv": "project:."},
+        )
+        DeploymentLedgerCodec.replace_lsp_target_servers(lock, {"copilot": ["srv"]})
+        lock._lsp_target_servers_present = True
+
+        diagnostics = self._install(tmp_path, "copilot", lock, self._dep(tmp_path, "pkg-b"))
+
+        config = tmp_path / ".github" / "lsp.json"
+        command = json.loads(config.read_text())["lspServers"]["srv"]["command"]
+        assert command.endswith("apm_modules/acme/pkg-b/bin/srv")
+        diagnostics.warn.assert_not_called()
+
+    def test_user_edit_across_a_move_is_kept_not_overwritten(self, tmp_path) -> None:
+        config, lock = self._deploy_from_a(tmp_path, "copilot")
+        data = json.loads(config.read_text())
+        data["lspServers"]["srv"]["command"] = "my-srv"
+        config.write_text(json.dumps(data), encoding="utf-8")
+
+        diagnostics = self._install(tmp_path, "copilot", lock, self._dep(tmp_path, "pkg-b"))
+
+        assert json.loads(config.read_text())["lspServers"]["srv"]["command"] == "my-srv"
+        # The move renders a new path the kept edit holds back: a blocked keep.
+        (message,) = diagnostics.error.call_args.args
+        assert message.startswith("Kept LSP server 'srv' in .github/lsp.json: it was modified")
+
+
 # ===========================================================================
 # Stale cleanup
 # ===========================================================================

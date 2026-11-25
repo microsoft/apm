@@ -852,7 +852,10 @@ def run_lsp_integration(  # noqa: PLR0913
             )
 
         conflict = None
-        record = LspInstallRecord(locked_configs=old_lsp_configs)
+        locked_roots = _locked_plugin_roots(
+            existing_lock, old_lsp_provenance, apm_modules_path, project_root
+        )
+        record = LspInstallRecord(locked_configs=old_lsp_configs, locked_roots=locked_roots)
         kept, kept_servers = record.kept_unowned, record.kept_edits
         if lsp_deps:
             if fail_on_write_error:
@@ -897,9 +900,7 @@ def run_lsp_integration(  # noqa: PLR0913
                 project_root=project_root,
                 user_scope=user_scope,
                 locked_configs=old_lsp_configs,
-                plugin_roots=_locked_plugin_roots(
-                    existing_lock, old_lsp_provenance, apm_modules_path, project_root
-                ),
+                plugin_roots=locked_roots,
                 logger=logger,
                 fail_on_write_error=fail_on_write_error,
             )
