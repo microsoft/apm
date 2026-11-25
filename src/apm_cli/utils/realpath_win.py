@@ -39,7 +39,7 @@ from pathlib import Path, WindowsPath
 
 ENABLED = sys.platform == "win32"
 # Compute Path.resolve() too and raise on any difference (CI differential only).
-_DIFFERENTIAL = False
+_DIFFERENTIAL = True  # RT3 scratch only
 
 _STOCK_RESOLVE = WindowsPath.resolve
 _PREFIX = "\\\\?\\"
