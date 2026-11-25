@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, os.getcwd())
 from tests.benchmarks.journeys import Context, open_world, prepare_fixture  # noqa: E402
 
-FIXTURES = os.environ.get("DIFF_FIXTURES", "monorepo-4,tree-50,tree-10-mcp,tree-10-multi").split(",")
+FIXTURES = os.environ.get("DIFF_FIXTURES", "tree-50,monorepo-4,tree-10-mcp,tree-10-multi,tree-50-policy").split(",")
 SKIP = {"apm_modules", ".git"}
 SKIP_FILES = {".apm-local/installation"}  # per-install id, random by design
 import difflib
@@ -32,8 +32,9 @@ def snapshot(project: Path) -> dict[str, str]:
 
 
 failures = 0
-work = Path(tempfile.mkdtemp())
-for name in FIXTURES:
+work = Path(tempfile.mkdtemp()).resolve()  # W: long form, as in the bench world
+def _one(name):
+    global failures
     fixture = prepare_fixture(name, work)
     with open_world(fixture, work / "world" / name) as world:
         shots = {}
@@ -57,5 +58,13 @@ for name in FIXTURES:
         for line in list(difflib.unified_diff(a, b, "base/" + rel, "new/" + rel, n=2, lineterm=""))[:60]:
             print("      " + line[:220])
     failures += bool(diffs)
+
+
+for name in FIXTURES:
+    try:
+        _one(name)
+    except BaseException as exc:  # a failed install is unequal output, not a pass
+        failures += 1
+        print(f"DIFF {name}: ERROR {type(exc).__name__}: {str(exc)[-600:]}", flush=True)
 print("DIFF RESULT:", "IDENTICAL" if not failures else f"{failures} fixture(s) differ")
 sys.exit(1 if failures else 0)
