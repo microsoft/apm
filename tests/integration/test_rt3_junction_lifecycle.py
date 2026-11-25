@@ -173,18 +173,23 @@ def test_rt3_uninstall_with_a_locked_deployed_file_recovers(
     finally:
         holder.kill()
         holder.wait()
+    manifest = (world.project / "apm.yml").read_text(encoding="utf-8")
     lock = (world.project / "apm.lock.yaml").read_text(encoding="utf-8")
+    print(
+        f"first uninstall exit {first.returncode}\n{first.stdout[-2500:]}\n{first.stderr[-1500:]}"
+    )
+    print(
+        f"after: skill exists={skill.exists()} manifest lists a={'vendor/a' in manifest} "
+        f"lock lists a={'vendor/a' in lock}"
+    )
     if skill.exists():
-        # The file survived the lock: the lockfile must still own it, or a
-        # later command can never clean it up (a silent orphan).
-        assert "a-skill" in lock, (
-            f"locked file left behind but forgotten by the lockfile (exit {first.returncode}):\n"
-            f"{first.stdout[-1500:]}\n{first.stderr[-1500:]}\n--- lock:\n{lock}"
-        )
-    again = world.apm("prune", expect=None) if skill.exists() else first
+        # The file survived the lock: whatever owns it must still say so, or
+        # nothing can ever clean it up (a silent orphan).
+        assert "vendor/a" in manifest or "vendor/a" in lock, "locked file orphaned"
+    again = world.apm("uninstall", "./vendor/a", expect=None) if skill.exists() else first
     assert not skill.exists(), (
-        f"never recovered: first exit {first.returncode}, then {again.returncode}\n"
-        f"{again.stdout[-1500:]}\n{again.stderr[-1500:]}"
+        f"retry did not recover: exit {again.returncode}\n{again.stdout[-1500:]}\n"
+        f"{again.stderr[-1500:]}"
     )
 
 

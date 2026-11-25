@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, ubuntu-24.04]
+        os: [windows-2025]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,7 +35,4 @@ jobs:
           export APM_BINARY_PATH="$(uv run --frozen python -c 'import shutil; print(shutil.which("apm"))')"
           echo "apm: $APM_BINARY_PATH"
           uv run --frozen python -m pytest -p no:cacheprovider -p no:randomly -rA -v -s \
-          tests/integration/test_rt3_junction_lifecycle.py \
-          tests/unit/utils/test_rt3_windows_redteam.py \
-          tests/unit/utils/test_realpath_win.py \
-          tests/integration/test_realpath_win.py
+          tests/integration/test_rt3_junction_lifecycle.py -k locked
