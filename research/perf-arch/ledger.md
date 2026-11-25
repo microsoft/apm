@@ -313,3 +313,9 @@
 05:10 | regent closed Lane N KILLED; inbox: row 33 done, Lane N row dropped, deletion-map row opened (SoL, 06:10) | deletion map 06:10 | none
 05:19 | tick: main 1e4a208e; inbox silent; prompt refreshed (Lane N killed, deletion map) | deletion map 06:10; pulse ~05:48 | none
 05:30 | tick: main 1e4a208e; inbox silent; deletion map in flight (06:10) | pulse ~05:48 | none
+05:36 | deletion map DONE: no owner >=0.5 s (best ~0.05 s; 1.005/0.989/0.988 verified); NO THIRD BET; doc v3.8 095f788c3ba3a40723aaea7ce7a0deeb792f721a; row 36 done | VP; SoL reassign | none
+05:36 | SoL on 30-min tick; re-check A/A L+W + profile on new main when #5406 merges (still open 05:37) | #5406 land | none
+05:36 | VP: no third bet ACCEPTED, v0.40 research ENDED; re-check fallback = train head 42878803 at 10:30 if #5406 unlanded; E2 started Car 1 (first bench ~06:40) | SoL re-check by 11:30; doc FINAL 12:00 | none
+05:43 | Bets pulse: #5382/#5377 H8-signed in train; #5406 final candidate 42878803; Lane N notes bets-notes 947fafe1; standby + Car 3 prep | #5406 land | none
+05:47 | tick: main 1e4a208e; inbox silent; research ended; waiting #5406 / E2 Car 1 bench | none | none
+05:58 | tick: main 1e4a208e; inbox silent; 30-min notes push | E2 Car 1 bench ~06:40 | none
