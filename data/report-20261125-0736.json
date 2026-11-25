@@ -1,0 +1,5938 @@
+{
+ "base": "e37400fa313bfe736ec63242299486dac7647961",
+ "new": "42878803f020bf3f31821e24d764d2f8fdf40c6f",
+ "new_label": "the fat train head (#5406)",
+ "harness": "danielmeppiel-perf-ceo-report",
+ "reference_cpu_class": "EPYC 9V74",
+ "collected": "2026-11-25T06:08",
+ "rows": [
+  {
+   "command": "audit",
+   "journey": "audit",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.47127450957908135,
+   "band": [
+    0.46482719653451354,
+    0.4805243191979407
+   ],
+   "speedup": 2.121905555412173,
+   "base_cpu_s": 2.1249000000000002,
+   "new_cpu_s": 0.996,
+   "base_wall_s": 2.1587,
+   "new_wall_s": 1.0574,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 2.9452,
+     "new_s": 1.4144
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.1131,
+     "new_s": 0.9901
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.1131,
+    "new_s": 0.9901
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit-ci",
+   "journey": "audit-ci",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.49095784422934396,
+   "band": [
+    0.4867631181170373,
+    0.5146487609526964
+   ],
+   "speedup": 2.036834754254103,
+   "base_cpu_s": 2.36795,
+   "new_cpu_s": 1.1718,
+   "base_wall_s": 2.4089,
+   "new_wall_s": 1.25765,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.3321,
+     "new_s": 1.67795
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.34165,
+     "new_s": 1.1493
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.34165,
+    "new_s": 1.1493
+   },
+   "requests": "0->0",
+   "spawns": "6->4",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "boot-help",
+   "journey": "boot-help",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 1.023984453519586,
+   "band": [
+    1.0080906148867315,
+    1.050993377483444
+   ],
+   "speedup": 0.976577326504179,
+   "base_cpu_s": 0.1217,
+   "new_cpu_s": 0.12440000000000001,
+   "base_wall_s": 0.1561,
+   "new_wall_s": 0.15615,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 0.15365,
+     "new_s": 0.1583
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.11975,
+     "new_s": 0.12315000000000001
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.11975,
+    "new_s": 0.12315000000000001
+   },
+   "requests": "0->0",
+   "spawns": "0->0",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "boot-version",
+   "journey": "boot-version",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 1.0201558834730236,
+   "band": [
+    0.9840000000000001,
+    1.0377697841726619
+   ],
+   "speedup": 0.9802423494295747,
+   "base_cpu_s": 0.1134,
+   "new_cpu_s": 0.11555,
+   "base_wall_s": 0.1561,
+   "new_wall_s": 0.1561,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 0.14865,
+     "new_s": 0.1497
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.1118,
+     "new_s": 0.11499999999999999
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.1118,
+    "new_s": 0.11499999999999999
+   },
+   "requests": "0->0",
+   "spawns": "0->0",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "compile",
+   "journey": "compile",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.8035151097069759,
+   "band": [
+    0.7964883625969784,
+    0.8141194554238033
+   ],
+   "speedup": 1.2445316683150833,
+   "base_cpu_s": 0.9142,
+   "new_cpu_s": 0.7399,
+   "base_wall_s": 0.9574,
+   "new_wall_s": 0.757,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 1.24935,
+     "new_s": 0.9953000000000001
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.89665,
+     "new_s": 0.72585
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.89665,
+    "new_s": 0.72585
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-bundle",
+   "journey": "install-bundle",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.876345077024477,
+   "band": [
+    0.8646363821552251,
+    0.8986833984776795
+   ],
+   "speedup": 1.1411030040761778,
+   "base_cpu_s": 0.9889,
+   "new_cpu_s": 0.86615,
+   "base_wall_s": 1.0574,
+   "new_wall_s": 0.95715,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 1.3540999999999999,
+     "new_s": 1.2020499999999998
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.9848,
+     "new_s": 0.8584499999999999
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.9848,
+    "new_s": 0.8584499999999999
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547509699",
+   "pairs": 15,
+   "paired_p50": 0.48222140762463345,
+   "band": [
+    0.4774272338693263,
+    0.4867763737878343
+   ],
+   "speedup": 2.073736221968833,
+   "base_cpu_s": 3.2685,
+   "new_cpu_s": 1.5786,
+   "base_wall_s": 4.9614,
+   "new_wall_s": 2.6593,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 4.1318,
+     "new_s": 1.9878
+    },
+    "EPYC 9V45": {
+     "n": 5,
+     "base_s": 2.5149,
+     "new_s": 1.2006
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 3.2685,
+     "new_s": 1.5658
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 3.2685,
+    "new_s": 1.5786
+   },
+   "requests": "41->21",
+   "spawns": "123->14",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.5475339268951819,
+   "band": [
+    0.46841224909933094,
+    0.656555215694547
+   ],
+   "speedup": 1.8263708436672579,
+   "base_cpu_s": 4.24265,
+   "new_cpu_s": 2.3295,
+   "base_wall_s": 5.8641000000000005,
+   "new_wall_s": 3.3601,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 5.0184,
+     "new_s": 2.77935
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 3.6456,
+     "new_s": 2.0304
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 4.12945,
+     "new_s": 2.4074999999999998
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 3.6456,
+    "new_s": 2.0304
+   },
+   "requests": "41->21",
+   "spawns": "133->16",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen",
+   "journey": "install-frozen",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.5515559611088385,
+   "band": [
+    0.550232558139535,
+    0.5543710521990278
+   ],
+   "speedup": 1.813052655599293,
+   "base_cpu_s": 3.285,
+   "new_cpu_s": 1.82,
+   "base_wall_s": 4.8616,
+   "new_wall_s": 2.8596,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 4.2884,
+     "new_s": 2.3644
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 3.24935,
+     "new_s": 1.78885
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 3.24935,
+    "new_s": 1.78885
+   },
+   "requests": "31->21",
+   "spawns": "129->11",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen-noop",
+   "journey": "install-frozen-noop",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547807435",
+   "pairs": 15,
+   "paired_p50": 0.3561890909090909,
+   "band": [
+    0.3497057032677086,
+    0.36597552818979423
+   ],
+   "speedup": 2.80749754982032,
+   "base_cpu_s": 2.5203,
+   "new_cpu_s": 0.9287,
+   "base_wall_s": 2.5591,
+   "new_wall_s": 0.9572,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 3.5011,
+     "new_s": 1.2244
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 2.4571,
+     "new_s": 0.8692
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 2.5203,
+     "new_s": 0.9287
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 2.4571,
+    "new_s": 0.8692
+   },
+   "requests": "0->0",
+   "spawns": "18->2",
+   "replay_new": [
+    "attested miss (inputs changed: argv), recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.3269895374710032,
+   "band": [
+    0.31068983675618744,
+    0.33622160366346415
+   ],
+   "speedup": 3.058201824236282,
+   "base_cpu_s": 2.1668,
+   "new_cpu_s": 0.7205,
+   "base_wall_s": 2.159,
+   "new_wall_s": 0.7572,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 2.8603,
+     "new_s": 0.8849
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 2.12005,
+     "new_s": 0.70635
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 2.12005,
+    "new_s": 0.70635
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop-replay",
+   "journey": "install-noop-replay",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.08900523560209424,
+   "band": [
+    0.084703485103991,
+    0.09182202575437248
+   ],
+   "speedup": 11.23529411764706,
+   "base_cpu_s": 2.1472,
+   "new_cpu_s": 0.198,
+   "base_wall_s": 2.159,
+   "new_wall_s": 0.2564,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 2.8464,
+     "new_s": 0.2411
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 2.12065,
+     "new_s": 0.19245
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 2.12065,
+    "new_s": 0.19245
+   },
+   "requests": "0->0",
+   "spawns": "8->0",
+   "replay_new": [
+    "hit"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final; replay hit 15/15",
+   "replay_hit": "15/15",
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.6156974379829199,
+   "band": [
+    0.6077547075877823,
+    0.6274865773108269
+   ],
+   "speedup": 1.6241743725231177,
+   "base_cpu_s": 2.587,
+   "new_cpu_s": 1.5879,
+   "base_wall_s": 3.1604,
+   "new_wall_s": 2.0586,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 3.4237,
+     "new_s": 2.0994
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 2.5521,
+     "new_s": 1.5683500000000001
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 2.5521,
+    "new_s": 1.5683500000000001
+   },
+   "requests": "11->11",
+   "spawns": "23->22",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.6001214888492379,
+   "band": [
+    0.5882075286158204,
+    0.6283166904422255
+   ],
+   "speedup": 1.6663292659583788,
+   "base_cpu_s": 2.82625,
+   "new_cpu_s": 1.766,
+   "base_wall_s": 3.5111499999999998,
+   "new_wall_s": 2.15925,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.48505,
+     "new_s": 2.0913
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 2.52005,
+     "new_s": 1.4889000000000001
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 2.82625,
+     "new_s": 1.766
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 2.52005,
+    "new_s": 1.4889000000000001
+   },
+   "requests": "11->11",
+   "spawns": "33->23",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "outdated",
+   "journey": "outdated",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.49325175964924517,
+   "band": [
+    0.4791478809738503,
+    0.5026056745801969
+   ],
+   "speedup": 2.0273622555570956,
+   "base_cpu_s": 0.9074,
+   "new_cpu_s": 0.45005,
+   "base_wall_s": 1.15805,
+   "new_wall_s": 0.7569,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 1.2134,
+     "new_s": 0.5964499999999999
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.8956999999999999,
+     "new_s": 0.44025000000000003
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.8956999999999999,
+    "new_s": 0.44025000000000003
+   },
+   "requests": "20->10",
+   "spawns": "52->5",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "pack",
+   "journey": "pack",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.7882946303305354,
+   "band": [
+    0.7771385959305422,
+    0.8402852820401988
+   ],
+   "speedup": 1.2685612225732092,
+   "base_cpu_s": 0.94285,
+   "new_cpu_s": 0.7599,
+   "base_wall_s": 0.9572,
+   "new_wall_s": 0.8069500000000001,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 1.29245,
+     "new_s": 1.0211999999999999
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.9379,
+     "new_s": 0.74055
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.9379,
+    "new_s": 0.74055
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "prune",
+   "journey": "prune",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.6142681545285043,
+   "band": [
+    0.5885883195987102,
+    0.6245842926579688
+   ],
+   "speedup": 1.6279535128555918,
+   "base_cpu_s": 1.5749499999999999,
+   "new_cpu_s": 0.9771000000000001,
+   "base_wall_s": 1.6581,
+   "new_wall_s": 1.0573,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 2.2216500000000003,
+     "new_s": 1.32925
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 1.5699999999999998,
+     "new_s": 0.97565
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 1.5699999999999998,
+    "new_s": 0.97565
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "uninstall",
+   "journey": "uninstall",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.5938190730530677,
+   "band": [
+    0.5791568662927448,
+    0.604870519636426
+   ],
+   "speedup": 1.6840146188949259,
+   "base_cpu_s": 2.3261,
+   "new_cpu_s": 1.40475,
+   "base_wall_s": 2.35945,
+   "new_wall_s": 1.5084499999999998,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.2074,
+     "new_s": 1.9018000000000002
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.2832999999999997,
+     "new_s": 1.3562
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.2832999999999997,
+    "new_s": 1.3562
+   },
+   "requests": "0->0",
+   "spawns": "12->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "update",
+   "journey": "update",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.8202012193696098,
+   "band": [
+    0.8042229244469978,
+    0.839842708611037
+   ],
+   "speedup": 1.219213013080595,
+   "base_cpu_s": 1.5023499999999999,
+   "new_cpu_s": 1.25315,
+   "base_wall_s": 2.0138,
+   "new_wall_s": 1.5583,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 2.0086,
+     "new_s": 1.63665
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 1.4464000000000001,
+     "new_s": 1.1829999999999998
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 1.4464000000000001,
+    "new_s": 1.1829999999999998
+   },
+   "requests": "10->10",
+   "spawns": "29->24",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.7881784744961358,
+   "band": [
+    0.7182779632526324,
+    0.8868733121991311
+   ],
+   "speedup": 1.2687481736154707,
+   "base_cpu_s": 4.27905,
+   "new_cpu_s": 3.0903,
+   "base_wall_s": 5.76225,
+   "new_wall_s": 4.9109,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 4.9076,
+     "new_s": 3.8155
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 3.0443,
+     "new_s": 2.5317999999999996
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.27905,
+    "new_s": 3.0903
+   },
+   "requests": "41->51",
+   "spawns": "134->47",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.7183796040936963,
+   "band": [
+    0.7118950270989826,
+    0.7753099984303877
+   ],
+   "speedup": 1.392021703151768,
+   "base_cpu_s": 4.17285,
+   "new_cpu_s": 2.99065,
+   "base_wall_s": 5.6619,
+   "new_wall_s": 4.7607,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 4.19265,
+     "new_s": 3.00005
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.5355,
+     "new_s": 1.94495
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.17285,
+    "new_s": 2.99065
+   },
+   "requests": "41->51",
+   "spawns": "132->43",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.3103712688564696,
+   "band": [
+    0.305400111919418,
+    0.35933114362496266
+   ],
+   "speedup": 3.221947713409154,
+   "base_cpu_s": 2.83155,
+   "new_cpu_s": 0.87165,
+   "base_wall_s": 2.85935,
+   "new_wall_s": 0.9574,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 2.8360000000000003,
+     "new_s": 0.87555
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 1.6550500000000001,
+     "new_s": 0.58615
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.83155,
+    "new_s": 0.87165
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.7223483392173492,
+   "band": [
+    0.7068232091202995,
+    0.7837688719466319
+   ],
+   "speedup": 1.3843736404010856,
+   "base_cpu_s": 3.46475,
+   "new_cpu_s": 2.4825,
+   "base_wall_s": 4.01035,
+   "new_wall_s": 3.25935,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 3.47505,
+     "new_s": 2.4928999999999997
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.0044500000000003,
+     "new_s": 1.57085
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 3.46475,
+    "new_s": 2.4825
+   },
+   "requests": "11->21",
+   "spawns": "34->35",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit",
+   "journey": "audit",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.3272796726275552,
+   "band": [
+    0.3220723113424696,
+    0.34379725448785636
+   ],
+   "speedup": 3.0554907121836488,
+   "base_cpu_s": 8.5001,
+   "new_cpu_s": 2.77535,
+   "base_wall_s": 8.56655,
+   "new_wall_s": 2.8094,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 11.8391,
+     "new_s": 4.0595
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 8.47875,
+     "new_s": 2.7542
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 8.47875,
+    "new_s": 2.7542
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit-ci",
+   "journey": "audit-ci",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.3522795678738634,
+   "band": [
+    0.35000530391428875,
+    0.37050315901651826
+   ],
+   "speedup": 2.8386545550608213,
+   "base_cpu_s": 9.444199999999999,
+   "new_cpu_s": 3.3202499999999997,
+   "base_wall_s": 9.4677,
+   "new_wall_s": 3.3604000000000003,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 13.161200000000001,
+     "new_s": 4.853350000000001
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 9.414449999999999,
+     "new_s": 3.3084
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 9.414449999999999,
+    "new_s": 3.3084
+   },
+   "requests": "0->0",
+   "spawns": "6->4",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "compile",
+   "journey": "compile",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.6372677820932919,
+   "band": [
+    0.6349589175489515,
+    0.6400163165408934
+   ],
+   "speedup": 1.5691990527360544,
+   "base_cpu_s": 2.4592,
+   "new_cpu_s": 1.5707499999999999,
+   "base_wall_s": 2.5092499999999998,
+   "new_wall_s": 1.6580499999999998,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.50415,
+     "new_s": 2.2297000000000002
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.4507,
+     "new_s": 1.56615
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.4507,
+    "new_s": 1.56615
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-bundle",
+   "journey": "install-bundle",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.7555927580495845,
+   "band": [
+    0.753631161971831,
+    0.791242309879543
+   ],
+   "speedup": 1.3234642462446373,
+   "base_cpu_s": 2.73435,
+   "new_cpu_s": 2.06555,
+   "base_wall_s": 2.7594,
+   "new_wall_s": 2.1586499999999997,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.8659499999999998,
+     "new_s": 3.03345
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.7277,
+     "new_s": 2.0603499999999997
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.7277,
+    "new_s": 2.0603499999999997
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547509699",
+   "pairs": 15,
+   "paired_p50": 0.37522790810745105,
+   "band": [
+    0.35513822636105763,
+    0.38291613354767456
+   ],
+   "speedup": 2.6650469711694202,
+   "base_cpu_s": 14.3346,
+   "new_cpu_s": 5.2248,
+   "base_wall_s": 16.5781,
+   "new_wall_s": 6.8636,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 18.2664,
+     "new_s": 7.0137
+    },
+    "EPYC 9V45": {
+     "n": 5,
+     "base_s": 10.9639,
+     "new_s": 3.8527
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 14.3346,
+     "new_s": 5.2248
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 14.3346,
+    "new_s": 5.2248
+   },
+   "requests": "201->101",
+   "spawns": "567->17",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.3692734731795404,
+   "band": [
+    0.3596702654135231,
+    0.382437182658508
+   ],
+   "speedup": 2.708020133127193,
+   "base_cpu_s": 15.38635,
+   "new_cpu_s": 5.77935,
+   "base_wall_s": 17.430300000000003,
+   "new_wall_s": 7.26615,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 19.3206,
+     "new_s": 7.133649999999999
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 13.7858,
+     "new_s": 5.0265
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 15.38635,
+     "new_s": 5.77935
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 13.7858,
+    "new_s": 5.0265
+   },
+   "requests": "201->101",
+   "spawns": "617->20",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen",
+   "journey": "install-frozen",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.4351574486739242,
+   "band": [
+    0.42321213479369174,
+    0.4404148010910401
+   ],
+   "speedup": 2.2980188045668233,
+   "base_cpu_s": 14.5093,
+   "new_cpu_s": 6.1974,
+   "base_wall_s": 15.2767,
+   "new_wall_s": 7.7657,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 19.3249,
+     "new_s": 8.5315
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 14.322849999999999,
+     "new_s": 6.0293
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 14.322849999999999,
+    "new_s": 6.0293
+   },
+   "requests": "151->101",
+   "spawns": "573->13",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen-noop",
+   "journey": "install-frozen-noop",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547807435",
+   "pairs": 15,
+   "paired_p50": 0.19853249475890986,
+   "band": [
+    0.19665091076781188,
+    0.2087031082529475
+   ],
+   "speedup": 5.036958817317846,
+   "base_cpu_s": 9.7842,
+   "new_cpu_s": 2.0445,
+   "base_wall_s": 9.7673,
+   "new_wall_s": 2.0585,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 13.9846,
+     "new_s": 2.7513
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 9.7346,
+     "new_s": 1.9192
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 9.7794,
+     "new_s": 2.0445
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 9.7346,
+    "new_s": 1.9192
+   },
+   "requests": "0->0",
+   "spawns": "18->2",
+   "replay_new": [
+    "attested miss (inputs changed: argv), recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.15103541323695055,
+   "band": [
+    0.14587233119014678,
+    0.15258298767804795
+   ],
+   "speedup": 6.620963776430094,
+   "base_cpu_s": 8.2655,
+   "new_cpu_s": 1.2544,
+   "base_wall_s": 8.1676,
+   "new_wall_s": 1.2579,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 11.1593,
+     "new_s": 1.6182
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 8.15995,
+     "new_s": 1.23845
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 8.15995,
+    "new_s": 1.23845
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop-replay",
+   "journey": "install-noop-replay",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.0366325534300076,
+   "band": [
+    0.03501515165139512,
+    0.03726199920666402
+   ],
+   "speedup": 27.298124383020728,
+   "base_cpu_s": 8.2712,
+   "new_cpu_s": 0.3042,
+   "base_wall_s": 8.1679,
+   "new_wall_s": 0.3567,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 11.148,
+     "new_s": 0.388
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 8.17375,
+     "new_s": 0.302
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 8.17375,
+    "new_s": 0.302
+   },
+   "requests": "0->0",
+   "spawns": "8->0",
+   "replay_new": [
+    "hit"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final; replay hit 15/15",
+   "replay_hit": "15/15",
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547574011",
+   "pairs": 15,
+   "paired_p50": 0.5272633261257873,
+   "band": [
+    0.5221728745599479,
+    0.5436640216223708
+   ],
+   "speedup": 1.8965855398056524,
+   "base_cpu_s": 10.6893,
+   "new_cpu_s": 5.6557,
+   "base_wall_s": 11.5709,
+   "new_wall_s": 5.5642,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 14.3886,
+     "new_s": 7.8448
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 10.638950000000001,
+     "new_s": 5.5546
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 10.638950000000001,
+    "new_s": 5.5546
+   },
+   "requests": "51->51",
+   "spawns": "67->66",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.5283827673782601,
+   "band": [
+    0.5102374251553559,
+    0.5571000763679735
+   ],
+   "speedup": 1.8925673995043772,
+   "base_cpu_s": 11.58955,
+   "new_cpu_s": 6.453799999999999,
+   "base_wall_s": 12.4241,
+   "new_wall_s": 6.4651,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 14.840499999999999,
+     "new_s": 7.8414
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 10.58845,
+     "new_s": 5.4376999999999995
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 11.58955,
+     "new_s": 6.453799999999999
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 10.58845,
+    "new_s": 5.4376999999999995
+   },
+   "requests": "51->51",
+   "spawns": "117->67",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "outdated",
+   "journey": "outdated",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.22596789982899887,
+   "band": [
+    0.2041444066699045,
+    0.24318181818181817
+   ],
+   "speedup": 4.425407328902688,
+   "base_cpu_s": 2.9718999999999998,
+   "new_cpu_s": 0.63915,
+   "base_wall_s": 3.8105,
+   "new_wall_s": 1.6578,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.84455,
+     "new_s": 0.88775
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.8157,
+     "new_s": 0.6334
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.8157,
+    "new_s": 0.6334
+   },
+   "requests": "100->50",
+   "spawns": "252->5",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "pack",
+   "journey": "pack",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.6318082578046483,
+   "band": [
+    0.6182795698924731,
+    0.6579678533406039
+   ],
+   "speedup": 1.582758673453734,
+   "base_cpu_s": 2.77475,
+   "new_cpu_s": 1.7415500000000002,
+   "base_wall_s": 2.8596500000000002,
+   "new_wall_s": 1.7582499999999999,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.85565,
+     "new_s": 2.5019
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.75645,
+     "new_s": 1.7332
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.75645,
+    "new_s": 1.7332
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "prune",
+   "journey": "prune",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.43626379675301696,
+   "band": [
+    0.4321267734398808,
+    0.4397227856659905
+   ],
+   "speedup": 2.292191117949061,
+   "base_cpu_s": 5.93075,
+   "new_cpu_s": 2.59205,
+   "base_wall_s": 5.96345,
+   "new_wall_s": 2.75955,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 8.3969,
+     "new_s": 3.66325
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 5.911300000000001,
+     "new_s": 2.5804
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 5.911300000000001,
+    "new_s": 2.5804
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "uninstall",
+   "journey": "uninstall",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.44459387359684865,
+   "band": [
+    0.44193906164985564,
+    0.45864251092095026
+   ],
+   "speedup": 2.2492437691725495,
+   "base_cpu_s": 9.544,
+   "new_cpu_s": 4.2242999999999995,
+   "base_wall_s": 9.568549999999998,
+   "new_wall_s": 4.2625,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 13.37135,
+     "new_s": 6.0785
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 9.497399999999999,
+     "new_s": 4.2191
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 9.497399999999999,
+    "new_s": 4.2191
+   },
+   "requests": "0->0",
+   "spawns": "12->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "update",
+   "journey": "update",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547604324",
+   "pairs": 6,
+   "paired_p50": 0.7367787728707036,
+   "band": [
+    0.6806809024979854,
+    0.7912901307966707
+   ],
+   "speedup": 1.3572595150966555,
+   "base_cpu_s": 4.9276,
+   "new_cpu_s": 3.57945,
+   "base_wall_s": 5.61215,
+   "new_wall_s": 3.4099500000000003,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 6.80505,
+     "new_s": 5.3166
+    },
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 4.885,
+     "new_s": 3.5358
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 4.885,
+    "new_s": 3.5358
+   },
+   "requests": "50->50",
+   "spawns": "73->68",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.6710775416827226,
+   "band": [
+    0.6375948024256755,
+    0.7124432093864409
+   ],
+   "speedup": 1.4901407630070684,
+   "base_cpu_s": 18.58345,
+   "new_cpu_s": 12.11955,
+   "base_wall_s": 19.63095,
+   "new_wall_s": 13.776250000000001,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 18.81215,
+     "new_s": 12.2229
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 11.5708,
+     "new_s": 8.100950000000001
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 18.58345,
+    "new_s": 12.11955
+   },
+   "requests": "201->251",
+   "spawns": "618->170",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.6825600725385554,
+   "band": [
+    0.6218832210989593,
+    0.7133199535227632
+   ],
+   "speedup": 1.4650725119048236,
+   "base_cpu_s": 18.5994,
+   "new_cpu_s": 12.7447,
+   "base_wall_s": 19.628999999999998,
+   "new_wall_s": 14.2742,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 18.7462,
+     "new_s": 12.84645
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 11.7241,
+     "new_s": 7.8104
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 18.5994,
+    "new_s": 12.7447
+   },
+   "requests": "201->251",
+   "spawns": "616->167",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.1445173029103949,
+   "band": [
+    0.1406850881230605,
+    0.15547259828371388
+   ],
+   "speedup": 6.919586650603563,
+   "base_cpu_s": 11.122800000000002,
+   "new_cpu_s": 1.6029,
+   "base_wall_s": 11.018650000000001,
+   "new_wall_s": 1.65815,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 11.13085,
+     "new_s": 1.6086
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 6.59535,
+     "new_s": 0.9756
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 11.122800000000002,
+    "new_s": 1.6029
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.6828732723362713,
+   "band": [
+    0.667447242461492,
+    0.7155886743221166
+   ],
+   "speedup": 1.4644005564586868,
+   "base_cpu_s": 14.54165,
+   "new_cpu_s": 9.7838,
+   "base_wall_s": 15.07245,
+   "new_wall_s": 9.868549999999999,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 14.568249999999999,
+     "new_s": 9.93425
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 8.65525,
+     "new_s": 5.9877
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 14.54165,
+    "new_s": 9.7838
+   },
+   "requests": "51->101",
+   "spawns": "118->116",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit",
+   "journey": "audit",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.707403678048721,
+   "band": [
+    0.5478546465114321,
+    1.0052961945861123
+   ],
+   "speedup": 1.413620017863587,
+   "base_cpu_s": 1.93965,
+   "new_cpu_s": 1.34725,
+   "base_wall_s": 2.01635,
+   "new_wall_s": 1.6125500000000001,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 1.93965,
+     "new_s": 1.34725
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 1.93965,
+    "new_s": 1.34725
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit-ci",
+   "journey": "audit-ci",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.7174916389979487,
+   "band": [
+    0.552151963720373,
+    0.9178308913011731
+   ],
+   "speedup": 1.3937444642513235,
+   "base_cpu_s": 2.19585,
+   "new_cpu_s": 1.596,
+   "base_wall_s": 2.3205,
+   "new_wall_s": 1.7130999999999998,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 2.19585,
+     "new_s": 1.596
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.19585,
+    "new_s": 1.596
+   },
+   "requests": "0->0",
+   "spawns": "6->4",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "boot-help",
+   "journey": "boot-help",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 1.2024763998448207,
+   "band": [
+    0.9880851063829788,
+    1.5780254777070064
+   ],
+   "speedup": 0.8316171528431242,
+   "base_cpu_s": 0.123,
+   "new_cpu_s": 0.1576,
+   "base_wall_s": 0.17204999999999998,
+   "new_wall_s": 0.26985000000000003,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 0.123,
+     "new_s": 0.1576
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 0.123,
+    "new_s": 0.1576
+   },
+   "requests": "0->0",
+   "spawns": "0->0",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "boot-version",
+   "journey": "boot-version",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 1.0555155347607124,
+   "band": [
+    0.8926758520667151,
+    1.4233025984911987
+   ],
+   "speedup": 0.9474043413550537,
+   "base_cpu_s": 0.13169999999999998,
+   "new_cpu_s": 0.1649,
+   "base_wall_s": 0.21725,
+   "new_wall_s": 0.24114999999999998,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 0.13169999999999998,
+     "new_s": 0.1649
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 0.13169999999999998,
+    "new_s": 0.1649
+   },
+   "requests": "0->0",
+   "spawns": "0->0",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "compile",
+   "journey": "compile",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 1.093434878592711,
+   "band": [
+    0.8319385730307998,
+    1.3307923307923306
+   ],
+   "speedup": 0.914549205972865,
+   "base_cpu_s": 0.873,
+   "new_cpu_s": 0.9562,
+   "base_wall_s": 0.96735,
+   "new_wall_s": 1.15565,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 0.873,
+     "new_s": 0.9562
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 0.873,
+    "new_s": 0.9562
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-bundle",
+   "journey": "install-bundle",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 1.131251876258466,
+   "band": [
+    0.8129940875572975,
+    1.3139813002826701
+   ],
+   "speedup": 0.88397643441479,
+   "base_cpu_s": 1.0867499999999999,
+   "new_cpu_s": 1.2162,
+   "base_wall_s": 1.36175,
+   "new_wall_s": 1.3850500000000001,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 1.0867499999999999,
+     "new_s": 1.2162
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 1.0867499999999999,
+    "new_s": 1.2162
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547526017",
+   "pairs": 15,
+   "paired_p50": 0.48042853065794383,
+   "band": [
+    0.4404145077720207,
+    0.5280777890168695
+   ],
+   "speedup": 2.0814750502650337,
+   "base_cpu_s": 4.4969,
+   "new_cpu_s": 2.1282,
+   "base_wall_s": 8.1162,
+   "new_wall_s": 4.2589,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 4.4969,
+     "new_s": 2.1282
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 4.4969,
+    "new_s": 2.1282
+   },
+   "requests": "41->21",
+   "spawns": "123->14",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.44351762227409897,
+   "band": [
+    0.40170992742034695,
+    0.5715841584158415
+   ],
+   "speedup": 2.254701842223506,
+   "base_cpu_s": 4.6314,
+   "new_cpu_s": 2.08675,
+   "base_wall_s": 7.8291,
+   "new_wall_s": 3.91785,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 4.6314,
+     "new_s": 2.08675
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.6314,
+    "new_s": 2.08675
+   },
+   "requests": "41->21",
+   "spawns": "133->16",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen",
+   "journey": "install-frozen",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.49166295140436916,
+   "band": [
+    0.45685087055261164,
+    0.5550298744055603
+   ],
+   "speedup": 2.0339136742836414,
+   "base_cpu_s": 4.356,
+   "new_cpu_s": 2.1353,
+   "base_wall_s": 7.1464,
+   "new_wall_s": 4.6048,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 4.356,
+     "new_s": 2.1353
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 4.356,
+    "new_s": 2.1353
+   },
+   "requests": "31->21",
+   "spawns": "129->11",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.3420239474700657,
+   "band": [
+    0.3130029440628067,
+    0.4168213109847351
+   ],
+   "speedup": 2.9237718802936192,
+   "base_cpu_s": 1.9355,
+   "new_cpu_s": 0.7223,
+   "base_wall_s": 2.0565,
+   "new_wall_s": 0.7826,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 1.9355,
+     "new_s": 0.7223
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 1.9355,
+    "new_s": 0.7223
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop-replay",
+   "journey": "install-noop-replay",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.10940759282436378,
+   "band": [
+    0.0911440728516324,
+    0.11907126306331868
+   ],
+   "speedup": 9.140133460438513,
+   "base_cpu_s": 2.1147,
+   "new_cpu_s": 0.2282,
+   "base_wall_s": 2.2286,
+   "new_wall_s": 0.3089,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 2.1147,
+     "new_s": 0.2282
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 2.1147,
+    "new_s": 0.2282
+   },
+   "requests": "0->0",
+   "spawns": "8->0",
+   "replay_new": [
+    "hit"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final; replay hit 15/15",
+   "replay_hit": "15/15",
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.7358077292366779,
+   "band": [
+    0.6820576263069679,
+    0.8500472823884361
+   ],
+   "speedup": 1.3590506871100598,
+   "base_cpu_s": 2.5841,
+   "new_cpu_s": 1.9023,
+   "base_wall_s": 4.0,
+   "new_wall_s": 3.2821,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 2.5841,
+     "new_s": 1.9023
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 2.5841,
+    "new_s": 1.9023
+   },
+   "requests": "11->11",
+   "spawns": "23->21",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.7472793260481598,
+   "band": [
+    0.5308189278854549,
+    0.9193677649154053
+   ],
+   "speedup": 1.3381876965448836,
+   "base_cpu_s": 2.4298,
+   "new_cpu_s": 1.9444500000000002,
+   "base_wall_s": 3.60875,
+   "new_wall_s": 2.84355,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 2.4298,
+     "new_s": 1.9444500000000002
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.4298,
+    "new_s": 1.9444500000000002
+   },
+   "requests": "11->11",
+   "spawns": "33->23",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "outdated",
+   "journey": "outdated",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.49835976439739743,
+   "band": [
+    0.4064110824742268,
+    0.6610299769408148
+   ],
+   "speedup": 2.0065825362309733,
+   "base_cpu_s": 1.1812,
+   "new_cpu_s": 0.5715,
+   "base_wall_s": 2.0163,
+   "new_wall_s": 1.26215,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 1.1812,
+     "new_s": 0.5715
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 1.1812,
+    "new_s": 0.5715
+   },
+   "requests": "20->10",
+   "spawns": "52->5",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "pack",
+   "journey": "pack",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.9611260437236615,
+   "band": [
+    0.4689655172413793,
+    1.7919784845650142
+   ],
+   "speedup": 1.0404462625169644,
+   "base_cpu_s": 0.9497,
+   "new_cpu_s": 0.87485,
+   "base_wall_s": 1.0575,
+   "new_wall_s": 1.05345,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 0.9497,
+     "new_s": 0.87485
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 0.9497,
+    "new_s": 0.87485
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "prune",
+   "journey": "prune",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.661284865666344,
+   "band": [
+    0.6330532212885155,
+    0.714553706505295
+   ],
+   "speedup": 1.5122076005661333,
+   "base_cpu_s": 1.68065,
+   "new_cpu_s": 1.1307,
+   "base_wall_s": 1.79245,
+   "new_wall_s": 1.254,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 1.68065,
+     "new_s": 1.1307
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 1.68065,
+    "new_s": 1.1307
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "uninstall",
+   "journey": "uninstall",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.7594006264689039,
+   "band": [
+    0.5827811435062477,
+    0.9963806076769216
+   ],
+   "speedup": 1.3168279892654897,
+   "base_cpu_s": 2.1593999999999998,
+   "new_cpu_s": 1.7306499999999998,
+   "base_wall_s": 2.2832999999999997,
+   "new_wall_s": 1.96035,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 2.1593999999999998,
+     "new_s": 1.7306499999999998
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.1593999999999998,
+    "new_s": 1.7306499999999998
+   },
+   "requests": "0->0",
+   "spawns": "12->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "update",
+   "journey": "update",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 1.1419086972682468,
+   "band": [
+    0.7880662413815324,
+    1.3732017397122782
+   ],
+   "speedup": 0.8757267567821047,
+   "base_cpu_s": 1.5346000000000002,
+   "new_cpu_s": 1.7759,
+   "base_wall_s": 2.87235,
+   "new_wall_s": 2.96915,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 1.5346000000000002,
+     "new_s": 1.7759
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 1.5346000000000002,
+    "new_s": 1.7759
+   },
+   "requests": "10->10",
+   "spawns": "29->22",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "macos",
+   "fixture": "tree-10-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.8486672452714046,
+   "band": [
+    0.657426662090408,
+    1.1031599086588904
+   ],
+   "speedup": 1.1783181283026885,
+   "base_cpu_s": 5.50515,
+   "new_cpu_s": 4.3116,
+   "base_wall_s": 10.33635,
+   "new_wall_s": 9.11335,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 5.50515,
+     "new_s": 4.3116
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 5.50515,
+    "new_s": 4.3116
+   },
+   "requests": "41->51",
+   "spawns": "134->87",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "macos",
+   "fixture": "tree-10-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.8122913395024576,
+   "band": [
+    0.5654899736937448,
+    0.8968178985667478
+   ],
+   "speedup": 1.231085389402917,
+   "base_cpu_s": 4.9407499999999995,
+   "new_cpu_s": 3.4774000000000003,
+   "base_wall_s": 7.75305,
+   "new_wall_s": 8.7624,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 4.9407499999999995,
+     "new_s": 3.4774000000000003
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.9407499999999995,
+    "new_s": 3.4774000000000003
+   },
+   "requests": "41->51",
+   "spawns": "132->83",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "macos",
+   "fixture": "tree-10-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.386779303155082,
+   "band": [
+    0.3085360326333283,
+    0.4453643291847141
+   ],
+   "speedup": 2.585453750608374,
+   "base_cpu_s": 2.5066,
+   "new_cpu_s": 0.9167,
+   "base_wall_s": 2.66115,
+   "new_wall_s": 1.07975,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 2.5066,
+     "new_s": 0.9167
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.5066,
+    "new_s": 0.9167
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "macos",
+   "fixture": "tree-10-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.8448544884089135,
+   "band": [
+    0.6299373040752352,
+    1.0853414303249562
+   ],
+   "speedup": 1.1836357783732283,
+   "base_cpu_s": 2.95585,
+   "new_cpu_s": 2.4699,
+   "base_wall_s": 4.2873,
+   "new_wall_s": 5.04415,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 2.95585,
+     "new_s": 2.4699
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.95585,
+    "new_s": 2.4699
+   },
+   "requests": "11->21",
+   "spawns": "34->35",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit",
+   "journey": "audit",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.43379431057002343,
+   "band": [
+    0.24841429215948196,
+    0.5910426707417421
+   ],
+   "speedup": 2.305240008071934,
+   "base_cpu_s": 7.72755,
+   "new_cpu_s": 3.69415,
+   "base_wall_s": 8.20285,
+   "new_wall_s": 3.94,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 7.72755,
+     "new_s": 3.69415
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 7.72755,
+    "new_s": 3.69415
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit-ci",
+   "journey": "audit-ci",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.3698057459999372,
+   "band": [
+    0.2556077677968742,
+    0.5843879896895247
+   ],
+   "speedup": 2.7041223961949195,
+   "base_cpu_s": 11.1645,
+   "new_cpu_s": 4.32255,
+   "base_wall_s": 11.56615,
+   "new_wall_s": 4.63525,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 11.1645,
+     "new_s": 4.32255
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 11.1645,
+    "new_s": 4.32255
+   },
+   "requests": "0->0",
+   "spawns": "6->4",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "compile",
+   "journey": "compile",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.69404894109509,
+   "band": [
+    0.3983932081707074,
+    0.7640098869484176
+   ],
+   "speedup": 1.4408205830876593,
+   "base_cpu_s": 2.7337499999999997,
+   "new_cpu_s": 1.8237999999999999,
+   "base_wall_s": 2.8291000000000004,
+   "new_wall_s": 1.8632,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 2.7337499999999997,
+     "new_s": 1.8237999999999999
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.7337499999999997,
+    "new_s": 1.8237999999999999
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-bundle",
+   "journey": "install-bundle",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.7673765750345312,
+   "band": [
+    0.5149757235639069,
+    1.0835051947546597
+   ],
+   "speedup": 1.3031411598080134,
+   "base_cpu_s": 4.04635,
+   "new_cpu_s": 3.1199,
+   "base_wall_s": 4.73715,
+   "new_wall_s": 3.3951000000000002,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 4.04635,
+     "new_s": 3.1199
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.04635,
+    "new_s": 3.1199
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547526017",
+   "pairs": 15,
+   "paired_p50": 0.3337500950787252,
+   "band": [
+    0.31534921275736777,
+    0.35497004730600745
+   ],
+   "speedup": 2.996253828074923,
+   "base_cpu_s": 19.4776,
+   "new_cpu_s": 6.6444,
+   "base_wall_s": 24.853,
+   "new_wall_s": 10.4453,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 19.4776,
+     "new_s": 6.6444
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 19.4776,
+    "new_s": 6.6444
+   },
+   "requests": "201->101",
+   "spawns": "567->14",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.3200415259617815,
+   "band": [
+    0.28265331729005944,
+    0.37370563370831744
+   ],
+   "speedup": 3.1245945256473293,
+   "base_cpu_s": 18.157400000000003,
+   "new_cpu_s": 5.9056,
+   "base_wall_s": 22.31475,
+   "new_wall_s": 8.6983,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 18.157400000000003,
+     "new_s": 5.9056
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 18.157400000000003,
+    "new_s": 5.9056
+   },
+   "requests": "201->101",
+   "spawns": "617->15",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen",
+   "journey": "install-frozen",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.3695618952142844,
+   "band": [
+    0.3327411582128563,
+    0.39477733436575535
+   ],
+   "speedup": 2.7059066774732456,
+   "base_cpu_s": 19.0523,
+   "new_cpu_s": 7.0206,
+   "base_wall_s": 22.4633,
+   "new_wall_s": 11.2533,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 19.0523,
+     "new_s": 7.0206
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 19.0523,
+    "new_s": 7.0206
+   },
+   "requests": "151->101",
+   "spawns": "573->13",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.17019975150530442,
+   "band": [
+    0.15998698158824626,
+    0.19190242714011632
+   ],
+   "speedup": 5.875449236298293,
+   "base_cpu_s": 7.2553,
+   "new_cpu_s": 1.3764,
+   "base_wall_s": 7.3704,
+   "new_wall_s": 1.5267,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 7.2553,
+     "new_s": 1.3764
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 7.2553,
+    "new_s": 1.3764
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop-replay",
+   "journey": "install-noop-replay",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.04551287927399395,
+   "band": [
+    0.037212329825025925,
+    0.05001954414955992
+   ],
+   "speedup": 21.971802618328297,
+   "base_cpu_s": 7.4191,
+   "new_cpu_s": 0.3373,
+   "base_wall_s": 7.5306,
+   "new_wall_s": 0.4491,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 7.4191,
+     "new_s": 0.3373
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 7.4191,
+    "new_s": 0.3373
+   },
+   "requests": "0->0",
+   "spawns": "8->0",
+   "replay_new": [
+    "hit"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final; replay hit 15/15",
+   "replay_hit": "15/15",
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547633341",
+   "pairs": 15,
+   "paired_p50": 0.673069175200742,
+   "band": [
+    0.5934633612494552,
+    0.7120174199623351
+   ],
+   "speedup": 1.4857313881619245,
+   "base_cpu_s": 10.6844,
+   "new_cpu_s": 6.8457,
+   "base_wall_s": 12.5724,
+   "new_wall_s": 8.4467,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 10.6844,
+     "new_s": 6.8457
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 10.6844,
+    "new_s": 6.8457
+   },
+   "requests": "51->51",
+   "spawns": "67->62",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.6024055117575868,
+   "band": [
+    0.36843388808418814,
+    0.7036798635076971
+   ],
+   "speedup": 1.6600113718786966,
+   "base_cpu_s": 11.8782,
+   "new_cpu_s": 5.6844,
+   "base_wall_s": 14.1172,
+   "new_wall_s": 6.24765,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 11.8782,
+     "new_s": 5.6844
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 11.8782,
+    "new_s": 5.6844
+   },
+   "requests": "51->51",
+   "spawns": "117->64",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "outdated",
+   "journey": "outdated",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.1431843642396353,
+   "band": [
+    0.10519209354120268,
+    0.24163909725179336
+   ],
+   "speedup": 6.984002794651422,
+   "base_cpu_s": 4.6552,
+   "new_cpu_s": 0.7021999999999999,
+   "base_wall_s": 8.564250000000001,
+   "new_wall_s": 2.81905,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 4.6552,
+     "new_s": 0.7021999999999999
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.6552,
+    "new_s": 0.7021999999999999
+   },
+   "requests": "100->50",
+   "spawns": "252->5",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "pack",
+   "journey": "pack",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.5618670044771794,
+   "band": [
+    0.41992633865331946,
+    0.6967412299831766
+   ],
+   "speedup": 1.7797806100582574,
+   "base_cpu_s": 3.7679,
+   "new_cpu_s": 2.16,
+   "base_wall_s": 3.9881,
+   "new_wall_s": 2.35195,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 3.7679,
+     "new_s": 2.16
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 3.7679,
+    "new_s": 2.16
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "prune",
+   "journey": "prune",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.4545493706645687,
+   "band": [
+    0.3999868121723649,
+    0.5478214136427875
+   ],
+   "speedup": 2.199981046146784,
+   "base_cpu_s": 6.126250000000001,
+   "new_cpu_s": 2.97025,
+   "base_wall_s": 6.2109000000000005,
+   "new_wall_s": 3.1989,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 6.126250000000001,
+     "new_s": 2.97025
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 6.126250000000001,
+    "new_s": 2.97025
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "uninstall",
+   "journey": "uninstall",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.39157082563719675,
+   "band": [
+    0.2860224719101124,
+    0.5721275621789329
+   ],
+   "speedup": 2.553816409515996,
+   "base_cpu_s": 10.96445,
+   "new_cpu_s": 4.36475,
+   "base_wall_s": 11.729849999999999,
+   "new_wall_s": 4.618,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 10.96445,
+     "new_s": 4.36475
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 10.96445,
+    "new_s": 4.36475
+   },
+   "requests": "0->0",
+   "spawns": "12->2",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "update",
+   "journey": "update",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547667294",
+   "pairs": 6,
+   "paired_p50": 0.8507213195181214,
+   "band": [
+    0.6969550507491541,
+    1.001900564103601
+   ],
+   "speedup": 1.1754730686265573,
+   "base_cpu_s": 6.1934000000000005,
+   "new_cpu_s": 5.0628,
+   "base_wall_s": 8.153649999999999,
+   "new_wall_s": 6.313000000000001,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 6.1934000000000005,
+     "new_s": 5.0628
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 6.1934000000000005,
+    "new_s": 5.0628
+   },
+   "requests": "50->50",
+   "spawns": "73->64",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "macos",
+   "fixture": "tree-50-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.7513453419620197,
+   "band": [
+    0.6788381260472459,
+    0.8060954643850562
+   ],
+   "speedup": 1.3309458968477237,
+   "base_cpu_s": 20.10035,
+   "new_cpu_s": 14.54665,
+   "base_wall_s": 25.0587,
+   "new_wall_s": 24.30355,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 20.10035,
+     "new_s": 14.54665
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 20.10035,
+    "new_s": 14.54665
+   },
+   "requests": "201->251",
+   "spawns": "618->367",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "macos",
+   "fixture": "tree-50-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.7632263381011748,
+   "band": [
+    0.5761199864117157,
+    0.7983981549225485
+   ],
+   "speedup": 1.31022732062404,
+   "base_cpu_s": 21.0639,
+   "new_cpu_s": 14.631800000000002,
+   "base_wall_s": 25.63635,
+   "new_wall_s": 24.373649999999998,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 21.0639,
+     "new_s": 14.631800000000002
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 21.0639,
+    "new_s": 14.631800000000002
+   },
+   "requests": "201->251",
+   "spawns": "616->365",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "macos",
+   "fixture": "tree-50-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.153195199882233,
+   "band": [
+    0.10703551912568307,
+    0.23704135119394293
+   ],
+   "speedup": 6.527619669341716,
+   "base_cpu_s": 9.69835,
+   "new_cpu_s": 1.4968,
+   "base_wall_s": 10.013,
+   "new_wall_s": 1.5947,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 9.69835,
+     "new_s": 1.4968
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 9.69835,
+    "new_s": 1.4968
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "macos",
+   "fixture": "tree-50-ghe",
+   "run": "45547680739",
+   "pairs": 6,
+   "paired_p50": 0.7352029585899083,
+   "band": [
+    0.6417516863236938,
+    0.8547214338106324
+   ],
+   "speedup": 1.3601686286980708,
+   "base_cpu_s": 12.442,
+   "new_cpu_s": 8.68095,
+   "base_wall_s": 13.7449,
+   "new_wall_s": 13.901250000000001,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 12.442,
+     "new_s": 8.68095
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 12.442,
+    "new_s": 8.68095
+   },
+   "requests": "51->101",
+   "spawns": "118->116",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit",
+   "journey": "audit",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.6428445290005737,
+   "band": [
+    0.6104558139534884,
+    0.7210588184074187
+   ],
+   "speedup": 1.5555860785728297,
+   "base_cpu_s": 2.625,
+   "new_cpu_s": 1.66405,
+   "base_wall_s": 2.66265,
+   "new_wall_s": 1.6921,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.6484,
+     "new_s": 1.6797
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 2.35155,
+     "new_s": 1.6328
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.6484,
+    "new_s": 1.6797
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit-ci",
+   "journey": "audit-ci",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.6717110807157078,
+   "band": [
+    0.648227953946099,
+    0.7092837209302325
+   ],
+   "speedup": 1.488735304075229,
+   "base_cpu_s": 3.0703,
+   "new_cpu_s": 2.0078,
+   "base_wall_s": 3.06395,
+   "new_wall_s": 2.0062,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 3.08595,
+     "new_s": 2.0156
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 2.66405,
+     "new_s": 1.8828
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 3.08595,
+    "new_s": 2.0156
+   },
+   "requests": "0->0",
+   "spawns": "6->4",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "boot-help",
+   "journey": "boot-help",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 1.0907504363001745,
+   "band": [
+    0.9168,
+    1.3002560819462228
+   ],
+   "speedup": 0.9168,
+   "base_cpu_s": 0.1719,
+   "new_cpu_s": 0.1875,
+   "base_wall_s": 0.17709999999999998,
+   "new_wall_s": 0.1862,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.16405,
+     "new_s": 0.1875
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 0.1875,
+     "new_s": 0.1797
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.16405,
+    "new_s": 0.1875
+   },
+   "requests": "0->0",
+   "spawns": "0->0",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "boot-version",
+   "journey": "boot-version",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 1.0,
+   "band": [
+    0.9086678301337988,
+    1.3002560819462228
+   ],
+   "speedup": 1.0,
+   "base_cpu_s": 0.1719,
+   "new_cpu_s": 0.1719,
+   "base_wall_s": 0.1699,
+   "new_wall_s": 0.1784,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 0.16405,
+     "new_s": 0.16405
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 0.1719,
+     "new_s": 0.1719
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 0.16405,
+    "new_s": 0.16405
+   },
+   "requests": "0->0",
+   "spawns": "0->0",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "compile",
+   "journey": "compile",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.8928506125434266,
+   "band": [
+    0.8630545327020867,
+    1.085664655330042
+   ],
+   "speedup": 1.1200081916854392,
+   "base_cpu_s": 1.1172,
+   "new_cpu_s": 1.01565,
+   "base_wall_s": 1.13945,
+   "new_wall_s": 1.02095,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 1.1406,
+     "new_s": 1.01565
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 1.0938,
+     "new_s": 1.07815
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 1.1406,
+    "new_s": 1.01565
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-bundle",
+   "journey": "install-bundle",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 1.0276135630726098,
+   "band": [
+    0.990016,
+    1.0795636363636363
+   ],
+   "speedup": 0.9731284560024257,
+   "base_cpu_s": 1.46875,
+   "new_cpu_s": 1.5156,
+   "base_wall_s": 1.50645,
+   "new_wall_s": 1.54765,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 1.4922,
+     "new_s": 1.53905
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 1.3672,
+     "new_s": 1.4375
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 1.4922,
+    "new_s": 1.53905
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547559105",
+   "pairs": 15,
+   "paired_p50": 0.44122809886719216,
+   "band": [
+    0.4292528301886792,
+    0.4619146460357895
+   ],
+   "speedup": 2.2664014430798884,
+   "base_cpu_s": 6.9062,
+   "new_cpu_s": 3.0312,
+   "base_wall_s": 7.5131,
+   "new_wall_s": 4.0973,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 9.375,
+     "new_s": 4.0469
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 6.7344,
+     "new_s": 2.91405
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 6.7344,
+    "new_s": 2.91405
+   },
+   "requests": "41->21",
+   "spawns": "123->14",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.45715916666666667,
+   "band": [
+    0.39802105263157894,
+    0.5531602909962896
+   ],
+   "speedup": 2.1874219591644777,
+   "base_cpu_s": 10.03905,
+   "new_cpu_s": 4.2031,
+   "base_wall_s": 10.5898,
+   "new_wall_s": 5.3987,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 11.03905,
+     "new_s": 4.85935
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 5.34375,
+     "new_s": 2.5781
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 11.1719,
+     "new_s": 5.60935
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 11.1719,
+    "new_s": 5.60935
+   },
+   "requests": "41->21",
+   "spawns": "133->16",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen",
+   "journey": "install-frozen",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.4673107692307692,
+   "band": [
+    0.45471670772351835,
+    0.4918775243525778
+   ],
+   "speedup": 2.1399036055729677,
+   "base_cpu_s": 7.3281,
+   "new_cpu_s": 3.5156,
+   "base_wall_s": 7.4755,
+   "new_wall_s": 4.7393,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 7.1875,
+     "new_s": 3.33595
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 8.125,
+     "new_s": 3.7812
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 7.1875,
+    "new_s": 3.33595
+   },
+   "requests": "31->21",
+   "spawns": "129->11",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.32293333333333335,
+   "band": [
+    0.3128097410482786,
+    0.3467228404193735
+   ],
+   "speedup": 3.096614368290669,
+   "base_cpu_s": 3.0469,
+   "new_cpu_s": 0.9688,
+   "base_wall_s": 3.0884,
+   "new_wall_s": 0.9976,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 2.97655,
+     "new_s": 0.9375
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 3.25,
+     "new_s": 1.1094
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 2.97655,
+    "new_s": 0.9375
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop-replay",
+   "journey": "install-noop-replay",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.10256326101939676,
+   "band": [
+    0.094223294464549,
+    0.11342042755344417
+   ],
+   "speedup": 9.75008,
+   "base_cpu_s": 3.0781,
+   "new_cpu_s": 0.3125,
+   "base_wall_s": 3.067,
+   "new_wall_s": 0.3272,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 3.0312,
+     "new_s": 0.30469999999999997
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 3.1875,
+     "new_s": 0.375
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 3.0312,
+    "new_s": 0.30469999999999997
+   },
+   "requests": "0->0",
+   "spawns": "8->0",
+   "replay_new": [
+    "hit"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final; replay hit 15/15",
+   "replay_hit": "15/15",
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.8351149240721201,
+   "band": [
+    0.8214349206349206,
+    0.8541777777777777
+   ],
+   "speedup": 1.19743998242048,
+   "base_cpu_s": 4.0312,
+   "new_cpu_s": 3.3125,
+   "base_wall_s": 4.3808,
+   "new_wall_s": 3.6241,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 3.9219,
+     "new_s": 3.21095
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 4.3594,
+     "new_s": 3.7031
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 3.9219,
+    "new_s": 3.21095
+   },
+   "requests": "11->11",
+   "spawns": "23->22",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.811040946148383,
+   "band": [
+    0.6691423966119372,
+    0.8426966292134831
+   ],
+   "speedup": 1.2329833712452865,
+   "base_cpu_s": 5.64065,
+   "new_cpu_s": 4.2344,
+   "base_wall_s": 5.9137,
+   "new_wall_s": 4.5136,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 6.09375,
+     "new_s": 4.2344
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.6875,
+     "new_s": 2.17965
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 5.64065,
+     "new_s": 4.6797
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 5.64065,
+    "new_s": 4.6797
+   },
+   "requests": "11->11",
+   "spawns": "33->23",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "outdated",
+   "journey": "outdated",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.3770071897351438,
+   "band": [
+    0.34822857142857144,
+    0.40177142857142856
+   ],
+   "speedup": 2.652469308881146,
+   "base_cpu_s": 1.8203,
+   "new_cpu_s": 0.6953,
+   "base_wall_s": 1.7825,
+   "new_wall_s": 1.0075,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 1.75,
+     "new_s": 0.6953
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 1.90625,
+     "new_s": 0.70315
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 1.75,
+    "new_s": 0.6953
+   },
+   "requests": "20->10",
+   "spawns": "52->5",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "pack",
+   "journey": "pack",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.9002793288358415,
+   "band": [
+    0.8227478937135452,
+    0.9324511330219687
+   ],
+   "speedup": 1.1107663676929116,
+   "base_cpu_s": 1.1953,
+   "new_cpu_s": 1.0547,
+   "base_wall_s": 1.2084,
+   "new_wall_s": 1.08835,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 1.21875,
+     "new_s": 1.0547
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 1.17185,
+     "new_s": 1.0625
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 1.21875,
+    "new_s": 1.0547
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "prune",
+   "journey": "prune",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.6706026614700225,
+   "band": [
+    0.6591030303030303,
+    0.6960217090778762
+   ],
+   "speedup": 1.4911959904959344,
+   "base_cpu_s": 1.96095,
+   "new_cpu_s": 1.34375,
+   "base_wall_s": 1.9821499999999999,
+   "new_wall_s": 1.37315,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.01565,
+     "new_s": 1.3594
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 1.89065,
+     "new_s": 1.2812
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.01565,
+    "new_s": 1.3594
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "uninstall",
+   "journey": "uninstall",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.70314310868489,
+   "band": [
+    0.6750079999999999,
+    0.7407470116149131
+   ],
+   "speedup": 1.4221855944379949,
+   "base_cpu_s": 3.09375,
+   "new_cpu_s": 2.16405,
+   "base_wall_s": 3.07715,
+   "new_wall_s": 2.20235,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 3.14845,
+     "new_s": 2.2031
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 2.85935,
+     "new_s": 2.04685
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 3.14845,
+    "new_s": 2.2031
+   },
+   "requests": "0->0",
+   "spawns": "12->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "update",
+   "journey": "update",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.9236470345046908,
+   "band": [
+    0.8197581395348837,
+    0.9941269482719675
+   ],
+   "speedup": 1.0826646572153549,
+   "base_cpu_s": 2.60935,
+   "new_cpu_s": 2.25785,
+   "base_wall_s": 2.7813,
+   "new_wall_s": 2.46035,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.6172,
+     "new_s": 2.2188
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 2.5859,
+     "new_s": 2.46875
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.6172,
+    "new_s": 2.2188
+   },
+   "requests": "10->10",
+   "spawns": "29->24",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "windows",
+   "fixture": "tree-10-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.8037839375126118,
+   "band": [
+    0.6269321221478197,
+    0.832141322364786
+   ],
+   "speedup": 1.2441154311873885,
+   "base_cpu_s": 9.1719,
+   "new_cpu_s": 6.77345,
+   "base_wall_s": 11.33075,
+   "new_wall_s": 8.6262,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 11.1875,
+     "new_s": 8.15625
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 6.0156,
+     "new_s": 4.82815
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 9.1719,
+     "new_s": 7.39065
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 9.1719,
+    "new_s": 6.77345
+   },
+   "requests": "41->51",
+   "spawns": "134->47",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "windows",
+   "fixture": "tree-10-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.7374387014811958,
+   "band": [
+    0.6835135070351639,
+    0.7804878048780488
+   ],
+   "speedup": 1.3560449132808352,
+   "base_cpu_s": 8.4297,
+   "new_cpu_s": 5.8281,
+   "base_wall_s": 8.774049999999999,
+   "new_wall_s": 7.88775,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 9.3672,
+     "new_s": 6.90625
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 5.0625,
+     "new_s": 3.9297
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 8.4297,
+     "new_s": 5.8281
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 8.4297,
+    "new_s": 5.8281
+   },
+   "requests": "41->51",
+   "spawns": "132->43",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "windows",
+   "fixture": "tree-10-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.35109479907843466,
+   "band": [
+    0.28938484621155286,
+    0.3827780499755022
+   ],
+   "speedup": 2.8482335899729456,
+   "base_cpu_s": 3.2422,
+   "new_cpu_s": 1.14845,
+   "base_wall_s": 3.2649,
+   "new_wall_s": 1.19025,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 4.23435,
+     "new_s": 1.2344
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.03905,
+     "new_s": 0.7656000000000001
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 3.2422,
+     "new_s": 1.15625
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 3.2422,
+    "new_s": 1.14845
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "windows",
+   "fixture": "tree-10-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.9705375577577982,
+   "band": [
+    0.7385247706422019,
+    1.0740916325217567
+   ],
+   "speedup": 1.030356828550013,
+   "base_cpu_s": 4.60935,
+   "new_cpu_s": 4.6640999999999995,
+   "base_wall_s": 5.0125,
+   "new_wall_s": 5.559699999999999,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 6.3203,
+     "new_s": 5.1953
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.98435,
+     "new_s": 3.0
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 4.60935,
+     "new_s": 4.6640999999999995
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.60935,
+    "new_s": 4.6640999999999995
+   },
+   "requests": "11->21",
+   "spawns": "34->35",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit",
+   "journey": "audit",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.5069672534267449,
+   "band": [
+    0.49855216805916747,
+    0.5172377397595448
+   ],
+   "speedup": 1.9725139902837863,
+   "base_cpu_s": 10.46095,
+   "new_cpu_s": 5.34375,
+   "base_wall_s": 10.580400000000001,
+   "new_wall_s": 5.39725,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 10.53905,
+     "new_s": 5.3984000000000005
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 9.117149999999999,
+     "new_s": 4.6172
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 10.53905,
+    "new_s": 5.3984000000000005
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "audit-ci",
+   "journey": "audit-ci",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.534461197197263,
+   "band": [
+    0.5200654266042832,
+    0.5486821052631579
+   ],
+   "speedup": 1.8710432211805872,
+   "base_cpu_s": 11.91405,
+   "new_cpu_s": 6.47655,
+   "base_wall_s": 12.0513,
+   "new_wall_s": 6.526350000000001,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 12.0156,
+     "new_s": 6.5234000000000005
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 10.47655,
+     "new_s": 5.5313
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 12.0156,
+    "new_s": 6.5234000000000005
+   },
+   "requests": "0->0",
+   "spawns": "6->4",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "compile",
+   "journey": "compile",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.7342779649253756,
+   "band": [
+    0.7005713045993636,
+    0.7527011217397288
+   ],
+   "speedup": 1.3618820770437114,
+   "base_cpu_s": 2.8906,
+   "new_cpu_s": 2.125,
+   "base_wall_s": 2.93135,
+   "new_wall_s": 2.15135,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 2.9062,
+     "new_s": 2.1406
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 2.7109,
+     "new_s": 1.9375
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 2.9062,
+    "new_s": 2.1406
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-bundle",
+   "journey": "install-bundle",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.9983581086719702,
+   "band": [
+    0.957523042328696,
+    1.0535114193368864
+   ],
+   "speedup": 1.0016445915686645,
+   "base_cpu_s": 4.6719,
+   "new_cpu_s": 4.64845,
+   "base_wall_s": 4.8081499999999995,
+   "new_wall_s": 4.81235,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 4.6875,
+     "new_s": 4.70315
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 3.91405,
+     "new_s": 3.8906
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 4.6875,
+    "new_s": 4.70315
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547543560",
+   "pairs": 15,
+   "paired_p50": 0.345657846859939,
+   "band": [
+    0.331987676617444,
+    0.35878962536023057
+   ],
+   "speedup": 2.8930342796621114,
+   "base_cpu_s": 35.0156,
+   "new_cpu_s": 11.5625,
+   "base_wall_s": 27.3807,
+   "new_wall_s": 13.5325,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 43.7344,
+     "new_s": 15.5312
+    },
+    "EPYC 9V45": {
+     "n": 5,
+     "base_s": 22.4219,
+     "new_s": 7.5781
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 35.0156,
+     "new_s": 11.5625
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 35.0156,
+    "new_s": 11.5625
+   },
+   "requests": "201->101",
+   "spawns": "567->18",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.3431358869645724,
+   "band": [
+    0.3006059980029611,
+    0.3653577142857143
+   ],
+   "speedup": 2.914297332308021,
+   "base_cpu_s": 43.6328,
+   "new_cpu_s": 15.3125,
+   "base_wall_s": 33.750550000000004,
+   "new_wall_s": 16.832500000000003,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 44.6328,
+     "new_s": 15.3125
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 22.6953,
+     "new_s": 7.0547
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 43.6328,
+     "new_s": 15.9297
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 43.6328,
+    "new_s": 15.9297
+   },
+   "requests": "201->101",
+   "spawns": "617->20",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen",
+   "journey": "install-frozen",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547717485",
+   "pairs": 15,
+   "paired_p50": 0.3912440866209132,
+   "band": [
+    0.36992626735669704,
+    0.39743134981745193
+   ],
+   "speedup": 2.5559491739204905,
+   "base_cpu_s": 36.2344,
+   "new_cpu_s": 13.3438,
+   "base_wall_s": 26.839,
+   "new_wall_s": 15.3588,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 45.125,
+     "new_s": 17.9375
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 32.6406,
+     "new_s": 12.8281
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 36.2344,
+     "new_s": 13.3438
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 32.6406,
+    "new_s": 12.8281
+   },
+   "requests": "151->101",
+   "spawns": "573->13",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547717485",
+   "pairs": 15,
+   "paired_p50": 0.15265950771768166,
+   "band": [
+    0.14063838504227344,
+    0.16430669374138807
+   ],
+   "speedup": 6.550525512301097,
+   "base_cpu_s": 11.2031,
+   "new_cpu_s": 1.8281,
+   "base_wall_s": 11.0649,
+   "new_wall_s": 1.8764,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 16.2031,
+     "new_s": 2.2656
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 11.125,
+     "new_s": 1.7031
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 11.0312,
+     "new_s": 1.8281
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 11.125,
+    "new_s": 1.7031
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop-replay",
+   "journey": "install-noop-replay",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547717485",
+   "pairs": 15,
+   "paired_p50": 0.04354157303370786,
+   "band": [
+    0.040265326534494286,
+    0.045006931067384376
+   ],
+   "speedup": 22.96655656482246,
+   "base_cpu_s": 11.2656,
+   "new_cpu_s": 0.5312,
+   "base_wall_s": 11.0944,
+   "new_wall_s": 0.5293,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 16.3438,
+     "new_s": 0.6562
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 11.2031,
+     "new_s": 0.5
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 11.1094,
+     "new_s": 0.5
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 11.2031,
+    "new_s": 0.5
+   },
+   "requests": "0->0",
+   "spawns": "8->0",
+   "replay_new": [
+    "hit"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final; replay hit 15/15",
+   "replay_hit": "15/15",
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547717485",
+   "pairs": 15,
+   "paired_p50": 0.81445,
+   "band": [
+    0.7734073778179166,
+    0.8461593880957242
+   ],
+   "speedup": 1.2278224568727363,
+   "base_cpu_s": 16.8438,
+   "new_cpu_s": 14.25,
+   "base_wall_s": 16.0258,
+   "new_wall_s": 12.8486,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 23.0312,
+     "new_s": 17.75
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 16.0156,
+     "new_s": 13.0312
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 16.8438,
+     "new_s": 14.25
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 16.0156,
+    "new_s": 13.0312
+   },
+   "requests": "51->51",
+   "spawns": "67->65",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.7483355529337519,
+   "band": [
+    0.7167665643463613,
+    0.8130383954154728
+   ],
+   "speedup": 1.3362989317821805,
+   "base_cpu_s": 22.60155,
+   "new_cpu_s": 17.2031,
+   "base_wall_s": 20.842950000000002,
+   "new_wall_s": 15.30795,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 23.7266,
+     "new_s": 17.6797
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 11.3125,
+     "new_s": 8.5
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 22.60155,
+     "new_s": 17.25
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 22.60155,
+    "new_s": 17.25
+   },
+   "requests": "51->51",
+   "spawns": "117->67",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "outdated",
+   "journey": "outdated",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.12706358418920838,
+   "band": [
+    0.12396694214876033,
+    0.15545557139463054
+   ],
+   "speedup": 7.870075493155582,
+   "base_cpu_s": 7.0703499999999995,
+   "new_cpu_s": 0.9218500000000001,
+   "base_wall_s": 6.076650000000001,
+   "new_wall_s": 2.17295,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 6.9297,
+     "new_s": 0.9218500000000001
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 7.3672,
+     "new_s": 0.91405
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 6.9297,
+    "new_s": 0.9218500000000001
+   },
+   "requests": "100->50",
+   "spawns": "252->5",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "pack",
+   "journey": "pack",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.7889210362548504,
+   "band": [
+    0.7719298245614035,
+    0.8243196494464945
+   ],
+   "speedup": 1.267553980747147,
+   "base_cpu_s": 3.4922,
+   "new_cpu_s": 2.7656,
+   "base_wall_s": 3.5401,
+   "new_wall_s": 2.8285,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 3.5234,
+     "new_s": 2.80465
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 3.16405,
+     "new_s": 2.48435
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 3.5234,
+    "new_s": 2.80465
+   },
+   "requests": "0->0",
+   "spawns": "2->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "prune",
+   "journey": "prune",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.5652763159044838,
+   "band": [
+    0.5260525020248059,
+    0.5714285714285714
+   ],
+   "speedup": 1.7690463439989101,
+   "base_cpu_s": 6.8672,
+   "new_cpu_s": 3.875,
+   "base_wall_s": 6.90715,
+   "new_wall_s": 3.9144,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 6.9375,
+     "new_s": 3.8906
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 6.15625,
+     "new_s": 3.35935
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 6.9375,
+    "new_s": 3.8906
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "uninstall",
+   "journey": "uninstall",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.6356562866923547,
+   "band": [
+    0.6307985190995973,
+    0.6545897119580067
+   ],
+   "speedup": 1.5731772357723577,
+   "base_cpu_s": 12.08595,
+   "new_cpu_s": 7.6875,
+   "base_wall_s": 12.13435,
+   "new_wall_s": 7.766,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 12.0938,
+     "new_s": 7.79685
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 10.41405,
+     "new_s": 6.57815
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 12.0938,
+    "new_s": 7.79685
+   },
+   "requests": "0->0",
+   "spawns": "12->2",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "update",
+   "journey": "update",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547751784",
+   "pairs": 6,
+   "paired_p50": 0.9687328572300555,
+   "band": [
+    0.9071563857837859,
+    0.9839033687029979
+   ],
+   "speedup": 1.0322763314329486,
+   "base_cpu_s": 8.0703,
+   "new_cpu_s": 7.75,
+   "base_wall_s": 7.2621,
+   "new_wall_s": 6.1913,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 4,
+     "base_s": 8.125,
+     "new_s": 7.8828499999999995
+    },
+    "Xeon(R) 6973P": {
+     "n": 2,
+     "base_s": 8.0703,
+     "new_s": 7.5781
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 4,
+    "base_s": 8.125,
+    "new_s": 7.8828499999999995
+   },
+   "requests": "50->50",
+   "spawns": "73->68",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "windows",
+   "fixture": "tree-50-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.7026858293508421,
+   "band": [
+    0.6620587012481534,
+    0.7224055227024695
+   ],
+   "speedup": 1.423111094931036,
+   "base_cpu_s": 37.91405,
+   "new_cpu_s": 26.77345,
+   "base_wall_s": 29.132350000000002,
+   "new_wall_s": 26.591099999999997,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 45.71095,
+     "new_s": 30.33595
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 24.17185,
+     "new_s": 17.36715
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 37.91405,
+     "new_s": 26.77345
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 37.91405,
+    "new_s": 26.77345
+   },
+   "requests": "201->251",
+   "spawns": "618->171",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "windows",
+   "fixture": "tree-50-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.6950944165935218,
+   "band": [
+    0.6394382915630176,
+    0.7285727731092437
+   ],
+   "speedup": 1.438653478042223,
+   "base_cpu_s": 37.97655,
+   "new_cpu_s": 26.7969,
+   "base_wall_s": 28.78625,
+   "new_wall_s": 25.816699999999997,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 46.375,
+     "new_s": 30.44535
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 23.9609,
+     "new_s": 16.9922
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 37.97655,
+     "new_s": 26.7969
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 37.97655,
+    "new_s": 26.7969
+   },
+   "requests": "201->251",
+   "spawns": "616->167",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "windows",
+   "fixture": "tree-50-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.1677472352664598,
+   "band": [
+    0.13821702941141548,
+    0.1763911995382474
+   ],
+   "speedup": 5.96135011352968,
+   "base_cpu_s": 11.867149999999999,
+   "new_cpu_s": 2.02345,
+   "base_wall_s": 11.74255,
+   "new_wall_s": 2.0707,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 16.8672,
+     "new_s": 2.36715
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 7.6953499999999995,
+     "new_s": 1.33595
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 11.867149999999999,
+     "new_s": 2.02345
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 11.867149999999999,
+    "new_s": 2.02345
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "windows",
+   "fixture": "tree-50-ghe",
+   "run": "45547764833",
+   "pairs": 6,
+   "paired_p50": 0.9060117833099159,
+   "band": [
+    0.8230010526797564,
+    1.0257441341990228
+   ],
+   "speedup": 1.1037384043138143,
+   "base_cpu_s": 19.1875,
+   "new_cpu_s": 19.1094,
+   "base_wall_s": 17.52935,
+   "new_wall_s": 18.3264,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 25.58595,
+     "new_s": 21.55465
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 12.34375,
+     "new_s": 11.1797
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 19.1875,
+     "new_s": 19.1094
+    }
+   },
+   "headline": {
+    "cpu_class": "pooled",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 19.1875,
+    "new_s": 19.1094
+   },
+   "requests": "51->101",
+   "spawns": "118->119",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  }
+ ],
+ "pending": []
+}

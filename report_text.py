@@ -249,19 +249,17 @@ def render(g, srcs):
                "(~0.7 s Linux, ~1.5 s Windows: 0 git children, 2 requests per package).")
     a("## 7. Gap to floor, what did not work, what is next")
     a("")
-    a(gap + " Bytes are already at the floor; validated paired-deletion ceilings (t50 anonymous, EPYC 9V74, runs "
-      "45464564203, 45464596572, 45464623708, 45464660115, 45464777276, 45464818672) put **integrate incl. discovery "
-      "at 60%** of install (Linux 3.5 s / Windows 6.7 s), **lockfile build+write, ledger and journal at 27%**, policy + "
-      "audit + content scan at 3%, and resolve + fetch + boot + glue at 10% or less. **What did not work:** lazy imports, "
-      "frozen/zipapp boot, single-pass integrate (bytes are only ~6%; the cost is per-file Python and path containment), "
-      "stat cuts, the rest-bucket cut, #5352 (~1.00 on GHE/GitLab) and small cars that stayed within noise; all were "
-      "measured and killed. Honest caveat: on the current stack, locked-warm costs 1.21-1.29x warm (A/A 45464702877), "
-      "attribution in progress. **Next:** "
+    a(gap + " Bytes are already at the floor. Current phase shares on main: **integrate (per-file Python work and "
+      "path containment) is ~50% of install on Windows and ~45% on Linux**, resolve + fetch ~33%, and the lockfile "
+      "code itself ~3% (an earlier 27% lock-phase bucket was a measurement confound). **What did not work:** lazy "
+      "imports, frozen/zipapp boot, single-pass integrate (bytes are only ~6%; the cost is per-file Python and path "
+      "containment), stat cuts, the rest-bucket cut, #5352 (~1.00 on GHE/GitLab) and small cars that stayed within "
+      "noise; all were measured and killed. The earlier locked-warm regression is gone on main (#5414 was closed for "
+      "that reason). **Next:** "
       + ("land the waiting PRs (" + ", ".join(f"#{n} {w}" for n, w in ((5376, "schannel"), (5353, "auth fetch"),
          (5366, "pack checkout"), (5374, "Windows paths"), (5382, "containment once"), (5372, "Linux paths"),
          (5383, "re-install #2")) if not IN(n)) + "); then " if not all(IN(n) for n in (5376, 5353, 5366, 5374, 5382, 5372, 5383)) else "")
-      + "a 5x on Linux needs an integrate redesign plus the lockfile cut, with "
-      + ("B1 on enterprise hosts next (lever S #5377 for monorepos rides the train)." if IN(5377)
-         else "B1 on enterprise hosts and lever S (#5377) for monorepos."))
+      + "v0.40 targets per-file integrate work (plan-once/classify-once in build); the 5x target needs more than "
+      "Python-level cuts on Linux (see the v0.40 design doc).")
     a("")
     return "\n".join(out)
