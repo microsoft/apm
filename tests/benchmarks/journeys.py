@@ -76,6 +76,7 @@ NETWORK_JOURNEYS = (
     "install-noop",
     "install-noop-replay",
     "install-frozen-noop",
+    "install-frozen-noop-imports",
     "install-frozen",
     "install-locked-warm",
     "install-frozen-warm",
@@ -88,7 +89,7 @@ NETWORK_JOURNEYS = (
     "outdated",
     "prune",
 )
-BOOT_JOURNEYS = ("boot-version", "boot-help")
+BOOT_JOURNEYS = ("boot-version", "boot-help", "boot-version-imports")
 ALL_JOURNEYS = BOOT_JOURNEYS + NETWORK_JOURNEYS + LOCAL_JOURNEYS
 _GLOBAL = ("install-global-cold", "install-global-warm")
 _PACKS = ("pack", "install-bundle")
@@ -489,6 +490,7 @@ class Context:
     # The CLI emitted verified-state record diagnostics during replay setup.
     replay_supported: bool = False
     locks: dict[str, bytes] | None = None
+    imports: dict | None = None
 
     def run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -523,10 +525,33 @@ class Context:
             )
             out.seek(0)
             err.seek(0)
+            err_text = err.read().decode(errors="replace")
+            if env.get("PYTHONPROFILEIMPORTTIME"):
+                err_text = self._note_imports(err_text)
             # Redact before slicing: a token cut at the boundary leaves no fragment.
             tail = _redact(out.read().decode(errors="replace"))[-3000:] + "\n"
-            tail += _redact(err.read().decode(errors="replace"))[-3000:]
+            tail += _redact(err_text)[-3000:]
         return returncode, tail, cpu
+
+    def _note_imports(self, err_text: str) -> str:
+        """Sum the import self times of one run (research: hit-path import oracle)."""
+        total_us, count, kept = 0, 0, []
+        for line in err_text.splitlines(keepends=True):
+            if line.startswith("import time:"):
+                parts = line.split("|")
+                try:
+                    total_us += int(parts[0].split(":", 1)[1])
+                    count += 1
+                except (ValueError, IndexError):
+                    pass
+                continue
+            kept.append(line)
+        prev = self.imports or {"self_s": 0.0, "modules": 0}
+        self.imports = {
+            "self_s": round(prev["self_s"] + total_us / 1e6, 4),
+            "modules": prev["modules"] + count,
+        }
+        return "".join(kept)
 
     def checked(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
         """Run one untimed setup command; a nonzero exit fails the cell (redacted)."""
@@ -789,6 +814,12 @@ JOURNEYS: dict[str, Journey] = {
     j.name: j
     for j in (
         Journey("boot-version", _noop, lambda c: [(["--version"], c.elsewhere)]),
+        Journey(
+            "boot-version-imports",
+            _noop,
+            lambda c: [(["--version"], c.elsewhere)],
+            (("PYTHONPROFILEIMPORTTIME", "1"),),
+        ),
         Journey("boot-help", _noop, lambda c: [(["--help"], c.elsewhere)]),
         Journey("install-cold", _setup_cold, lambda c: _per_root(c, ["install"])),
         Journey("install-warm", _setup_warm, lambda c: _per_root(c, ["install"])),
@@ -810,6 +841,12 @@ JOURNEYS: dict[str, Journey] = {
             Context.installed,
             lambda c: _per_root(c, ["install", "--frozen"]),
             _REPLAY_TRACE,
+        ),
+        Journey(
+            "install-frozen-noop-imports",
+            Context.installed,
+            lambda c: _per_root(c, ["install", "--frozen"]),
+            (*_REPLAY_TRACE, ("PYTHONPROFILEIMPORTTIME", "1")),
         ),
         Journey(
             "install-noop-replay",
@@ -888,6 +925,8 @@ class Sample:
     fs: dict = field(default_factory=dict)
     # Verified-state record outcome per step (noop journeys): "hit", "miss (...)".
     replay: str = ""
+    # PYTHONPROFILEIMPORTTIME journeys: summed import self time and module count.
+    imports: dict = field(default_factory=dict)
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
@@ -905,6 +944,7 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     returncode = 0
     cpu = 0.0
     replays: list[str] = []
+    ctx.imports = None
     start = time.perf_counter()
     for argv, cwd in journey.steps(ctx):
         code, tail, step_cpu = ctx.timed_run(argv, cwd)
@@ -922,6 +962,7 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
     sample.replay = "; ".join(r for r in replays if r)
+    sample.imports = ctx.imports or {}
     return sample, output
 
 
