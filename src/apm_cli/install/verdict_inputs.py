@@ -38,7 +38,6 @@ def key_startup(digest: Any, root: Path, notice: str, surfaces: list[str]) -> No
     the apm_modules structure and the directories above every keyed surface."""
     _key_modules(digest, root)
     _key_parents(digest, root, surfaces)
-    _key_carriers(digest, root)
     from apm_cli.core.lifecycle_scripts import _get_policy_scripts_dir
 
     for rel, files, dirs in _tree(str(_get_policy_scripts_dir())):
@@ -134,18 +133,6 @@ def _key_parents(digest: Any, root: Path, surfaces: list[str]) -> None:
             seen.add(parent)
             digest.put(f"parent:{parent}", _kind(parent))
             parent = os.path.dirname(parent)
-
-
-def _key_carriers(digest: Any, root: Path) -> None:
-    """The files that decide whether a compiled AGENTS.md carries a Claude rule (#5434).
-
-    The full run reads them (``compiled_agents_md_may_carry``, ``CompiledCoverage``);
-    the compile record naming them is keyed with APM home. A symlinked carrier is
-    never read through: the no-follow read fails, so nothing is recorded or served."""
-    from apm_cli.core.agents_md_compile_record import carrier_inputs
-
-    for path in carrier_inputs(root):
-        digest.file(f"carrier:{path.as_posix()}", path)
 
 
 def _key_modules(digest: Any, root: Path) -> None:

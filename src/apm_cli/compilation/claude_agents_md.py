@@ -667,14 +667,36 @@ def compiled_agents_md_may_carry(project_root: Path) -> bool:
     defer to the full run when APM home records a compile for this root or a
     root ``AGENTS.md`` or ``CLAUDE.md`` exists.
     """
-    from ..core.agents_md_compile_record import ROOT_CARRIERS, read_record
+    from ..core.agents_md_compile_record import may_carry
 
-    if read_record(project_root):
-        return True
-    return any(
-        (project_root / name).is_symlink() or (project_root / name).exists()
-        for name in ROOT_CARRIERS
-    )
+    return may_carry(project_root)
+
+
+def lock_ships_routable_instruction(project_root: Path, lock: object) -> bool:
+    """Whether a locked package ships an instruction Claude may load from AGENTS.md (#5434).
+
+    Routing reads carriers anywhere under the project, and a directory
+    instruction routes once its directory and carrier exist, so this is the
+    static form (:func:`routes_to_agents_md` without a root). A fast path that
+    replays the lock declines for any such instruction; an unreadable one counts.
+    """
+    from ..constants import APM_MODULES_DIR
+    from ..integration.instruction_integrator import InstructionIntegrator
+
+    modules = project_root / APM_MODULES_DIR
+    integrator = InstructionIntegrator()
+    for key, dependency in getattr(lock, "dependencies", {}).items():
+        if key == ".":
+            continue
+        try:
+            package = dependency.to_dependency_ref().get_install_path(modules)
+            for source in integrator.find_instruction_files(package):
+                metadata = integrator._parse_frontmatter(source.read_text(encoding="utf-8"))[0]
+                if routes_to_agents_md(metadata.get("applyTo")):
+                    return True
+        except Exception:  # unreadable: the full run decides
+            return True
+    return False
 
 
 def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> bool:

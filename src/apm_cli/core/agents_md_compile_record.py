@@ -34,19 +34,17 @@ def read_record(root: Path) -> dict:
 ROOT_CARRIERS = ("AGENTS.md", "CLAUDE.md")
 
 
-def carrier_inputs(root: Path) -> list[Path]:
-    """Every project file the Claude carrier decision reads, besides this record (#5434).
+def may_carry(root: Path) -> bool:
+    """Whether a compiled ``AGENTS.md`` may stand in for a Claude rule at *root* (#5343).
 
-    ``compiled_agents_md_may_carry`` reads the root carriers; ``CompiledCoverage``
-    reads each recorded ``AGENTS.md`` and its directory's ``CLAUDE.md``. A fast
-    path that replays a verdict keys all of them, so a changed carrier misses.
+    The one decision behind ``compiled_agents_md_may_carry`` (the engine fast
+    path's decline) and the no-op replay's (#5434): this record exists, or a
+    root carrier does. Kept here, light, so a replay asks it without importing
+    the compiler: two lstat and one read of the record.
     """
-    paths = {root / name for name in ROOT_CARRIERS}
-    for relative in read_record(root):
-        if isinstance(relative, str):
-            agents_md = root / relative
-            paths.update((agents_md, agents_md.parent / "CLAUDE.md"))
-    return sorted(paths)
+    if read_record(root):
+        return True
+    return any(os.path.lexists(root / name) for name in ROOT_CARRIERS)
 
 
 def write_record(root: Path, files: dict) -> None:
