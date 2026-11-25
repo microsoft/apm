@@ -18,3 +18,13 @@ linux agents perf-bench/5d217dbe-1795568660-1fca6d
 linux prompts perf-bench/b72107b8-1795568669-ea3a3b
 linux records perf-bench/e4c21194-1795568677-ad957e
 linux skpreflight perf-bench/10e074e0-1795568686-01a7b0
+windows verify perf-bench/7eaa0f77-1795570997-8f4786
+linux verify perf-bench/7eaa0f77-1795571006-48cdde
+macos verify perf-bench/7eaa0f77-1795571015-90c771
+windows noverify perf-bench/85aae507-1795571024-4ce59e
+linux noverify perf-bench/85aae507-1795571032-efa13c
+macos noverify perf-bench/85aae507-1795571042-b334a0
+windows noverify warm perf-bench/85aae507-1795571061-b16fbc
+linux noverify warm perf-bench/85aae507-1795571070-054744
+windows verify warm perf-bench/7eaa0f77-1795571081-08dbd5
+linux verify warm perf-bench/7eaa0f77-1795571090-9b4ec0

@@ -47,9 +47,34 @@ apm plus children) measured on CI. Nothing was measured locally.
 | lockfile build + write | 3.0% / 2.5% (0.14 / 0.39 s) | 0.2 / 0.3 | n/a alone | 0.05 / 0.08 | 0.15 / 0.25 | one YAML emit (50 deps + 667 hashes, C emitter) + one atomic write |
 | lock + ledger + journal (deletion) | CONFOUNDED | n/a | 0.770 / 0.789, CONFOUNDED | | | Deleting the lockfile build/write makes downstream phases skip their work (MCP/LSP update_lockfile, post_deps_local, claude_plugins). lockfile.py itself is ~3% L inclusive [45521813477, E2], and the finer deletions (commit gate, claim binding, disk write) are neutral. The REAL costs in this area are the ledger _trusted_hash lstat chain (~3,300 lstat at t50, W ~0.91 s), counted under integrate/containment, and the journal (L ~7%, inside integrate). No lock-phase lever. |
 | policy / target check / audit / content scan | ~0 phase CPU (scan runs inside integrate) | 0.12 / 0.5 | 0.980 / 0.961 | 0.03 / 0.05 | 0.1 / 0.45 | regex scan of ~0.7 MB of text |
-| MCP/LSP services reconcile | 6.8% / 3.4% (0.32 / 0.53 s) | 0.4 / 0.45 | stack: 0.996 / 1.002 (F19) | ~0.01 | 0.4 / 0.45 | 6 MCP servers: one config merge + write per runtime. PROBE vs DELETION DISAGREE; verify on main |
+| MCP/LSP services reconcile | probe 6.8% / 3.4% = other threads overlapping that window | ~0 | 1.005 / 1.005 (main, 45527709409 / 45527692033) | ~0.01 | ~0 | DISCREPANCY CLOSED: the paired deletion on main is neutral. The probe's process CPU in that window comes from concurrent threads, not the phase. |
 | glue (pipeline setup, session construction, exit) | 4-5% (0.2 / 0.7 s) | 0.3 / 0.65 | n/a | ~0.02 | 0.3 / 0.6 | |
 | **total** | 4.68 / 15.8 s on the probe runner | **6.1 / 13.2** | | **~0.7 / ~1.2** | **~5.4 / ~12** | measured/floor = **~8.7x L, ~11x W** |
+
+## Materialization re-measured on main (resolve+fetch row): the copy into apm_modules
+Today, per file: the in-process fetch writes the cache checkout; `robust_copy_entry` copies it into
+apm_modules (github_downloader.py:1922-1926); `require_verified_copy` re-reads and re-verifies the copy (:1927).
+Paired 6 pairs on main 1e4a208e, anon, t50:
+| stub (research only) | cold W | cold L | cold M | warm W | warm L | runs (cold W/L/M; warm W/L) |
+|---|---|---|---|---|---|---|
+| (c1) hardlink instead of copy, verify kept (UNSAFE, upper bound only; W3d M3 rejected) | 0.832 | 0.832 | 0.850 | 0.838 | 0.827 | 45527826943 / 45527848039 / 45527865311; 45527994568 / 45528022070 |
+| (c2) hardlink, no re-verify = one write per file (M2 / fetch-to-final-tree upper bound) | 0.802 | 0.817 | 0.856 | 0.833 | 0.794 | 45527883690 / 45527902064 / 45527922103; 45527956593 / 45527977857 |
+- The second copy plus its re-verify is **15-20% of cold on every OS** (~1.0-1.1 s L, ~2.2-2.6 s W at 9V74)
+  and **16-21% of warm**. The re-verify alone is ~1.5-3% (c1 vs c2).
+- Per file that is ~1.4 ms L / ~3.5 ms W against a raw write of 16 / 67 us: the cost is Python per-file
+  copy machinery (copytree, copy2, copystat, robust wrappers), not bytes. That is why macOS (APFS, where
+  a clone could be cheap) shows the same ~15%.
+- Shapes (W3d w3d:ruling:materialize-once):
+  - **M2, cache = objects only, fetch writes the final tree** (OK under MS1-MS7). Cost line: 1 write per
+    file (was 2), bytes bound by re-hash-as-written (MS1), O_EXCL/NOFOLLOW per file (MS3), mode from the
+    tree entry (MS4). Ceiling ~ the c2 row: ~18-20% cold. On warm it needs inflate + write from the
+    object store; c2-warm (0.79-0.83) bounds it.
+  - **M1, reflink/COW** (OK under MS1-MS7). Cost line: per file 1 create + 1 clone + 1 fchmod, 0 data
+    bytes. CI runners can't show it (ext4 / NTFS have no clone; macOS already 0.85 with c1). Because the
+    cost is per-file Python, not bytes, M1 buys little over a lean copy loop. M2 is the lane.
+  - M3 hardlinks: rejected for any user- or project-nameable tree (shared inode).
+- This makes "materialize once" a v0.40 lane BESIDE integrate: ~1.0 s L / ~2.4 s W of the 2.1 / 4.4 s
+  resolve+fetch block.
 
 ## Reading
 1. **Integrate is half the gap on both OSes** (2.4 s L, 6.5 s W at 9V74). Per deployed file, main spends
@@ -62,9 +87,9 @@ apm plus children) measured on CI. Nothing was measured locally.
      of profile CPU, of which _persistent_cache_checkout is 1.6 W / 0.7 L and fetch_worktree 1.2 W;
    - manifest loading and graph work is ~1.2 W / 0.4 L;
    - reachability is under 1% (deletion 0.992-0.994).
-   Network bytes and request counts are already at floor (101 requests, 0.6 MB). The gap is per-file
-   Python on fetch-write and checkout-copy: a CAS store + link materialization would collapse the two
-   writes per file into one link.
+   Network bytes and request counts are already at floor (101 requests, 0.6 MB). Measured (section
+   above): the second copy + re-verify alone is 15-20% of cold on L/W/M, so "materialize once" (M2) is
+   a v0.40 lane.
 3. **Lock + ledger + journal: no lock-phase lever.** The lockfile build itself is 0.14 / 0.39 s (~3%). The
    21-23% deletion is a confound: without a lockfile, downstream phases skip their work. The real
    costs sit inside integrate: the ledger's _trusted_hash lstat chain (~3,300 lstat, W ~0.9 s; a
@@ -74,9 +99,8 @@ apm plus children) measured on CI. Nothing was measured locally.
 4. **Boot is no longer negligible on L** (~10% of cold). Imports are flat at ~0.4-0.5 s while cold shrank,
    but lazy imports measured nothing (F15). The floor needs fewer modules on the install path.
 5. **Policy/audit/scan and reachability are small** (<= 4%). Not design-doc levers.
-6. **MCP services** is an open discrepancy: the probe attributes 0.3-0.5 s to the services phase, while
-   the stack deletion read ~0. It could be a background thread (update check, thread-pool teardown)
-   running during that phase. One paired deletion on main settles it.
+6. **MCP services**: closed. The paired deletion on main is 1.005 / 1.005. The probe's 0.3-0.5 s was CPU
+   from concurrent threads in that window.
 
 ## Caveats
 - Deletion confounds: a deleted phase can make a downstream phase skip its work. Integrate deletion is

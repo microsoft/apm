@@ -168,3 +168,9 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 ## F25 (02:20, 25 Nov) Phase map re-grounded on main 1e4a208e -> files/main-phase-map.md
 - integrate W 0.499 / L 0.551 (stack 0.415 / 0.402); skills 0.854/0.871; instr 0.927/0.947; prompts 0.944/0.956; agents 0.962/0.973; shared remainder ~19% (stack 27-33%); lockfile+ledger+journal 0.789/0.770; policy 0.961/0.980.
 ## F26 (02:29) no-op lead refuted (bench no-op = first unchanged install after full install; proof run) [45523138212]; frozen-warm kept-mcp decline = trace-harness sequencing artifact; deletion 0.995 L [45524432672].
+
+## F27 (03:05, 25 Nov) Materialize-once is a lane on main: the apm_modules copy + re-verify = 15-20% of cold (L/W/M), 16-21% warm
+- hardlink+verify: cold W 0.832 / L 0.832 / M 0.850; warm W 0.838 / L 0.827. hardlink no-verify (M2 bound): cold 0.802 / 0.817 / 0.856; warm 0.833 / 0.794. Runs 45527826943..45528022070.
+- Per-file Python copy machinery, not bytes (~1.4 ms L / 3.5 ms W per file). W3d: M2 (fetch-to-final-tree) and M1 (reflink) OK under MS1-MS7; M3 hardlinks rejected.
+## F28 (03:05) MCP services deletion on main 1.005 / 1.005 [45527692033 / 45527709409]: probe discrepancy closed (concurrent threads).
+## F29 (02:50) Section 1 drafted: files/design-sec1-floor.md (probe run 45526028119; reachability 0.992-0.994).
