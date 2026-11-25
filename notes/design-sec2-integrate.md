@@ -117,6 +117,27 @@ Reading:
 - On W, the containment family carries the win (0.970 -> 0.752). The journal is ~0 on W.
 - On L, the journal (-4%) and resolve (-3%) are both small. L's remainder is content transforms: frontmatter re-parse, `write_text_lf` and copies, about 0.8 s real.
 
+### Verdict
+
+**A+B+C clears integrate <= 50% on W (main + #5374: 0.718, -4.45 s vs -3.3 s), not on L (L ceiling ~0.90 of cold vs a ~0.775 bar).**
+
+### L remaining cost after every hack
+
+Ceiling head ea0ec45e, cProfile, about 2x real. 684 deployed files. `integrate.run` is 4.19 s profiled, about 6.1 ms per file.
+
+| owner | profiled s | ms/file | what it is |
+|---|---|---|---|
+| `primitives/discovery._find_primitive_inventory_files` | 0.79 | 1.15 | per-type (3x) glob classification of the inventory, plus `is_file`/`is_symlink` per candidate; Shape A-faithful classifies once |
+| `install/template.preflight_skill_materializations` (`find_unmanaged_conflicts` 0.27) | 0.56 | 0.82 | skill ownership/conflict preflight |
+| `install/sources.acquire` | 0.51 | 0.75 | manifest snapshot 0.13, carried hash 0.11, license 0.08, targets 0.06, `apm.yml` 0.06 |
+| skill copy residual | 0.50 | 0.73 | stale-copy report 0.16, copytree 0.10, link render 0.07, ledger record 0.05 |
+| `parse_primitive_file` | 0.22 | 0.32 | one parse per file (already once) |
+| prompts / instruction prep / gate scan / agents | 0.17 / 0.13 / 0.13 / 0.09 | 0.25 / 0.19 / 0.19 / 0.13 | per-target render |
+
+- No owner exceeds ~20% of what remains.
+- The next L lever is classification once (about -0.35 s real), then the skill preflight. Even with both, L stays near ~0.85.
+- On L, integrate <= 50% needs a different design (no per-file Python work at all, e.g. a manifest-driven deploy from the in-process fetch manifest) or a different L bar.
+
 ## 2.4 Parse-once: one parsed model per primitive, N renders
 
 - **Model.** `PackagePlan.primitives[path] = ParsedPrimitive(metadata, body, raw_bytes_hash)`, parsed once with the bounded loader (`yaml_io.loads_frontmatter`, same hostile-input limits).
