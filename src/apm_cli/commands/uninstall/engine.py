@@ -1675,6 +1675,7 @@ def _sync_integrations_after_uninstall(
             # Survivors redeploy exactly the selection install deployed (#3760).
             selection = effective_dependency_selection(dep_ref)
 
+            failures_before = reintegration_diagnostics.failed_package_count
             try:
                 integration_result = integrate_package_primitives(
                     pkg_info,
@@ -1700,11 +1701,13 @@ def _sync_integrations_after_uninstall(
                     f"Best-effort re-integration skipped for {pkg_id}. "
                     f"{INTEGRATED_FILES_STALE.sentence()}"
                 )
-                # Count the failed rebuild so uninstall exits non-zero (#4954).
-                reintegration_diagnostics.error(
-                    "Could not rebuild the surviving package's integrated files",
-                    package=pkg_id,
-                )
+                # Count the failed rebuild once so uninstall exits non-zero (#4954);
+                # an error the rebuild already recorded for it counts already.
+                if reintegration_diagnostics.failed_package_count == failures_before:
+                    reintegration_diagnostics.error(
+                        "Could not rebuild the surviving package's integrated files",
+                        package=pkg_id,
+                    )
                 logger.verbose_detail(
                     f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
                 )

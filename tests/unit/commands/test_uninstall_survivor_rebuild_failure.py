@@ -14,7 +14,7 @@ from apm_cli.commands.uninstall.engine import _sync_integrations_after_uninstall
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.yaml_io import dump_yaml
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-post-uninstall-dependency-reachability")]
 
 
 def _survivor_plan() -> list[tuple[MagicMock, object]]:
@@ -63,6 +63,46 @@ def test_survivor_rebuild_exception_is_recorded_as_a_package_failure(
     assert outcome.package_failures == 1
 
 
+def test_a_rebuild_that_records_an_error_before_raising_fails_the_package_once(
+    tmp_path: Path,
+) -> None:
+    """An error the rebuild recorded, then its exception, count one failed package."""
+    apm_package = MagicMock()
+    apm_package.canonical_targets = []
+    apm_package.get_all_apm_dependencies.return_value = []
+
+    def record_then_raise(*_args, diagnostics, **_kwargs):
+        diagnostics.error("partial write failed", package="acme/survivor")
+        raise RuntimeError("rebuild blew up")
+
+    with (
+        patch(
+            "apm_cli.install.services.integrate_package_primitives",
+            side_effect=record_then_raise,
+        ),
+        patch(
+            "apm_cli.install.target_filter.resolve_effective_package_targets",
+            return_value=SimpleNamespace(targets=[]),
+        ),
+        patch(
+            "apm_cli.install.package_resolution.effective_dependency_selection",
+            return_value=SimpleNamespace(target_subset=None, skill_subset=None, skill_pairing=None),
+        ),
+        patch("apm_cli.security.executables.resolve_project_exec_allow_map"),
+        patch("apm_cli.integration.hook_reintegration.preflight_survivor_hooks"),
+    ):
+        outcome = _sync_integrations_after_uninstall(
+            apm_package,
+            tmp_path,
+            set(),
+            MagicMock(),
+            survivor_plan=_survivor_plan(),
+            evidence=None,
+        )
+
+    assert outcome.package_failures == 1
+
+
 def test_uninstall_command_fails_when_survivor_rebuild_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -85,12 +125,9 @@ def test_uninstall_command_fails_when_survivor_rebuild_raises(
     (prompts / "hello.prompt.md").write_text("hello", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    with (
-        patch("apm_cli.commands.uninstall.cli._fire_uninstall_scripts"),
-        patch(
-            "apm_cli.install.services.integrate_package_primitives",
-            side_effect=RuntimeError("rebuild blew up"),
-        ),
+    with patch(
+        "apm_cli.install.services.integrate_package_primitives",
+        side_effect=RuntimeError("rebuild blew up"),
     ):
         result = CliRunner().invoke(uninstall, [removed])
 
